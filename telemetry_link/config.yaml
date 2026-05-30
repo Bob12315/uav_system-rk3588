@@ -1,0 +1,99 @@
+# 数据源模式：real / sitl / dual
+data_source: real
+
+# 当前对外暴露状态与发送控制命令的 active source：real / sitl
+active_source: real
+
+sitl:
+  # SITL 推荐使用 tcp 连接 SITL一般端口在5762
+  connection_type: tcp
+  serial_port: /dev/ttyUSB1
+  baudrate: 115200
+  udp_mode: udpin
+  udp_host: 0.0.0.0
+  udp_port: 14550
+  tcp_host: 127.0.0.1
+  tcp_port: 5762
+  eth_mode: udpin
+  eth_host: 0.0.0.0
+  eth_port: 15001
+
+real:
+  # 真机可使用 serial 或 eth；ETH 直连 RK3588 网口时使用 eth
+  connection_type: eth
+  serial_port: /dev/ttyUSB0
+  baudrate: 115200
+  udp_mode: udpin
+  udp_host: 0.0.0.0
+  udp_port: 14550
+  tcp_host: 127.0.0.1
+  tcp_port: 5762
+  eth_mode: udpin
+  eth_host: 0.0.0.0
+  eth_port: 15001
+
+# 连续控制命令最大发送频率，避免占满链路
+control_send_rate_hz: 10
+
+# 动作命令发送后的默认重试次数
+action_cmd_retries: 3
+
+# 动作命令重试间隔秒数
+action_retry_interval_sec: 0.5
+
+# 心跳超时秒数，超过该时间未收到心跳则判定链路中断
+heartbeat_timeout_sec: 3.0
+
+# 任意消息接收超时秒数，超过该时间未收到任何消息则判定链路异常
+rx_timeout_sec: 2.0
+
+# 断线后的重连间隔秒数
+reconnect_interval_sec: 2.0
+
+# 接收线程空闲轮询间隔秒数
+receiver_idle_sleep_sec: 0.01
+
+# 发送线程空闲轮询间隔秒数
+sender_idle_sleep_sec: 0.01
+
+# 启动后是否主动请求常用消息的发送频率
+request_message_intervals: true
+
+# 云台控制使用的 mount mode，默认 2 = MAVLink Targeting
+gimbal_mount_mode: 2
+
+# 云台 yaw 角度限制；当前设为大范围，等效关闭发送层限位
+gimbal_yaw_min_deg: -180.0
+gimbal_yaw_max_deg: 180.0
+
+# 云台 pitch 角度限制；当前设为大范围，等效关闭发送层限位
+gimbal_pitch_min_deg: -180.0
+gimbal_pitch_max_deg: 180.0
+
+# 使用 MAV_CMD_SET_MESSAGE_INTERVAL 请求消息频率时的默认频率
+message_interval_hz:
+  HEARTBEAT: 1
+  ATTITUDE: 10
+  GLOBAL_POSITION_INT: 10
+  LOCAL_POSITION_NED: 10
+  VFR_HUD: 5
+  SYS_STATUS: 2
+  GPS_RAW_INT: 2
+  RC_CHANNELS: 2
+  MOUNT_STATUS: 5
+  GIMBAL_DEVICE_ATTITUDE_STATUS: 10
+
+# 是否把最新 drone/gimbal/link 状态通过本地 UDP 发给 fusion 等上层进程
+state_udp_enabled: true
+
+# 是否默认启用终端双框 UI；也可以启动时加 --ui 临时启用
+ui_enabled: true
+
+# 状态广播目的 IP
+state_udp_ip: "127.0.0.1"
+
+# 状态广播目的端口
+state_udp_port: 5010
+
+# 日志级别，可选 DEBUG / INFO / WARNING / ERROR
+log_level: INFO

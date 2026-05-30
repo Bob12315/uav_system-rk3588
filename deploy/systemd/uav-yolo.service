@@ -1,0 +1,13 @@
+[Unit]
+Description=UAV YOLO vision and MJPEG stream
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/uav_project/yolo_app
+ExecStart=%h/miniconda3/bin/conda run --no-capture-output -n yolo python -u main.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

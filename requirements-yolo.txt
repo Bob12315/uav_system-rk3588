@@ -1,0 +1,4 @@
+rknn-toolkit-lite2==2.3.2
+opencv-python
+pyyaml
+numpy

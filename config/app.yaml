@@ -1,0 +1,48 @@
+runtime:
+  yolo_udp_ip: "0.0.0.0"
+  yolo_udp_port: 5005
+  loop_hz: 20.0
+  perception_timeout_sec: 1.0
+  print_rate_hz: 2.0
+  require_gimbal_feedback: true
+  run_seconds: null
+  log_level: INFO
+
+services:
+  connect_telemetry: true
+  start_yolo_udp: true
+
+ui:
+  web_enabled: true
+  terminal_enabled: false
+  web_host: "0.0.0.0"
+  web_port: 8080
+  audit_log_path: "logs/web_ui/audit.jsonl"
+
+services_control:
+  # Configure these after installing the corresponding systemd user services.
+  restart_app_command: ["systemctl", "--user", "restart", "uav-app.service"]
+  restart_yolo_command: ["systemctl", "--user", "restart", "uav-yolo.service"]
+
+blackbox:
+  enabled: true
+  output_dir: logs/blackbox
+  sample_hz: 20
+  flush_every: 20
+  rotate_mb: 100
+  keep_files: 20
+  include_perception: true
+  include_drone: true
+  include_gimbal: true
+  include_fused: true
+  include_commands: true
+  include_events: true
+
+mission:
+  name: visual_tracking
+
+executor:
+  body_frame: 8
+  gimbal_roll_deg: 0.0
+  log_commands: true
+  send_commands: false

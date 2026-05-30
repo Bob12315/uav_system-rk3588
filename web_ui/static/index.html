@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UAV Web Control</title>
+  <link rel="stylesheet" href="/static/style.css?v=classic-ui-restore">
+</head>
+<body>
+  <header>
+    <div class="brand">UAV Control</div>
+    <nav>
+      <button class="tab active" data-page="control">控制台</button>
+      <button class="tab" data-page="config">配置管理</button>
+    </nav>
+    <div class="badges">
+      <span id="sourceBadge" class="badge">SOURCE --</span>
+      <span id="linkBadge" class="badge">LINK --</span>
+      <span id="sendBadge" class="badge danger">SEND OFF</span>
+    </div>
+  </header>
+
+  <main id="controlPage" class="page active">
+    <section class="top-grid">
+      <article class="panel video-panel">
+        <div class="panel-title">YOLO 标注实时视频 <span id="videoHint">点击目标框锁定</span></div>
+        <div class="video-wrap">
+          <img id="video" alt="YOLO 视频流">
+          <canvas id="hitCanvas"></canvas>
+          <div id="videoOffline" class="overlay-note">等待 YOLO Web 视频流</div>
+        </div>
+      </article>
+      <article class="panel target-panel">
+        <div class="panel-title">目标列表</div>
+        <section class="aircraft-info">
+          <div class="aircraft-info-title">飞机信息</div>
+          <div id="aircraftInfo" class="aircraft-info-grid"></div>
+        </section>
+        <section class="target-info">
+          <div class="aircraft-info-title">目标信息</div>
+          <div id="targetInfo" class="aircraft-info-grid"></div>
+        </section>
+        <div id="targetCurrent" class="current-target">当前锁定: --</div>
+        <div id="detections" class="detections"></div>
+        <div class="button-row">
+          <button data-command="target prev" data-origin="BUTTON">上一个</button>
+          <button data-command="target next" data-origin="BUTTON">下一个</button>
+          <button data-command="target unlock" data-origin="BUTTON">解除锁定</button>
+        </div>
+        <div class="mini-state">
+          <div>Frame <strong id="frameId">--</strong></div>
+          <div>检测数 <strong id="detCount">0</strong></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="controls-grid">
+      <article class="panel">
+        <div class="panel-title">飞行安全控制</div>
+        <div class="takeoff-row">
+          <label>起飞高度 <input id="takeoffAltitude" type="number" value="5" min="0" step="0.1"> m</label>
+          <button id="takeoffButton" class="warning">起飞</button>
+        </div>
+        <div class="button-row flight-buttons">
+          <button data-confirm="确认切换到 GUIDED？" data-command="mode GUIDED" data-mode="GUIDED">GUIDED</button>
+          <button data-confirm="确认解锁飞行器？" data-command="arm" data-arm-state="armed" class="warning">解锁</button>
+          <button id="sendToggle" class="switch-button" data-confirm="确认切换自动控制命令发送状态？请确认链路、模式和参数安全。" data-command="control send toggle" data-origin="BUTTON">
+            <span>自动发送</span><strong id="sendToggleState">OFF</strong>
+          </button>
+          <button data-confirm="确认返航 RTL？" data-command="mode RTL" data-mode="RTL" class="warning">RTL</button>
+          <button data-confirm="确认降落？" data-command="land" class="warning">降落</button>
+          <button data-confirm="强制 Disarm 可能导致坠落，确认发送？" data-command="disarm" data-arm-state="disarmed" class="danger">Disarm</button>
+        </div>
+        <div class="controller-switches">
+          <div class="switch-row" data-controller-row="gimbal"><span>Gimbal</span><button data-command="controller gimbal on">ON</button><button data-command="controller gimbal off">OFF</button><button data-command="controller gimbal toggle">TOGGLE</button></div>
+          <div class="switch-row" data-controller-row="body"><span>Body</span><button data-command="controller body on">ON</button><button data-command="controller body off">OFF</button><button data-command="controller body toggle">TOGGLE</button></div>
+          <div class="switch-row" data-controller-row="approach"><span>Approach</span><button data-command="controller approach on">ON</button><button data-command="controller approach off">OFF</button><button data-command="controller approach toggle">TOGGLE</button></div>
+          <div class="switch-row" data-controller-row="all"><span>All</span><button data-command="controller all on">ON</button><button data-command="controller all off">OFF</button><button data-command="controller all toggle">TOGGLE</button></div>
+        </div>
+        <div class="source-actions">
+          数据源:
+          <button data-confirm="切换到 SITL 将关闭自动发送，确认？" data-command="switch_source sitl" data-source="sitl">SITL</button>
+          <button data-confirm="切换到真实飞控将关闭自动发送，确认？" data-command="switch_source real" data-source="real" class="warning">REAL</button>
+        </div>
+      </article>
+      <article class="panel">
+        <div class="panel-title">Mission 控制</div>
+        <div class="mission-row">
+          <select id="missionSelect"></select>
+          <button id="missionSwitch">切换</button>
+          <button data-command="mission start">开始</button>
+          <button data-confirm="重置任务会关闭自动发送，确认？" data-command="mission reset">重置</button>
+        </div>
+        <dl class="mission-status">
+          <dt>Mission</dt><dd id="missionName">--</dd>
+          <dt>Stage</dt><dd id="missionStage">--</dd>
+          <dt>Controller</dt><dd id="stageController">--</dd>
+          <dt>Fixed</dt><dd id="stageOverride">AUTO</dd>
+          <dt>Hold</dt><dd id="holdReason">--</dd>
+        </dl>
+        <div id="missionSteps" class="mission-steps"></div>
+      </article>
+    </section>
+
+    <section class="panel console">
+      <div class="command-line">
+        <label>命令行 &gt;</label>
+        <input id="commandInput" autocomplete="off" placeholder="输入命令，Tab 补全，↑ ↓ 历史">
+        <button id="sendCommand">发送</button>
+      </div>
+      <div id="completionHint" class="hint">Tab 补全 / ↑ ↓ 查看输入记录</div>
+    </section>
+
+    <section class="bottom-grid">
+      <article class="panel log-panel">
+        <div class="panel-title">用户输入记录</div>
+        <div id="auditLog" class="scroll-list"></div>
+      </article>
+      <article class="panel output-panel">
+        <div class="panel-title">系统输出</div>
+        <div id="statusCards" class="status-cards"></div>
+        <div class="panel-title minor">最新控制输出</div>
+        <div id="commandCards" class="command-cards"></div>
+        <div class="panel-title minor">重要事件</div>
+        <div id="events" class="scroll-list events"></div>
+      </article>
+    </section>
+  </main>
+
+  <main id="configPage" class="page">
+    <section class="config-grid">
+      <article class="panel file-list">
+        <div class="panel-title">配置文件</div>
+        <div id="configFiles"></div>
+      </article>
+      <article class="panel editor-panel">
+        <div class="panel-title" id="editingPath">选择配置文件</div>
+        <textarea id="yamlEditor" spellcheck="false"></textarea>
+        <div class="button-row">
+          <button id="previewConfig">差异预览</button>
+          <button id="saveConfig">保存</button>
+          <button id="applyConfig" class="warning">保存并应用</button>
+          <button id="restoreConfig">恢复上一次</button>
+        </div>
+        <pre id="configDiff" class="diff"></pre>
+      </article>
+      <article class="panel apply-panel">
+        <div class="panel-title">应用状态</div>
+        <div id="configStatus">尚未选择配置文件。</div>
+        <hr>
+        <div class="panel-title minor">服务操作</div>
+        <button id="reconnectTelemetry">立即重连通信服务</button>
+        <button id="restartYolo">重启 YOLO 服务</button>
+        <button id="restartApp" class="warning">重启 App 服务</button>
+      </article>
+    </section>
+  </main>
+  <script src="/static/app.js?v=classic-ui-restore"></script>
+</body>
+</html>
