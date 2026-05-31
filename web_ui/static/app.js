@@ -263,7 +263,7 @@ async function openConfig(path) {
   document.querySelectorAll("#configFiles button").forEach(b => b.classList.toggle("active", b.dataset.path === path));
   const action = path.startsWith("missions/") ? "保存并应用" :
     path === "config/telemetry.yaml" ? "保存并重连" :
-    path === "yolo_app/config.yaml" ? "保存并重启 YOLO" :
+    path === "config/yolo.yaml" ? "保存并重启 YOLO" :
     path === "config/app.yaml" ? "保存并重启 App" : "保存并应用";
   $("applyConfig").textContent = action;
 }
@@ -285,7 +285,7 @@ async function saveConfig(action = "save") {
 function actionForPath() {
   if (currentConfigPath.startsWith("missions/")) return "apply";
   if (currentConfigPath === "config/telemetry.yaml") return "reconnect";
-  if (currentConfigPath === "yolo_app/config.yaml" || currentConfigPath === "config/app.yaml") return "restart";
+  if (currentConfigPath === "config/yolo.yaml" || currentConfigPath === "config/app.yaml") return "restart";
   return "save";
 }
 async function init() {

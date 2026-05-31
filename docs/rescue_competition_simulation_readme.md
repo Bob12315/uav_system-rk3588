@@ -430,7 +430,7 @@ cd /home/level6/uav_project/src/yolo_app
 python main.py
 ```
 
-确认 `yolo_app/config.yaml` 的 UDP 输出端口和 app 一致：
+确认 `config/yolo.yaml` 的 UDP 输出端口和 app 一致：
 
 ```yaml
 udp_ip: "127.0.0.1"

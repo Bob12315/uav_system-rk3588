@@ -41,7 +41,7 @@ The browser is used from a laptop on the same local network.
 - Edit only project-approved YAML files:
   - `config/app.yaml`
   - `config/telemetry.yaml`
-  - `yolo_app/config.yaml`
+  - `config/yolo.yaml`
   - `missions/*/config.yaml`
 - Support raw YAML editing and diff preview.
 - Permanently save edits after YAML validation.
@@ -78,7 +78,7 @@ ui:
 ```
 
 - YOLO local display and web stream are independently configured in
-  `yolo_app/config.yaml`:
+  `config/yolo.yaml`:
 
 ```yaml
 display:

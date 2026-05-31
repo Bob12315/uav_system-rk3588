@@ -85,7 +85,7 @@
 应该改：
 
 - `yolo_app/`
-- `yolo_app/config.yaml`
+- `config/yolo.yaml`
 - 必要时更新 UDP JSON 协议文档。
 
 不应该碰：

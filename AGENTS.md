@@ -21,7 +21,7 @@ This repository targets Linux ARM64 boards with RK3588 only.
 
 - App configuration: `config/app.yaml`
 - Telemetry configuration: `config/telemetry.yaml`
-- YOLO configuration: `yolo_app/config.yaml`
+- YOLO configuration: `config/yolo.yaml`
 - Mission configuration: `missions/<mission_name>/config.yaml`
 
 ## Read Before Editing

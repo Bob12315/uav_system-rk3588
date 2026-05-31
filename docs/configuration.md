@@ -163,7 +163,7 @@ real:
 - `control_send_rate_hz` 控制连续命令最高发送频率。
 - `request_message_intervals` 为 true 时会请求常用 MAVLink 消息频率。
 
-## yolo_app/config.yaml
+## config/yolo.yaml
 
 YOLO 感知配置，包含模型路径、视频源、UDP 输出目标、目标选择策略、显示和保存选项。
 
@@ -187,7 +187,7 @@ web_stream:
 ## Web 配置编辑
 
 配置页只开放 `config/app.yaml`、`config/telemetry.yaml`、
-`yolo_app/config.yaml` 和 `missions/*/config.yaml`。每次保存会写入同路径
+`config/yolo.yaml` 和 `missions/*/config.yaml`。每次保存会写入同路径
 `.bak` 作为上一次版本。
 
 - 当前 mission 的“保存并应用”先关闭 `SEND`、清空连续命令，再热重载任务配置。
@@ -213,3 +213,23 @@ ture
 ```
 
 新 loader 对错误 bool 应明确报错，避免实机时误解配置。
+
+## RK3588 真机与 SITL 切换
+
+`config/*.yaml` 是程序直接读取并提交到 Git 的当前生效配置。切换运行环境时，
+使用显式脚本覆盖 `config/telemetry.yaml` 和 `config/yolo.yaml`：
+
+```bash
+bash scripts/config/apply_rk3588_real.sh
+bash scripts/config/apply_rk3588_sitl.sh
+```
+
+模板位于：
+
+```text
+config/profiles/rk3588-real/
+config/profiles/rk3588-sitl/
+```
+
+两个脚本都会先检查 `config/app.yaml` 中 `executor.send_commands` 是否严格为
+`false`。如果自动发送已开启，脚本拒绝切换配置。

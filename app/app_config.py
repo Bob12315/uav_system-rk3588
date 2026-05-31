@@ -254,8 +254,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--yolo-config",
-        default=str(ROOT_DIR / "yolo_app" / "config.yaml"),
-        help="Path to yolo_app config.yaml for UI target commands",
+        default=str(ROOT_DIR / "config" / "yolo.yaml"),
+        help="Path to config/yolo.yaml for UI target commands",
     )
     parser.add_argument("--yolo-udp-ip")
     parser.add_argument("--yolo-udp-port", type=int)

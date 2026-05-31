@@ -56,7 +56,10 @@ def _str_to_bool(value: str | bool) -> bool:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Ground-side YOLO tracking app")
-    parser.add_argument("--config", default=str(Path(__file__).with_name("config.yaml")))
+    parser.add_argument(
+        "--config",
+        default=str(Path(__file__).resolve().parent.parent / "config" / "yolo.yaml"),
+    )
     parser.add_argument("--model-path")
     parser.add_argument("--source")
     parser.add_argument("--conf-thres", type=float)
@@ -137,7 +140,7 @@ def load_config() -> AppConfig:
         max_lost_frames=int(merged["max_lost_frames"]),
         show=bool(display_config.get("local_window_enabled", merged["show"])),
         save_video=bool(merged["save_video"]),
-        save_path=_expand_user_path(merged["save_path"]),
+        save_path=_resolve_config_path(merged["save_path"], args.config),
         line_width=int(merged.get("line_width", 2)),
         show_all_tracks=bool(merged.get("show_all_tracks", True)),
         command_enabled=bool(merged.get("command_enabled", True)),

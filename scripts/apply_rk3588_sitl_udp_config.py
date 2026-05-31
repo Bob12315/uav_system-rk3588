@@ -46,7 +46,7 @@ def main() -> int:
         set -e
         PROJ={PROJ}
         TELEM="$PROJ/config/telemetry.yaml"
-        YOLO="$PROJ/yolo_app/config.yaml"
+        YOLO="$PROJ/config/yolo.yaml"
         test -f "$TELEM" && test -f "$YOLO"
 
         python3 - "$TELEM" "$YOLO" <<'PY'

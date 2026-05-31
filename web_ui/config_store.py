@@ -15,7 +15,7 @@ class ConfigStore:
         candidates = [
             self.root / "config" / "app.yaml",
             self.root / "config" / "telemetry.yaml",
-            self.root / "yolo_app" / "config.yaml",
+            self.root / "config" / "yolo.yaml",
         ]
         candidates.extend(sorted((self.root / "missions").glob("*/config.yaml")))
         return [str(path.relative_to(self.root)) for path in candidates if path.exists()]

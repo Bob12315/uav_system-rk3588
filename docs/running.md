@@ -27,7 +27,7 @@ executor:
 YOLO 输出端口需要匹配 app 输入端口：
 
 ```yaml
-# yolo_app/config.yaml
+# config/yolo.yaml
 udp_ip: "127.0.0.1"
 udp_port: 5005
 web_stream:
@@ -67,7 +67,7 @@ v4l2-ctl --list-devices
 ls -l /dev/v4l/by-id/
 ```
 
-在 `yolo_app/config.yaml` 中配置板端模型和实际摄像头。例如：
+在 `config/yolo.yaml` 中配置板端模型和实际摄像头。例如：
 
 ```yaml
 model_path: "../data/models/best-int8-rk3588.rknn"
@@ -141,7 +141,7 @@ git fetch github platform/rk3588
 git merge --ff-only github/platform/rk3588
 ```
 
-板端可能保留现场的 `yolo_app/config.yaml` 与 `.rknn` 模型文件。更新前应
+板端可能保留现场的 `config/yolo.yaml` 与 `.rknn` 模型文件。更新前应
 确认 `git status`，不要用会丢失现场配置的强制覆盖命令。
 
 普通 Python、HTML、JavaScript、CSS 或 YAML 配置修改不需要重新安装，
@@ -211,7 +211,7 @@ Web UI 的参数页面可修改白名单中的 YAML 文件：
 
 - `config/app.yaml`
 - `config/telemetry.yaml`
-- `yolo_app/config.yaml`
+- `config/yolo.yaml`
 - `missions/*/config.yaml`
 
 保存 mission 参数后，系统会先执行 `control send off`，再重载当前
@@ -244,7 +244,7 @@ ss -lunp | grep ':5005'
 ```
 
 检查 `config/app.yaml` 的 `runtime.yolo_udp_port` 与
-`yolo_app/config.yaml` 的 `udp_port` 是否都为 `5005`。
+`config/yolo.yaml` 的 `udp_port` 是否都为 `5005`。
 
 YOLO 报 Python 依赖缺失：
 

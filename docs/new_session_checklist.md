@@ -165,7 +165,7 @@ fusion/，除非 telemetry 状态接口变化
 
 ```text
 yolo_app/README.md
-yolo_app/config.yaml
+config/yolo.yaml
 yolo_app/main.py
 yolo_app/models.py
 yolo_app/udp_publisher.py
@@ -178,7 +178,7 @@ docs/interfaces.md
 
 ```text
 yolo_app/
-yolo_app/config.yaml
+config/yolo.yaml
 docs/interfaces.md，若 UDP 字段变化
 ```
 
@@ -261,7 +261,7 @@ missions/visual_tracking/config.yaml
 missions/rescue_competition/config.yaml
 missions/<mission_name>/config.yaml
 config/telemetry.yaml
-yolo_app/config.yaml
+config/yolo.yaml
 ```
 
 允许主要修改：

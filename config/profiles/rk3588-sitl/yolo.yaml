@@ -1,0 +1,92 @@
+# RK3588 SITL YOLO 感知进程模板
+# 说明：
+# - 本进程仅支持 RKNN INT8 模型，通过 RK3588 NPU 推理。
+# - bool 值只能使用 true / false，不要加引号。
+# - 相对路径均以本文件所在目录 config/ 为基准。
+
+# -----------------------------------------------------------------------------
+# RKNN 模型
+# -----------------------------------------------------------------------------
+# 仓库内随代码管理的 RKNN INT8 模型。
+model_path: "../data/models/best-int8-rk3588.rknn"
+
+# 模型类别名称，顺序必须与 RKNN 模型输出一致。
+class_names: ["Target", "bucket", "class_2"]
+
+# 检测置信度阈值与 NMS IOU 阈值，范围通常为 0.0 到 1.0。
+conf_thres: 0.25
+iou_thres: 0.45
+
+# 类别过滤列表。空列表表示保留全部类别，例如 [0] 表示只保留 class_id=0。
+classes: []
+
+# -----------------------------------------------------------------------------
+# 视频输入
+# -----------------------------------------------------------------------------
+# 可选形式：
+# - 本地摄像头：/dev/videoX 或 /dev/v4l/by-id/<device>
+# - UDP H264/RTP：端口号字符串，例如 "5600"
+# - RTSP、本地视频文件或完整 GStreamer pipeline
+source: "5600"
+
+# 本地摄像头采集参数。
+camera_width: 640
+camera_height: 480
+camera_fps: 30
+camera_fourcc: "MJPG"
+
+# true：只处理最新帧，减少推理显示积压造成的延迟。
+latest_frame: true
+
+# -----------------------------------------------------------------------------
+# 目标选择与锁定
+# -----------------------------------------------------------------------------
+# 自动选择主目标策略，可选值：center / biggest / class。
+selection_mode: "class"
+
+# selection_mode=class 时优先选择的类别名。
+target_class: "target"
+
+# 锁定目标连续丢失多少帧后自动解锁。
+max_lost_frames: 5
+
+# -----------------------------------------------------------------------------
+# UDP 数据输出与目标控制命令
+# -----------------------------------------------------------------------------
+# 向 app 发布当前目标与场景检测结果。
+udp_ip: "127.0.0.1"
+udp_port: 5005
+
+# true：接收 Web UI 或终端 UI 发出的目标切换、锁定、解锁命令。
+command_enabled: true
+command_ip: "0.0.0.0"
+command_port: 5006
+
+# -----------------------------------------------------------------------------
+# 画面标注、显示与录像
+# -----------------------------------------------------------------------------
+# 普通目标框线宽；锁定目标会额外加粗。
+line_width: 5
+
+# true：绘制所有可见 tracks；false：只显示主要目标。
+show_all_tracks: true
+
+# 兼容旧版本地显示开关。display.local_window_enabled 存在时以新配置为准。
+show: false
+window_name: "YOLO Tracking"
+
+# 本地窗口和网页视频流可以独立启用。
+display:
+  local_window_enabled: false
+  fullscreen: false
+
+web_stream:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8081
+  jpeg_quality: 75
+  max_fps: 20
+
+# true：保存带标注的视频。生成文件属于运行产物，不提交 Git。
+save_video: false
+save_path: "../runtime/videos/track_output.mp4"

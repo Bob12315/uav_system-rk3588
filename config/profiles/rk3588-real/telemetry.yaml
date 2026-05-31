@@ -1,0 +1,142 @@
+# RK3588 真机 MAVLink 遥测链路模板
+# 说明：
+# - 本文件由 app 总控进程读取。
+# - bool 值只能使用 true / false，不要加引号。
+# - 同时保留 SITL 和真机端点，使用 data_source 与 active_source 选择运行模式。
+
+# -----------------------------------------------------------------------------
+# 数据源选择
+# -----------------------------------------------------------------------------
+# 可选值：
+# - real：只连接真机。
+# - sitl：只连接 SITL。
+# - dual：同时连接真机与 SITL。
+data_source: real
+
+# 当前向上层暴露状态、接收控制命令的数据源。
+# 可选值：real / sitl。
+# data_source=dual 时可以在运行期间切换 active_source。
+active_source: real
+
+# -----------------------------------------------------------------------------
+# SITL 端点
+# -----------------------------------------------------------------------------
+sitl:
+  # 可选值：serial / udp / tcp / eth。
+  # SITL 常用 tcp，ArduPilot SITL 常见端口为 5762。
+  connection_type: tcp
+
+  # connection_type=serial 时使用。
+  serial_port: /dev/ttyUSB1
+  baudrate: 115200
+
+  # connection_type=udp 时使用。
+  # udp_mode 可选值：udpin / udpout。
+  udp_mode: udpin
+  udp_host: "0.0.0.0"
+  udp_port: 14550
+
+  # connection_type=tcp 时使用。
+  tcp_host: "127.0.0.1"
+  tcp_port: 5762
+
+  # connection_type=eth 时使用。
+  # eth_mode 可选值：udpin / udpout / tcp。
+  eth_mode: udpin
+  eth_host: "0.0.0.0"
+  eth_port: 15001
+
+# -----------------------------------------------------------------------------
+# 真机端点
+# -----------------------------------------------------------------------------
+real:
+  # 可选值：serial / udp / tcp / eth。
+  # RK3588 与飞控网口直连时通常使用 eth。
+  connection_type: eth
+
+  # connection_type=serial 时使用。
+  serial_port: /dev/ttyUSB0
+  baudrate: 57600
+
+  # connection_type=udp 时使用。
+  # udp_mode 可选值：udpin / udpout。
+  udp_mode: udpin
+  udp_host: "0.0.0.0"
+  udp_port: 14550
+
+  # connection_type=tcp 时使用。
+  tcp_host: "127.0.0.1"
+  tcp_port: 5762
+
+  # connection_type=eth 时使用。
+  # eth_mode 可选值：udpin / udpout / tcp。
+  eth_mode: udpin
+  eth_host: "0.0.0.0"
+  eth_port: 15001
+
+# -----------------------------------------------------------------------------
+# 命令发送与链路超时
+# -----------------------------------------------------------------------------
+# 连续控制命令最大发送频率，单位：Hz。
+control_send_rate_hz: 10
+
+# 一次性动作命令的默认重试次数与重试间隔，间隔单位：秒。
+action_cmd_retries: 3
+action_retry_interval_sec: 0.5
+
+# 超过 heartbeat_timeout_sec 未收到心跳，则认为链路中断。
+# 超过 rx_timeout_sec 未收到任何消息，则认为链路异常。
+heartbeat_timeout_sec: 3.0
+rx_timeout_sec: 2.0
+
+# 断线重连间隔与收发线程空闲轮询间隔，单位：秒。
+reconnect_interval_sec: 2.0
+receiver_idle_sleep_sec: 0.01
+sender_idle_sleep_sec: 0.01
+
+# -----------------------------------------------------------------------------
+# MAVLink 消息频率
+# -----------------------------------------------------------------------------
+# true：启动后通过 MAV_CMD_SET_MESSAGE_INTERVAL 请求常用消息频率。
+request_message_intervals: true
+
+# 各 MAVLink 消息的目标接收频率，单位：Hz。
+message_interval_hz:
+  HEARTBEAT: 1
+  ATTITUDE: 10
+  GLOBAL_POSITION_INT: 10
+  LOCAL_POSITION_NED: 10
+  VFR_HUD: 5
+  SYS_STATUS: 2
+  GPS_RAW_INT: 2
+  RC_CHANNELS: 2
+  MOUNT_STATUS: 5
+  GIMBAL_DEVICE_ATTITUDE_STATUS: 10
+
+# -----------------------------------------------------------------------------
+# 云台发送层参数
+# -----------------------------------------------------------------------------
+# mount mode。2 = MAVLink Targeting。
+gimbal_mount_mode: 2
+
+# 发送层云台角度限制，单位：度。
+# 当前使用完整角度范围，等效于不额外限制。
+gimbal_yaw_min_deg: -180.0
+gimbal_yaw_max_deg: 180.0
+gimbal_pitch_min_deg: -180.0
+gimbal_pitch_max_deg: 180.0
+
+# -----------------------------------------------------------------------------
+# telemetry 独立运行辅助功能
+# -----------------------------------------------------------------------------
+# true：通过本地 UDP 发布最新 drone / gimbal / link 状态。
+state_udp_enabled: true
+state_udp_ip: "127.0.0.1"
+state_udp_port: 5010
+
+# true：telemetry 独立运行时默认启用 curses 终端 UI。
+# app 总控进程使用 config/app.yaml 中的 ui 配置。
+ui_enabled: true
+
+# 可选值：DEBUG / INFO / WARNING / ERROR。
+log_level: INFO

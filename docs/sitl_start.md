@@ -58,7 +58,7 @@ udp_host: 0.0.0.0
 udp_port: 14550
 ```
 
-`yolo_app/config.yaml`：
+`config/yolo.yaml`：
 
 ```yaml
 model_path: "/home/pi/uav_system-rk3588/data/models/best-int8-rk3588.rknn"

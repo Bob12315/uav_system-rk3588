@@ -13,12 +13,11 @@ from web_ui.server import create_app
 
 def test_config_store_saves_and_restores_approved_yaml(tmp_path: Path) -> None:
     (tmp_path / "config").mkdir()
-    (tmp_path / "yolo_app").mkdir()
     (tmp_path / "missions" / "demo").mkdir(parents=True)
     app_file = tmp_path / "config" / "app.yaml"
     app_file.write_text("runtime:\n  loop_hz: 20\n", encoding="utf-8")
     (tmp_path / "config" / "telemetry.yaml").write_text("value: 1\n", encoding="utf-8")
-    (tmp_path / "yolo_app" / "config.yaml").write_text("value: 1\n", encoding="utf-8")
+    (tmp_path / "config" / "yolo.yaml").write_text("value: 1\n", encoding="utf-8")
     (tmp_path / "missions" / "demo" / "config.yaml").write_text("name: demo\n", encoding="utf-8")
     store = ConfigStore(tmp_path)
 
@@ -34,11 +33,10 @@ def test_config_store_saves_and_restores_approved_yaml(tmp_path: Path) -> None:
 
 def test_config_store_rejects_arbitrary_paths_and_invalid_yaml(tmp_path: Path) -> None:
     (tmp_path / "config").mkdir()
-    (tmp_path / "yolo_app").mkdir()
     (tmp_path / "missions").mkdir()
     (tmp_path / "config" / "app.yaml").write_text("runtime: {}\n", encoding="utf-8")
     (tmp_path / "config" / "telemetry.yaml").write_text("value: 1\n", encoding="utf-8")
-    (tmp_path / "yolo_app" / "config.yaml").write_text("value: 1\n", encoding="utf-8")
+    (tmp_path / "config" / "yolo.yaml").write_text("value: 1\n", encoding="utf-8")
     store = ConfigStore(tmp_path)
 
     with pytest.raises(ValueError):

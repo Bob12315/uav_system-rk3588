@@ -38,7 +38,6 @@
 ```text
 yolo_app/
   main.py                 主循环、显示和 FPS 日志
-  config.yaml             RK3588 板端默认配置
   config.py               配置与命令行覆盖
   video_source.py         相机、UDP/RTSP/视频输入
   rknn_detector.py        RKNN 推理和后处理
@@ -48,6 +47,8 @@ yolo_app/
   udp_publisher.py        UDP JSON 输出
   command_receiver.py     目标选择命令输入
 ```
+
+默认配置文件位于 `../config/yolo.yaml`。
 
 ## 环境
 

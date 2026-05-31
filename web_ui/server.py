@@ -102,7 +102,7 @@ def create_app(runner, config: UiConfig) -> FastAPI:
     def yolo_stream():
         port = 8081
         try:
-            data = yaml.safe_load((ROOT_DIR / "yolo_app" / "config.yaml").read_text(encoding="utf-8")) or {}
+            data = yaml.safe_load((ROOT_DIR / "config" / "yolo.yaml").read_text(encoding="utf-8")) or {}
             web_stream = data.get("web_stream", {})
             if isinstance(web_stream, dict):
                 port = int(web_stream.get("port", port))
@@ -185,7 +185,7 @@ def _apply_config_action(runner, path: str, action: str) -> dict[str, object]:
         result = runner.apply_active_mission_config(path)
     elif action == "reconnect" and path == "config/telemetry.yaml":
         result = runner.reconnect_telemetry_from_saved_config()
-    elif action == "restart" and path == "yolo_app/config.yaml":
+    elif action == "restart" and path == "config/yolo.yaml":
         result = runner.restart_external_service("yolo")
     elif action == "restart" and path == "config/app.yaml":
         result = runner.restart_external_service("app")

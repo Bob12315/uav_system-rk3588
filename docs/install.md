@@ -53,7 +53,7 @@ bash scripts/install/install_yolo_env.sh
 data/models/best-int8-rk3588.rknn
 ```
 
-`yolo_app/config.yaml` 使用相对于配置文件的路径：
+`config/yolo.yaml` 使用相对于配置文件的路径：
 
 ```yaml
 model_path: "../data/models/best-int8-rk3588.rknn"

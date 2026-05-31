@@ -89,7 +89,7 @@ target unlock
 
 这些命令会通过 UDP 发给 `yolo_app.command_receiver`。
 
-默认读取 [yolo_app/config.yaml](../yolo_app/config.yaml) 中：
+默认读取 [config/yolo.yaml](../config/yolo.yaml) 中：
 
 ```yaml
 command_enabled: true
@@ -102,7 +102,7 @@ command_port: 5006
 也可以启动 control 时指定 yolo 配置：
 
 ```bash
-python -m control --yolo-config /path/to/yolo_app/config.yaml
+python -m control --yolo-config /path/to/config/yolo.yaml
 ```
 
 发送 JSON 格式：
