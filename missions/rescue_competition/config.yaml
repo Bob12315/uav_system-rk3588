@@ -64,7 +64,7 @@ recce:
   vote_min_count: 3
   vote_min_confidence_sum: 1.2
   scan_duration_s: 8.0
-  output_dir: logs/recce
+  output_dir: runtime/logs/recce
   output_json: true
   output_csv: true
 recon:

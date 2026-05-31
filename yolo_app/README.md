@@ -20,7 +20,7 @@
 默认模型路径：
 
 ```text
-~/rk3588_yolo/rknn_model_zoo/examples/yolo11/model/best-int8-rk3588.rknn
+../data/models/best-int8-rk3588.rknn
 ```
 
 模型约定：
@@ -62,7 +62,8 @@ yolo_app/
 `yolo` conda 环境至少需要：
 
 ```bash
-pip install rknn-toolkit-lite2==2.3.2 opencv-python pyyaml numpy
+conda activate yolo
+bash scripts/install/install_yolo_env.sh
 ```
 
 ## 屏幕运行

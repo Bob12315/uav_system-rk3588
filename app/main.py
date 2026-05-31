@@ -10,6 +10,8 @@ from app.system_runner import SystemRunner
 
 
 def setup_logging(level: str, log_file: str | None = None) -> None:
+    if log_file:
+        Path(log_file).parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -21,7 +23,11 @@ def main() -> int:
     parser = build_arg_parser()
     args = parser.parse_args()
     config = load_app_config(args)
-    ui_log_file = str(Path(__file__).with_name("app_ui.log")) if config.runtime.ui_enabled else None
+    ui_log_file = (
+        str(Path(__file__).resolve().parent.parent / "runtime" / "logs" / "app" / "app_ui.log")
+        if config.runtime.ui_enabled
+        else None
+    )
     setup_logging(config.runtime.log_level, ui_log_file)
     logger = logging.getLogger("app.main")
     stop_event = threading.Event()

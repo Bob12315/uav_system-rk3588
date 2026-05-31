@@ -145,7 +145,7 @@ stage_input = adapter.adapt(fused_state)
 启动示例：
 
 ```bash
-cd ~/uav_project/src/fusion
+cd ~/uav_project/uav_system-rk3588/fusion
 python3 debug_main.py \
   --telemetry-config ../telemetry_link/config.yaml \
   --yolo-udp-ip 0.0.0.0 \

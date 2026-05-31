@@ -376,7 +376,9 @@ def load_app_config(args: argparse.Namespace) -> AppConfig:
     terminal_enabled = _cfg_bool(ui_data, "terminal_enabled", ui_enabled, "ui")
     if args.ui_enabled is not None:
         terminal_enabled = bool(args.ui_enabled)
-    audit_log_path = Path(str(ui_data.get("audit_log_path", "logs/web_ui/audit.jsonl"))).expanduser()
+    audit_log_path = Path(
+        str(ui_data.get("audit_log_path", "runtime/logs/web_ui/audit.jsonl"))
+    ).expanduser()
     if not audit_log_path.is_absolute():
         audit_log_path = ROOT_DIR / audit_log_path
     ui_cfg = UiConfig(
@@ -553,7 +555,7 @@ def _build_blackbox_config(data: dict[str, Any], args: argparse.Namespace) -> Bl
     if args.blackbox_enabled is not None:
         enabled = bool(args.blackbox_enabled)
 
-    output_dir = str(data.get("output_dir", "logs/blackbox"))
+    output_dir = str(data.get("output_dir", "runtime/logs/blackbox"))
     if args.blackbox_output_dir:
         output_dir = args.blackbox_output_dir
     output_path = Path(output_dir).expanduser()
@@ -1106,7 +1108,7 @@ def _load_legacy_app_config(args: argparse.Namespace) -> AppConfig:
             terminal_enabled=telemetry_cfg.ui_enabled if args.ui_enabled is None else bool(args.ui_enabled),
             web_host="0.0.0.0",
             web_port=8080,
-            audit_log_path=str(ROOT_DIR / "logs" / "web_ui" / "audit.jsonl"),
+            audit_log_path=str(ROOT_DIR / "runtime" / "logs" / "web_ui" / "audit.jsonl"),
         ),
         services_control=ServiceControlConfig([], []),
         control=control_cfg,

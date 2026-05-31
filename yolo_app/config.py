@@ -101,6 +101,13 @@ def _expand_user_path(value: Any) -> str:
     return text
 
 
+def _resolve_config_path(value: Any, config_path: str) -> str:
+    path = Path(_expand_user_path(value))
+    if path.is_absolute():
+        return str(path)
+    return str((Path(config_path).resolve().parent / path).resolve())
+
+
 def load_config() -> AppConfig:
     parser = build_arg_parser()
     args = parser.parse_args()
@@ -118,7 +125,7 @@ def load_config() -> AppConfig:
             merged[key.replace("-", "_")] = value
 
     return AppConfig(
-        model_path=_expand_user_path(merged["model_path"]),
+        model_path=_resolve_config_path(merged["model_path"], args.config),
         source=_expand_user_path(merged["source"]),
         conf_thres=float(merged["conf_thres"]),
         iou_thres=float(merged["iou_thres"]),

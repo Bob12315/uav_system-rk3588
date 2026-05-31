@@ -26,7 +26,7 @@ ui:
   terminal_enabled: false
   web_host: "0.0.0.0"
   web_port: 8080
-  audit_log_path: "logs/web_ui/audit.jsonl"
+  audit_log_path: "runtime/logs/web_ui/audit.jsonl"
 
 mission:
   name: visual_tracking

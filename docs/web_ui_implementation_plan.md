@@ -2,17 +2,12 @@
 
 ## 1. Goal
 
-Add a browser-based operator UI to the UAV application for both supported
-deployment modes:
+Add a browser-based operator UI to the RK3588 UAV application:
 
-- x86 host running YOLO locally and reaching the flight controller through a
-  telemetry/data link.
 - RK3588 host running the RKNN YOLO backend and reaching the flight controller
   over its local wired link.
 
-The browser is used from a laptop on the same local network. The x86 and
-RK3588 deployments must expose the same Web UI behavior; only their YOLO
-inference backend and platform defaults differ.
+The browser is used from a laptop on the same local network.
 
 ## 2. Confirmed Product Requirements
 
@@ -79,7 +74,7 @@ ui:
   terminal_enabled: false
   web_host: "0.0.0.0"
   web_port: 8080
-  audit_log_path: "logs/web_ui/audit.jsonl"
+  audit_log_path: "runtime/logs/web_ui/audit.jsonl"
 ```
 
 - YOLO local display and web stream are independently configured in
@@ -134,8 +129,7 @@ app ---- UDP target commands ----------> yolo_app
 - Continues to own video capture, inference, target selection, annotation, and
   the existing UDP contracts.
 - Adds an MJPEG publisher for its already annotated frames.
-- Maintains identical output behavior across the PyTorch/x86 and RKNN/RK3588
-  implementations.
+- Uses RKNN INT8 inference on the RK3588 NPU.
 
 ## 4. Web API Surface
 
@@ -215,9 +209,7 @@ supervised operations.
    `ServiceManager`, including telemetry reconnect.
 4. Add `yolo_app` annotated MJPEG stream module and configuration on RK3588.
 5. Validate the common Web UI and RK3588-specific video integration.
-6. Port the common change set and the PyTorch-side MJPEG hook into `main` and
-   `platform/x86`.
-7. Run tests and dry-run smoke checks for every updated branch.
+6. Run tests and dry-run smoke checks for the RK3588 branch.
 
 ## 8. Acceptance Checklist
 
@@ -233,4 +225,4 @@ supervised operations.
 - Active mission save-and-apply leaves `SEND=OFF`.
 - Telemetry save-and-reconnect leaves `SEND=OFF`.
 - YOLO and app restart endpoints execute configured supervisor commands.
-- RK3588 and x86 offer the same UI features.
+- RK3588 exposes the complete Web UI feature set.

@@ -51,26 +51,27 @@ docs/             架构、接口、运行、安全和开发规则
 
 ## 安装环境
 
-建议使用两个 conda 环境：`app` 环境和 `yolo` 环境。用户先自行安装适合 RK3588/aarch64 的 Miniconda/Anaconda 或 Miniforge，并自行创建两个环境；本仓库当前只提供 app 环境的一键依赖安装脚本。
+建议使用两个 conda 环境：`app` 环境和 `yolo` 环境。用户先自行安装适合 RK3588/aarch64 的 Miniconda/Anaconda 或 Miniforge，并自行创建两个环境；仓库为两个环境分别提供依赖安装脚本。
 
 ```bash
 conda create -n app python=3.10 -y
 conda activate app
-bash scripts/install_app_env.sh
+bash scripts/install/install_app_env.sh
 ```
 
 ```bash
 conda create -n yolo python=3.10 -y
 conda activate yolo
+bash scripts/install/install_yolo_env.sh
 ```
 
-`yolo` 环境需安装 OpenCV、PyYAML、NumPy 及匹配板端 Runtime 的 `rknn-toolkit-lite2==2.3.2`。模型文件路径为：
+`yolo` 环境需安装 OpenCV、PyYAML、NumPy 及匹配板端 Runtime 的 `rknn-toolkit-lite2==2.3.2`。仓库已包含部署模型：
 
 ```text
-~/rk3588_yolo/rknn_model_zoo/examples/yolo11/model/best-int8-rk3588.rknn
+data/models/best-int8-rk3588.rknn
 ```
 
-大型 `.rknn`、日志、缓存文件不建议提交到 Git。
+运行状态、日志、缓存和生成视频统一写入 `runtime/`，不提交到 Git。
 
 更完整的安装说明见 [docs/install.md](docs/install.md)。
 
@@ -91,7 +92,7 @@ YOLO 默认通过 UDP JSON 输出主目标。控制端默认监听 `0.0.0.0:5005
 
 ```bash
 conda activate app
-cd ~/uav_project/src
+cd ~/uav_project/uav_system-rk3588
 python -m app.main --send-commands false
 ```
 
@@ -128,7 +129,7 @@ python -m app.main --connect-telemetry --force-mode APPROACH_TRACK --send-comman
 ## 测试
 
 ```bash
-cd ~/uav_project/src
+cd ~/uav_project/uav_system-rk3588
 python -m pytest -q
 ```
 

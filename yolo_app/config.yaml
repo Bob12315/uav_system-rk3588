@@ -1,5 +1,5 @@
 # RK3588 上验证过的 Rockchip YOLO11 INT8 模型
-model_path: "~/rk3588_yolo/rknn_model_zoo/examples/yolo11/model/best-int8-rk3588.rknn"
+model_path: "../data/models/best-int8-rk3588.rknn"
 
 # 视频输入源：
 # 1. 如果是本地视频设备，请填写 /dev/videoX

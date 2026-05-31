@@ -31,8 +31,8 @@ src/missions/rescue_competition/config.yaml
 相关日志输出：
 
 ```text
-src/logs/blackbox/
-src/logs/recce/
+runtime/logs/blackbox/
+runtime/logs/recce/
 ```
 
 ## 3. app.yaml 怎么改
@@ -475,13 +475,13 @@ python -m app.main \
 黑匣子：
 
 ```text
-src/logs/blackbox/*.jsonl
+runtime/logs/blackbox/*.jsonl
 ```
 
 侦察结果：
 
 ```text
-src/logs/recce/
+runtime/logs/recce/
 ```
 
 运行日志重点看：

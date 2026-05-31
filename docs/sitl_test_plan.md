@@ -36,15 +36,15 @@ python -m app.main --connect-telemetry --no-yolo-udp --send-commands false --run
 
 ```bash
 conda activate yolo
-cd ~/uav_project/src/yolo_app
+cd ~/uav_project/uav_system-rk3588/yolo_app
 python main.py
 ```
 
 窗口 2：
 
 ```bash
-conda activate uav-control
-cd ~/uav_project/src
+conda activate app
+cd ~/uav_project/uav_system-rk3588
 python -m app.main --connect-telemetry --send-commands false
 ```
 

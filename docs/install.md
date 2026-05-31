@@ -1,13 +1,13 @@
 # 安装说明
 
-建议分两个环境：app 环境和 YOLO 环境。用户先自行安装适合 RK3588/aarch64 的 Miniconda/Anaconda 或 Miniforge，并自行创建两个 conda 环境；本项目脚本只负责在已经激活的 `app` 环境里安装 app 侧依赖。
+建议分两个环境：app 环境和 YOLO 环境。用户先自行安装适合 RK3588/aarch64 的 Miniconda/Anaconda 或 Miniforge，并自行创建两个 conda 环境；本项目脚本负责在已经激活的环境里安装对应依赖。
 
 ## app 环境
 
 ```bash
 conda create -n app python=3.10 -y
 conda activate app
-bash scripts/install_app_env.sh
+bash scripts/install/install_app_env.sh
 ```
 
 用途：
@@ -31,7 +31,7 @@ bash scripts/install_app_env.sh
 验证：
 
 ```bash
-cd ~/uav_project/src
+cd ~/uav_project/uav_system-rk3588
 python -m app.main --help
 python -m telemetry_link.main --help
 python -m pytest -q
@@ -42,30 +42,25 @@ python -m pytest -q
 ```bash
 conda create -n yolo python=3.10 -y
 conda activate yolo
-```
-
-在 NanoPC-T6 上安装与 RKNN Runtime `2.3.2` 相配的依赖：
-
-```bash
-pip install rknn-toolkit-lite2==2.3.2 opencv-python pyyaml numpy
+bash scripts/install/install_yolo_env.sh
 ```
 
 ## 模型文件
 
-建议路径：
+仓库内已跟踪部署模型：
 
 ```text
-~/rk3588_yolo/rknn_model_zoo/examples/yolo11/model/best-int8-rk3588.rknn
+data/models/best-int8-rk3588.rknn
 ```
 
-然后在 `yolo_app/config.yaml` 中配置：
+`yolo_app/config.yaml` 使用相对于配置文件的路径：
 
 ```yaml
-model_path: "~/rk3588_yolo/rknn_model_zoo/examples/yolo11/model/best-int8-rk3588.rknn"
+model_path: "../data/models/best-int8-rk3588.rknn"
 ```
 
 模型为 Rockchip 优化的 INT8 RKNN 文件，输入为 RGB uint8 `(1, 640, 640, 3)`，固定使用
-`NPU_CORE_0_1_2`。不建议把 `.rknn` 模型提交到 Git。
+`NPU_CORE_0_1_2`。
 
 ## 可选依赖
 
@@ -77,7 +72,7 @@ model_path: "~/rk3588_yolo/rknn_model_zoo/examples/yolo11/model/best-int8-rk3588
 
 ```bash
 conda activate app
-cd ~/uav_project/src
+cd ~/uav_project/uav_system-rk3588
 python -m app.main --no-yolo-udp --run-seconds 1 --send-commands false
 ```
 
