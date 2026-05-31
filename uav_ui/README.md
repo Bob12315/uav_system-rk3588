@@ -13,7 +13,7 @@
 
 ### 跟随 control 启动
 
-当 [telemetry_link/config.yaml](../telemetry_link/config.yaml) 中：
+当 [config/telemetry.yaml](../config/telemetry.yaml) 中：
 
 ```yaml
 ui_enabled: true

@@ -147,7 +147,7 @@ stage_input = adapter.adapt(fused_state)
 ```bash
 cd ~/uav_project/uav_system-rk3588/fusion
 python3 debug_main.py \
-  --telemetry-config ../telemetry_link/config.yaml \
+  --telemetry-config ../config/telemetry.yaml \
   --yolo-udp-ip 0.0.0.0 \
   --yolo-udp-port 5005 \
   --print-rate-hz 1 \

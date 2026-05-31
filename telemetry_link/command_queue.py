@@ -65,6 +65,10 @@ class CommandQueue:
             item = heapq.heappop(self._action_heap)
             return item.command
 
+    def clear_actions(self) -> None:
+        with self._lock:
+            self._action_heap.clear()
+
     def requeue_action(self, command: ActionCommand) -> None:
         command.created_at = time.time()
         self.put_action(command)

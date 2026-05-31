@@ -47,8 +47,8 @@ FlightCommandExecutor / UI / stdin
 ## 主要文件
 
 - `main.py`：独立运行入口。
-- `config.yaml`：独立运行 telemetry 服务时的默认配置。
-- `config.py`：加载 `config.yaml` 并处理命令行覆盖。
+- `../config/telemetry.yaml`：app 和独立 telemetry 服务共用的默认配置。
+- `config.py`：加载根目录 telemetry 配置并处理命令行覆盖。
 - `models.py`：公开 dataclass 和枚举。
 - `link_manager.py`：对外统一入口和 source 生命周期管理。
 - `mavlink_client.py`：底层 `pymavlink` 连接封装。
@@ -132,7 +132,7 @@ cd ~/uav_project/uav_system-rk3588
 python -m telemetry_link.main --help
 ```
 
-使用 `telemetry_link/config.yaml` 启动：
+使用根目录 `config/telemetry.yaml` 启动：
 
 ```bash
 python -m telemetry_link.main
@@ -164,13 +164,13 @@ python -m telemetry_link.main \
 
 ## 配置
 
-`telemetry_link/config.yaml` 只服务于 telemetry 独立运行。完整 app 运行时，配置入口是：
+telemetry 独立运行和完整 app 运行共用配置入口：
 
 ```text
 config/telemetry.yaml
 ```
 
-保留模块内配置文件的原因是 telemetry 可以脱离 `app/` 单独调链路、调云台和验证 MAVLink 命令。
+独立入口仍然可以脱离 `app/` 调链路、调云台和验证 MAVLink 命令。需要临时覆盖时，使用 `--config` 指定其他文件，或使用命令行参数覆盖单项配置。
 
 常用配置项：
 

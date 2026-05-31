@@ -273,7 +273,7 @@ land() -> None
 - mission stage controller 不直接持有 `LinkManager`。
 - `start()` 启动各 source 的后台连接/监控线程并返回，不应等待 heartbeat 成功。
 - `start_background()` 保留给嵌入 app 的异步启动路径。
-- `switch_active_source()` 只切换对外状态和后续命令提交目标；切换时非 active source 的连续控制队列必须清空。
+- `switch_active_source()` 只切换对外状态和后续命令提交目标；切换时所有 source 的连续控制队列必须清空，避免重新激活旧控制量。
 
 ## app.service_manager.ServiceManager
 

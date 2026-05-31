@@ -29,7 +29,7 @@ from utils import setup_logging
 
 def main() -> int:
     cfg = load_config()
-    ui_log_file = str(Path(__file__).with_name("telemetry_link_ui.log")) if cfg.ui_enabled else None
+    ui_log_file = str(ROOT_DIR / "runtime" / "logs" / "telemetry_link" / "telemetry_link_ui.log") if cfg.ui_enabled else None
     setup_logging(cfg.log_level, ui_log_file)
     logger = logging.getLogger("telemetry_link")
     manager = LinkManager(cfg)

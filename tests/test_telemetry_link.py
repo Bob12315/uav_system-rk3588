@@ -11,7 +11,7 @@ from pymavlink import mavutil
 from telemetry_link.command_dispatcher import dispatch_text_command
 from telemetry_link.command_queue import CommandQueue
 from telemetry_link.command_sender import CommandSender
-from telemetry_link.config import EndpointConfig, TelemetryConfig, load_config
+from telemetry_link.config import DEFAULT_CONFIG_PATH, EndpointConfig, TelemetryConfig, build_arg_parser, load_config
 from telemetry_link.link_manager import LinkManager, SourceRuntime
 from telemetry_link.mavlink_client import MavlinkClient
 from telemetry_link.models import ActionCommand, ActionType, ControlCommand, ControlType, GimbalRateCommand
@@ -67,18 +67,24 @@ def _config(**overrides) -> TelemetryConfig:
     return TelemetryConfig(**data)
 
 
-def test_switch_active_source_clears_inactive_continuous_queues() -> None:
+def test_switch_active_source_clears_all_continuous_queues() -> None:
     manager = LinkManager(_config())
     manager.runtimes["sitl"].command_queue.put_control(
         ControlCommand(command_type=ControlType.VELOCITY, vx=1.0)
     )
     manager.runtimes["sitl"].command_queue.put_gimbal_rate(GimbalRateCommand(yaw_rate=0.2))
+    manager.runtimes["real"].command_queue.put_control(
+        ControlCommand(command_type=ControlType.VELOCITY, vx=2.0)
+    )
+    manager.runtimes["real"].command_queue.put_gimbal_rate(GimbalRateCommand(yaw_rate=0.4))
 
     assert manager.switch_active_source("real") is True
 
     assert manager.get_active_source() == "real"
     assert manager.runtimes["sitl"].command_queue.peek_control() is None
     assert manager.runtimes["sitl"].command_queue.peek_gimbal_rate() is None
+    assert manager.runtimes["real"].command_queue.peek_control() is None
+    assert manager.runtimes["real"].command_queue.peek_gimbal_rate() is None
 
 
 class _FailingClient:
@@ -126,7 +132,25 @@ def test_source_runtime_start_returns_while_connect_retries_in_background() -> N
         runtime.stop()
 
 
-def test_load_config_parses_quoted_false_as_false(tmp_path, monkeypatch) -> None:
+def test_source_runtime_stop_workers_clears_pending_actions() -> None:
+    runtime = SourceRuntime(
+        name="sitl",
+        endpoint=_endpoint("sitl"),
+        cfg=_config(data_source="sitl", active_source="sitl"),
+        state_cache=StateCache(heartbeat_timeout_sec=0.05, rx_timeout_sec=0.05),
+        command_queue=CommandQueue(),
+        client=_FailingClient(),
+        stop_event=threading.Event(),
+        worker_stop_event=threading.Event(),
+    )
+    runtime.command_queue.put_action(ActionCommand(action_type=ActionType.ARM))
+
+    runtime._stop_workers(close_client=False)
+
+    assert runtime.command_queue.get_next_action() is None
+
+
+def test_load_config_rejects_quoted_false_bool(tmp_path, monkeypatch) -> None:
     path = tmp_path / "telemetry.yaml"
     path.write_text(
         """
@@ -154,11 +178,61 @@ log_level: INFO
     )
     monkeypatch.setattr("sys.argv", ["telemetry_link.main", "--config", str(path)])
 
+    with pytest.raises(ValueError, match="request_message_intervals must be a YAML bool"):
+        load_config()
+
+
+def test_load_config_parses_cli_false_override(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "telemetry.yaml"
+    path.write_text(
+        """
+data_source: sitl
+active_source: sitl
+sitl:
+  connection_type: tcp
+real:
+  connection_type: tcp
+control_send_rate_hz: 10
+action_cmd_retries: 0
+action_retry_interval_sec: 0.01
+heartbeat_timeout_sec: 0.05
+rx_timeout_sec: 0.05
+reconnect_interval_sec: 0.01
+receiver_idle_sleep_sec: 0.01
+sender_idle_sleep_sec: 0.01
+request_message_intervals: true
+message_interval_hz: {}
+state_udp_enabled: true
+ui_enabled: false
+log_level: INFO
+""".lstrip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "telemetry_link.main",
+            "--config",
+            str(path),
+            "--request-message-intervals",
+            "false",
+            "--state-udp-enabled",
+            "false",
+        ],
+    )
+
     cfg = load_config()
 
     assert cfg.request_message_intervals is False
     assert cfg.state_udp_enabled is False
-    assert cfg.ui_enabled is False
+
+
+def test_build_arg_parser_defaults_to_root_telemetry_config(monkeypatch) -> None:
+    monkeypatch.setattr("sys.argv", ["telemetry_link.main"])
+
+    args = build_arg_parser().parse_args()
+
+    assert args.config == str(DEFAULT_CONFIG_PATH)
 
 
 def test_load_config_parses_eth_endpoint(tmp_path, monkeypatch) -> None:
@@ -270,7 +344,7 @@ log_level: INFO
     )
     monkeypatch.setattr("sys.argv", ["telemetry_link.main", "--config", str(path)])
 
-    with pytest.raises(Exception, match="invalid bool value"):
+    with pytest.raises(ValueError, match="request_message_intervals must be a YAML bool"):
         load_config()
 
 

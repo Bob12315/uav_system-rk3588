@@ -7,6 +7,9 @@ from typing import Any
 
 import yaml
 
+ROOT_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_CONFIG_PATH = ROOT_DIR / "config" / "telemetry.yaml"
+
 
 @dataclass(slots=True)
 class EndpointConfig:
@@ -65,9 +68,15 @@ def _to_bool(value: Any) -> bool:
     raise argparse.ArgumentTypeError(f"invalid bool value: {value}")
 
 
+def _require_yaml_bool(value: Any, key: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise ValueError(f"{key} must be a YAML bool: use true or false without quotes")
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Standalone MAVLink telemetry link service")
-    parser.add_argument("--config", default=str(Path(__file__).with_name("config.yaml")))
+    parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
     parser.add_argument("--data-source", choices=["real", "sitl", "dual"])
     parser.add_argument("--active-source", choices=["real", "sitl"])
 
@@ -175,16 +184,16 @@ def load_config() -> TelemetryConfig:
         reconnect_interval_sec=float(merged["reconnect_interval_sec"]),
         receiver_idle_sleep_sec=float(merged["receiver_idle_sleep_sec"]),
         sender_idle_sleep_sec=float(merged["sender_idle_sleep_sec"]),
-        request_message_intervals=_to_bool(merged["request_message_intervals"]),
+        request_message_intervals=_require_yaml_bool(merged["request_message_intervals"], "request_message_intervals"),
         message_interval_hz={str(k): float(v) for k, v in dict(merged.get("message_interval_hz", {})).items()},
         gimbal_mount_mode=int(merged.get("gimbal_mount_mode", 2)),
         gimbal_yaw_min_deg=float(merged.get("gimbal_yaw_min_deg", -180.0)),
         gimbal_yaw_max_deg=float(merged.get("gimbal_yaw_max_deg", 180.0)),
         gimbal_pitch_min_deg=float(merged.get("gimbal_pitch_min_deg", -180.0)),
         gimbal_pitch_max_deg=float(merged.get("gimbal_pitch_max_deg", 180.0)),
-        state_udp_enabled=_to_bool(merged.get("state_udp_enabled", True)),
+        state_udp_enabled=_require_yaml_bool(merged.get("state_udp_enabled", True), "state_udp_enabled"),
         state_udp_ip=str(merged.get("state_udp_ip", "127.0.0.1")),
         state_udp_port=int(merged.get("state_udp_port", 5010)),
-        ui_enabled=_to_bool(merged.get("ui_enabled", False)),
+        ui_enabled=_require_yaml_bool(merged.get("ui_enabled", False), "ui_enabled"),
         log_level=str(merged["log_level"]),
     )

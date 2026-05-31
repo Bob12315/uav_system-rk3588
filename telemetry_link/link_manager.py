@@ -119,6 +119,7 @@ class SourceRuntime:
                 self.sender = None
             self.command_queue.clear_control()
             self.command_queue.clear_gimbal_rate()
+            self.command_queue.clear_actions()
             if close_client:
                 self.client.close()
 
@@ -220,14 +221,12 @@ class LinkManager:
         previous_source = self.get_active_source()
         with self.active_lock:
             self.active_source = source_name
-        self._clear_inactive_continuous_commands(source_name)
+        self._clear_continuous_commands()
         self.logger.info("switched active_source=%s previous_source=%s", source_name, previous_source)
         return True
 
-    def _clear_inactive_continuous_commands(self, active_source: str) -> None:
-        for source_name, runtime in self.runtimes.items():
-            if source_name == active_source:
-                continue
+    def _clear_continuous_commands(self) -> None:
+        for runtime in self.runtimes.values():
             runtime.command_queue.clear_control()
             runtime.command_queue.clear_gimbal_rate()
 
