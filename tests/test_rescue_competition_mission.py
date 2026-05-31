@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.health_monitor import HealthStatus
 from missions.common.control.types import MissionStageInput
+from missions.common.navigation import LocalMissionFrame
 from fusion.models import PerceptionTarget, SceneDetections, SceneObject
 from missions.common.recce import RecceConfig
 from missions.base import MissionContext
@@ -11,6 +12,7 @@ from missions.rescue_competition import (
     PayloadRelease,
     PayloadReleaseTiming,
     PayloadSlot,
+    ReportedTarget,
     RecceMissionConfig,
     RescueCompetitionMission,
     RescueCompetitionMissionConfig,
@@ -124,16 +126,22 @@ def test_rescue_stage_enum_matches_planned_route() -> None:
     assert [stage.value for stage in RescueStage] == [
         "PREPARE",
         "TAKEOFF",
-        "FOLLOW_ROUTE_TO_DROP_ZONE",
-        "SEARCH_DROP_TARGETS",
-        "ALIGN_AND_DROP",
-        "WAIT_PAYLOAD_RELEASE",
-        "RESUME_ROUTE_TO_RECCE_ZONE",
-        "SCAN_RECCE_AREA",
-        "FOLLOW_ROUTE_HOME",
+        "GOTO_DROPZONE",
+        "DROP_SCAN",
+        "DROP_ALIGN",
+        "DROP_DESCEND",
+        "DROP_RELEASE",
+        "DROP_ASCEND",
+        "DROP_RESUME_SCAN",
+        "GOTO_RECON",
+        "RECON_SCAN",
+        "RECON_ALIGN",
+        "RECON_DESCEND",
+        "RECON_REPORT",
+        "RETURN_HOME",
         "LAND",
-        "DONE",
-        "ABORT",
+        "FINISH",
+        "FAILSAFE",
     ]
 
 
@@ -211,14 +219,14 @@ def test_takeoff_stage_emits_once_takeoff_action_and_advances_at_altitude() -> N
     assert first.actions[0].action_type == "takeoff"
     assert first.actions[0].params == {"altitude_m": 8.0}
     assert first.actions[0].key == "rescue_takeoff"
-    assert second.stage == "FOLLOW_ROUTE_TO_DROP_ZONE"
+    assert second.stage == "GOTO_DROPZONE"
     assert second.previous_stage == "TAKEOFF"
 
 
 def test_route_follow_emits_local_position_in_ekf_frame_until_point_is_stable() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.FOLLOW_ROUTE_TO_DROP_ZONE,
+            initial_stage=RescueStage.GOTO_DROPZONE,
             drop_route_end_name="wp1",
             route=[
                 RoutePoint(
@@ -253,19 +261,19 @@ def test_route_follow_emits_local_position_in_ekf_frame_until_point_is_stable() 
     first = mission.update(_context(drone=enroute))
     second = mission.update(_context(drone=at_target))
 
-    assert first.stage == "FOLLOW_ROUTE_TO_DROP_ZONE"
+    assert first.stage == "GOTO_DROPZONE"
     assert first.hold_reason == "enroute:wp1"
     assert first.actions[0].action_type == "local_position"
     assert first.actions[0].params == {"x": 15.0, "y": 18.0, "z": -4.0, "frame": 1}
-    assert second.stage == "SEARCH_DROP_TARGETS"
-    assert second.previous_stage == "FOLLOW_ROUTE_TO_DROP_ZONE"
+    assert second.stage == "DROP_SCAN"
+    assert second.previous_stage == "GOTO_DROPZONE"
     assert second.detail["route_index"] == 1
 
 
 def test_search_drop_targets_switches_to_overhead_hold_when_scene_target_stable() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.SEARCH_DROP_TARGETS,
+            initial_stage=RescueStage.DROP_SCAN,
             drop_target_stable_frames=2,
         )
     )
@@ -274,34 +282,34 @@ def test_search_drop_targets_switches_to_overhead_hold_when_scene_target_stable(
     searching = mission.update(_context(scene=scene))
     acquired = mission.update(_context(scene=scene))
 
-    assert searching.stage == "SEARCH_DROP_TARGETS"
+    assert searching.stage == "DROP_SCAN"
     assert searching.active_mode == "IDLE"
-    assert searching.hold_reason == "searching_drop_targets"
-    assert acquired.stage == "ALIGN_AND_DROP"
-    assert acquired.previous_stage == "SEARCH_DROP_TARGETS"
-    assert acquired.active_mode == "OVERHEAD_HOLD"
+    assert searching.hold_reason == "drop_scanning"
+    assert acquired.stage == "DROP_ALIGN"
+    assert acquired.previous_stage == "DROP_SCAN"
+    assert acquired.active_mode == "IDLE"
     assert acquired.hold_reason == "drop_target_acquired"
-    assert acquired.actions[0].action_type == "yolo_lock_target"
-    assert acquired.actions[0].params == {"track_id": 7}
+    assert acquired.actions[1].action_type == "yolo_lock_target"
+    assert acquired.actions[1].params == {"track_id": 7}
     assert acquired.detail["selected_drop_target"]["track_id"] == 7
     assert acquired.detail["selected_drop_target"]["class_name"] == "cylinder"
 
 
 def test_search_drop_targets_does_not_trigger_without_scene() -> None:
     mission = RescueCompetitionMission(
-        RescueCompetitionMissionConfig(initial_stage=RescueStage.SEARCH_DROP_TARGETS)
+        RescueCompetitionMissionConfig(initial_stage=RescueStage.DROP_SCAN)
     )
 
     output = mission.update(_context(target_ready=True, scene=None))
 
-    assert output.stage == "SEARCH_DROP_TARGETS"
-    assert output.hold_reason == "searching_drop_targets"
+    assert output.stage == "DROP_SCAN"
+    assert output.hold_reason == "drop_scanning"
 
 
 def test_search_drop_targets_filters_scene_candidates() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.SEARCH_DROP_TARGETS,
+            initial_stage=RescueStage.DROP_SCAN,
             drop_target_classes=["cylinder"],
             drop_target_min_confidence=0.5,
             drop_target_max_center_error=0.35,
@@ -319,15 +327,15 @@ def test_search_drop_targets_filters_scene_candidates() -> None:
         _context(scene=_scene(_object(class_name="cylinder", confidence=0.9, ex=0.8, ey=0.0)))
     )
 
-    assert wrong_class.stage == "SEARCH_DROP_TARGETS"
-    assert low_confidence.stage == "SEARCH_DROP_TARGETS"
-    assert off_center.stage == "SEARCH_DROP_TARGETS"
+    assert wrong_class.stage == "DROP_SCAN"
+    assert low_confidence.stage == "DROP_SCAN"
+    assert off_center.stage == "DROP_SCAN"
 
 
 def test_search_drop_targets_selects_center_nearest_candidate() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.SEARCH_DROP_TARGETS,
+            initial_stage=RescueStage.DROP_SCAN,
             drop_target_stable_frames=1,
         )
     )
@@ -341,14 +349,14 @@ def test_search_drop_targets_selects_center_nearest_candidate() -> None:
         )
     )
 
-    assert output.stage == "ALIGN_AND_DROP"
+    assert output.stage == "DROP_ALIGN"
     assert output.detail["selected_drop_target"]["track_id"] == 2
 
 
 def test_search_drop_targets_can_stabilize_untracked_candidate_by_center() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.SEARCH_DROP_TARGETS,
+            initial_stage=RescueStage.DROP_SCAN,
             drop_target_stable_frames=2,
         )
     )
@@ -360,15 +368,15 @@ def test_search_drop_targets_can_stabilize_untracked_candidate_by_center() -> No
         _context(scene=_scene(_object(track_id=None, class_name="cylinder", cx=323.0, cy=244.0)))
     )
 
-    assert first.stage == "SEARCH_DROP_TARGETS"
-    assert second.stage == "ALIGN_AND_DROP"
-    assert second.actions == []
+    assert first.stage == "DROP_SCAN"
+    assert second.stage == "DROP_ALIGN"
+    assert [action.action_type for action in second.actions] == ["set_mode"]
 
 
 def test_search_drop_targets_can_skip_vision_after_dry_run_hold() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.SEARCH_DROP_TARGETS,
+            initial_stage=RescueStage.DROP_SCAN,
             dry_run_skip_vision=True,
             search_drop_duration_s=2.0,
         )
@@ -378,37 +386,35 @@ def test_search_drop_targets_can_skip_vision_after_dry_run_hold() -> None:
     second = mission.update(_context(timestamp=11.0, target_ready=False))
     third = mission.update(_context(timestamp=12.1, target_ready=False))
 
-    assert first.stage == "SEARCH_DROP_TARGETS"
-    assert second.stage == "SEARCH_DROP_TARGETS"
-    assert third.stage == "ALIGN_AND_DROP"
-    assert third.previous_stage == "SEARCH_DROP_TARGETS"
-    assert third.active_mode == "OVERHEAD_HOLD"
+    assert first.stage == "DROP_SCAN"
+    assert second.stage == "DROP_SCAN"
+    assert third.stage == "DROP_ALIGN"
+    assert third.previous_stage == "DROP_SCAN"
+    assert third.active_mode == "IDLE"
     assert third.hold_reason == "dry_run_drop_target_skip"
 
 
-def test_align_and_drop_holds_safely_when_payload_release_is_not_configured() -> None:
+def test_drop_release_fails_safely_when_payload_release_is_not_configured() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.ALIGN_AND_DROP,
-            align=DropAlignConfig(hold_s=0.0),
+            initial_stage=RescueStage.DROP_RELEASE,
             payloads=[PayloadSlot(payload_id=2, label="water")],
         )
     )
 
     output = mission.update(_context(target_ready=True, actions_enabled=True))
 
-    assert output.active_mode == "OVERHEAD_HOLD"
-    assert output.stage == "ALIGN_AND_DROP"
-    assert output.previous_stage is None
+    assert output.stage == "FAILSAFE"
+    assert output.previous_stage == "DROP_RELEASE"
     assert output.hold_reason == "payload_release_not_configured"
     assert output.actions == []
     assert output.detail["payload_index"] == 0
 
 
-def test_align_and_drop_can_simulate_payload_release_in_dry_run() -> None:
+def test_drop_pipeline_can_simulate_payload_release_in_dry_run() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.ALIGN_AND_DROP,
+            initial_stage=RescueStage.DROP_ALIGN,
             dry_run_skip_vision=True,
             dry_run_skip_payload_release=True,
             align_drop_duration_s=1.0,
@@ -417,21 +423,28 @@ def test_align_and_drop_can_simulate_payload_release_in_dry_run() -> None:
 
     first = mission.update(_context(timestamp=5.0, target_ready=False))
     second = mission.update(_context(timestamp=6.1, target_ready=False))
+    third = mission.update(_context(timestamp=7.2, target_ready=False))
+    fourth = mission.update(_context(timestamp=8.3, target_ready=False))
+    fifth = mission.update(_context(timestamp=8.4, target_ready=False))
 
-    assert first.stage == "ALIGN_AND_DROP"
-    assert first.actions == []
+    assert first.stage == "DROP_ALIGN"
+    assert [action.action_type for action in first.actions] == ["set_mode"]
     assert first.hold_reason == "aligning_drop_dry_run"
-    assert second.stage == "WAIT_PAYLOAD_RELEASE"
-    assert second.previous_stage == "ALIGN_AND_DROP"
-    assert second.hold_reason == "payload_release_simulated"
-    assert second.actions == []
+    assert second.stage == "DROP_DESCEND"
+    assert second.previous_stage == "DROP_ALIGN"
+    assert second.hold_reason == "drop_align_dry_run_complete"
+    assert third.stage == "DROP_DESCEND"
+    assert third.hold_reason == "drop_descending_dry_run"
+    assert fourth.stage == "DROP_RELEASE"
+    assert fourth.hold_reason == "drop_descend_dry_run_complete"
+    assert fifth.stage == "DROP_ASCEND"
+    assert fifth.hold_reason == "payload_release_simulated"
 
 
-def test_align_and_drop_emits_configured_servo_release_action() -> None:
+def test_drop_release_emits_configured_servo_release_action() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.ALIGN_AND_DROP,
-            align=DropAlignConfig(hold_s=0.0),
+            initial_stage=RescueStage.DROP_RELEASE,
             payloads=[
                 PayloadSlot(
                     payload_id=2,
@@ -444,20 +457,19 @@ def test_align_and_drop_emits_configured_servo_release_action() -> None:
 
     output = mission.update(_context(target_ready=True, actions_enabled=True))
 
-    assert output.stage == "WAIT_PAYLOAD_RELEASE"
-    assert output.previous_stage == "ALIGN_AND_DROP"
+    assert output.stage == "DROP_ASCEND"
+    assert output.previous_stage == "DROP_RELEASE"
     assert output.hold_reason == "payload_release_requested"
     assert output.actions[0].action_type == "set_servo"
     assert output.actions[0].params == {"channel": 9, "pwm": 1900}
     assert output.actions[0].key == "rescue_release_payload_2"
-    assert output.detail["payload_index"] == 0
+    assert output.detail["payload_index"] == 1
 
 
-def test_align_and_drop_emits_configured_relay_release_action() -> None:
+def test_drop_release_emits_configured_relay_release_action() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.ALIGN_AND_DROP,
-            align=DropAlignConfig(hold_s=0.0),
+            initial_stage=RescueStage.DROP_RELEASE,
             payloads=[
                 PayloadSlot(
                     payload_id=3,
@@ -469,23 +481,22 @@ def test_align_and_drop_emits_configured_relay_release_action() -> None:
 
     output = mission.update(_context(target_ready=True, actions_enabled=True))
 
-    assert output.stage == "WAIT_PAYLOAD_RELEASE"
+    assert output.stage == "DROP_ASCEND"
     assert output.actions[0].action_type == "set_relay"
     assert output.actions[0].params == {"relay_id": 0, "state": True}
     assert output.actions[0].key == "rescue_release_payload_3"
 
 
-def test_align_and_drop_holds_safely_without_payload_config() -> None:
+def test_drop_release_fails_safely_without_payload_config() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.ALIGN_AND_DROP,
-            align=DropAlignConfig(hold_s=0.0),
+            initial_stage=RescueStage.DROP_RELEASE,
         )
     )
 
     output = mission.update(_context(target_ready=True, actions_enabled=True))
 
-    assert output.stage == "ALIGN_AND_DROP"
+    assert output.stage == "FAILSAFE"
     assert output.actions == []
     assert output.hold_reason == "no_payload_configured"
 
@@ -493,7 +504,7 @@ def test_align_and_drop_holds_safely_without_payload_config() -> None:
 def test_align_and_drop_requires_centered_target_before_release() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.ALIGN_AND_DROP,
+            initial_stage=RescueStage.DROP_ALIGN,
             align=DropAlignConfig(max_ex_cam=0.08, max_ey_cam=0.08, hold_s=0.0),
             payloads=[
                 PayloadSlot(
@@ -513,15 +524,15 @@ def test_align_and_drop_requires_centered_target_before_release() -> None:
         )
     )
 
-    assert output.stage == "ALIGN_AND_DROP"
-    assert output.actions == []
+    assert output.stage == "DROP_ALIGN"
+    assert [action.action_type for action in output.actions] == ["set_mode"]
     assert output.hold_reason == "aligning_drop"
 
 
 def test_align_and_drop_requires_hold_time_before_release() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.ALIGN_AND_DROP,
+            initial_stage=RescueStage.DROP_ALIGN,
             align=DropAlignConfig(hold_s=1.0),
             payloads=[
                 PayloadSlot(
@@ -536,17 +547,17 @@ def test_align_and_drop_requires_hold_time_before_release() -> None:
     second = mission.update(_context(timestamp=1.5, target_ready=True, actions_enabled=True))
     third = mission.update(_context(timestamp=2.1, target_ready=True, actions_enabled=True))
 
-    assert first.stage == "ALIGN_AND_DROP"
+    assert first.stage == "DROP_ALIGN"
     assert first.hold_reason == "aligning_drop"
-    assert second.actions == []
-    assert third.stage == "WAIT_PAYLOAD_RELEASE"
-    assert third.actions[0].action_type == "set_servo"
+    assert [action.action_type for action in second.actions] == ["set_mode"]
+    assert third.stage == "DROP_DESCEND"
+    assert third.hold_reason == "drop_align_complete"
 
 
 def test_align_and_drop_returns_to_search_when_target_lost() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.ALIGN_AND_DROP,
+            initial_stage=RescueStage.DROP_ALIGN,
             align=DropAlignConfig(lost_timeout_s=1.0),
         )
     )
@@ -554,17 +565,17 @@ def test_align_and_drop_returns_to_search_when_target_lost() -> None:
     first = mission.update(_context(timestamp=1.0, target_ready=False))
     second = mission.update(_context(timestamp=2.1, target_ready=False))
 
-    assert first.stage == "ALIGN_AND_DROP"
+    assert first.stage == "DROP_ALIGN"
     assert first.hold_reason == "drop_target_vision_stale"
-    assert second.stage == "SEARCH_DROP_TARGETS"
+    assert second.stage == "DROP_SCAN"
     assert second.hold_reason == "drop_target_lost"
-    assert second.actions[0].action_type == "yolo_unlock_target"
+    assert second.actions[-1].action_type == "yolo_unlock_target"
 
 
 def test_align_and_drop_timeout_returns_to_search() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.ALIGN_AND_DROP,
+            initial_stage=RescueStage.DROP_ALIGN,
             align=DropAlignConfig(timeout_s=1.0, require_target_stable=False),
         )
     )
@@ -576,38 +587,49 @@ def test_align_and_drop_timeout_returns_to_search() -> None:
         _context(timestamp=2.1, target_ready=True, ex_cam=0.2, actions_enabled=True)
     )
 
-    assert first.stage == "ALIGN_AND_DROP"
-    assert second.stage == "SEARCH_DROP_TARGETS"
+    assert first.stage == "DROP_ALIGN"
+    assert second.stage == "DROP_SCAN"
     assert second.hold_reason == "drop_align_timeout"
-    assert second.actions[0].action_type == "yolo_unlock_target"
+    assert second.actions[-1].action_type == "yolo_unlock_target"
 
 
-def test_wait_payload_release_advances_after_delay_and_unlocks_target() -> None:
+def test_drop_ascend_unlocks_target_after_reaching_scan_height() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.WAIT_PAYLOAD_RELEASE,
+            initial_stage=RescueStage.DROP_ASCEND,
             payload_release=PayloadReleaseTiming(delay_after_action_s=1.0),
             payloads=[PayloadSlot(payload_id=1)],
         )
     )
+    mission._origin = LocalMissionFrame(origin_x=0.0, origin_y=0.0, origin_z=0.0, yaw_rad=0.0)
+    mission._drop_count = 2
+    mission._payload_index = 1
+    mission._payload_release_started_at = 10.0
+    scan_height = DroneState(
+        local_position_valid=True,
+        local_z=-5.0,
+        vx=0.0,
+        vy=0.0,
+        vz=0.0,
+    )
 
-    first = mission.update(_context(timestamp=10.0, actions_enabled=True))
-    second = mission.update(_context(timestamp=10.5, actions_enabled=True))
-    third = mission.update(_context(timestamp=11.1, actions_enabled=True))
+    first = mission.update(_context(timestamp=10.0, drone=scan_height, actions_enabled=True))
+    second = mission.update(_context(timestamp=10.5, drone=scan_height, actions_enabled=True))
+    third = mission.update(_context(timestamp=11.1, drone=scan_height, actions_enabled=True))
 
-    assert first.stage == "WAIT_PAYLOAD_RELEASE"
+    assert first.stage == "DROP_ASCEND"
     assert first.hold_reason == "waiting_payload_release"
-    assert second.stage == "WAIT_PAYLOAD_RELEASE"
-    assert third.stage == "RESUME_ROUTE_TO_RECCE_ZONE"
-    assert third.hold_reason == "payload_release_complete"
+    assert second.stage == "DROP_ASCEND"
+    assert third.stage == "GOTO_RECON"
+    assert third.hold_reason == "payload_drops_complete"
     assert third.detail["payload_index"] == 1
-    assert third.actions[0].action_type == "yolo_unlock_target"
+    assert third.actions[-1].action_type == "yolo_unlock_target"
 
 
 def test_resume_route_to_recce_continues_route_before_scan_recce_area() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.RESUME_ROUTE_TO_RECCE_ZONE,
+            initial_stage=RescueStage.GOTO_RECON,
             recce_route_end_name="recce_center",
             route=[
                 RoutePoint(name="recce_entry", x=5.0, y=0.0, z=-2.0),
@@ -623,31 +645,31 @@ def test_resume_route_to_recce_continues_route_before_scan_recce_area() -> None:
     second = mission.update(_context(drone=at_entry))
     third = mission.update(_context(drone=at_center))
 
-    assert first.stage == "RESUME_ROUTE_TO_RECCE_ZONE"
+    assert first.stage == "GOTO_RECON"
     assert first.hold_reason == "enroute:recce_entry"
     assert first.actions[0].params == {"x": 5.0, "y": 0.0, "z": -2.0, "frame": 1}
-    assert second.stage == "RESUME_ROUTE_TO_RECCE_ZONE"
+    assert second.stage == "GOTO_RECON"
     assert second.detail["route_index"] == 1
-    assert third.stage == "SCAN_RECCE_AREA"
-    assert third.previous_stage == "RESUME_ROUTE_TO_RECCE_ZONE"
+    assert third.stage == "RECON_SCAN"
+    assert third.previous_stage == "GOTO_RECON"
 
 
 def test_resume_route_to_recce_with_empty_route_advances_to_scan_recce_area() -> None:
     mission = RescueCompetitionMission(
-        RescueCompetitionMissionConfig(initial_stage=RescueStage.RESUME_ROUTE_TO_RECCE_ZONE)
+        RescueCompetitionMissionConfig(initial_stage=RescueStage.GOTO_RECON)
     )
 
     output = mission.update(_context())
 
-    assert output.stage == "SCAN_RECCE_AREA"
-    assert output.previous_stage == "RESUME_ROUTE_TO_RECCE_ZONE"
+    assert output.stage == "RECON_SCAN"
+    assert output.previous_stage == "GOTO_RECON"
     assert output.hold_reason == "route_empty"
 
 
 def test_scan_recce_area_waits_then_advances_home() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.SCAN_RECCE_AREA,
+            initial_stage=RescueStage.RECON_SCAN,
             recce=RecceMissionConfig(scan_duration_s=2.0, output_json=False, output_csv=False),
         )
     )
@@ -656,17 +678,17 @@ def test_scan_recce_area_waits_then_advances_home() -> None:
     second = mission.update(_context(timestamp=11.0))
     third = mission.update(_context(timestamp=12.1))
 
-    assert first.stage == "SCAN_RECCE_AREA"
-    assert first.hold_reason == "scanning_recce_area"
-    assert second.stage == "SCAN_RECCE_AREA"
-    assert third.stage == "FOLLOW_ROUTE_HOME"
-    assert third.previous_stage == "SCAN_RECCE_AREA"
+    assert first.stage == "RECON_SCAN"
+    assert first.hold_reason == "recon_scanning"
+    assert second.stage == "RECON_SCAN"
+    assert third.stage == "RETURN_HOME"
+    assert third.previous_stage == "RECON_SCAN"
 
 
 def test_scan_recce_area_accumulates_results_and_writes_output(tmp_path) -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.SCAN_RECCE_AREA,
+            initial_stage=RescueStage.RECON_SCAN,
             recce=RecceMissionConfig(
                 config=RecceConfig(
                     cylinder_classes={"cylinder"},
@@ -705,14 +727,23 @@ def test_scan_recce_area_accumulates_results_and_writes_output(tmp_path) -> None
             cy=165.0,
         ),
     )
+    mission._reported_targets = [
+        ReportedTarget(
+            local_x=0.0,
+            local_y=0.0,
+            label="flammable",
+            confidence=0.7,
+            timestamp=9.0,
+        )
+    ]
 
     first = mission.update(_context(timestamp=10.0, scene=scene))
     second = mission.update(_context(timestamp=11.0, scene=scene))
     third = mission.update(_context(timestamp=12.1, scene=scene))
 
-    assert first.stage == "SCAN_RECCE_AREA"
+    assert first.stage == "RECON_SCAN"
     assert second.detail["recce_observation_count"] == 2
-    assert third.stage == "FOLLOW_ROUTE_HOME"
+    assert third.stage == "RETURN_HOME"
     assert third.detail["recce_confirmed_count"] == 1
     assert third.detail["recce_results"][0]["hazard_class"] == "flammable"
     assert third.detail["recce_results"][0]["status"] == "confirmed"
@@ -723,7 +754,7 @@ def test_scan_recce_area_accumulates_results_and_writes_output(tmp_path) -> None
 def test_scan_recce_area_without_scene_still_advances_home(tmp_path) -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.SCAN_RECCE_AREA,
+            initial_stage=RescueStage.RECON_SCAN,
             recce=RecceMissionConfig(
                 scan_duration_s=0.5,
                 output_dir=str(tmp_path),
@@ -736,8 +767,8 @@ def test_scan_recce_area_without_scene_still_advances_home(tmp_path) -> None:
     first = mission.update(_context(timestamp=1.0, scene=None))
     second = mission.update(_context(timestamp=1.6, scene=None))
 
-    assert first.stage == "SCAN_RECCE_AREA"
-    assert second.stage == "FOLLOW_ROUTE_HOME"
+    assert first.stage == "RECON_SCAN"
+    assert second.stage == "RETURN_HOME"
     assert second.detail["recce_observation_count"] == 0
     assert second.detail["recce_results"] == []
     assert len(list(tmp_path.glob("*.json"))) == 1
@@ -746,7 +777,7 @@ def test_scan_recce_area_without_scene_still_advances_home(tmp_path) -> None:
 def test_follow_route_home_emits_local_position_until_home_is_stable() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.FOLLOW_ROUTE_HOME,
+            initial_stage=RescueStage.RETURN_HOME,
             home_route_end_name="home",
             route=[
                 RoutePoint(
@@ -781,23 +812,23 @@ def test_follow_route_home_emits_local_position_until_home_is_stable() -> None:
     first = mission.update(_context(drone=enroute))
     second = mission.update(_context(drone=home))
 
-    assert first.stage == "FOLLOW_ROUTE_HOME"
+    assert first.stage == "RETURN_HOME"
     assert first.hold_reason == "returning_home:home"
     assert first.actions[0].action_type == "local_position"
     assert first.actions[0].params == {"x": 10.0, "y": 20.0, "z": -3.0, "frame": 1}
     assert second.stage == "LAND"
-    assert second.previous_stage == "FOLLOW_ROUTE_HOME"
+    assert second.previous_stage == "RETURN_HOME"
 
 
 def test_follow_route_home_without_route_advances_to_land() -> None:
     mission = RescueCompetitionMission(
-        RescueCompetitionMissionConfig(initial_stage=RescueStage.FOLLOW_ROUTE_HOME)
+        RescueCompetitionMissionConfig(initial_stage=RescueStage.RETURN_HOME)
     )
 
     output = mission.update(_context())
 
     assert output.stage == "LAND"
-    assert output.previous_stage == "FOLLOW_ROUTE_HOME"
+    assert output.previous_stage == "RETURN_HOME"
     assert output.hold_reason == "route_empty"
     assert output.actions == []
 
@@ -805,7 +836,7 @@ def test_follow_route_home_without_route_advances_to_land() -> None:
 def test_route_hold_time_delays_route_index_advance() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.FOLLOW_ROUTE_TO_DROP_ZONE,
+            initial_stage=RescueStage.GOTO_DROPZONE,
             drop_route_end_name="drop_center",
             route_hold_s=1.0,
             route=[RoutePoint(name="drop_center", x=0.0, y=0.0, z=0.0)],
@@ -817,18 +848,18 @@ def test_route_hold_time_delays_route_index_advance() -> None:
     second = mission.update(_context(timestamp=1.5, drone=drone))
     third = mission.update(_context(timestamp=2.1, drone=drone))
 
-    assert first.stage == "FOLLOW_ROUTE_TO_DROP_ZONE"
+    assert first.stage == "GOTO_DROPZONE"
     assert first.hold_reason == "arrived:drop_center"
     assert first.detail["route_index"] == 0
     assert second.detail["route_index"] == 0
-    assert third.stage == "SEARCH_DROP_TARGETS"
+    assert third.stage == "DROP_SCAN"
     assert third.detail["route_index"] == 1
 
 
 def test_invalid_runtime_route_end_aborts_safely() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
-            initial_stage=RescueStage.FOLLOW_ROUTE_TO_DROP_ZONE,
+            initial_stage=RescueStage.GOTO_DROPZONE,
             drop_route_end_name="missing",
             route=[RoutePoint(name="wp1", x=0.0, y=0.0, z=0.0)],
         )
@@ -836,7 +867,7 @@ def test_invalid_runtime_route_end_aborts_safely() -> None:
 
     output = mission.update(_context(drone=DroneState(local_position_valid=True)))
 
-    assert output.stage == "ABORT"
+    assert output.stage == "FAILSAFE"
     assert output.aborted
     assert output.hold_reason == "route_invalid"
 
@@ -857,17 +888,17 @@ def test_land_emits_land_action_and_completes_near_ground() -> None:
     assert first.stage == "LAND"
     assert first.actions[0].action_type == "land"
     assert first.actions[0].key == "rescue_land"
-    assert second.stage == "DONE"
+    assert second.stage == "FINISH"
     assert second.previous_stage == "LAND"
     assert second.done
 
 
 def test_rescue_competition_mission_can_start_done_or_abort_for_future_tests() -> None:
     done_mission = RescueCompetitionMission(
-        RescueCompetitionMissionConfig(initial_stage=RescueStage.DONE)
+        RescueCompetitionMissionConfig(initial_stage=RescueStage.FINISH)
     )
     abort_mission = RescueCompetitionMission(
-        RescueCompetitionMissionConfig(initial_stage=RescueStage.ABORT)
+        RescueCompetitionMissionConfig(initial_stage=RescueStage.FAILSAFE)
     )
 
     assert done_mission.update(_context()).done

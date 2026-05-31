@@ -433,7 +433,7 @@ class RescueCompetitionMission:
             "ABORT": RescueStage.FAILSAFE,
         }
         value = str(stage)
-        return legacy.get(value, RescueStage(value))
+        return legacy[value] if value in legacy else RescueStage(value)
 
     def _update_prepare(self, context: MissionContext) -> str:
         if not context.drone.local_position_valid:
