@@ -10,15 +10,26 @@ os.environ.setdefault("QT_QPA_FONTDIR", "/usr/share/fonts/truetype/dejavu")
 
 import cv2
 
-from annotator import Annotator
-from command_receiver import CommandReceiver
-from config import load_config
-from mjpeg_stream import MjpegStream
-from target_manager import TargetManager, build_scene_detections
-from tracker_runner import TrackerRunner
-from udp_publisher import UdpPublisher
-from utils import ensure_parent_dir
-from video_source import VideoSource
+try:
+    from .annotator import Annotator
+    from .command_receiver import CommandReceiver
+    from .config import load_config
+    from .mjpeg_stream import MjpegStream
+    from .target_manager import TargetManager, build_scene_detections
+    from .tracker_runner import TrackerRunner
+    from .udp_publisher import UdpPublisher
+    from .utils import ensure_parent_dir
+    from .video_source import VideoSource
+except ImportError:
+    from annotator import Annotator
+    from command_receiver import CommandReceiver
+    from config import load_config
+    from mjpeg_stream import MjpegStream
+    from target_manager import TargetManager, build_scene_detections
+    from tracker_runner import TrackerRunner
+    from udp_publisher import UdpPublisher
+    from utils import ensure_parent_dir
+    from video_source import VideoSource
 
 
 def build_video_writer(save_path: str, fps: float, width: int, height: int) -> cv2.VideoWriter:

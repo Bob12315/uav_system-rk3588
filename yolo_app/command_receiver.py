@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 import socket
 
-from models import CommandMessage
+try:
+    from .models import CommandMessage
+except ImportError:
+    from models import CommandMessage
 
 
 class CommandReceiver:

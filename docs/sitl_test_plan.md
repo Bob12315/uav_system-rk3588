@@ -36,8 +36,8 @@ python -m app.main --connect-telemetry --no-yolo-udp --send-commands false --run
 
 ```bash
 conda activate yolo
-cd ~/uav_project/uav_system-rk3588/yolo_app
-python main.py
+cd ~/uav_project/uav_system-rk3588
+python -m yolo_app.main
 ```
 
 窗口 2：

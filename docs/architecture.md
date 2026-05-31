@@ -162,8 +162,8 @@ MissionStage.update()
 职责：
 
 - 读取视频源。
-- 调用 Ultralytics YOLO 官方 tracking。
-- 使用 ByteTrack。
+- 在 RK3588 NPU 上调用 RKNNLite 执行 RKNN INT8 推理。
+- 使用短时 IoU 关联维护跨帧 `track_id`。
 - 维护主目标。
 - 通过 UDP JSON 输出当前主目标。
 - 接收目标选择相关的简单命令。

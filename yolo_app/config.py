@@ -54,6 +54,12 @@ def _str_to_bool(value: str | bool) -> bool:
     raise argparse.ArgumentTypeError(f"invalid boolean value: {value}")
 
 
+def _strict_bool(value: Any, path: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise ValueError(f"{path} must be a YAML bool (true/false), got {value!r}")
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Ground-side YOLO tracking app")
     parser.add_argument(
@@ -138,12 +144,15 @@ def load_config() -> AppConfig:
         selection_mode=str(merged["selection_mode"]),
         target_class=str(merged.get("target_class", "")),
         max_lost_frames=int(merged["max_lost_frames"]),
-        show=bool(display_config.get("local_window_enabled", merged["show"])),
-        save_video=bool(merged["save_video"]),
+        show=_strict_bool(
+            display_config.get("local_window_enabled", merged["show"]),
+            "display.local_window_enabled",
+        ),
+        save_video=_strict_bool(merged["save_video"], "save_video"),
         save_path=_resolve_config_path(merged["save_path"], args.config),
         line_width=int(merged.get("line_width", 2)),
-        show_all_tracks=bool(merged.get("show_all_tracks", True)),
-        command_enabled=bool(merged.get("command_enabled", True)),
+        show_all_tracks=_strict_bool(merged.get("show_all_tracks", True), "show_all_tracks"),
+        command_enabled=_strict_bool(merged.get("command_enabled", True), "command_enabled"),
         command_ip=str(merged.get("command_ip", "0.0.0.0")),
         command_port=int(merged.get("command_port", 5006)),
         window_name=str(merged.get("window_name", "YOLO Tracking")),
@@ -152,9 +161,12 @@ def load_config() -> AppConfig:
         camera_height=int(merged.get("camera_height", 480)),
         camera_fps=int(merged.get("camera_fps", 30)),
         camera_fourcc=str(merged.get("camera_fourcc", "MJPG")),
-        latest_frame=bool(merged.get("latest_frame", False)),
-        fullscreen=bool(display_config.get("fullscreen", merged.get("fullscreen", False))),
-        web_stream_enabled=bool(web_stream_config.get("enabled", False)),
+        latest_frame=_strict_bool(merged.get("latest_frame", False), "latest_frame"),
+        fullscreen=_strict_bool(
+            display_config.get("fullscreen", merged.get("fullscreen", False)),
+            "display.fullscreen",
+        ),
+        web_stream_enabled=_strict_bool(web_stream_config.get("enabled", False), "web_stream.enabled"),
         web_stream_host=str(web_stream_config.get("host", "0.0.0.0")),
         web_stream_port=int(web_stream_config.get("port", 8081)),
         web_stream_jpeg_quality=int(web_stream_config.get("jpeg_quality", 75)),

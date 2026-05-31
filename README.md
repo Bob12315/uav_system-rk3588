@@ -88,9 +88,9 @@ bash scripts/healthcheck/check_rk3588.sh
 
 ```bash
 conda activate yolo
-cd ~/uav_project/uav_system-rk3588/yolo_app
+cd ~/uav_project/uav_system-rk3588
 DISPLAY=:0 XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 \
-DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus python main.py
+DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus python -m yolo_app.main
 ```
 
 YOLO 默认通过 UDP JSON 输出主目标。控制端默认监听 `0.0.0.0:5005`，两边端口需要一致。

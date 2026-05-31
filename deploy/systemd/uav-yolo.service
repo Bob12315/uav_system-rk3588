@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=%h/uav_project/uav_system-rk3588
-ExecStart=%h/anaconda3/envs/yolo/bin/python -u yolo_app/main.py
+ExecStart=%h/anaconda3/envs/yolo/bin/python -u -m yolo_app.main
 Restart=on-failure
 RestartSec=2
 

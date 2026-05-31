@@ -73,18 +73,18 @@ bash scripts/install/install_yolo_env.sh
 从板载 GNOME 桌面会话启动：
 
 ```bash
-cd ~/uav_project/uav_system-rk3588/yolo_app
+cd ~/uav_project/uav_system-rk3588
 DISPLAY=:0 \
 XDG_RUNTIME_DIR=/run/user/1000 \
 WAYLAND_DISPLAY=wayland-0 \
 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
-conda run --no-capture-output -n yolo python -u main.py
+conda run --no-capture-output -n yolo python -u -m yolo_app.main
 ```
 
 无窗口性能测试：
 
 ```bash
-conda run --no-capture-output -n yolo python -u main.py \
+conda run --no-capture-output -n yolo python -u -m yolo_app.main \
   --show false --command-enabled false
 ```
 

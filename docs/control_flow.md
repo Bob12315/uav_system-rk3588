@@ -4,7 +4,8 @@
 
 ## 1. YOLO 输出
 
-`yolo_app` 读取视频源，调用 Ultralytics YOLO 官方 tracking 和 ByteTrack，维护主目标，并通过 UDP JSON 输出。
+`yolo_app` 读取视频源，在 RK3588 NPU 上调用 RKNNLite 执行 RKNN INT8 推理，
+使用短时 IoU 关联维护 `track_id`，选择主目标，并通过 UDP JSON 输出。
 
 典型字段：
 

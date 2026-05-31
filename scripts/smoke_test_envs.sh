@@ -18,7 +18,7 @@ conda run -n "${CONTROL_ENV}" bash -lc "cd '${REPO_ROOT}' && python -m telemetry
 conda run -n "${CONTROL_ENV}" bash -lc "cd '${REPO_ROOT}' && python -m app.main --no-yolo-udp --run-seconds 1 --send-commands false --no-ui --blackbox-enabled false >/dev/null"
 
 echo "Checking YOLO environment '${YOLO_ENV}'..."
-conda run -n "${YOLO_ENV}" bash -lc "cd '${REPO_ROOT}/yolo_app' && python main.py --help >/dev/null"
+conda run -n "${YOLO_ENV}" bash -lc "cd '${REPO_ROOT}' && python -m yolo_app.main --help >/dev/null"
 conda run -n "${YOLO_ENV}" python - <<'PY'
 import cv2
 from rknnlite.api import RKNNLite

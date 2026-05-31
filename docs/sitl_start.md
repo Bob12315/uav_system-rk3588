@@ -78,8 +78,8 @@ systemctl --user restart uav-yolo.service uav-app.service
 
 ```bash
 conda activate yolo
-cd ~/uav_system-rk3588/yolo_app
-python3 main.py --source 5600
+cd ~/uav_project/uav_system-rk3588
+python3 -m yolo_app.main --source 5600
 
 conda activate app
 cd ~/uav_system-rk3588

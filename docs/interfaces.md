@@ -25,7 +25,7 @@
 - `frame_id: int`：帧编号。
 - `target_valid: bool`：当前是否有有效主目标。
 - `tracking_state: str`：当前使用 `locked`、`lost`、`searching`；`fusion` 只把 `locked` 视为锁定目标。
-- `track_id: int`：ByteTrack track id，无效时通常为 `-1`。
+- `track_id: int`：短时 IoU 关联生成的跨帧目标 id，无效时通常为 `-1`。
 - `class_name: str`：类别名。
 - `confidence: float`：检测置信度。
 - `cx/cy/w/h: float`：bbox 几何量。

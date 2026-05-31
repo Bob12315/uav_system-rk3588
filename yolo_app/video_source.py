@@ -10,7 +10,10 @@ import time
 import cv2
 import numpy as np
 
-from models import FramePacket
+try:
+    from .models import FramePacket
+except ImportError:
+    from models import FramePacket
 
 
 class VideoSource:
