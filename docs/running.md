@@ -56,7 +56,7 @@ SSH 登录板端后进入项目：
 
 ```bash
 ssh pi@<rk3588-ip>
-cd ~/uav_project
+cd ~/uav_project/uav_system-rk3588
 git switch platform/rk3588
 ```
 
@@ -84,22 +84,19 @@ target_class: "bucket"
 NumPy 以及匹配模型的 `rknn-toolkit-lite2`：
 
 ```bash
-cd ~/uav_project
-~/miniconda3/envs/app/bin/python -m pip install -r requirements-control.txt
-~/miniconda3/envs/yolo/bin/python -c "import cv2, yaml; from rknnlite.api import RKNNLite"
+cd ~/uav_project/uav_system-rk3588
+~/anaconda3/envs/app/bin/python -m pip install -r requirements-control.txt
+~/anaconda3/envs/yolo/bin/python -c "import cv2, yaml; from rknnlite.api import RKNNLite"
 ```
 
 安装随登录用户运行的服务：
 
 ```bash
-mkdir -p ~/.config/systemd/user
-cp deploy/systemd/uav-app.service deploy/systemd/uav-yolo.service ~/.config/systemd/user/
-systemctl --user daemon-reload
+bash scripts/deploy/install_systemd_user_services.sh --enable-now
 sudo loginctl enable-linger "$USER"
-systemctl --user enable --now uav-app.service uav-yolo.service
 ```
 
-模板的 `WorkingDirectory` 是 `%h/uav_project`。如果代码放在其他目录，
+模板的 `WorkingDirectory` 是 `%h/uav_project/uav_system-rk3588`。如果代码放在其他目录，
 需要先修改 `~/.config/systemd/user/uav-*.service` 中的路径。
 
 ### 2.3 启动、停止和重启
@@ -135,7 +132,7 @@ systemctl --user enable --now uav-app.service uav-yolo.service
 如果代码在 GitHub 的 `platform/rk3588` 分支已经提交并推送，在板端执行：
 
 ```bash
-cd ~/uav_project
+cd ~/uav_project/uav_system-rk3588
 git status --short --branch
 git fetch github platform/rk3588
 git merge --ff-only github/platform/rk3588
@@ -162,12 +159,12 @@ systemctl --user restart uav-app.service uav-yolo.service
 
 ```bash
 # requirements-control.txt 变化
-~/miniconda3/envs/app/bin/python -m pip install -r requirements-control.txt
+~/anaconda3/envs/app/bin/python -m pip install -r requirements-control.txt
 
 # RK3588 的 yolo 依赖变化时，只安装板端需要的包；
 # rknn-toolkit-lite2 版本仍需与板端模型和驱动匹配
-~/miniconda3/envs/yolo/bin/python -m pip install opencv-python pyyaml numpy
-~/miniconda3/envs/yolo/bin/python -c "import cv2, yaml; from rknnlite.api import RKNNLite"
+~/anaconda3/envs/yolo/bin/python -m pip install opencv-python pyyaml numpy
+~/anaconda3/envs/yolo/bin/python -c "import cv2, yaml; from rknnlite.api import RKNNLite"
 
 systemctl --user restart uav-app.service uav-yolo.service
 ```
@@ -176,9 +173,8 @@ systemctl --user restart uav-app.service uav-yolo.service
 `deploy/systemd/uav-yolo.service`，需要重新覆盖用户服务文件并重新加载：
 
 ```bash
-cd ~/uav_project
-cp deploy/systemd/uav-app.service deploy/systemd/uav-yolo.service ~/.config/systemd/user/
-systemctl --user daemon-reload
+cd ~/uav_project/uav_system-rk3588
+bash scripts/deploy/install_systemd_user_services.sh
 systemctl --user restart uav-app.service uav-yolo.service
 ```
 
@@ -203,6 +199,12 @@ http://<rk3588-ip>:8080/
 ```bash
 journalctl --user -u uav-app.service -f
 journalctl --user -u uav-yolo.service -f
+```
+
+板端健康检查：
+
+```bash
+bash scripts/healthcheck/check_rk3588.sh
 ```
 
 ## 3. 参数修改与任务切换

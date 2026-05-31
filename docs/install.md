@@ -26,7 +26,8 @@ bash scripts/install/install_app_env.sh
 - 当前已经激活 conda 环境 `app`。
 - 当前 Python 版本是 `3.10.x`。
 
-脚本安装依赖时使用清华 conda/PyPI 镜像作为临时源，不修改用户全局 `.condarc` 或 pip 配置。`pymavlink` 通过 pip 镜像安装，其他 app 依赖优先通过 conda 安装。
+脚本读取根目录 `requirements-control.txt`，通过清华 PyPI 镜像安装依赖，不修改
+用户全局 pip 配置。
 
 验证：
 
@@ -83,4 +84,10 @@ conda activate yolo
 cd ~/uav_project/uav_system-rk3588/yolo_app
 DISPLAY=:0 XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 \
 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus python main.py
+```
+
+完整板端检查：
+
+```bash
+bash scripts/healthcheck/check_rk3588.sh
 ```

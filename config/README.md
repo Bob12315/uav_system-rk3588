@@ -31,3 +31,18 @@ the board exposes a stable `/dev/v4l/by-id/...` path.
 
 The SITL profile expects a PC to send MAVLink UDP to port `14550` and H264/RTP
 video to port `5600` on the RK3588 board.
+
+## Deployment
+
+Install or refresh the systemd user services:
+
+```bash
+bash scripts/deploy/install_systemd_user_services.sh
+bash scripts/deploy/install_systemd_user_services.sh --enable-now
+```
+
+Run the read-only board check after installation or configuration changes:
+
+```bash
+bash scripts/healthcheck/check_rk3588.sh
+```

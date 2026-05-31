@@ -7,8 +7,6 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 APP_ENV_NAME="${APP_ENV_NAME:-app}"
 APP_PYTHON_VERSION="${APP_PYTHON_VERSION:-3.10}"
 
-TUNA_MAIN_CHANNEL="https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main"
-TUNA_CONDA_FORGE_CHANNEL="https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge"
 TUNA_PYPI_INDEX="https://pypi.tuna.tsinghua.edu.cn/simple"
 
 APT_PACKAGES=(
@@ -26,19 +24,6 @@ APT_PACKAGES=(
   gstreamer1.0-plugins-bad
   gstreamer1.0-plugins-ugly
   gstreamer1.0-libav
-)
-
-CONDA_PACKAGES=(
-  pyyaml
-  numpy
-  pytest
-)
-
-PIP_PACKAGES=(
-  pymavlink
-  fastapi
-  uvicorn
-  httpx
 )
 
 TOTAL_STEPS=5
@@ -169,16 +154,9 @@ install_system_deps() {
 
 install_python_deps() {
   step "Installing app Python packages"
-  info "Installing conda packages from temporary Tsinghua mirrors"
-  conda install -y \
-    --override-channels \
-    -c "${TUNA_CONDA_FORGE_CHANNEL}" \
-    -c "${TUNA_MAIN_CHANNEL}" \
-    "${CONDA_PACKAGES[@]}"
-
-  info "Installing pip-only packages from temporary Tsinghua PyPI mirror"
+  info "Installing app dependencies from requirements-control.txt"
   python -m pip install -i "${TUNA_PYPI_INDEX}" --upgrade pip
-  python -m pip install -i "${TUNA_PYPI_INDEX}" "${PIP_PACKAGES[@]}"
+  python -m pip install -i "${TUNA_PYPI_INDEX}" -r "${REPO_ROOT}/requirements-control.txt"
 }
 
 verify_app_env() {
@@ -218,7 +196,8 @@ main() {
 
   info "Done"
   echo "App environment '${APP_ENV_NAME}' is ready for RK3588."
-  echo "YOLO environment installation is intentionally not handled by this script yet."
+  echo "Install the separate YOLO environment with:"
+  echo "  bash ${REPO_ROOT}/scripts/install/install_yolo_env.sh"
   echo "Try:"
   echo "  cd ${REPO_ROOT}"
   echo "  python -m app.main --no-yolo-udp --run-seconds 1 --send-commands false --no-ui --blackbox-enabled false"

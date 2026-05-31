@@ -67,10 +67,11 @@ udp_ip: "127.0.0.1"
 udp_port: 5005
 ```
 
-一键写入并重启服务（需 `BOARD_SSH_PASS`）：
+在 RK3588 板端应用 SITL 配置：
 
 ```bash
-BOARD_SSH_PASS='...' python3 scripts/apply_rk3588_sitl_udp_config.py
+bash scripts/config/apply_rk3588_sitl.sh
+systemctl --user restart uav-yolo.service uav-app.service
 ```
 
 ### 手动启动

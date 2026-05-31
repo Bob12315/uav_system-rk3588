@@ -75,6 +75,13 @@ data/models/best-int8-rk3588.rknn
 
 更完整的安装说明见 [docs/install.md](docs/install.md)。
 
+安装用户级 systemd 服务并执行板端健康检查：
+
+```bash
+bash scripts/deploy/install_systemd_user_services.sh --enable-now
+bash scripts/healthcheck/check_rk3588.sh
+```
+
 ## 快速运行
 
 ### 1. 启动 YOLO
