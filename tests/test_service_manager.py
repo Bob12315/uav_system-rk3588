@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
+import socket
+import threading
 import time
+from types import SimpleNamespace
 
-from app.service_manager import YoloUdpReceiver
+from app.service_manager import ServiceManager, YoloUdpReceiver
 
 
 def test_yolo_receiver_decodes_legacy_current_target_payload() -> None:
@@ -104,3 +108,70 @@ def test_yolo_receiver_times_out_scene_detections() -> None:
 
     assert scene.valid is False
     assert scene.detections == []
+
+
+def test_yolo_receiver_drops_bad_fields_and_keeps_listening() -> None:
+    stop_event = threading.Event()
+    receiver = YoloUdpReceiver("127.0.0.1", 0, stop_event)
+    client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    receiver.start()
+
+    try:
+        address = receiver.sock.getsockname()
+        client.sendto(json.dumps({"track_id": "invalid"}).encode("utf-8"), address)
+        client.sendto(
+            json.dumps({"target_valid": True, "tracking_state": "locked", "track_id": 7}).encode("utf-8"),
+            address,
+        )
+
+        deadline = time.time() + 1.0
+        while time.time() < deadline:
+            target = receiver.get_latest_target(time.time(), timeout_sec=1.0)
+            if target.track_id == 7:
+                break
+            time.sleep(0.01)
+
+        assert receiver.is_alive()
+        assert target.target_valid is True
+        assert target.track_id == 7
+    finally:
+        stop_event.set()
+        receiver.close()
+        receiver.join(timeout=1.0)
+        client.close()
+
+
+def test_service_manager_reconnect_stops_old_link_and_starts_new_link(monkeypatch) -> None:
+    created = []
+
+    class FakeLinkManager:
+        def __init__(self, config) -> None:
+            self.config = config
+            self.stopped = False
+            self.started = False
+            created.append(self)
+
+        def stop(self) -> None:
+            self.stopped = True
+
+        def start_background(self) -> None:
+            self.started = True
+
+    monkeypatch.setattr("app.service_manager.LinkManager", FakeLinkManager)
+    old_config = object()
+    new_config = object()
+    app_config = SimpleNamespace(
+        runtime=SimpleNamespace(require_gimbal_feedback=False),
+        telemetry=old_config,
+    )
+    manager = ServiceManager(app_config, threading.Event())
+    old_link = FakeLinkManager(old_config)
+    manager.link_manager = old_link
+
+    manager.reconnect_telemetry(new_config)
+
+    assert old_link.stopped is True
+    assert manager.config.telemetry is new_config
+    assert manager.link_manager is created[-1]
+    assert manager.link_manager.config is new_config
+    assert manager.link_manager.started is True

@@ -11,7 +11,7 @@ from pymavlink import mavutil
 from telemetry_link.command_dispatcher import dispatch_text_command
 from telemetry_link.command_queue import CommandQueue
 from telemetry_link.command_sender import CommandSender
-from telemetry_link.config import DEFAULT_CONFIG_PATH, EndpointConfig, TelemetryConfig, build_arg_parser, load_config
+from telemetry_link.config import DEFAULT_CONFIG_PATH, EndpointConfig, TelemetryConfig, build_arg_parser, load_config, load_config_file
 from telemetry_link.link_manager import LinkManager, SourceRuntime
 from telemetry_link.mavlink_client import MavlinkClient
 from telemetry_link.models import ActionCommand, ActionType, ControlCommand, ControlType, GimbalRateCommand
@@ -233,6 +233,14 @@ def test_build_arg_parser_defaults_to_root_telemetry_config(monkeypatch) -> None
     args = build_arg_parser().parse_args()
 
     assert args.config == str(DEFAULT_CONFIG_PATH)
+
+
+def test_load_config_file_uses_same_root_telemetry_parser() -> None:
+    cfg = load_config_file(DEFAULT_CONFIG_PATH)
+
+    assert cfg.data_source == "sitl"
+    assert cfg.active_source == "sitl"
+    assert cfg.real.connection_type == "eth"
 
 
 def test_load_config_parses_eth_endpoint(tmp_path, monkeypatch) -> None:

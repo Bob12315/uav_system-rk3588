@@ -45,8 +45,12 @@ class YoloUdpReceiver(threading.Thread):
             if not isinstance(data, dict):
                 self.logger.warning("drop YOLO UDP payload because it is not a JSON object")
                 continue
-            target = self._decode_target(data)
-            scene = self._decode_scene(data)
+            try:
+                target = self._decode_target(data)
+                scene = self._decode_scene(data)
+            except (TypeError, ValueError, OverflowError) as exc:
+                self.logger.warning("drop invalid YOLO UDP payload fields: %s", exc)
+                continue
             with self._lock:
                 self._latest_target = target
                 self._latest_scene = scene

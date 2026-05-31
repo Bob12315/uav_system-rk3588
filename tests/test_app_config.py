@@ -6,7 +6,8 @@ import pytest
 import yaml
 
 from app.stage_registry import StageRegistry
-from app.app_config import build_arg_parser, load_app_config
+from app.app_config import build_arg_parser, load_app_config, load_telemetry_config
+from telemetry_link.config import DEFAULT_CONFIG_PATH, load_config_file
 from missions.visual_tracking.stages.approach_track.config import (
     ApproachBodyConfig,
     ApproachTrackConfig,
@@ -53,6 +54,10 @@ def test_loads_independent_web_and_terminal_ui_settings() -> None:
     assert config.ui.web_enabled is True
     assert config.ui.terminal_enabled is False
     assert config.ui.web_port == 8080
+
+
+def test_app_reuses_telemetry_link_config_parser() -> None:
+    assert load_telemetry_config(DEFAULT_CONFIG_PATH) == load_config_file(DEFAULT_CONFIG_PATH)
 
 
 def test_mission_name_can_be_overridden_from_cli() -> None:

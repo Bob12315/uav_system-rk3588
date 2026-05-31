@@ -165,12 +165,7 @@ def _build_endpoint(name: str, data: dict[str, Any]) -> EndpointConfig:
     )
 
 
-def load_config() -> TelemetryConfig:
-    parser = build_arg_parser()
-    args = parser.parse_args()
-    merged = _load_yaml(args.config)
-    _merge_cli_overrides(merged, args)
-
+def _build_config(merged: dict[str, Any]) -> TelemetryConfig:
     return TelemetryConfig(
         data_source=str(merged["data_source"]),
         active_source=str(merged["active_source"]),
@@ -197,3 +192,15 @@ def load_config() -> TelemetryConfig:
         ui_enabled=_require_yaml_bool(merged.get("ui_enabled", False), "ui_enabled"),
         log_level=str(merged["log_level"]),
     )
+
+
+def load_config_file(path: str | Path) -> TelemetryConfig:
+    return _build_config(_load_yaml(str(path)))
+
+
+def load_config() -> TelemetryConfig:
+    parser = build_arg_parser()
+    args = parser.parse_args()
+    merged = _load_yaml(args.config)
+    _merge_cli_overrides(merged, args)
+    return _build_config(merged)

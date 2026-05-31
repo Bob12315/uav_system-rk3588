@@ -150,7 +150,7 @@ from missions.visual_tracking.stages.overhead_hold.config import (
     OverheadHoldConfig,
 )
 from app.mission_manager import MissionManagerConfig
-from telemetry_link.config import EndpointConfig, TelemetryConfig
+from telemetry_link.config import TelemetryConfig, load_config_file as load_telemetry_config
 from uav_ui.yolo_command_client import YoloCommandConfig
 
 
@@ -492,58 +492,6 @@ def load_mission_stage_runtime_config(
         _build_overhead_hold_config(mission_data, mission_data),
         _build_shaper_config(_section(mission_data, "shaper")),
     )
-
-def load_telemetry_config(path: str) -> TelemetryConfig:
-    merged = _load_yaml(path)
-
-    def build_endpoint(name: str, data: dict[str, Any]) -> EndpointConfig:
-        return EndpointConfig(
-            name=name,
-            connection_type=str(data["connection_type"]),
-            serial_port=str(data.get("serial_port", "/dev/ttyUSB0")),
-            baudrate=int(data.get("baudrate", 115200)),
-            udp_mode=str(data.get("udp_mode", "udpin")),
-            udp_host=str(data.get("udp_host", "0.0.0.0")),
-            udp_port=int(data.get("udp_port", 14550)),
-            tcp_host=str(data.get("tcp_host", "127.0.0.1")),
-            tcp_port=int(data.get("tcp_port", 5760)),
-            eth_mode=str(data.get("eth_mode", "udpin")),
-            eth_host=str(data.get("eth_host", "0.0.0.0")),
-            eth_port=int(data.get("eth_port", 14550)),
-        )
-
-    return TelemetryConfig(
-        data_source=str(merged["data_source"]),
-        active_source=str(merged["active_source"]),
-        sitl=build_endpoint("sitl", dict(merged["sitl"])),
-        real=build_endpoint("real", dict(merged["real"])),
-        control_send_rate_hz=float(merged["control_send_rate_hz"]),
-        action_cmd_retries=int(merged["action_cmd_retries"]),
-        action_retry_interval_sec=float(merged["action_retry_interval_sec"]),
-        heartbeat_timeout_sec=float(merged["heartbeat_timeout_sec"]),
-        rx_timeout_sec=float(merged["rx_timeout_sec"]),
-        reconnect_interval_sec=float(merged["reconnect_interval_sec"]),
-        receiver_idle_sleep_sec=float(merged["receiver_idle_sleep_sec"]),
-        sender_idle_sleep_sec=float(merged["sender_idle_sleep_sec"]),
-        request_message_intervals=_strict_bool(
-            merged["request_message_intervals"],
-            "telemetry.request_message_intervals",
-        ),
-        message_interval_hz={
-            str(k): float(v) for k, v in dict(merged.get("message_interval_hz", {})).items()
-        },
-        gimbal_mount_mode=int(merged.get("gimbal_mount_mode", 2)),
-        gimbal_yaw_min_deg=float(merged.get("gimbal_yaw_min_deg", -180.0)),
-        gimbal_yaw_max_deg=float(merged.get("gimbal_yaw_max_deg", 180.0)),
-        gimbal_pitch_min_deg=float(merged.get("gimbal_pitch_min_deg", -180.0)),
-        gimbal_pitch_max_deg=float(merged.get("gimbal_pitch_max_deg", 180.0)),
-        state_udp_enabled=_cfg_bool(merged, "state_udp_enabled", True, "telemetry"),
-        state_udp_ip=str(merged.get("state_udp_ip", "127.0.0.1")),
-        state_udp_port=int(merged.get("state_udp_port", 5010)),
-        ui_enabled=_cfg_bool(merged, "ui_enabled", False, "telemetry"),
-        log_level=str(merged.get("log_level", "INFO")),
-    )
-
 
 def _build_blackbox_config(data: dict[str, Any], args: argparse.Namespace) -> BlackboxConfig:
     enabled = _cfg_bool(data, "enabled", False, "blackbox")
