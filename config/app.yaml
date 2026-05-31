@@ -1,36 +1,83 @@
+# UAV 主程序配置
+# 说明：
+# - 本文件负责 app 总控进程，不放 YOLO 模型、摄像头或 MAVLink 连接细节。
+# - bool 值只能使用 true / false，不要加引号。
+# - 相对路径均以仓库根目录为基准。
+
+# -----------------------------------------------------------------------------
+# 主循环与感知输入
+# -----------------------------------------------------------------------------
 runtime:
+  # YOLO 进程通过 UDP 向 app 发布目标和场景检测结果。
   yolo_udp_ip: "0.0.0.0"
   yolo_udp_port: 5005
+
+  # app 控制循环频率与状态日志输出频率，单位：Hz。
   loop_hz: 20.0
-  perception_timeout_sec: 1.0
   print_rate_hz: 2.0
+
+  # 超过此时间未收到 YOLO 数据，则认为感知数据过期，单位：秒。
+  perception_timeout_sec: 1.0
+
+  # true：控制放行需要有效云台反馈；false：允许在无云台反馈时运行。
   require_gimbal_feedback: true
+
+  # null：持续运行；数字：运行指定秒数后退出，适合 smoke test。
   run_seconds: null
+
+  # 可选值：DEBUG / INFO / WARNING / ERROR。
   log_level: INFO
 
+# -----------------------------------------------------------------------------
+# app 启动时自动拉起的内部服务
+# -----------------------------------------------------------------------------
 services:
+  # true：连接飞控或 SITL；false：不建立 MAVLink 连接。
+  # 即使连接 telemetry，executor.send_commands=false 时仍不会发送连续控制命令。
   connect_telemetry: true
+
+  # true：监听 YOLO UDP；false：关闭感知 UDP 接收。
   start_yolo_udp: true
 
+# -----------------------------------------------------------------------------
+# 操作界面
+# -----------------------------------------------------------------------------
 ui:
+  # Web UI 与 curses 终端 UI 可以独立启用。
   web_enabled: true
   terminal_enabled: false
+
+  # Web UI 监听地址和端口。0.0.0.0 表示允许局域网访问。
   web_host: "0.0.0.0"
   web_port: 8080
+
+  # 操作审计日志。运行产物统一写入 runtime/，不提交 Git。
   audit_log_path: "runtime/logs/web_ui/audit.jsonl"
 
+# -----------------------------------------------------------------------------
+# Web UI 可调用的外部服务管理命令
+# -----------------------------------------------------------------------------
 services_control:
-  # Configure these after installing the corresponding systemd user services.
+  # 安装 systemd 用户服务后生效。每个列表元素都是一个独立命令参数。
   restart_app_command: ["systemctl", "--user", "restart", "uav-app.service"]
   restart_yolo_command: ["systemctl", "--user", "restart", "uav-yolo.service"]
 
+# -----------------------------------------------------------------------------
+# 黑匣子记录
+# -----------------------------------------------------------------------------
 blackbox:
   enabled: true
-  output_dir: runtime/logs/blackbox
+  output_dir: "runtime/logs/blackbox"
+
+  # sample_hz：记录频率；flush_every：累计多少条记录后刷新到磁盘。
   sample_hz: 20
   flush_every: 20
+
+  # 单文件达到 rotate_mb 后轮转，最多保留 keep_files 个文件。
   rotate_mb: 100
   keep_files: 20
+
+  # 可按排查需要关闭部分数据，减小日志体积。
   include_perception: true
   include_drone: true
   include_gimbal: true
@@ -38,11 +85,27 @@ blackbox:
   include_commands: true
   include_events: true
 
+# -----------------------------------------------------------------------------
+# 默认任务
+# -----------------------------------------------------------------------------
 mission:
+  # 可选值取决于 missions/ 下已注册任务。
+  # 当前可用：visual_tracking / rescue_competition。
   name: visual_tracking
 
+# -----------------------------------------------------------------------------
+# 控制命令出口
+# -----------------------------------------------------------------------------
 executor:
+  # MAVLink 坐标系。8 = MAV_FRAME_BODY_NED。
   body_frame: 8
+
+  # 云台横滚目标角，单位：度。
   gimbal_roll_deg: 0.0
+
+  # true：记录控制输出日志。
   log_commands: true
+
+  # 安全关键项：默认必须保持 false。
+  # true：允许向飞控发送连续控制命令；仅在确认环境安全后人工开启。
   send_commands: false
