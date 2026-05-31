@@ -16,7 +16,7 @@ import yaml
 from app.app_config import AppConfig, ROOT_DIR, load_mission_stage_runtime_config, load_telemetry_config
 from app.blackbox_recorder import BlackboxRecorder
 from app.debug_runtime import DebugRuntime
-from app.health_monitor import HealthMonitor, HealthMonitorConfig
+from app.health_monitor import HealthMonitor
 from app.mission_manager import MissionMode
 from app.mission_runner import MissionRunner
 from app.stage_registry import StageRegistry, copy_dataclass_values
@@ -42,13 +42,7 @@ class SystemRunner:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.services = ServiceManager(config, self.stop_event)
         self.input_adapter = StageInputAdapter(config=config.input_adapter)
-        self.health_monitor = HealthMonitor(
-            HealthMonitorConfig(
-                max_vision_age_s=config.control.mode.max_vision_age_s,
-                max_drone_age_s=config.control.mode.max_drone_age_s,
-                max_gimbal_age_s=config.control.mode.max_gimbal_age_s,
-            )
-        )
+        self.health_monitor = HealthMonitor(config.health)
         self.mission_runner = MissionRunner(
             build_mission(config.mission_name, config),
             link_manager=self.services.link_manager,
@@ -705,7 +699,7 @@ class SystemRunner:
         if not path:
             return CommandResult(False, "mission config reload is unavailable for legacy config")
         try:
-            input_adapter_cfg, approach_cfg, overhead_cfg, shaper_cfg = load_mission_stage_runtime_config(
+            input_adapter_cfg, health_cfg, approach_cfg, overhead_cfg, shaper_cfg = load_mission_stage_runtime_config(
                 self.config.mission_config_path,
             )
         except Exception as exc:
@@ -714,6 +708,7 @@ class SystemRunner:
 
         with self.runtime_config_lock:
             copy_dataclass_values(self.config.input_adapter, input_adapter_cfg)
+            copy_dataclass_values(self.config.health, health_cfg)
             copy_dataclass_values(self.config.approach_track, approach_cfg)
             copy_dataclass_values(self.config.overhead_hold, overhead_cfg)
             copy_dataclass_values(self.config.shaper, shaper_cfg)
@@ -723,6 +718,7 @@ class SystemRunner:
                 reset=True,
             )
             self.input_adapter.config = self.config.input_adapter
+            self.health_monitor.config = self.config.health
             self.command_shaper.config = self.config.shaper
             self.command_shaper.reset()
 

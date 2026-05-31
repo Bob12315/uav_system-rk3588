@@ -26,7 +26,7 @@ bash scripts/install/install_app_env.sh
 - 当前已经激活 conda 环境 `app`。
 - 当前 Python 版本是 `3.10.x`。
 
-脚本读取根目录 `requirements-control.txt`，通过清华 PyPI 镜像安装依赖，不修改
+脚本读取根目录 `requirements-app.txt`，通过清华 PyPI 镜像安装依赖，不修改
 用户全局 pip 配置。
 
 验证：

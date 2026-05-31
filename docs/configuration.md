@@ -1,6 +1,6 @@
 # 配置说明
 
-新架构把配置分成两层：`config/` 只放系统配置；每个 mission 的任务参数和阶段参数放在自己的 `missions/<mission_name>/config.yaml`。旧 `control/config.yaml` 保留用于旧入口兼容。
+配置分成两层：`config/` 只放系统配置；每个 mission 的任务参数和阶段参数放在自己的 `missions/<mission_name>/config.yaml`。
 
 ## config/app.yaml
 

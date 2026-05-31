@@ -44,6 +44,9 @@ def test_loads_mission_local_config_layout() -> None:
     assert Path(config.mission_config_path).parent.name == "visual_tracking"
     assert config.mission.initial_mode == "OVERHEAD_HOLD"
     assert config.mission.overhead_entry_target_size_thresh == pytest.approx(10.0)
+    assert config.health.max_vision_age_s == pytest.approx(0.3)
+    assert config.health.max_drone_age_s == pytest.approx(0.3)
+    assert config.health.max_gimbal_age_s == pytest.approx(0.3)
 
 
 def test_loads_independent_web_and_terminal_ui_settings() -> None:
@@ -58,6 +61,10 @@ def test_loads_independent_web_and_terminal_ui_settings() -> None:
 
 def test_app_reuses_telemetry_link_config_parser() -> None:
     assert load_telemetry_config(DEFAULT_CONFIG_PATH) == load_config_file(DEFAULT_CONFIG_PATH)
+
+
+def test_app_help_does_not_expose_removed_control_config() -> None:
+    assert "--control-config" not in build_arg_parser().format_help()
 
 
 def test_mission_name_can_be_overridden_from_cli() -> None:

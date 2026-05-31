@@ -85,7 +85,7 @@ NumPy 以及匹配模型的 `rknn-toolkit-lite2`：
 
 ```bash
 cd ~/uav_project/uav_system-rk3588
-~/anaconda3/envs/app/bin/python -m pip install -r requirements-control.txt
+~/anaconda3/envs/app/bin/python -m pip install -r requirements-app.txt
 ~/anaconda3/envs/yolo/bin/python -c "import cv2, yaml; from rknnlite.api import RKNNLite"
 ```
 
@@ -158,8 +158,8 @@ systemctl --user restart uav-app.service uav-yolo.service
 如果修改了依赖文件，更新后先安装依赖，再重启服务：
 
 ```bash
-# requirements-control.txt 变化
-~/anaconda3/envs/app/bin/python -m pip install -r requirements-control.txt
+# requirements-app.txt 变化
+~/anaconda3/envs/app/bin/python -m pip install -r requirements-app.txt
 
 # RK3588 的 yolo 依赖变化时，只安装板端需要的包；
 # rknn-toolkit-lite2 版本仍需与板端模型和驱动匹配

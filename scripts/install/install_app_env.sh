@@ -154,9 +154,9 @@ install_system_deps() {
 
 install_python_deps() {
   step "Installing app Python packages"
-  info "Installing app dependencies from requirements-control.txt"
+  info "Installing app dependencies from requirements-app.txt"
   python -m pip install -i "${TUNA_PYPI_INDEX}" --upgrade pip
-  python -m pip install -i "${TUNA_PYPI_INDEX}" -r "${REPO_ROOT}/requirements-control.txt"
+  python -m pip install -i "${TUNA_PYPI_INDEX}" -r "${REPO_ROOT}/requirements-app.txt"
 }
 
 verify_app_env() {

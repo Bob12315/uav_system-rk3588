@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -9,130 +9,6 @@ import yaml
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
-try:
-    from control.approach_controller import ApproachControllerConfig
-    from control.body_controller import BodyControllerConfig
-    from control.command_shaper import CommandShaperConfig as LegacyCommandShaperConfig
-    from control.config import ControlConfig, ControlRuntimeConfig, load_config as load_control_config
-    from control.control_executor import ControlExecutorConfig
-    from control.control_input import ControlInputAdapterConfig
-    from control.control_mode import ControlModeConfig
-    from control.gimbal_controller import GimbalControllerConfig
-except ModuleNotFoundError:
-    @dataclass(slots=True)
-    class ControlRuntimeConfig:
-        yolo_udp_ip: str
-        yolo_udp_port: int
-        loop_hz: float
-        perception_timeout_sec: float
-        print_rate_hz: float
-        require_gimbal_feedback: bool
-        enable_gimbal_controller: bool
-        enable_body_controller: bool
-        enable_approach_controller: bool
-        log_level: str
-
-    @dataclass(slots=True)
-    class ControlInputAdapterConfig:
-        dt_default: float
-        dt_min: float
-        dt_max: float
-        stable_hold_s: float
-        age_invalid_value: float
-        ex_cam_tau_s: float
-        ey_cam_tau_s: float
-        ex_body_tau_s: float
-        ey_body_tau_s: float
-        gimbal_yaw_tau_s: float
-        gimbal_pitch_tau_s: float
-        target_size_tau_s: float
-
-    @dataclass(slots=True)
-    class ControlModeConfig:
-        max_vision_age_s: float
-        max_drone_age_s: float
-        max_gimbal_age_s: float
-        yaw_align_thresh_rad: float
-        overhead_entry_target_size_thresh: float
-        overhead_entry_pitch_rad: float
-        overhead_entry_pitch_tol_rad: float
-        overhead_entry_yaw_tol_rad: float
-        overhead_entry_hold_s: float
-        overhead_exit_target_size_drop: float
-        require_target_locked_for_body: bool
-        require_target_stable_for_approach: bool
-        require_yaw_aligned_for_approach: bool
-        require_gimbal_fresh_for_gimbal: bool
-        require_gimbal_fresh_for_body: bool
-        require_gimbal_fresh_for_approach: bool
-
-    @dataclass(slots=True)
-    class GimbalControllerConfig:
-        kp_yaw: float
-        kp_pitch: float
-        ki_yaw: float
-        ki_pitch: float
-        kd_yaw: float
-        kd_pitch: float
-        use_derivative: bool
-        overhead_downward_pitch_rad: float
-        lost_target_recenter_enabled: bool
-        lost_target_recenter_timeout_sec: float
-        lost_target_recenter_pitch_deg: float
-        lost_target_recenter_yaw_deg: float
-
-    @dataclass(slots=True)
-    class BodyControllerConfig:
-        kp_vy: float
-        kd_vy: float
-        use_derivative_vy: bool
-        kp_yaw: float
-        kd_yaw: float
-        use_derivative_yaw: bool
-
-    @dataclass(slots=True)
-    class ApproachControllerConfig:
-        target_size_ref: float
-        kp_vx: float
-        kd_vx: float
-        use_derivative: bool
-        allow_backward: bool
-
-    @dataclass(slots=True)
-    class LegacyCommandShaperConfig:
-        max_vx: float
-        max_vy: float
-        max_yaw_rate: float
-        max_gimbal_yaw_rate: float
-        max_gimbal_pitch_rate: float
-        max_vx_rate: float
-        max_vy_rate: float
-        max_yaw_rate_rate: float
-        max_gimbal_yaw_rate_rate: float
-        max_gimbal_pitch_rate_rate: float
-        smooth_to_zero_when_disabled: bool
-        dt_min: float
-
-    @dataclass(slots=True)
-    class ControlExecutorConfig:
-        body_frame: int
-        gimbal_roll_deg: float
-        log_commands: bool
-        send_commands: bool
-
-    @dataclass(slots=True)
-    class ControlConfig:
-        runtime: ControlRuntimeConfig
-        input_adapter: ControlInputAdapterConfig
-        mode: ControlModeConfig
-        gimbal: GimbalControllerConfig
-        body: BodyControllerConfig
-        approach: ApproachControllerConfig
-        shaper: LegacyCommandShaperConfig
-        executor: ControlExecutorConfig
-
-    def load_control_config(_argv: list[str]) -> ControlConfig:
-        raise RuntimeError("legacy control config is unavailable because control/ is not installed")
 from missions.visual_tracking.stages.approach_track.config import (
     ApproachBodyConfig,
     ApproachForwardConfig,
@@ -150,6 +26,7 @@ from missions.visual_tracking.stages.overhead_hold.config import (
     OverheadHoldConfig,
 )
 from app.mission_manager import MissionManagerConfig
+from app.health_monitor import HealthMonitorConfig
 from telemetry_link.config import TelemetryConfig, load_config_file as load_telemetry_config
 from uav_ui.yolo_command_client import YoloCommandConfig
 
@@ -210,7 +87,7 @@ class AppConfig:
     blackbox: BlackboxConfig
     ui: UiConfig
     services_control: ServiceControlConfig
-    control: ControlConfig
+    health: HealthMonitorConfig
     telemetry: TelemetryConfig
     yolo_command: YoloCommandConfig
     mission_name: str
@@ -236,11 +113,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--mission-config",
         default=None,
         help="Path to mission config yaml; defaults to missions/<mission_name>/config.yaml.",
-    )
-    parser.add_argument(
-        "--control-config",
-        default=None,
-        help="Legacy control config fallback. New app runtime reads config/app.yaml by default.",
     )
     parser.add_argument(
         "--telemetry-config",
@@ -294,9 +166,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def load_app_config(args: argparse.Namespace) -> AppConfig:
-    if args.control_config and not Path(args.app_config).exists():
-        return _load_legacy_app_config(args)
-
     app_config_path = Path(args.app_config)
     app_data = _load_yaml(args.app_config)
     app_mission_data = _section(app_data, "mission")
@@ -339,6 +208,7 @@ def load_app_config(args: argparse.Namespace) -> AppConfig:
 
     input_adapter_cfg = _build_input_adapter_config(_section(mission_data, "input_adapter"))
     mission_cfg = _build_mission_manager_config(mission_data)
+    health_cfg = _build_health_monitor_config(mission_data)
     approach_track_cfg = _build_approach_track_config(mission_data, mission_data)
     overhead_hold_cfg = _build_overhead_hold_config(mission_data, mission_data)
     shaper_cfg = _build_shaper_config(_section(mission_data, "shaper"))
@@ -447,14 +317,6 @@ def load_app_config(args: argparse.Namespace) -> AppConfig:
         runtime_cfg.run_seconds = float(runtime_cfg.run_seconds)
     blackbox_cfg = _build_blackbox_config(blackbox_data, args)
 
-    runtime_compat_data = dict(runtime_data)
-    runtime_compat_data.update(recovery_data)
-    control_cfg = _build_control_compat(
-        runtime_compat_data,
-        mission_data,
-        mission_data,
-        executor_cfg,
-    )
     executor_cfg.send_commands = bool(send_commands)
 
     return AppConfig(
@@ -462,7 +324,7 @@ def load_app_config(args: argparse.Namespace) -> AppConfig:
         blackbox=blackbox_cfg,
         ui=ui_cfg,
         services_control=service_control_cfg,
-        control=control_cfg,
+        health=health_cfg,
         telemetry=telemetry_cfg,
         yolo_command=yolo_command_cfg,
         mission_name=mission_name,
@@ -484,14 +346,22 @@ def load_app_config(args: argparse.Namespace) -> AppConfig:
 
 def load_mission_stage_runtime_config(
     mission_config_path: str | None,
-) -> tuple[InputAdapterConfig, ApproachTrackConfig, OverheadHoldConfig, CommandShaperConfig]:
+) -> tuple[
+    InputAdapterConfig,
+    HealthMonitorConfig,
+    ApproachTrackConfig,
+    OverheadHoldConfig,
+    CommandShaperConfig,
+]:
     mission_data = _normalize_mission_config(_load_yaml_if_exists(mission_config_path))
     return (
         _build_input_adapter_config(_section(mission_data, "input_adapter")),
+        _build_health_monitor_config(mission_data),
         _build_approach_track_config(mission_data, mission_data),
         _build_overhead_hold_config(mission_data, mission_data),
         _build_shaper_config(_section(mission_data, "shaper")),
     )
+
 
 def _build_blackbox_config(data: dict[str, Any], args: argparse.Namespace) -> BlackboxConfig:
     enabled = _cfg_bool(data, "enabled", False, "blackbox")
@@ -827,6 +697,14 @@ def _build_mission_manager_config(data: dict[str, Any]) -> MissionManagerConfig:
     )
 
 
+def _build_health_monitor_config(data: dict[str, Any]) -> HealthMonitorConfig:
+    return HealthMonitorConfig(
+        max_vision_age_s=float(data.get("max_vision_age_s", 0.3)),
+        max_drone_age_s=float(data.get("max_drone_age_s", 0.3)),
+        max_gimbal_age_s=float(data.get("max_gimbal_age_s", 0.3)),
+    )
+
+
 def _resolve_mission_name(
     args: argparse.Namespace,
     app_mission_data: dict[str, Any],
@@ -860,238 +738,6 @@ def _resolve_mission_config_path(
     if app_relative.exists():
         return str(app_relative)
     return str(ROOT_DIR / path)
-
-
-def _build_control_compat(
-    runtime: dict[str, Any],
-    mission: dict[str, Any],
-    flight: dict[str, Any],
-    executor: FlightCommandExecutorConfig,
-) -> ControlConfig:
-    input_adapter = _section(flight, "input_adapter")
-    approach_track = _section(flight, "approach_track")
-    gimbal = _section(approach_track, "gimbal") if approach_track else _section(flight, "gimbal")
-    body = _section(approach_track, "body") if approach_track else _section(flight, "body")
-    approach = (
-        _section(approach_track, "forward")
-        if approach_track
-        else _section(flight, "approach")
-    )
-    shaper = _section(flight, "shaper")
-    return ControlConfig(
-        runtime=ControlRuntimeConfig(
-            yolo_udp_ip=str(runtime.get("yolo_udp_ip", "0.0.0.0")),
-            yolo_udp_port=int(runtime.get("yolo_udp_port", 5005)),
-            loop_hz=float(runtime.get("loop_hz", 20.0)),
-            perception_timeout_sec=float(runtime.get("perception_timeout_sec", 1.0)),
-            print_rate_hz=float(runtime.get("print_rate_hz", 2.0)),
-            require_gimbal_feedback=_cfg_bool(runtime, "require_gimbal_feedback", True, "runtime"),
-            enable_gimbal_controller=_cfg_bool(runtime, "enable_gimbal_controller", True, "runtime"),
-            enable_body_controller=_cfg_bool(runtime, "enable_body_controller", True, "runtime"),
-            enable_approach_controller=_cfg_bool(runtime, "enable_approach_controller", True, "runtime"),
-            log_level=str(runtime.get("log_level", "INFO")),
-        ),
-        input_adapter=ControlInputAdapterConfig(**asdict(_build_input_adapter_config(input_adapter))),
-        mode=ControlModeConfig(
-            max_vision_age_s=float(mission.get("max_vision_age_s", 0.3)),
-            max_drone_age_s=float(mission.get("max_drone_age_s", 0.3)),
-            max_gimbal_age_s=float(mission.get("max_gimbal_age_s", 0.3)),
-            yaw_align_thresh_rad=float(mission.get("yaw_align_thresh_rad", 0.35)),
-            overhead_entry_target_size_thresh=float(
-                mission.get("overhead_entry_target_size_thresh", 0.30)
-            ),
-            overhead_entry_pitch_rad=float(
-                mission.get("overhead_entry_pitch_rad", -1.5707963267948966)
-            ),
-            overhead_entry_pitch_tol_rad=float(mission.get("overhead_entry_pitch_tol_rad", 0.20)),
-            overhead_entry_yaw_tol_rad=float(mission.get("overhead_entry_yaw_tol_rad", 0.15)),
-            overhead_entry_hold_s=float(mission.get("overhead_entry_hold_s", 0.5)),
-            overhead_exit_target_size_drop=float(
-                mission.get("overhead_exit_target_size_drop", 0.06)
-            ),
-            require_target_locked_for_body=_cfg_bool(
-                mission,
-                "require_target_locked_for_body",
-                True,
-                "mission",
-            ),
-            require_target_stable_for_approach=_cfg_bool(
-                mission,
-                "require_target_stable_for_approach",
-                True,
-                "mission",
-            ),
-            require_yaw_aligned_for_approach=_cfg_bool(
-                mission,
-                "require_yaw_aligned_for_approach",
-                True,
-                "mission",
-            ),
-            require_gimbal_fresh_for_gimbal=_cfg_bool(
-                mission,
-                "require_gimbal_fresh_for_gimbal",
-                False,
-                "mission",
-            ),
-            require_gimbal_fresh_for_body=_cfg_bool(
-                mission,
-                "require_gimbal_fresh_for_body",
-                True,
-                "mission",
-            ),
-            require_gimbal_fresh_for_approach=_cfg_bool(
-                mission,
-                "require_gimbal_fresh_for_approach",
-                True,
-                "mission",
-            ),
-        ),
-        gimbal=GimbalControllerConfig(
-            kp_yaw=float(gimbal.get("kp_yaw", 3.2)),
-            kp_pitch=float(gimbal.get("kp_pitch", 1.8)),
-            ki_yaw=float(gimbal.get("ki_yaw", 0.05)),
-            ki_pitch=float(gimbal.get("ki_pitch", 0.03)),
-            kd_yaw=float(gimbal.get("kd_yaw", 0.18)),
-            kd_pitch=float(gimbal.get("kd_pitch", 0.12)),
-            use_derivative=_cfg_bool(gimbal, "use_derivative", False, "gimbal"),
-            overhead_downward_pitch_rad=float(
-                gimbal.get("overhead_downward_pitch_rad", -1.5707963267948966)
-            ),
-            lost_target_recenter_enabled=_cfg_bool(
-                runtime,
-                "lost_target_recenter_enabled",
-                True,
-                "runtime",
-            ),
-            lost_target_recenter_timeout_sec=float(
-                runtime.get("lost_target_recenter_timeout_sec", 10.0)
-            ),
-            lost_target_recenter_pitch_deg=float(
-                runtime.get("lost_target_recenter_pitch_deg", 0.0)
-            ),
-            lost_target_recenter_yaw_deg=float(runtime.get("lost_target_recenter_yaw_deg", 0.0)),
-        ),
-        body=BodyControllerConfig(
-            kp_vy=float(body.get("kp_vy", 1.0)),
-            kd_vy=float(body.get("kd_vy", 0.0)),
-            use_derivative_vy=_cfg_bool(body, "use_derivative_vy", False, "body"),
-            kp_yaw=float(body.get("kp_yaw", 1.2)),
-            kd_yaw=float(body.get("kd_yaw", 0.0)),
-            use_derivative_yaw=_cfg_bool(body, "use_derivative_yaw", False, "body"),
-        ),
-        approach=ApproachControllerConfig(
-            target_size_ref=float(approach.get("target_size_ref", 0.35)),
-            kp_vx=float(approach.get("kp_vx", 1.0)),
-            kd_vx=float(approach.get("kd_vx", 0.0)),
-            use_derivative=_cfg_bool(approach, "use_derivative", False, "approach"),
-            allow_backward=_cfg_bool(approach, "allow_backward", False, "approach"),
-        ),
-        shaper=LegacyCommandShaperConfig(
-            max_vx=float(shaper.get("max_vx", 0.8)),
-            max_vy=float(shaper.get("max_vy", 1.0)),
-            max_yaw_rate=float(shaper.get("max_yaw_rate", 1.0)),
-            max_gimbal_yaw_rate=float(shaper.get("max_gimbal_yaw_rate", 1.0)),
-            max_gimbal_pitch_rate=float(shaper.get("max_gimbal_pitch_rate", 1.0)),
-            max_vx_rate=float(shaper.get("max_vx_rate", 1.0)),
-            max_vy_rate=float(shaper.get("max_vy_rate", 1.5)),
-            max_yaw_rate_rate=float(shaper.get("max_yaw_rate_rate", 2.0)),
-            max_gimbal_yaw_rate_rate=float(shaper.get("max_gimbal_yaw_rate_rate", 3.0)),
-            max_gimbal_pitch_rate_rate=float(shaper.get("max_gimbal_pitch_rate_rate", 3.0)),
-            smooth_to_zero_when_disabled=_cfg_bool(
-                shaper,
-                "smooth_to_zero_when_disabled",
-                True,
-                "shaper",
-            ),
-            dt_min=float(shaper.get("dt_min", 1e-3)),
-        ),
-        executor=ControlExecutorConfig(
-            body_frame=executor.body_frame,
-            gimbal_roll_deg=executor.gimbal_roll_deg,
-            log_commands=executor.log_commands,
-            send_commands=executor.send_commands,
-        ),
-    )
-
-
-def _load_legacy_app_config(args: argparse.Namespace) -> AppConfig:
-    control_cfg = load_control_config(["--config", args.control_config])
-    telemetry_cfg = load_telemetry_config(args.telemetry_config)
-    yolo_command_cfg = load_yolo_command_config(args.yolo_config)
-    executor_cfg = FlightCommandExecutorConfig(
-        body_frame=control_cfg.executor.body_frame,
-        gimbal_roll_deg=control_cfg.executor.gimbal_roll_deg,
-        log_commands=control_cfg.executor.log_commands,
-        send_commands=False,
-    )
-    return AppConfig(
-        runtime=AppRuntimeConfig(
-            yolo_udp_ip=args.yolo_udp_ip or control_cfg.runtime.yolo_udp_ip,
-            yolo_udp_port=args.yolo_udp_port or control_cfg.runtime.yolo_udp_port,
-            loop_hz=args.loop_hz or control_cfg.runtime.loop_hz,
-            perception_timeout_sec=args.perception_timeout_sec
-            or control_cfg.runtime.perception_timeout_sec,
-            print_rate_hz=args.print_rate_hz or control_cfg.runtime.print_rate_hz,
-            require_gimbal_feedback=args.require_gimbal_feedback
-            if args.require_gimbal_feedback is not None
-            else control_cfg.runtime.require_gimbal_feedback,
-            log_level=args.log_level or control_cfg.runtime.log_level,
-            ui_enabled=telemetry_cfg.ui_enabled if args.ui_enabled is None else args.ui_enabled,
-            connect_telemetry=bool(args.connect_telemetry or args.start_auto_control),
-            start_yolo_udp=not args.no_yolo_udp,
-            run_seconds=args.run_seconds,
-            lost_target_recenter_enabled=bool(control_cfg.gimbal.lost_target_recenter_enabled),
-            lost_target_recenter_timeout_sec=float(control_cfg.gimbal.lost_target_recenter_timeout_sec),
-            lost_target_recenter_pitch_deg=float(control_cfg.gimbal.lost_target_recenter_pitch_deg),
-            lost_target_recenter_yaw_deg=float(control_cfg.gimbal.lost_target_recenter_yaw_deg),
-        ),
-        blackbox=_build_blackbox_config({}, args),
-        ui=UiConfig(
-            web_enabled=False,
-            terminal_enabled=telemetry_cfg.ui_enabled if args.ui_enabled is None else bool(args.ui_enabled),
-            web_host="0.0.0.0",
-            web_port=8080,
-            audit_log_path=str(ROOT_DIR / "runtime" / "logs" / "web_ui" / "audit.jsonl"),
-        ),
-        services_control=ServiceControlConfig([], []),
-        control=control_cfg,
-        telemetry=telemetry_cfg,
-        yolo_command=yolo_command_cfg,
-        mission_name="visual_tracking",
-        mission_settings={},
-        input_adapter=InputAdapterConfig(**asdict(control_cfg.input_adapter)),
-        mission=MissionManagerConfig(
-            overhead_entry_target_size_thresh=control_cfg.mode.overhead_entry_target_size_thresh,
-            overhead_entry_pitch_rad=control_cfg.mode.overhead_entry_pitch_rad,
-            overhead_entry_pitch_tol_rad=control_cfg.mode.overhead_entry_pitch_tol_rad,
-            overhead_entry_yaw_tol_rad=control_cfg.mode.overhead_entry_yaw_tol_rad,
-            overhead_entry_hold_s=control_cfg.mode.overhead_entry_hold_s,
-            overhead_exit_target_size_drop=control_cfg.mode.overhead_exit_target_size_drop,
-        ),
-        approach_track=_build_approach_track_config_from_control(control_cfg),
-        overhead_hold=_build_overhead_hold_config_from_control(control_cfg),
-        shaper=CommandShaperConfig(
-            max_vx=control_cfg.shaper.max_vx,
-            max_vy=control_cfg.shaper.max_vy,
-            max_yaw_rate=control_cfg.shaper.max_yaw_rate,
-            max_gimbal_yaw_rate=control_cfg.shaper.max_gimbal_yaw_rate,
-            max_gimbal_pitch_rate=control_cfg.shaper.max_gimbal_pitch_rate,
-            max_vx_rate=control_cfg.shaper.max_vx_rate,
-            max_vy_rate=control_cfg.shaper.max_vy_rate,
-            max_yaw_rate_rate=control_cfg.shaper.max_yaw_rate_rate,
-            max_gimbal_yaw_rate_rate=control_cfg.shaper.max_gimbal_yaw_rate_rate,
-            max_gimbal_pitch_rate_rate=control_cfg.shaper.max_gimbal_pitch_rate_rate,
-            smooth_to_zero_when_disabled=control_cfg.shaper.smooth_to_zero_when_disabled,
-            dt_min=control_cfg.shaper.dt_min,
-        ),
-        executor=executor_cfg,
-        debug=StageDebugConfig(force_mode=args.force_mode),
-        mission_config_path=None,
-        start_gimbal=bool(control_cfg.runtime.enable_gimbal_controller and args.start_auto_control),
-        start_body=bool(control_cfg.runtime.enable_body_controller and args.start_auto_control),
-        start_approach=bool(control_cfg.runtime.enable_approach_controller and args.start_auto_control),
-        start_send_commands=False,
-    )
 
 
 def _load_yaml(path: str) -> dict[str, Any]:
@@ -1241,25 +887,3 @@ def _to_bool(value: str | bool) -> bool:
         return _strict_bool(value, "cli")
     except ValueError as exc:
         raise argparse.ArgumentTypeError(str(exc)) from exc
-
-
-def _build_approach_track_config_from_control(control_cfg: ControlConfig) -> ApproachTrackConfig:
-    return _build_approach_track_config(
-        {
-            "gimbal": asdict(control_cfg.gimbal),
-            "body": asdict(control_cfg.body),
-            "approach": asdict(control_cfg.approach),
-        },
-        asdict(control_cfg.mode),
-    )
-
-
-def _build_overhead_hold_config_from_control(control_cfg: ControlConfig) -> OverheadHoldConfig:
-    return _build_overhead_hold_config(
-        {
-            "gimbal": asdict(control_cfg.gimbal),
-            "body": asdict(control_cfg.body),
-            "approach": asdict(control_cfg.approach),
-        },
-        asdict(control_cfg.mode),
-    )

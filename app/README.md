@@ -40,4 +40,4 @@
 - `config/yolo.yaml`：YOLO 进程及目标切换 UDP 配置。
 - `missions/<mission_name>/config.yaml`：任务和 stage controller 参数。
 
-`app_config.py` 目前仍保留旧 `control/` 配置兼容代码。新部署只使用根目录 `config/`，后续会单独移除该兼容层。
+旧 `control/` 配置入口已经移除。部署和调试统一使用根目录 `config/`。
