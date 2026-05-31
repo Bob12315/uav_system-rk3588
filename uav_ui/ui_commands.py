@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from command_dispatcher import CommandResult, dispatch_text_command
-from link_manager import LinkManager
-
+from telemetry_link.command_dispatcher import CommandResult, dispatch_text_command
+from telemetry_link.link_manager import LinkManager
 from uav_ui.control_switches import ControlRuntimeSwitches, ControlSwitchSnapshot
 from uav_ui.yolo_command_client import YoloCommandClient
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -9,10 +8,6 @@ from typing import Any
 import yaml
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-TELEMETRY_DIR = ROOT_DIR / "telemetry_link"
-for path in (str(ROOT_DIR), str(TELEMETRY_DIR)):
-    if path not in sys.path:
-        sys.path.insert(0, path)
 
 try:
     from control.approach_controller import ApproachControllerConfig

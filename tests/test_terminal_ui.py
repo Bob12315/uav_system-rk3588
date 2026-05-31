@@ -1,13 +1,5 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "telemetry_link"))
-sys.path.insert(0, str(ROOT))
-
 from uav_ui.terminal_ui import complete_command_input
 
 

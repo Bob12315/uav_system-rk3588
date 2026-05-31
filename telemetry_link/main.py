@@ -8,23 +8,15 @@ import time
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-TELEMETRY_DIR = ROOT_DIR / "telemetry_link"
-for path in (str(ROOT_DIR), str(TELEMETRY_DIR)):
-    if path not in sys.path:
-        sys.path.insert(0, path)
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
-try:
-    from .command_dispatcher import dispatch_text_command
-    from .config import load_config
-    from .link_manager import LinkManager
-    from .state_publisher import StatePublisher
-except ImportError:  # pragma: no cover - supports direct script execution
-    from command_dispatcher import dispatch_text_command
-    from config import load_config
-    from link_manager import LinkManager
-    from state_publisher import StatePublisher
+from telemetry_link.command_dispatcher import dispatch_text_command
+from telemetry_link.config import load_config
+from telemetry_link.link_manager import LinkManager
+from telemetry_link.state_publisher import StatePublisher
+from telemetry_link.utils import setup_logging
 from uav_ui.terminal_ui import run_terminal_ui
-from utils import setup_logging
 
 
 def main() -> int:

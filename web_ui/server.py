@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.app_config import ROOT_DIR, UiConfig
-from uav_ui.terminal_ui import _COMMAND_COMPLETIONS
+from uav_ui.completion_catalog import COMMAND_COMPLETIONS
 from web_ui.audit import AuditLog
 from web_ui.config_store import ConfigStore
 
@@ -77,7 +77,7 @@ def create_app(runner, config: UiConfig) -> FastAPI:
 
     @app.get("/api/commands/completions")
     def completions():
-        commands = set(_COMMAND_COMPLETIONS)
+        commands = set(COMMAND_COMPLETIONS)
         for mission in runner.web_missions():
             commands.add(f"mission switch {mission['name']}")
             for stage in mission.get("stage_modes", []):

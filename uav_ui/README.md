@@ -5,27 +5,29 @@
 当前主要入口：
 
 - [terminal_ui.py](terminal_ui.py)：curses 终端界面
+- [completion_catalog.py](completion_catalog.py)：终端和 Web UI 共用的命令补全目录
 - [ui_commands.py](ui_commands.py)：UI 层命令分发
-- [control_switches.py](control_switches.py)：control controller 运行时开关
+- [control_switches.py](control_switches.py)：app controller 运行时开关
 - [yolo_command_client.py](yolo_command_client.py)：向 `yolo_app` 发送目标切换 UDP 命令
 
 ## 启动方式
 
-### 跟随 control 启动
+### 跟随 app 启动
 
-当 [config/telemetry.yaml](../config/telemetry.yaml) 中：
+当 [config/app.yaml](../config/app.yaml) 中：
 
 ```yaml
-ui_enabled: true
+ui:
+  terminal_enabled: true
 ```
 
 运行：
 
 ```bash
-python -m control
+python -m app.main
 ```
 
-会启动 control 主循环，同时打开终端 UI。control 循环在后台线程运行，UI 在主线程接管终端。
+会启动 app 总控循环，同时打开终端 UI。app 循环在后台线程运行，UI 在主线程接管终端。
 
 ### 跟随 telemetry_link 启动
 
@@ -78,7 +80,7 @@ switch_source sitl
 
 ## 目标切换命令
 
-control 启动 UI 时支持：
+app 启动 UI 时支持：
 
 ```text
 target next
@@ -99,10 +101,10 @@ command_port: 5006
 
 如果 `command_ip` 是 `0.0.0.0`，UI 会自动改发到 `127.0.0.1`。
 
-也可以启动 control 时指定 yolo 配置：
+也可以启动 app 时指定 yolo 配置：
 
 ```bash
-python -m control --yolo-config /path/to/config/yolo.yaml
+python -m app.main --yolo-config /path/to/config/yolo.yaml
 ```
 
 发送 JSON 格式：
@@ -116,7 +118,7 @@ python -m control --yolo-config /path/to/config/yolo.yaml
 
 ## Controller 运行时开关
 
-control 启动 UI 时支持运行时开关：
+app 启动 UI 时支持运行时开关：
 
 ```text
 controller gimbal on
@@ -136,7 +138,7 @@ controller all off
 controller all toggle
 ```
 
-这些命令只影响当前运行中的 control，不会修改 [control/config.yaml](../control/config.yaml)。
+这些命令只影响当前运行中的 app，不会修改 [config/app.yaml](../config/app.yaml)。
 
 初始值来自：
 
@@ -155,7 +157,7 @@ Controllers G=ON B=ON A=OFF SEND=ON
 
 ## Control 发送开关
 
-control 启动 UI 时也支持运行时开关是否真的下发 control 命令：
+app 启动 UI 时也支持运行时开关是否真的下发 control 命令：
 
 ```text
 control send on
@@ -163,7 +165,7 @@ control send off
 control send toggle
 ```
 
-这些命令只影响当前运行中的 control，不会修改配置文件。
+这些命令只影响当前运行中的 app，不会修改配置文件。
 
 ## Stage Override
 
@@ -220,7 +222,7 @@ stage config reload
 
 ```yaml
 executor:
-  send_commands: true
+  send_commands: false
 ```
 
 当 `SEND=OFF` 时，app 仍然会正常计算内部 shaped command，但不会调用 executor 下发，也会清空 `telemetry_link` 中保留的连续 control/gimbal_rate 队列。UI 的 `Mission control` 只显示一条静态 `DRY continuous command sending disabled` 提示，不再刷新命令流水。
@@ -252,4 +254,4 @@ app 启动 UI 时，`Mission control` 会显示最近的 shaped command：
 
 - MAVLink 命令由 `telemetry_link` 执行
 - 目标切换由 `yolo_app` 执行
-- controller 开关由 `control` 主循环读取
+- controller 开关由 `app` 总控循环读取

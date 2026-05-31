@@ -148,7 +148,7 @@ MissionStage.update()
 
 - `pymavlink`
 - Python 标准库
-- `uav_ui` 仅限独立 `telemetry_link.main` 的终端 UI。
+- `uav_ui` 仅用于终端 UI 展示和人工命令分发。
 
 禁止事项：
 
