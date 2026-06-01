@@ -25,7 +25,7 @@ from missions.visual_tracking.stages.overhead_hold.config import (
     OverheadGimbalConfig,
     OverheadHoldConfig,
 )
-from app.mission_manager import MissionManagerConfig
+from missions.visual_tracking import VisualTrackingMissionConfig
 from app.health_monitor import HealthMonitorConfig
 from telemetry_link.config import TelemetryConfig, load_config_file as load_telemetry_config
 from uav_ui.yolo_command_client import YoloCommandConfig
@@ -93,7 +93,7 @@ class AppConfig:
     mission_name: str
     mission_settings: dict[str, Any]
     input_adapter: InputAdapterConfig
-    mission: MissionManagerConfig
+    visual_tracking: VisualTrackingMissionConfig
     approach_track: ApproachTrackConfig
     overhead_hold: OverheadHoldConfig
     shaper: CommandShaperConfig
@@ -207,7 +207,7 @@ def load_app_config(args: argparse.Namespace) -> AppConfig:
     executor_data = _section(app_data, "executor")
 
     input_adapter_cfg = _build_input_adapter_config(_section(mission_data, "input_adapter"))
-    mission_cfg = _build_mission_manager_config(mission_data)
+    visual_tracking_cfg = _build_visual_tracking_config(mission_data)
     health_cfg = _build_health_monitor_config(mission_data)
     approach_track_cfg = _build_approach_track_config(mission_data, mission_data)
     overhead_hold_cfg = _build_overhead_hold_config(mission_data, mission_data)
@@ -330,7 +330,7 @@ def load_app_config(args: argparse.Namespace) -> AppConfig:
         mission_name=mission_name,
         mission_settings=dict(mission_data),
         input_adapter=input_adapter_cfg,
-        mission=mission_cfg,
+        visual_tracking=visual_tracking_cfg,
         approach_track=approach_track_cfg,
         overhead_hold=overhead_hold_cfg,
         shaper=shaper_cfg,
@@ -678,8 +678,8 @@ def _build_executor_config(data: dict[str, Any]) -> FlightCommandExecutorConfig:
     )
 
 
-def _build_mission_manager_config(data: dict[str, Any]) -> MissionManagerConfig:
-    return MissionManagerConfig(
+def _build_visual_tracking_config(data: dict[str, Any]) -> VisualTrackingMissionConfig:
+    return VisualTrackingMissionConfig(
         initial_mode=str(data.get("initial_mode", "APPROACH_TRACK")),
         overhead_entry_target_size_thresh=float(
             data.get("overhead_entry_target_size_thresh", 0.30)

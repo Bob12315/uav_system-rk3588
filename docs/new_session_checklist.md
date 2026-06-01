@@ -94,13 +94,12 @@ app/mission_runner.py
 app/stage_registry.py
 app/health_monitor.py
 missions/base.py
-missions/visual_tracking.py
-missions/rescue_competition.py
+missions/visual_tracking/mission.py
+missions/rescue_competition/mission.py
 missions/common/navigation.py
 config/app.yaml
 missions/visual_tracking/config.yaml
 missions/rescue_competition/config.yaml
-tests/test_mission_manager.py
 tests/test_mission_runner.py
 tests/test_visual_tracking_mission.py
 tests/test_rescue_competition_mission.py

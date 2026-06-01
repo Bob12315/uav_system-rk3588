@@ -42,8 +42,8 @@ def test_loads_mission_local_config_layout() -> None:
     assert config.mission_settings["name"] == "visual_tracking"
     assert Path(config.mission_config_path).name == "config.yaml"
     assert Path(config.mission_config_path).parent.name == "visual_tracking"
-    assert config.mission.initial_mode == "OVERHEAD_HOLD"
-    assert config.mission.overhead_entry_target_size_thresh == pytest.approx(10.0)
+    assert config.visual_tracking.initial_mode == "OVERHEAD_HOLD"
+    assert config.visual_tracking.overhead_entry_target_size_thresh == pytest.approx(10.0)
     assert config.health.max_vision_age_s == pytest.approx(0.3)
     assert config.health.max_drone_age_s == pytest.approx(0.3)
     assert config.health.max_gimbal_age_s == pytest.approx(0.3)
@@ -132,8 +132,8 @@ def test_mission_config_path_can_be_declared_in_app_config(tmp_path) -> None:
 
     assert config.mission_config_path == str(mission_path)
     assert config.mission_name == "visual_tracking"
-    assert config.mission.initial_mode == "IDLE"
-    assert config.mission.auto_switch_enabled is False
+    assert config.visual_tracking.initial_mode == "IDLE"
+    assert config.visual_tracking.auto_switch_enabled is False
 
 
 def test_cli_mission_config_overrides_app_config_path(tmp_path) -> None:
@@ -182,7 +182,7 @@ def test_cli_mission_config_overrides_app_config_path(tmp_path) -> None:
     config = load_app_config(args)
 
     assert config.mission_config_path == str(cli_mission_path)
-    assert config.mission.initial_mode == "OVERHEAD_HOLD"
+    assert config.visual_tracking.initial_mode == "OVERHEAD_HOLD"
 
 
 def test_stage_registry_runtime_config_update_preserves_controller_references() -> None:

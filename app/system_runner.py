@@ -17,7 +17,6 @@ from app.app_config import AppConfig, ROOT_DIR, load_mission_stage_runtime_confi
 from app.blackbox_recorder import BlackboxRecorder
 from app.debug_runtime import DebugRuntime
 from app.health_monitor import HealthMonitor
-from app.mission_manager import MissionMode
 from app.mission_runner import MissionRunner
 from app.stage_registry import StageRegistry, copy_dataclass_values
 from app.service_manager import ServiceManager
@@ -282,7 +281,7 @@ class SystemRunner:
             self.stop_event.set()
 
     def _update_active_mode(self, mode_name: str, inputs) -> tuple[FlightCommand, object]:
-        if mode_name == MissionMode.IDLE.value:
+        if mode_name == "IDLE":
             return FlightCommand(valid=True), _Status("IDLE", False, True, "idle")
         try:
             mode = self.stage_registry.get(mode_name)
@@ -470,7 +469,7 @@ class SystemRunner:
             mission = build_mission_from_settings(
                 self.mission_runner.mission.name,
                 settings,
-                visual_config=self.config.mission,
+                visual_config=self.config.visual_tracking,
             )
             with self.runtime_config_lock:
                 self.mission_runner.mission = mission
@@ -555,7 +554,7 @@ class SystemRunner:
                 self.stage_registry.reset_all()
                 return CommandResult(True, "stage override auto")
             normalized = mode_name.strip().upper()
-            if normalized == MissionMode.IDLE.value:
+            if normalized == "IDLE":
                 self.debug_runtime.config.force_mode = normalized
                 return CommandResult(True, "stage override forced IDLE")
             try:
@@ -635,7 +634,7 @@ class SystemRunner:
             mission = build_mission_from_settings(
                 normalized,
                 settings,
-                visual_config=self.config.mission,
+                visual_config=self.config.visual_tracking,
             )
         except Exception as exc:
             self.logger.exception("failed to switch mission")

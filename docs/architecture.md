@@ -30,7 +30,6 @@ MissionStage.update()
 - `main.py`：总入口，只解析参数、加载配置、创建 `SystemRunner`。
 - `system_runner.py`：系统主循环，串联服务、融合、mission runner、stage controller 和执行器。
 - `mission_runner.py`：调用当前 mission，处理 `MissionAction` 的 once guard，并把 action 转发给 `LinkManager`。
-- `mission_manager.py`：旧视觉跟踪状态机兼容层，后续迁移完成后可移除。
 - `service_manager.py`：启动和停止 YOLO UDP 接收、telemetry link、fusion manager。
 - `health_monitor.py`：判断 vision/drone/gimbal/fusion/control 健康状态。
 - `debug_runtime.py`：强制模式、强制通道开关和 dry-run 调试覆盖。

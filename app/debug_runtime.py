@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any
-
-from app.mission_manager import MissionState
+from missions.base import MissionOutput
 from missions.common.control.debug_config import StageDebugConfig
 from missions.common.control.types import FlightCommand
 
@@ -12,20 +10,13 @@ from missions.common.control.types import FlightCommand
 class DebugRuntime:
     config: StageDebugConfig
 
-    def apply_mission_override(self, mission: Any) -> Any:
+    def apply_mission_override(self, mission: MissionOutput) -> MissionOutput:
         if not self.config.force_mode:
             return mission
-        if hasattr(mission, "previous_stage"):
-            return replace(
-                mission,
-                active_mode=self.config.force_mode,
-                previous_stage=mission.active_mode,
-                hold_reason="debug_force_mode",
-                detail=dict(mission.detail),
-            )
-        return MissionState(
+        return replace(
+            mission,
             active_mode=self.config.force_mode,
-            previous_mode=mission.active_mode,
+            previous_stage=mission.active_mode,
             hold_reason="debug_force_mode",
             detail=dict(mission.detail),
         )

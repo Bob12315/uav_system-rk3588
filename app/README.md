@@ -20,7 +20,6 @@
 - `system_runner.py`：主循环。
 - `service_manager.py`：YOLO UDP、telemetry、fusion 服务管理。
 - `mission_runner.py`：调用当前 mission，并分发 `MissionAction`。
-- `mission_manager.py`：旧视觉跟踪状态机兼容层。
 - `health_monitor.py`：数据健康状态。
 - `app_config.py`：加载 app 和 mission 配置；telemetry 配置复用 `telemetry_link.config`。
 - `debug_runtime.py`：强制模式和通道覆盖。

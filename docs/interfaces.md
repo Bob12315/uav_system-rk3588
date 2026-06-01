@@ -94,7 +94,7 @@
 
 创建者：`StageInputAdapter.adapt(fused: FusedState)`。
 
-消费者：`MissionManager`、`HealthMonitor`、所有 mission stage controller。
+消费者：missions、`HealthMonitor`、所有 mission stage controller。
 
 ## missions.common.control.types.FlightCommand
 

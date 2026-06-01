@@ -11,7 +11,6 @@ from missions.visual_tracking import VisualTrackingMission, VisualTrackingMissio
 
 if TYPE_CHECKING:
     from app.app_config import AppConfig
-    from app.mission_manager import MissionManagerConfig
 
 
 AVAILABLE_MISSIONS = ("visual_tracking", "rescue_competition")
@@ -25,7 +24,7 @@ def build_mission(name: str, config: AppConfig) -> Mission:
     return build_mission_from_settings(
         name,
         config.mission_settings,
-        visual_config=config.mission,
+        visual_config=config.visual_tracking,
     )
 
 
@@ -33,7 +32,7 @@ def build_mission_from_settings(
     name: str,
     settings: dict[str, object] | None = None,
     *,
-    visual_config: MissionManagerConfig | None = None,
+    visual_config: VisualTrackingMissionConfig | None = None,
 ) -> Mission:
     normalized = str(name).strip().lower()
     if normalized in {"", "visual_tracking"}:
@@ -45,7 +44,7 @@ def build_mission_from_settings(
 
 def _visual_tracking_config(
     settings: dict[str, object],
-    fallback: MissionManagerConfig | None,
+    fallback: VisualTrackingMissionConfig | None,
 ) -> VisualTrackingMissionConfig:
     freshness = _section(settings, "freshness")
     transitions = _section(settings, "transitions")
