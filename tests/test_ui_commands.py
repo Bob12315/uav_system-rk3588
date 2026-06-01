@@ -9,12 +9,16 @@ class _FakeManager:
     def __init__(self) -> None:
         self.clear_calls = 0
         self.velocity_commands: list[tuple[float, float, float, int]] = []
+        self.modes: list[str] = []
 
     def clear_continuous_commands(self) -> None:
         self.clear_calls += 1
 
     def send_velocity_command(self, vx: float, vy: float, vz: float, frame: int = 1) -> None:
         self.velocity_commands.append((vx, vy, vz, frame))
+
+    def set_mode(self, mode: str) -> None:
+        self.modes.append(mode)
 
 
 class _FakeYoloClient:
@@ -57,6 +61,19 @@ def test_control_send_off_clears_continuous_commands() -> None:
     assert result == CommandResult(True, "control send_commands=OFF")
     assert switches.snapshot().send_commands is False
     assert manager.clear_calls == 1
+
+
+def test_mode_action_does_not_disable_automatic_sending() -> None:
+    manager = _FakeManager()
+    switches = _switches()
+    handler = build_ui_command_handler(manager, controller_switches=switches)
+
+    result = handler("mode GUIDED")
+
+    assert result.ok is True
+    assert switches.snapshot().send_commands is True
+    assert manager.clear_calls == 0
+    assert manager.modes == ["GUIDED"]
 
 
 def test_target_lock_dispatches_yolo_udp_command() -> None:

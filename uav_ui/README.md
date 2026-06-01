@@ -196,10 +196,13 @@ mission reset
 
 `mission switch ...` 会重建当前 mission，恢复 `stage auto`，并重置 stage controller 和 command shaper。为避免切换瞬间沿用旧任务的连续控制，切换和重置都会把 `SEND` 置为 `OFF`，需要确认安全后再输入：
 
-`mission start` 会请求当前 mission 开始执行。对 `rescue_competition` 来说，它会从 `PREPARE` 等待本地位置有效后进入 `TAKEOFF`。
+`mission start` 会请求当前 mission 开始执行。对 `rescue_competition` 来说，它会从
+`PREPARE` 等待本地位置有效，进入 `ARM` 请求自动解锁，再进入 `TAKEOFF`。建议顺序：
 
 ```text
+mode GUIDED
 control send on
+mission start
 ```
 
 ## Stage 参数重载

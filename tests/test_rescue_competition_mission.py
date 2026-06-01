@@ -9,9 +9,11 @@ from missions.base import MissionContext
 from missions.rescue_competition import (
     MissionZone,
     DropAlignConfig,
+    DropMissionConfig,
     PayloadRelease,
     PayloadReleaseTiming,
     PayloadSlot,
+    ReconMissionConfig,
     ReportedTarget,
     RecceMissionConfig,
     RescueCompetitionMission,
@@ -122,9 +124,14 @@ def _object(
     )
 
 
+def _scan_route(name: str = "scan_1") -> list[RoutePoint]:
+    return [RoutePoint(name=name, x=5.0, y=0.0, z=-3.0)]
+
+
 def test_rescue_stage_enum_matches_planned_route() -> None:
     assert [stage.value for stage in RescueStage] == [
         "PREPARE",
+        "ARM",
         "TAKEOFF",
         "GOTO_DROPZONE",
         "DROP_SCAN",
@@ -177,7 +184,7 @@ def test_prepare_captures_origin_but_does_not_autostart_by_default() -> None:
     assert output.actions == []
 
 
-def test_prepare_autostart_transitions_to_takeoff_without_emitting_action_yet() -> None:
+def test_prepare_autostart_transitions_to_arm_without_emitting_action_yet() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(auto_start=True)
     )
@@ -185,20 +192,36 @@ def test_prepare_autostart_transitions_to_takeoff_without_emitting_action_yet() 
 
     output = mission.update(_context(drone=drone))
 
-    assert output.stage == "TAKEOFF"
+    assert output.stage == "ARM"
     assert output.previous_stage == "PREPARE"
     assert output.actions == []
 
 
-def test_start_request_transitions_from_prepare_when_origin_is_ready() -> None:
+def test_start_request_transitions_from_prepare_to_arm_when_origin_is_ready() -> None:
     mission = RescueCompetitionMission()
     mission.start()
     drone = DroneState(local_position_valid=True)
 
     output = mission.update(_context(drone=drone))
 
-    assert output.stage == "TAKEOFF"
+    assert output.stage == "ARM"
     assert output.previous_stage == "PREPARE"
+
+
+def test_arm_stage_requests_unlock_until_vehicle_is_armed() -> None:
+    mission = RescueCompetitionMission(
+        RescueCompetitionMissionConfig(initial_stage=RescueStage.ARM)
+    )
+
+    waiting = mission.update(_context(actions_enabled=True))
+    armed = mission.update(_context(drone=DroneState(armed=True), actions_enabled=True))
+
+    assert waiting.stage == "ARM"
+    assert waiting.hold_reason == "waiting_vehicle_arm"
+    assert waiting.actions[0].action_type == "arm"
+    assert waiting.actions[0].key == "rescue_arm"
+    assert armed.stage == "TAKEOFF"
+    assert armed.previous_stage == "ARM"
 
 
 def test_takeoff_stage_emits_once_takeoff_action_and_advances_at_altitude() -> None:
@@ -275,6 +298,7 @@ def test_search_drop_targets_switches_to_overhead_hold_when_scene_target_stable(
         RescueCompetitionMissionConfig(
             initial_stage=RescueStage.DROP_SCAN,
             drop_target_stable_frames=2,
+            drop=DropMissionConfig(scan_route=_scan_route()),
         )
     )
     scene = _scene(_object(track_id=7, class_name="cylinder", confidence=0.8))
@@ -284,7 +308,7 @@ def test_search_drop_targets_switches_to_overhead_hold_when_scene_target_stable(
 
     assert searching.stage == "DROP_SCAN"
     assert searching.active_mode == "IDLE"
-    assert searching.hold_reason == "drop_scanning"
+    assert searching.hold_reason == "drop_scanning:scan_1"
     assert acquired.stage == "DROP_ALIGN"
     assert acquired.previous_stage == "DROP_SCAN"
     assert acquired.active_mode == "IDLE"
@@ -297,13 +321,16 @@ def test_search_drop_targets_switches_to_overhead_hold_when_scene_target_stable(
 
 def test_search_drop_targets_does_not_trigger_without_scene() -> None:
     mission = RescueCompetitionMission(
-        RescueCompetitionMissionConfig(initial_stage=RescueStage.DROP_SCAN)
+        RescueCompetitionMissionConfig(
+            initial_stage=RescueStage.DROP_SCAN,
+            drop=DropMissionConfig(scan_route=_scan_route()),
+        )
     )
 
     output = mission.update(_context(target_ready=True, scene=None))
 
     assert output.stage == "DROP_SCAN"
-    assert output.hold_reason == "drop_scanning"
+    assert output.hold_reason == "drop_scanning:scan_1"
 
 
 def test_search_drop_targets_filters_scene_candidates() -> None:
@@ -314,6 +341,7 @@ def test_search_drop_targets_filters_scene_candidates() -> None:
             drop_target_min_confidence=0.5,
             drop_target_max_center_error=0.35,
             drop_target_stable_frames=1,
+            drop=DropMissionConfig(scan_route=_scan_route()),
         )
     )
 
@@ -358,6 +386,7 @@ def test_search_drop_targets_can_stabilize_untracked_candidate_by_center() -> No
         RescueCompetitionMissionConfig(
             initial_stage=RescueStage.DROP_SCAN,
             drop_target_stable_frames=2,
+            drop=DropMissionConfig(scan_route=_scan_route()),
         )
     )
 
@@ -373,25 +402,25 @@ def test_search_drop_targets_can_stabilize_untracked_candidate_by_center() -> No
     assert [action.action_type for action in second.actions] == ["set_mode"]
 
 
-def test_search_drop_targets_can_skip_vision_after_dry_run_hold() -> None:
+def test_search_drop_targets_skip_alignment_when_scan_route_finishes_without_target() -> None:
     mission = RescueCompetitionMission(
         RescueCompetitionMissionConfig(
             initial_stage=RescueStage.DROP_SCAN,
             dry_run_skip_vision=True,
-            search_drop_duration_s=2.0,
+            drop=DropMissionConfig(
+                scan_route=[RoutePoint(name="scan_1", x=0.0, y=0.0, z=0.0)]
+            ),
         )
     )
+    drone = DroneState(local_position_valid=True)
+    mission._origin = LocalMissionFrame(origin_x=0.0, origin_y=0.0, origin_z=0.0)
 
-    first = mission.update(_context(timestamp=10.0, target_ready=False))
-    second = mission.update(_context(timestamp=11.0, target_ready=False))
-    third = mission.update(_context(timestamp=12.1, target_ready=False))
+    output = mission.update(_context(timestamp=10.0, drone=drone, target_ready=False))
 
-    assert first.stage == "DROP_SCAN"
-    assert second.stage == "DROP_SCAN"
-    assert third.stage == "DROP_ALIGN"
-    assert third.previous_stage == "DROP_SCAN"
-    assert third.active_mode == "IDLE"
-    assert third.hold_reason == "dry_run_drop_target_skip"
+    assert output.stage == "GOTO_RECON"
+    assert output.previous_stage == "DROP_SCAN"
+    assert output.active_mode == "IDLE"
+    assert output.hold_reason == "drop_scan_complete_no_target"
 
 
 def test_drop_release_fails_safely_when_payload_release_is_not_configured() -> None:
@@ -671,6 +700,7 @@ def test_scan_recce_area_waits_then_advances_home() -> None:
         RescueCompetitionMissionConfig(
             initial_stage=RescueStage.RECON_SCAN,
             recce=RecceMissionConfig(scan_duration_s=2.0, output_json=False, output_csv=False),
+            recon=ReconMissionConfig(scan_timeout_s=2.0, scan_route=_scan_route()),
         )
     )
 
@@ -679,10 +709,29 @@ def test_scan_recce_area_waits_then_advances_home() -> None:
     third = mission.update(_context(timestamp=12.1))
 
     assert first.stage == "RECON_SCAN"
-    assert first.hold_reason == "recon_scanning"
+    assert first.hold_reason == "recon_scanning:scan_1"
     assert second.stage == "RECON_SCAN"
     assert third.stage == "RETURN_HOME"
     assert third.previous_stage == "RECON_SCAN"
+
+
+def test_recon_scan_route_finishes_without_target_and_returns_home() -> None:
+    mission = RescueCompetitionMission(
+        RescueCompetitionMissionConfig(
+            initial_stage=RescueStage.RECON_SCAN,
+            recce=RecceMissionConfig(output_json=False, output_csv=False),
+            recon=ReconMissionConfig(
+                scan_route=[RoutePoint(name="scan_1", x=0.0, y=0.0, z=0.0)]
+            ),
+        )
+    )
+    mission._origin = LocalMissionFrame(origin_x=0.0, origin_y=0.0, origin_z=0.0)
+
+    output = mission.update(_context(drone=DroneState(local_position_valid=True)))
+
+    assert output.stage == "RETURN_HOME"
+    assert output.previous_stage == "RECON_SCAN"
+    assert output.hold_reason == "recon_scan_complete_no_target"
 
 
 def test_scan_recce_area_accumulates_results_and_writes_output(tmp_path) -> None:
@@ -701,6 +750,7 @@ def test_scan_recce_area_accumulates_results_and_writes_output(tmp_path) -> None
                 output_json=True,
                 output_csv=True,
             ),
+            recon=ReconMissionConfig(scan_timeout_s=2.0, scan_route=_scan_route()),
         )
     )
     scene = _scene(
@@ -761,6 +811,7 @@ def test_scan_recce_area_without_scene_still_advances_home(tmp_path) -> None:
                 output_json=True,
                 output_csv=False,
             ),
+            recon=ReconMissionConfig(scan_timeout_s=0.5, scan_route=_scan_route()),
         )
     )
 
@@ -937,6 +988,11 @@ def test_build_rescue_config_parses_route_zones_and_payloads(tmp_path) -> None:
                 "timeout_s": 12.0,
                 "lost_timeout_s": 1.5,
             },
+            "drop": {
+                "scan_route": [
+                    {"name": "drop_scan_1", "x": 2.0, "y": -1.0, "z": -3.0}
+                ]
+            },
             "payload_release": {"delay_after_action_s": 1.2},
             "recce": {
                 "cylinder_classes": ["recce_cylinder", "cylinder"],
@@ -949,6 +1005,11 @@ def test_build_rescue_config_parses_route_zones_and_payloads(tmp_path) -> None:
                 "output_dir": str(tmp_path),
                 "output_json": "true",
                 "output_csv": "false",
+            },
+            "recon": {
+                "scan_route": [
+                    {"name": "recon_scan_1", "x": 3.0, "y": 1.0, "z": -3.0}
+                ]
             },
             "scan_duration_s": 4.5,
             "land_complete_altitude_m": 0.25,
@@ -1012,6 +1073,9 @@ def test_build_rescue_config_parses_route_zones_and_payloads(tmp_path) -> None:
         lost_timeout_s=1.5,
     )
     assert config.payload_release == PayloadReleaseTiming(delay_after_action_s=1.2)
+    assert config.drop.scan_route == [
+        RoutePoint(name="drop_scan_1", x=2.0, y=-1.0, z=-3.0)
+    ]
     assert config.recce.config.cylinder_classes == {"recce_cylinder", "cylinder"}
     assert config.recce.config.hazard_classes == {"flammable", "toxic"}
     assert config.recce.config.min_cylinder_confidence == 0.4
@@ -1022,6 +1086,9 @@ def test_build_rescue_config_parses_route_zones_and_payloads(tmp_path) -> None:
     assert config.recce.output_dir == str(tmp_path)
     assert config.recce.output_json is True
     assert config.recce.output_csv is False
+    assert config.recon.scan_route == [
+        RoutePoint(name="recon_scan_1", x=3.0, y=1.0, z=-3.0)
+    ]
     assert config.scan_duration_s == 4.5
     assert config.land_complete_altitude_m == 0.25
     assert config.route == [

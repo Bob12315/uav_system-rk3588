@@ -349,4 +349,6 @@ gimbal_rate 0 20 lock
 
 ## 注意
 
-在 app/control UI 中，输入手动 MAVLink 命令后，系统会自动关闭 control 连续命令发送，避免自动控制和人工输入同时争用飞控命令。
+在 app/control UI 中，输入 `body_vel`、`yaw_rate`、`stop`、`gimbal_rate` 这类连续
+人工控制命令后，系统会自动关闭 control 连续命令发送，避免自动控制和人工输入同时
+争用飞控命令。`mode`、`arm`、`takeoff` 等一次性动作不会自动关闭 `SEND`。

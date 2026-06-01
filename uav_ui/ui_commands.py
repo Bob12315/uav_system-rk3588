@@ -9,30 +9,6 @@ from uav_ui.yolo_command_client import YoloCommandClient
 
 
 _CONTINUOUS_MANUAL_COMMANDS = {"body_vel", "yaw_rate", "stop", "gimbal_rate"}
-_MANUAL_COMMANDS = {
-    "switch_source",
-    "mode",
-    "arm",
-    "disarm",
-    "takeoff",
-    "land",
-    "condition_yaw",
-    "change_speed",
-    "set_home",
-    "global_goto",
-    "local_pos",
-    "reposition",
-    "set_roi_location",
-    "roi_none",
-    "gimbal_manager_configure",
-    "set_message_interval",
-    "message_interval",
-    "body_vel",
-    "yaw_rate",
-    "stop",
-    "gimbal",
-    "gimbal_rate",
-}
 
 
 def build_ui_command_handler(
@@ -57,16 +33,12 @@ def build_ui_command_handler(
         if own_result is not None:
             return own_result
         command_root = _command_root(command)
-        sending_disabled_before_dispatch = False
         if command_root in _CONTINUOUS_MANUAL_COMMANDS:
-            sending_disabled_before_dispatch = _disable_control_sending_for_manual_command(
+            _disable_control_sending_for_manual_command(
                 manager,
                 controller_switches,
             )
-        result = dispatch_text_command(manager, command)
-        if result.ok and command_root in _MANUAL_COMMANDS and not sending_disabled_before_dispatch:
-            _disable_control_sending_for_manual_command(manager, controller_switches)
-        return result
+        return dispatch_text_command(manager, command)
 
     return _handle
 

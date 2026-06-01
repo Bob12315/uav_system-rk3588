@@ -102,7 +102,7 @@ initial_stage: PREPARE
 auto_start: false
 takeoff_altitude_m: 5.0
 local_position_frame: 1
-align_mode: OVERHEAD_HOLD
+align_mode: FIXED_DOWNWARD_HOLD
 land_complete_altitude_m: 0.3
 route: []
 drop_zones: []
@@ -115,6 +115,8 @@ payload_slots: []
 - `payload_slots`：投放载荷列表，可为每个载荷配置舵机或继电器动作。
 - `drop`：投放搜索、下降、投放后上升和恢复扫描参数。
 - `recce` / `recon`：侦察扫描、目标识别和结果输出参数。
+- `drop.scan_route` / `recon.scan_route`：任务相对 NED 坐标下的显式扫描航点。
+- `fixed_downward_hold`：比赛任务固定垂直下视摄像头的水平对准参数，不使用云台。
 - `land_complete_altitude_m`：降落完成的相对高度阈值。
 
 ## missions/<mission_name>/config.yaml

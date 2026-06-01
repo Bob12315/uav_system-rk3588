@@ -19,6 +19,7 @@ from missions.common.recce_output import write_recce_results
 
 class RescueStage(str, Enum):
     PREPARE = "PREPARE"
+    ARM = "ARM"
     TAKEOFF = "TAKEOFF"
     GOTO_DROPZONE = "GOTO_DROPZONE"
     FOLLOW_ROUTE_TO_DROP_ZONE = "GOTO_DROPZONE"
@@ -147,6 +148,7 @@ class DropMissionConfig:
     stable_hold_s: float = 3.0
     dropped_target_radius_m: float = 0.8
     resume_skip_m: float = 0.6
+    scan_route: list[RoutePoint] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -159,6 +161,7 @@ class ReconMissionConfig:
     align_hold_s: float = 0.5
     descend_hold_s: float = 0.5
     reported_target_radius_m: float = 0.8
+    scan_route: list[RoutePoint] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -209,7 +212,7 @@ class RescueCompetitionMissionConfig:
     recce_route_end_name: str = "recce_center"
     home_route_end_name: str = "home"
     route_hold_s: float = 0.0
-    align_mode: str = "OVERHEAD_HOLD"
+    align_mode: str = "FIXED_DOWNWARD_HOLD"
     dry_run_skip_vision: bool = False
     dry_run_skip_payload_release: bool = False
     search_drop_duration_s: float = 2.0
@@ -243,6 +246,8 @@ class RescueCompetitionMission:
     _stage: RescueStage = field(init=False)
     _origin: LocalMissionFrame | None = field(init=False, default=None)
     _route_index: int = field(init=False, default=0)
+    _drop_scan_index: int = field(init=False, default=0)
+    _recon_scan_index: int = field(init=False, default=0)
     _payload_index: int = field(init=False, default=0)
     _drop_count: int = field(init=False, default=0)
     _stage_started_at: float | None = field(init=False, default=None)
@@ -262,7 +267,6 @@ class RescueCompetitionMission:
     _start_requested: bool = field(init=False, default=False)
     _dropped_targets: list[DroppedTarget] = field(init=False, default_factory=list)
     _reported_targets: list[ReportedTarget] = field(init=False, default_factory=list)
-    _scan_resume_y: float | None = field(init=False, default=None)
     _recon_candidate: Any | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
@@ -273,6 +277,8 @@ class RescueCompetitionMission:
         self._stage = self._stage_value(self.config.initial_stage)
         self._origin = None
         self._route_index = 0
+        self._drop_scan_index = 0
+        self._recon_scan_index = 0
         self._payload_index = 0
         self._drop_count = 0
         self._stage_started_at = None
@@ -289,7 +295,6 @@ class RescueCompetitionMission:
         self._start_requested = False
         self._dropped_targets = []
         self._reported_targets = []
-        self._scan_resume_y = None
         self._recon_candidate = None
 
     def start(self) -> None:
@@ -310,6 +315,24 @@ class RescueCompetitionMission:
 
         if self._stage == RescueStage.PREPARE:
             hold_reason = self._update_prepare(context)
+        elif self._stage == RescueStage.ARM:
+            if context.drone.armed:
+                self._transition_to(RescueStage.TAKEOFF)
+                hold_reason = "vehicle_armed"
+            else:
+                actions.append(
+                    MissionAction(
+                        "arm",
+                        key="rescue_arm",
+                        once=True,
+                        priority=1,
+                    )
+                )
+                hold_reason = (
+                    "waiting_vehicle_arm"
+                    if context.actions_enabled
+                    else "arm_actions_disabled"
+                )
         elif self._stage == RescueStage.TAKEOFF:
             actions.append(
                 MissionAction(
@@ -395,9 +418,13 @@ class RescueCompetitionMission:
                 "timestamp": float(context.timestamp),
                 "origin_captured": self._origin is not None,
                 "route_index": self._route_index,
+                "drop_scan_index": self._drop_scan_index,
+                "recon_scan_index": self._recon_scan_index,
                 "payload_index": self._payload_index,
                 "drop_count": self._drop_count,
                 "route_points": len(self.config.route),
+                "drop_scan_points": len(self.config.drop.scan_route),
+                "recon_scan_points": len(self.config.recon.scan_route),
                 "drop_zones": len(self.config.drop_zones),
                 "recce_zones": len(self.config.recce_zones),
                 "payloads": len(self.config.payloads),
@@ -446,7 +473,7 @@ class RescueCompetitionMission:
                 yaw_rad=float(context.drone.yaw),
             )
         if self.config.auto_start or self._start_requested:
-            self._transition_to(RescueStage.TAKEOFF)
+            self._transition_to(RescueStage.ARM)
             self._start_requested = False
         return ""
 
@@ -551,21 +578,34 @@ class RescueCompetitionMission:
             candidate = self._update_drop_candidate(context)
         if candidate is not None:
             self._select_drop_target(candidate, context, actions)
+            self._drop_scan_index += 1
             self._transition_to(RescueStage.DROP_ALIGN)
             return "drop_target_acquired"
-        if self.config.dry_run_skip_vision and hold_elapsed(
-            context.timestamp,
-            self._stage_started_at,
-            self.config.search_drop_duration_s,
+        if self._drop_scan_index >= len(self.config.drop.scan_route):
+            self._transition_to(RescueStage.GOTO_RECON)
+            return "drop_scan_complete_no_target"
+        point = self.config.drop.scan_route[self._drop_scan_index]
+        self._append_local_position_action(
+            actions,
+            goal_target_tuple(point),
+            f"drop_scan_{self._drop_scan_index}_{point.name}",
+        )
+        if self._mission_goal_stable(
+            context,
+            goal_target_tuple(point),
+            xy_tolerance_m=point.xy_tolerance_m,
+            z_tolerance_m=point.z_tolerance_m,
+            max_speed_mps=point.max_speed_mps,
         ):
-            self._transition_to(RescueStage.DROP_ALIGN)
-            return "dry_run_drop_target_skip"
-
-        self._append_local_position_action(actions, self._drop_scan_target(), "drop_scan_sweep")
+            self._drop_scan_index += 1
+            if self._drop_scan_index >= len(self.config.drop.scan_route):
+                self._transition_to(RescueStage.GOTO_RECON)
+                return "drop_scan_complete_no_target"
+            return f"drop_scan_arrived:{point.name}"
         if hold_elapsed(context.timestamp, self._stage_started_at, self.config.drop.scan_timeout_s):
-            self._transition_to(RescueStage.FAILSAFE)
+            self._transition_to(RescueStage.GOTO_RECON)
             return "drop_scan_timeout"
-        return "drop_scanning"
+        return f"drop_scanning:{point.name}"
 
     def _update_drop_align(
         self,
@@ -696,13 +736,8 @@ class RescueCompetitionMission:
         context: MissionContext,
         actions: list[MissionAction],
     ) -> str:
-        actions.append(self._set_mode_action("GUIDED", "drop_resume_scan_guided"))
-        target = self._drop_resume_target(context)
-        self._append_local_position_action(actions, target, "drop_resume_scan")
-        if self._mission_goal_stable(context, target, xy_tolerance_m=0.7, z_tolerance_m=0.4):
-            self._transition_to(RescueStage.DROP_SCAN)
-            return "drop_scan_resumed"
-        return "drop_resuming_scan"
+        self._transition_to(RescueStage.DROP_SCAN)
+        return "drop_scan_resumed"
 
     def _update_recon_scan(
         self,
@@ -715,15 +750,37 @@ class RescueCompetitionMission:
         candidate = None if self._near_reported_target(context) else self._select_recon_candidate(context.scene)
         if candidate is not None:
             self._recon_candidate = candidate
+            self._recon_scan_index += 1
             self._transition_to(RescueStage.RECON_ALIGN)
             return "recon_target_acquired"
-        self._append_local_position_action(actions, self._recon_scan_target(), "recon_scan_sweep")
-        elapsed = 0.0 if self._stage_started_at is None else float(context.timestamp) - self._stage_started_at
-        if elapsed >= min(self.config.recce.scan_duration_s, self.config.recon.scan_timeout_s):
+        if self._recon_scan_index >= len(self.config.recon.scan_route):
             self._finalize_recce_results(context.timestamp)
             self._transition_to(RescueStage.RETURN_HOME)
-            return "recon_scan_complete"
-        return "recon_scanning"
+            return "recon_scan_complete_no_target"
+        point = self.config.recon.scan_route[self._recon_scan_index]
+        self._append_local_position_action(
+            actions,
+            goal_target_tuple(point),
+            f"recon_scan_{self._recon_scan_index}_{point.name}",
+        )
+        if self._mission_goal_stable(
+            context,
+            goal_target_tuple(point),
+            xy_tolerance_m=point.xy_tolerance_m,
+            z_tolerance_m=point.z_tolerance_m,
+            max_speed_mps=point.max_speed_mps,
+        ):
+            self._recon_scan_index += 1
+            if self._recon_scan_index >= len(self.config.recon.scan_route):
+                self._finalize_recce_results(context.timestamp)
+                self._transition_to(RescueStage.RETURN_HOME)
+                return "recon_scan_complete_no_target"
+            return f"recon_scan_arrived:{point.name}"
+        if hold_elapsed(context.timestamp, self._stage_started_at, self.config.recon.scan_timeout_s):
+            self._finalize_recce_results(context.timestamp)
+            self._transition_to(RescueStage.RETURN_HOME)
+            return "recon_scan_timeout"
+        return f"recon_scanning:{point.name}"
 
     def _update_recon_align(
         self,
@@ -775,16 +832,6 @@ class RescueCompetitionMission:
         self._recon_candidate = None
         self._transition_to(RescueStage.RECON_SCAN)
         return "recon_target_reported"
-
-    def _update_scan_recce_area(self, context: MissionContext) -> str:
-        if context.scene is not None and context.scene.valid:
-            self._recce_accumulator.update(context.scene, context.timestamp)
-        elapsed = 0.0 if self._stage_started_at is None else float(context.timestamp) - self._stage_started_at
-        if elapsed >= self.config.recce.scan_duration_s:
-            self._finalize_recce_results(context.timestamp)
-            self._transition_to(RescueStage.RETURN_HOME)
-            return ""
-        return "scanning_recce_area"
 
     def _finalize_recce_results(self, timestamp: float) -> None:
         self._recce_results = self._recce_accumulator.results()
@@ -857,42 +904,6 @@ class RescueCompetitionMission:
             priority=2,
         )
 
-    def _drop_scan_target(self) -> tuple[float, float, float]:
-        center = self._route_point_for_name(self.config.drop_route_end_name)
-        y = (
-            center.y + self.config.drop.scan_width_m / 2.0
-            if self.config.drop.scan_direction == "left_to_right"
-            else center.y - self.config.drop.scan_width_m / 2.0
-        )
-        if self._scan_resume_y is not None:
-            y = (
-                max(y, self._scan_resume_y)
-                if self.config.drop.scan_direction == "left_to_right"
-                else min(y, self._scan_resume_y)
-            )
-        return (center.x, y, -abs(self.config.drop.scan_height_m))
-
-    def _drop_resume_target(self, context: MissionContext) -> tuple[float, float, float]:
-        current = self._current_mission_position(context)
-        step = self.config.drop.resume_skip_m
-        if self.config.drop.scan_direction == "right_to_left":
-            step = -step
-        y = current[1] + step
-        self._scan_resume_y = y
-        center = self._route_point_for_name(self.config.drop_route_end_name)
-        return (center.x, y, -abs(self.config.drop.scan_height_m))
-
-    def _recon_scan_target(self) -> tuple[float, float, float]:
-        center = self._route_point_for_name(self.config.recce_route_end_name)
-        y = center.y + self.config.recon.scan_width_m / 2.0
-        return (center.x, y, -abs(self.config.recon.scan_height_m))
-
-    def _route_point_for_name(self, name: str) -> RoutePoint:
-        for point in self.config.route:
-            if point.name == name:
-                return point
-        return RoutePoint(name=name, x=0.0, y=0.0, z=-abs(self.config.drop.scan_height_m))
-
     def _current_xy_target(self, context: MissionContext, z: float) -> tuple[float, float, float]:
         current = self._current_mission_position(context)
         return (current[0], current[1], z)
@@ -909,6 +920,7 @@ class RescueCompetitionMission:
         *,
         xy_tolerance_m: float,
         z_tolerance_m: float,
+        max_speed_mps: float = 0.6,
     ) -> bool:
         if self._origin is None:
             return False
@@ -919,7 +931,7 @@ class RescueCompetitionMission:
             target,
             xy_tolerance_m,
             z_tolerance_m,
-            max_speed_mps=0.6,
+            max_speed_mps=max_speed_mps,
         )
 
     def _current_payload_offset(self) -> dict[str, float]:
@@ -1199,7 +1211,7 @@ def build_rescue_config(settings: dict[str, Any]) -> RescueCompetitionMissionCon
         recce_route_end_name=str(settings.get("recce_route_end_name", "recce_center")),
         home_route_end_name=str(settings.get("home_route_end_name", "home")),
         route_hold_s=float(settings.get("route_hold_s", 0.0)),
-        align_mode=str(settings.get("align_mode", "OVERHEAD_HOLD")),
+        align_mode=str(settings.get("align_mode", "FIXED_DOWNWARD_HOLD")),
         dry_run_skip_vision=_strict_bool(settings.get("dry_run_skip_vision", False)),
         dry_run_skip_payload_release=_strict_bool(settings.get("dry_run_skip_payload_release", False)),
         search_drop_duration_s=float(settings.get("search_drop_duration_s", 2.0)),
@@ -1363,6 +1375,10 @@ def _drop_config(item: Any) -> DropMissionConfig:
             item.get("dropped_target_radius_m", item.get("target_blacklist_radius_m", 0.8))
         ),
         resume_skip_m=float(item.get("drop_resume_skip_m", item.get("resume_skip_m", 0.6))),
+        scan_route=[
+            _route_point(point, index)
+            for index, point in enumerate(_list(item, "scan_route"))
+        ],
     )
 
 
@@ -1380,6 +1396,10 @@ def _recon_config(item: Any) -> ReconMissionConfig:
         align_hold_s=float(item.get("align_hold_s", 0.5)),
         descend_hold_s=float(item.get("descend_hold_s", 0.5)),
         reported_target_radius_m=float(item.get("reported_target_radius_m", 0.8)),
+        scan_route=[
+            _route_point(point, index)
+            for index, point in enumerate(_list(item, "scan_route"))
+        ],
     )
 
 

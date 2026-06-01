@@ -137,7 +137,7 @@ missions/rescue_competition/config.yaml
 ```yaml
 name: rescue_competition
 initial_stage: PREPARE
-auto_start: true
+auto_start: false
 takeoff_altitude_m: 5.0
 takeoff_altitude_tolerance_m: 0.5
 local_position_frame: 1
@@ -153,11 +153,11 @@ home_route_end_name: home
 含义：
 
 ```text
-auto_start: true
-  本地位置可用后自动进入 TAKEOFF。
+auto_start: false
+  建议由操作员按顺序输入 mode GUIDED、control send on、mission start。
 
 dry_run_skip_vision: true
-  暂时不等 YOLO 发现圆筒，到投放区后按时间模拟发现目标。
+  暂时不使用 YOLO 候选。扫描点走完后直接进入下一流程，不模拟发现目标。
 
 dry_run_skip_payload_release: true
   暂时不要求舵机/继电器投放配置，模拟投放完成。
@@ -319,6 +319,27 @@ drop_target_max_center_error: 0.35
 
 类别名必须和 YOLO 模型输出一致。
 
+### 5.5 显式扫描航点
+
+投放区和侦察区都按 YAML 中的任务相对 NED 航点逐点扫描：
+
+```yaml
+drop:
+  scan_route:
+    - {name: drop_scan_left, x: 30.0, y: -2.5, z: -5.0}
+    - {name: drop_scan_center, x: 30.0, y: 0.0, z: -5.0}
+    - {name: drop_scan_right, x: 30.0, y: 2.5, z: -5.0}
+
+recon:
+  scan_route:
+    - {name: recon_scan_left, x: 55.0, y: -2.5, z: -5.0}
+    - {name: recon_scan_center, x: 55.0, y: 0.0, z: -5.0}
+    - {name: recon_scan_right, x: 55.0, y: 2.5, z: -5.0}
+```
+
+投放扫描完成仍无目标时进入 `GOTO_RECON`；侦察扫描完成仍无危险品时进入
+`RETURN_HOME`。比赛任务使用固定垂直下视摄像头，不发送云台控制命令。
+
 ## 6. 启动 SITL
 
 如果用 Gazebo/ArduPilot，参考：
@@ -343,6 +364,10 @@ gz topic \
   -m gz.msgs.Boolean \
   -p "data: 1"
 ```
+
+比赛任务把摄像头视为固定垂直下视设备。Gazebo 模型应将相机 pitch 固定为 `-90°`，
+运行期间不要再发送云台角度或速率命令。现有带云台模型也可以用于提供相机流，但需
+在仿真模型侧固定角度。
 
 确认 SITL 端口和 `config/telemetry.yaml` 一致。
 
@@ -411,8 +436,8 @@ python -m app.main \
 这会允许：
 
 ```text
-MissionAction 实发：takeoff/local_position/land/set_servo/set_relay
-FlightCommand 实发：OVERHEAD_HOLD 等连续控制
+MissionAction 实发：arm/takeoff/local_position/land/set_servo/set_relay
+FlightCommand 实发：FIXED_DOWNWARD_HOLD 水平对准控制
 ```
 
 所以只在 SITL 中使用。
@@ -501,12 +526,14 @@ TX action queued action=set_servo
 
 ## 10. 常见问题
 
-### 10.1 一直不自动起飞
+### 10.1 点击启动后不解锁或不起飞
 
 检查：
 
-```yaml
-auto_start: true
+```text
+mode GUIDED
+control send on
+mission start
 ```
 
 检查 telemetry 是否有本地位置：
@@ -516,7 +543,8 @@ LOCAL_POSITION_NED
 local_position_valid
 ```
 
-如果没有 local position，mission 会停在 `PREPARE`。
+如果没有 local position，mission 会停在 `PREPARE`。如果 `SEND=OFF`，mission 会停在
+`ARM` 并提示 `arm_actions_disabled`。
 
 ### 10.2 SITL 连不上
 
@@ -548,11 +576,13 @@ tcp_port: 5760
 
 ### 10.4 到投放区不继续
 
-如果暂时不接 YOLO，确认：
+如果暂时不接 YOLO，可设置：
 
 ```yaml
 dry_run_skip_vision: true
 ```
+
+这会在扫描点走完后跳过投放，不会模拟目标或进入 `DROP_ALIGN`。
 
 如果接 YOLO，确认：
 

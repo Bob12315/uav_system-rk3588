@@ -50,6 +50,7 @@ class SystemRunner:
         self.stage_registry = StageRegistry(
             approach_config=config.approach_track,
             overhead_config=config.overhead_hold,
+            fixed_downward_config=config.fixed_downward_hold,
         )
         self.command_shaper = CommandShaper(config=config.shaper)
         self.executor = FlightCommandExecutor(config=config.executor)
@@ -483,11 +484,7 @@ class SystemRunner:
                 self.mission_runner.mission = mission
                 self.config.mission_settings = dict(settings)
                 self._reset_mission_runtime(clear_for_safety=True)
-            result = (
-                self._reload_mission_stage_config()
-                if self.mission_runner.mission.name == "visual_tracking"
-                else CommandResult(True, f"mission config reloaded: {relative_path}")
-            )
+            result = self._reload_mission_stage_config()
         except Exception as exc:
             self.logger.exception("failed to reload active mission config")
             result = CommandResult(False, f"mission config reload failed: {exc}")
@@ -664,10 +661,13 @@ class SystemRunner:
             self.config.mission_config_path = str(config_path)
             self.debug_runtime.config.force_mode = None
             self._reset_mission_runtime(clear_for_safety=True)
-            return CommandResult(
-                True,
-                f"mission switched {previous} -> {mission.name}; stage auto; SEND=OFF",
-            )
+        reload_result = self._reload_mission_stage_config()
+        if not reload_result.ok:
+            return reload_result
+        return CommandResult(
+            True,
+            f"mission switched {previous} -> {mission.name}; stage auto; SEND=OFF",
+        )
 
     def _reset_mission_runtime(self, *, clear_for_safety: bool) -> None:
         self.mission_runner.reset()
@@ -714,7 +714,7 @@ class SystemRunner:
         if not path:
             return CommandResult(False, "mission config reload is unavailable for legacy config")
         try:
-            input_adapter_cfg, health_cfg, approach_cfg, overhead_cfg, shaper_cfg = load_mission_stage_runtime_config(
+            input_adapter_cfg, health_cfg, approach_cfg, overhead_cfg, fixed_downward_cfg, shaper_cfg = load_mission_stage_runtime_config(
                 self.config.mission_config_path,
             )
         except Exception as exc:
@@ -726,10 +726,12 @@ class SystemRunner:
             copy_dataclass_values(self.config.health, health_cfg)
             copy_dataclass_values(self.config.approach_track, approach_cfg)
             copy_dataclass_values(self.config.overhead_hold, overhead_cfg)
+            copy_dataclass_values(self.config.fixed_downward_hold, fixed_downward_cfg)
             copy_dataclass_values(self.config.shaper, shaper_cfg)
             self.stage_registry.apply_configs(
                 approach_config=approach_cfg,
                 overhead_config=overhead_cfg,
+                fixed_downward_config=fixed_downward_cfg,
                 reset=True,
             )
             self.input_adapter.config = self.config.input_adapter

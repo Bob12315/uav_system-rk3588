@@ -112,7 +112,9 @@ IDLE
 ```
 
 `visual_tracking` mission 保留上述视觉跟踪流转。`rescue_competition` mission
-按阶段请求起飞、航点、目标搜索、下降投放、侦察、返航和降落动作。
+按阶段请求解锁、起飞、航点、目标搜索、下降投放、侦察、返航和降落动作。
+比赛任务按 YAML 中的投放区和侦察区显式扫描航点逐点运行；扫描结束仍无目标时
+进入后续流程，不强行进入视觉对准。
 
 mission 只决定流程、active stage 和通用 action，不直接发送 MAVLink。
 
@@ -135,6 +137,14 @@ raw_command, mode_status = mode.update(inputs)
 
 - gimbal 进入模式后发送一次性 pitch 角度目标到正下方，yaw 保持当前角度。
 - gimbal 到位后不再输出云台控制。
+- `ex_cam -> vy`
+- `ey_cam -> vx`
+
+`FIXED_DOWNWARD_HOLD`：
+
+- 仅供 `rescue_competition` 使用。
+- 摄像头物理固定垂直向下，不发送云台角度或速率命令。
+- 不要求云台反馈。
 - `ex_cam -> vy`
 - `ey_cam -> vx`
 

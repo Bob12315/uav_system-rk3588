@@ -199,3 +199,14 @@ def test_stage_registry_runtime_config_update_preserves_controller_references() 
 
     assert registry.approach_config.body.kp_yaw == pytest.approx(0.7)
     assert overhead_mode.body.config.kp_vy == pytest.approx(3.5)
+
+
+def test_stage_registry_exposes_rescue_fixed_downward_hold() -> None:
+    registry = StageRegistry(
+        approach_config=ApproachTrackConfig(),
+        overhead_config=OverheadHoldConfig(),
+    )
+
+    mode = registry.get("FIXED_DOWNWARD_HOLD")
+
+    assert mode.name == "FIXED_DOWNWARD_HOLD"

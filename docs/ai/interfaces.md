@@ -167,6 +167,8 @@ class MissionStage(Protocol):
 - `ApproachTrackMode`
 - `OverheadHoldMode`
 - `CorridorFollowMode`
+- `FixedDownwardHoldMode`：仅供 `rescue_competition` 固定下视相机对准使用，不输出
+  云台命令。
 
 禁止：
 
