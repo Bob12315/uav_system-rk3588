@@ -5,7 +5,7 @@
 ## 1. 纯代码检查
 
 ```bash
-python -m pytest -q
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
 python -m app.main --no-yolo-udp --run-seconds 2 --send-commands false
 python -m telemetry_link.main --help
 ```
@@ -130,5 +130,5 @@ transitions:
 每次 SITL 后运行：
 
 ```bash
-python -m pytest -q
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
 ```

@@ -1,7 +1,6 @@
 pymavlink
 pyyaml
 numpy
-pytest
 fastapi
 uvicorn
 httpx

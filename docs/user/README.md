@@ -48,6 +48,7 @@ python -m app.main \
 运行单元测试：
 
 ```bash
+python -m pip install -r requirements-dev.txt
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
 ```
 
@@ -102,6 +103,7 @@ http://<RK3588-IP>:8080/
 首次安装用户服务：
 
 ```bash
+bash scripts/deploy/install_systemd_user_services.sh --dry-run
 bash scripts/deploy/install_systemd_user_services.sh --enable-now
 sudo loginctl enable-linger "$USER"
 ```
@@ -162,4 +164,3 @@ ss -lunp | grep ':5005'
 
 详细运行和排查手册见 [running.md](running.md)。实机发命令前必须阅读
 [../reference/safety.md](../reference/safety.md)。
-

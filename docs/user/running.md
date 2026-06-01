@@ -47,13 +47,8 @@ http://<运行设备的局域网 IP>:8080/
 
 ## 2. RK3588 实机运行
 
-当前 systemd 安装脚本要求仓库位于：
-
-```text
-~/uav_project/uav_system-rk3588
-```
-
-如果需要支持其他路径，先调整部署模板和安装脚本，再安装用户服务。
+systemd 安装脚本会自动读取当前仓库路径并生成用户服务，因此代码可以放在
+任意固定目录。服务安装后不要移动仓库；如果移动了，重新运行安装脚本。
 
 ### 2.1 配置摄像头和模型
 
@@ -100,8 +95,27 @@ bash scripts/deploy/install_systemd_user_services.sh --enable-now
 sudo loginctl enable-linger "$USER"
 ```
 
-模板的 `WorkingDirectory` 是 `%h/uav_project/uav_system-rk3588`。如果代码放在其他目录，
-需要先修改 `~/.config/systemd/user/uav-*.service` 中的路径。
+安装脚本会把当前仓库路径和 Python 路径写入
+`~/.config/systemd/user/uav-*.service`。默认 Python 路径为：
+
+```text
+~/anaconda3/envs/app/bin/python
+~/anaconda3/envs/yolo/bin/python
+```
+
+安装前可以预览生成结果：
+
+```bash
+bash scripts/deploy/install_systemd_user_services.sh --dry-run
+```
+
+如果环境路径不同，显式覆盖：
+
+```bash
+APP_PYTHON=/path/to/app/bin/python \
+YOLO_PYTHON=/path/to/yolo/bin/python \
+bash scripts/deploy/install_systemd_user_services.sh --enable-now
+```
 
 ### 2.3 启动、停止和重启
 
@@ -166,6 +180,9 @@ systemctl --user restart uav-app.service uav-yolo.service
 # requirements-app.txt 变化
 ~/anaconda3/envs/app/bin/python -m pip install -r requirements-app.txt
 
+# 只有开发或测试环境需要 requirements-dev.txt
+~/anaconda3/envs/app/bin/python -m pip install -r requirements-dev.txt
+
 # RK3588 的 yolo 依赖变化时，只安装板端需要的包；
 # rknn-toolkit-lite2 版本仍需与板端模型和驱动匹配
 ~/anaconda3/envs/yolo/bin/python -m pip install opencv-python pyyaml numpy
@@ -174,8 +191,8 @@ systemctl --user restart uav-app.service uav-yolo.service
 systemctl --user restart uav-app.service uav-yolo.service
 ```
 
-如果修改了 `deploy/systemd/uav-app.service` 或
-`deploy/systemd/uav-yolo.service`，需要重新覆盖用户服务文件并重新加载：
+如果修改了 `deploy/systemd/uav-app.service`、`deploy/systemd/uav-yolo.service`
+或移动了仓库，需要重新生成用户服务并重新加载：
 
 ```bash
 cd ~/uav_project/uav_system-rk3588

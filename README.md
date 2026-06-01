@@ -143,9 +143,17 @@ python -m app.main --connect-telemetry --force-mode APPROACH_TRACK --send-comman
 
 ## 测试
 
+开发机或需要运行测试的板端先安装开发依赖：
+
+```bash
+python -m pip install -r requirements-dev.txt
+```
+
+然后运行：
+
 ```bash
 cd ~/uav_project/uav_system-rk3588
-python -m pytest -q
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
 ```
 
 当前测试覆盖 input adapter、command shaper、missions、stage controllers、UI、

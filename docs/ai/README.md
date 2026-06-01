@@ -54,6 +54,7 @@ git status --short --branch
 运行测试：
 
 ```bash
+python -m pip install -r requirements-dev.txt
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
 ```
 
@@ -87,4 +88,3 @@ python -m yolo_app.main --help
 运行了哪些测试
 是否仍有未处理问题
 ```
-

@@ -26,8 +26,16 @@ bash scripts/install/install_app_env.sh
 - 当前已经激活 conda 环境 `app`。
 - 当前 Python 版本是 `3.10.x`。
 
-脚本读取根目录 `requirements-app.txt`，通过清华 PyPI 镜像安装依赖，不修改
-用户全局 pip 配置。
+脚本读取根目录 `requirements-app.txt`，通过清华 PyPI 镜像安装 app 运行依赖，
+不修改用户全局 pip 配置。运行依赖不包含 `pytest`。
+
+需要开发或运行单元测试时，额外安装：
+
+```bash
+python -m pip install -r requirements-dev.txt
+```
+
+`requirements-dev.txt` 会包含 `requirements-app.txt` 并额外安装测试依赖。
 
 验证：
 
@@ -35,7 +43,7 @@ bash scripts/install/install_app_env.sh
 cd ~/uav_project/uav_system-rk3588
 python -m app.main --help
 python -m telemetry_link.main --help
-python -m pytest -q
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
 ```
 
 ## YOLO 环境

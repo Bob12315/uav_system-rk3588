@@ -165,7 +165,6 @@ verify_app_env() {
   python - <<'PY'
 import numpy
 import pymavlink
-import pytest
 import yaml
 import fastapi
 import httpx
@@ -173,7 +172,6 @@ import uvicorn
 
 print("python import check passed")
 print("numpy", numpy.__version__)
-print("pytest", pytest.__version__)
 PY
 
   cd "${REPO_ROOT}"

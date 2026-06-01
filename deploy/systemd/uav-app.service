@@ -4,8 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/uav_project/uav_system-rk3588
-ExecStart=%h/anaconda3/envs/app/bin/python -m app.main --send-commands false
+WorkingDirectory=@REPO_ROOT@
+ExecStart=@APP_PYTHON@ -m app.main --send-commands false
 Restart=on-failure
 RestartSec=2
 

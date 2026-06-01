@@ -37,9 +37,14 @@ video to port `5600` on the RK3588 board.
 Install or refresh the systemd user services:
 
 ```bash
+bash scripts/deploy/install_systemd_user_services.sh --dry-run
 bash scripts/deploy/install_systemd_user_services.sh
 bash scripts/deploy/install_systemd_user_services.sh --enable-now
 ```
+
+The installer renders the current repository path and Python paths into the
+user service files. Override `APP_PYTHON` or `YOLO_PYTHON` if the conda
+environments do not live under `~/anaconda3/envs/`.
 
 Run the read-only board check after installation or configuration changes:
 

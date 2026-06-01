@@ -155,7 +155,7 @@
 每次结构性修改后运行：
 
 ```bash
-python -m pytest -q
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
 python -m app.main --no-yolo-udp --run-seconds 1 --send-commands false
 ```
 
