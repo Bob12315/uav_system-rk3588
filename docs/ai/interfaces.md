@@ -311,7 +311,8 @@ get_gimbal_state() -> GimbalState
 输出：
 
 - `MissionOutput.active_mode`，例如 `IDLE`、`APPROACH_TRACK`、`OVERHEAD_HOLD`。
-- `MissionOutput.actions`，例如 `takeoff`、`land`、`local_position`、`release_payload`。
+- `MissionOutput.actions`，例如 `takeoff`、`land`、`local_position`、
+  `set_servo`、`set_relay`。
 - `stage`、`hold_reason` 和 `detail`。
 
 禁止：

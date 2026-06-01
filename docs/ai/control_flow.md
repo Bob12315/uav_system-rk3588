@@ -98,7 +98,8 @@ get_link_status()
 `SystemRunner` 构造 `MissionContext`，再调用 `MissionRunner.update(context)`。当前 mission 输出 `MissionOutput`：
 
 - `active_mode`：当前 mission 内 stage controller 的名字。
-- `actions`：一次性或重复任务动作请求，例如 `takeoff`、`local_position`、`release_payload`。
+- `actions`：一次性或重复任务动作请求，例如 `takeoff`、`local_position`、
+  `set_servo`、`set_relay`。
 - `stage` / `hold_reason` / `detail`：任务阶段和诊断信息。
 
 典型流转：
@@ -110,7 +111,8 @@ IDLE
   -> APPROACH_TRACK
 ```
 
-`visual_tracking` mission 保留上述视觉跟踪流转。`rescue_competition` mission 是比赛任务骨架，按阶段请求起飞、航点、投放和降落动作。
+`visual_tracking` mission 保留上述视觉跟踪流转。`rescue_competition` mission
+按阶段请求起飞、航点、目标搜索、下降投放、侦察、返航和降落动作。
 
 mission 只决定流程、active stage 和通用 action，不直接发送 MAVLink。
 

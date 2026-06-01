@@ -8,11 +8,12 @@
 
 ```text
 README.md
-docs/architecture.md
-docs/interfaces.md
-docs/ai_development_rules.md
-docs/control_flow.md
-docs/safety.md
+docs/ai/README.md
+docs/ai/architecture.md
+docs/ai/interfaces.md
+docs/ai/development_rules.md
+docs/ai/control_flow.md
+docs/reference/safety.md
 ```
 
 读完后，AI 必须能说明：
@@ -32,11 +33,11 @@ docs/safety.md
 你先阅读以下文件，严格遵守里面的架构边界、接口契约和 AI 开发规则，再开始改代码：
 
 README.md
-docs/architecture.md
-docs/interfaces.md
-docs/ai_development_rules.md
-docs/control_flow.md
-docs/safety.md
+docs/ai/architecture.md
+docs/ai/interfaces.md
+docs/ai/development_rules.md
+docs/ai/control_flow.md
+docs/reference/safety.md
 
 不要绕过 CommandShaper 和 FlightCommandExecutor。
 不要让 mission stage controller 直接调用 telemetry_link。
@@ -53,7 +54,6 @@ docs/safety.md
 追加阅读：
 
 ```text
-missions/README.md
 missions/<mission_name>/config.yaml
 missions/base_stage.py
 missions/common/control/types.py
@@ -147,7 +147,7 @@ config/telemetry.yaml
 telemetry_link/
 config/telemetry.yaml
 telemetry_link/COMMAND_AUDIT.md
-docs/interfaces.md
+docs/ai/interfaces.md
 ```
 
 不要碰：
@@ -170,7 +170,7 @@ yolo_app/models.py
 yolo_app/udp_publisher.py
 yolo_app/target_manager.py
 app/service_manager.py
-docs/interfaces.md
+docs/ai/interfaces.md
 ```
 
 允许主要修改：
@@ -178,7 +178,7 @@ docs/interfaces.md
 ```text
 yolo_app/
 config/yolo.yaml
-docs/interfaces.md，若 UDP 字段变化
+docs/ai/interfaces.md，若 UDP 字段变化
 ```
 
 不要碰：
@@ -199,7 +199,7 @@ fusion/models.py
 fusion/fusion_manager.py
 fusion/rules.py
 missions/common/control/input_adapter.py
-docs/interfaces.md
+docs/ai/interfaces.md
 ```
 
 允许主要修改：
@@ -207,7 +207,7 @@ docs/interfaces.md
 ```text
 fusion/
 missions/common/control/input_adapter.py，若 FusedState 字段变化
-docs/interfaces.md
+docs/ai/interfaces.md
 tests/
 ```
 
@@ -252,9 +252,9 @@ yolo_app/
 追加阅读：
 
 ```text
-docs/running.md
-docs/install.md
-docs/configuration.md
+docs/user/running.md
+docs/user/install.md
+docs/reference/configuration.md
 config/app.yaml
 missions/visual_tracking/config.yaml
 missions/rescue_competition/config.yaml

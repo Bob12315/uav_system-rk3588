@@ -112,8 +112,10 @@ python -m app.main --connect-telemetry --force-mode APPROACH_TRACK --send-comman
 调整 mission 阈值，让 SITL 中能触发 overhead：
 
 ```yaml
-mission:
-  overhead_entry_target_size_thresh: <测试值>
+# missions/visual_tracking/config.yaml
+transitions:
+  approach_track_to_overhead_hold:
+    target_size_thresh: <测试值>
 ```
 
 观察：

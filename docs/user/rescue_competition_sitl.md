@@ -3,7 +3,7 @@
 本文说明如何用仿真测试 `rescue_competition` mission，以及需要改哪些配置。默认工作目录：
 
 ```bash
-cd /home/level6/uav_project/src
+cd ~/uav_project/uav_system-rk3588
 ```
 
 ## 1. 测试目标
@@ -23,9 +23,9 @@ cd /home/level6/uav_project/src
 主要改这三个配置：
 
 ```text
-src/config/app.yaml
-src/config/telemetry.yaml
-src/missions/rescue_competition/config.yaml
+config/app.yaml
+config/telemetry.yaml
+missions/rescue_competition/config.yaml
 ```
 
 相关日志输出：
@@ -40,7 +40,7 @@ runtime/logs/recce/
 文件：
 
 ```text
-src/config/app.yaml
+config/app.yaml
 ```
 
 默认如果还在视觉跟踪任务：
@@ -80,7 +80,7 @@ python -m app.main \
 文件：
 
 ```text
-src/config/telemetry.yaml
+config/telemetry.yaml
 ```
 
 SITL 测试应使用：
@@ -127,7 +127,7 @@ message_interval_hz:
 文件：
 
 ```text
-src/missions/rescue_competition/config.yaml
+missions/rescue_competition/config.yaml
 ```
 
 ### 5.1 最小仿真配置
@@ -263,7 +263,7 @@ route:
 
 ```yaml
 dry_run_skip_payload_release: true
-payloads: []
+payload_slots: []
 ```
 
 如果要测试舵机命令，不建议一开始就接真实硬件。SITL 中可先配置：
@@ -271,25 +271,22 @@ payloads: []
 ```yaml
 dry_run_skip_payload_release: false
 
-payloads:
-  - payload_id: 1
+payload_slots:
+  - id: 1
     label: bottle_1
-    release:
-      type: servo
-      channel: 9
-      pwm: 1900
+    servo_channel: 9
+    release_pwm: 1900
+    hold_pwm: 1100
 ```
 
 或继电器：
 
 ```yaml
-payloads:
-  - payload_id: 1
+payload_slots:
+  - id: 1
     label: bottle_1
-    release:
-      type: relay
-      relay_id: 0
-      state: true
+    relay_id: 0
+    relay_state: true
 ```
 
 实机前一定要确认通道号和 PWM，不要直接用示例值。
@@ -426,7 +423,7 @@ FlightCommand 实发：OVERHEAD_HOLD 等连续控制
 
 ```bash
 conda activate yolo
-cd /home/level6/uav_project/src/yolo_app
+cd ~/uav_project/uav_system-rk3588
 python -m yolo_app.main
 ```
 
@@ -577,12 +574,11 @@ dry_run_skip_payload_release: true
 
 ```yaml
 dry_run_skip_payload_release: false
-payloads:
-  - payload_id: 1
-    release:
-      type: servo
-      channel: 9
-      pwm: 1900
+payload_slots:
+  - id: 1
+    servo_channel: 9
+    release_pwm: 1900
+    hold_pwm: 1100
 ```
 
 如果没有 payload 配置，mission 应该保持安全，不应假装投放完成。

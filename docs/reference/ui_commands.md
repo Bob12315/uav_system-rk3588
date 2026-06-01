@@ -182,7 +182,8 @@ control send on
 
 ## Stage 参数重载
 
-仅 app/control UI 支持。用于运行中重载 [missions/<mission_name>/config.yaml](missions/<mission_name>/config.yaml)。
+仅 app/control UI 支持。用于运行中重载
+`missions/<mission_name>/config.yaml`。
 
 ```text
 pid reload

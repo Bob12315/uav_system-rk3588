@@ -27,10 +27,11 @@ This repository targets Linux ARM64 boards with RK3588 only.
 ## Read Before Editing
 
 1. `README.md`
-2. `docs/architecture.md`
-3. `docs/interfaces.md`
-4. `docs/ai_development_rules.md`
-5. `docs/control_flow.md`
-6. `docs/safety.md`
+2. `docs/ai/README.md`
+3. `docs/ai/architecture.md`
+4. `docs/ai/interfaces.md`
+5. `docs/ai/control_flow.md`
+6. `docs/ai/development_rules.md`
+7. `docs/reference/safety.md`
 
-Use `docs/new_session_checklist.md` to select additional files for the task.
+Use `docs/ai/task_checklist.md` to select additional files for the task.

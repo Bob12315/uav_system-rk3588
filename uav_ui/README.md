@@ -204,7 +204,8 @@ control send on
 
 ## Stage 参数重载
 
-app 启动 UI 时支持在运行中重载 [missions/<mission_name>/config.yaml](../missions/<mission_name>/config.yaml)：
+app 启动 UI 时支持在运行中重载
+`missions/<mission_name>/config.yaml`：
 
 ```text
 pid reload
@@ -212,7 +213,9 @@ stage reload
 stage config reload
 ```
 
-这些命令会重新读取 `input_adapter`、`approach_track`、`overhead_hold` 和 `shaper` 配置，并更新当前运行中的 controller。适合调 `kp_*`、`ki_*`、`kd_*`、死区、限幅和 slew rate 等参数。
+这些命令会重新读取 `input_adapter`、健康监控阈值、`approach_track`、
+`overhead_hold` 和 `shaper` 配置，并更新当前运行中的 controller。适合调
+`kp_*`、`ki_*`、`kd_*`、死区、限幅和 slew rate 等参数。
 
 重载只影响当前 app 进程，不会写回 YAML。重载成功时会重置 stage controller 内部状态，包括积分、微分历史和 command shaper 状态。
 

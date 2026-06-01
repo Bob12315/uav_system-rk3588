@@ -61,7 +61,7 @@ udp_port: 14550
 `config/yolo.yaml`：
 
 ```yaml
-model_path: "/home/pi/uav_system-rk3588/data/models/best-int8-rk3588.rknn"
+model_path: "../data/models/best-int8-rk3588.rknn"
 source: 5600
 udp_ip: "127.0.0.1"
 udp_port: 5005
@@ -82,7 +82,7 @@ cd ~/uav_project/uav_system-rk3588
 python3 -m yolo_app.main --source 5600
 
 conda activate app
-cd ~/uav_system-rk3588
+cd ~/uav_project/uav_system-rk3588
 python3 -m app.main --connect-telemetry --send-commands false
 ```
 

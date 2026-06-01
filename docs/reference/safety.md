@@ -5,7 +5,8 @@
 ## 默认安全策略
 
 - `send_commands` 默认 false。
-- 不传 `--connect-telemetry` 时不连接 MAVLink。
+- telemetry 连接和命令发送是两个独立开关。是否连接由
+  `services.connect_telemetry` 或 `--connect-telemetry` 决定。
 - 不传 `--send-commands true` 时不发送连续控制命令。
 - telemetry 断线时清空连续控制和云台速率命令。
 - 数据不新鲜时 `HealthMonitor` 应阻止控制放行。

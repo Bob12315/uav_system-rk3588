@@ -33,7 +33,7 @@ missions/common/control/executor.py -> telemetry_link.LinkManager
 MAVLink control / gimbal commands
 ```
 
-更详细的边界说明见 [docs/architecture.md](docs/architecture.md)，完整接口见 [docs/interfaces.md](docs/interfaces.md)。
+更详细的边界说明见 [docs/ai/architecture.md](docs/ai/architecture.md)，完整接口见 [docs/ai/interfaces.md](docs/ai/interfaces.md)。
 
 ## 目录结构
 
@@ -44,9 +44,14 @@ fusion/           感知与遥测融合
 telemetry_link/   MAVLink2 通讯、状态缓存、命令队列和发送
 yolo_app/         RK3588 RKNN INT8 感知进程
 uav_ui/           终端 UI 与人工命令分发
-config/           新架构配置入口
+web_ui/           浏览器控制台、配置编辑和操作审计
+config/           当前生效的系统配置与 RK3588 配置模板
+data/             跟踪提交的 RKNN 模型和 SITL 地形数据
+scripts/          配置切换、安装、部署和健康检查脚本
+deploy/           systemd 用户服务模板
+runtime/          日志、视频和 SITL 运行产物，不提交 Git
 tests/            单元测试
-docs/             架构、接口、运行、安全和开发规则
+docs/             用户手册、参考文档和 AI 接管材料
 ```
 
 ## 安装环境
@@ -73,7 +78,7 @@ data/models/best-int8-rk3588.rknn
 
 运行状态、日志、缓存和生成视频统一写入 `runtime/`，不提交到 Git。
 
-更完整的安装说明见 [docs/install.md](docs/install.md)。
+更完整的安装说明见 [docs/user/install.md](docs/user/install.md)。
 
 安装用户级 systemd 服务并执行板端健康检查：
 
@@ -121,7 +126,10 @@ UI 中可以在 app 运行时重载 mission stage 控制参数。修改 `mission
 pid reload
 ```
 
-这会重新读取 `input_adapter`、`approach_track`、`overhead_hold` 和 `shaper` 配置，并更新当前运行中的 controller。常用来现场调整 `kp_*`、`ki_*`、`kd_*`、限幅和死区参数。重载成功后，控制器内部积分/微分状态会被重置，配置文件本身不会被 UI 修改。
+这会重新读取 `input_adapter`、健康监控阈值、`approach_track`、
+`overhead_hold` 和 `shaper` 配置，并更新当前运行中的 controller。常用来现场
+调整 `kp_*`、`ki_*`、`kd_*`、限幅和死区参数。重载成功后，控制器内部
+积分/微分状态会被重置，配置文件本身不会被 UI 修改。
 
 ### 5. SITL 中实发控制
 
@@ -131,7 +139,7 @@ pid reload
 python -m app.main --connect-telemetry --force-mode APPROACH_TRACK --send-commands true
 ```
 
-更完整的运行手册见 [docs/running.md](docs/running.md)。
+更完整的运行手册见 [docs/user/running.md](docs/user/running.md)。
 
 ## 测试
 
@@ -140,27 +148,24 @@ cd ~/uav_project/uav_system-rk3588
 python -m pytest -q
 ```
 
-当前测试覆盖 input adapter、command shaper、mission stages、mission manager。
+当前测试覆盖 input adapter、command shaper、missions、stage controllers、UI、
+telemetry 和 RKNN 接口。
 
 ## 安全默认值
 
 - `config/app.yaml` 中 `executor.send_commands` 默认应保持 `false`。
-- 不传 `--connect-telemetry` 时，新 app 不连接 MAVLink。
+- 是否连接 telemetry 由 `config/app.yaml` 的 `services.connect_telemetry` 决定；
+  `--connect-telemetry` 可以临时打开连接。
 - 不传 `--send-commands true` 时，不应向飞控发送连续控制命令。
 - 所有 stage controller 输出必须经过 `CommandShaper` 和 `FlightCommandExecutor`。
 - stage controller 禁止直接调用 MAVLink 或 `LinkManager`。
 
-实机前请阅读 [docs/safety.md](docs/safety.md)。
+实机前请阅读 [docs/reference/safety.md](docs/reference/safety.md)。
 
 ## 文档索引
 
-- [docs/new_session_checklist.md](docs/new_session_checklist.md)：每次开启新 AI 会话前必读。
-- [docs/architecture.md](docs/architecture.md)：模块职责、依赖方向和边界。
-- [docs/interfaces.md](docs/interfaces.md)：核心 dataclass、接口和单位。
-- [docs/ai_development_rules.md](docs/ai_development_rules.md)：给 AI/开发者的修改规则。
-- [docs/running.md](docs/running.md)：常用启动方式。
-- [docs/install.md](docs/install.md)：环境和依赖安装。
-- [docs/configuration.md](docs/configuration.md)：配置文件说明。
-- [docs/control_flow.md](docs/control_flow.md)：从 YOLO 到 MAVLink 的数据流。
-- [docs/safety.md](docs/safety.md)：安全边界和实机 checklist。
-- [docs/sitl_test_plan.md](docs/sitl_test_plan.md)：SITL 测试顺序。
+- [docs/README.md](docs/README.md)：完整文档索引。
+- [docs/user/README.md](docs/user/README.md)：用户快速上手说明。
+- [docs/ai/README.md](docs/ai/README.md)：AI 快速接管入口。
+- [docs/reference/configuration.md](docs/reference/configuration.md)：配置说明。
+- [docs/reference/safety.md](docs/reference/safety.md)：安全边界和实机 checklist。

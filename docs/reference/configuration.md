@@ -18,7 +18,7 @@ runtime:
   log_level: INFO
 
 services:
-  connect_telemetry: false
+  connect_telemetry: true
   start_yolo_udp: true
 
 ui:
@@ -35,7 +35,8 @@ executor:
   send_commands: false
 ```
 
-- `connect_telemetry`：默认 false；命令行 `--connect-telemetry` 可打开。
+- `connect_telemetry`：是否在 app 启动时连接 telemetry；命令行
+  `--connect-telemetry` 也可临时打开。
 - `ui.web_enabled`：是否随 app 启动网页控制台。
 - `ui.terminal_enabled`：是否启动 curses UI；命令行 `--ui` 仍可临时打开。
 - `start_yolo_udp`：是否监听 YOLO UDP。
@@ -90,7 +91,8 @@ recovery:
 
 ## missions/rescue_competition/config.yaml
 
-比赛任务骨架配置。当前只提供框架，不代表已完成比赛自动化。
+比赛任务配置。流程包含起飞、前往投放区、目标搜索、对准、下降、投放、上升、
+侦察、返航和降落。实机使用前仍需在 SITL 中逐阶段验证。
 
 常用项：
 
@@ -101,18 +103,18 @@ auto_start: false
 takeoff_altitude_m: 5.0
 local_position_frame: 1
 align_mode: OVERHEAD_HOLD
-scan_duration_s: 3.0
 land_complete_altitude_m: 0.3
 route: []
 drop_zones: []
 recce_zones: []
-payloads: []
+payload_slots: []
 ```
 
 - `auto_start`：默认 false，避免加载 rescue mission 后自动起飞。
 - `route`：任务相对本地坐标航点，mission 会在开始时记录 EKF local origin。
-- `payloads`：投放载荷列表，mission 只请求 `release_payload`，具体舵机/继电器映射仍属于 telemetry/action 层。
-- `scan_duration_s`：侦察扫描占位阶段持续时间。
+- `payload_slots`：投放载荷列表，可为每个载荷配置舵机或继电器动作。
+- `drop`：投放搜索、下降、投放后上升和恢复扫描参数。
+- `recce` / `recon`：侦察扫描、目标识别和结果输出参数。
 - `land_complete_altitude_m`：降落完成的相对高度阈值。
 
 ## missions/<mission_name>/config.yaml
@@ -132,7 +134,10 @@ mission 阶段控制器和通用控制参数。
 - `overhead_hold.longitudinal`：正上方悬停前后平移参数。
 - `shaper`：最终命令限幅和 slew rate。
 
-app 带 UI 运行时，修改本文件后可以在 UI 输入 `pid reload` 或 `stage reload`，将上述 mission stage 参数重载进当前进程。重载会更新正在运行的 controller，并重置积分/微分历史和 command shaper 状态；不会修改 YAML 文件。
+app 带 UI 运行时，修改本文件后可以在 UI 输入 `pid reload` 或 `stage reload`，
+将上述 mission stage 参数重载进当前进程。重载会更新 input adapter、健康监控
+阈值、正在运行的 controller 和 command shaper，并重置积分/微分历史；不会修改
+YAML 文件。
 
 ## config/telemetry.yaml
 

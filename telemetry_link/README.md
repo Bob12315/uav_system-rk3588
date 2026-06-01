@@ -99,7 +99,7 @@ manager.takeoff(altitude_m=5.0)
 manager.land()
 ```
 
-完整接口契约见 [../docs/interfaces.md](../docs/interfaces.md)。
+完整接口契约见 [../docs/ai/interfaces.md](../docs/ai/interfaces.md)。
 
 ## 状态模型
 
@@ -107,7 +107,7 @@ manager.land()
 - `GimbalState`：云台 yaw、pitch、roll、反馈来源和有效性。
 - `LinkStatus`：连接状态、重连状态、最近收发时间和目标 system/component。
 
-状态字段单位和语义以 [../docs/interfaces.md](../docs/interfaces.md) 为准。
+状态字段单位和语义以 [../docs/ai/interfaces.md](../docs/ai/interfaces.md) 为准。
 
 ## 命令模型
 

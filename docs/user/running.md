@@ -47,8 +47,13 @@ http://<运行设备的局域网 IP>:8080/
 
 ## 2. RK3588 实机运行
 
-以下步骤适用于板端仓库位于 `/home/pi/uav_project`、代码分支为
-`platform/rk3588` 的部署方式。
+当前 systemd 安装脚本要求仓库位于：
+
+```text
+~/uav_project/uav_system-rk3588
+```
+
+如果需要支持其他路径，先调整部署模板和安装脚本，再安装用户服务。
 
 ### 2.1 配置摄像头和模型
 
@@ -57,7 +62,6 @@ SSH 登录板端后进入项目：
 ```bash
 ssh pi@<rk3588-ip>
 cd ~/uav_project/uav_system-rk3588
-git switch platform/rk3588
 ```
 
 USB 摄像头建议使用不会随插拔序号变化的 `by-id` 路径：
@@ -129,13 +133,14 @@ systemctl --user enable --now uav-app.service uav-yolo.service
 
 ### 2.4 修改程序后加载新版本
 
-如果代码在 GitHub 的 `platform/rk3588` 分支已经提交并推送，在板端执行：
+确认开发机改动已经提交并推送后，在板端执行。以下以当前 `main` 分支和
+`gitee` 远端为例；如果现场使用其他远端，只替换远端名称：
 
 ```bash
 cd ~/uav_project/uav_system-rk3588
 git status --short --branch
-git fetch github platform/rk3588
-git merge --ff-only github/platform/rk3588
+git fetch gitee main
+git merge --ff-only gitee/main
 ```
 
 板端可能保留现场的 `config/yolo.yaml` 与 `.rknn` 模型文件。更新前应

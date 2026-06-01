@@ -64,7 +64,7 @@
 - `telemetry_link/`
 - `config/telemetry.yaml`
 - `telemetry_link/COMMAND_AUDIT.md`
-- 必要时更新 `docs/interfaces.md`
+- 必要时更新 `docs/ai/interfaces.md`
 
 不应该碰：
 
@@ -139,9 +139,9 @@
 2. 实现 `MissionStage` 接口。
 3. 在 `app/stage_registry.py` 注册。
 4. 在对应 mission 中增加进入/退出条件。
-5. 在 `missions/<mission_name>/config.yaml`、`missions/<mission_name>/config.yaml` 和必要的 app 配置中加配置。
+5. 在 `missions/<mission_name>/config.yaml` 和必要的 app 配置中加配置。
 6. 增加 `tests/test_<new_mode>.py`。
-7. 更新 [docs/interfaces.md](interfaces.md) 和 [docs/architecture.md](architecture.md)。
+7. 更新 [docs/ai/interfaces.md](interfaces.md) 和 [docs/ai/architecture.md](architecture.md)。
 
 ## 日志风格
 

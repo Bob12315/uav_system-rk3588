@@ -59,7 +59,8 @@ MissionStage.update()
 - 决定任务阶段、active stage controller 和一次性动作请求。
 - `visual_tracking/mission.py`：保留现有视觉跟踪任务行为。
 - `visual_tracking/stages/`：视觉跟踪任务的连续控制阶段，例如斜视接近、正上方悬停。
-- `rescue_competition/mission.py`：比赛任务骨架，包含起飞、航线、搜索、对准投放、侦察扫描、返航、降落的阶段框架。
+- `rescue_competition/mission.py`：比赛任务流程，包含起飞、航线、搜索、对准、
+  下降、投放、上升、侦察扫描、返航和降落。
 - `common/navigation.py`：任务层本地坐标转换和到点判断。
 
 允许依赖：
@@ -74,7 +75,8 @@ MissionStage.update()
 - Mission 不直接调用 pymavlink。
 - Mission 不直接构造 MAVLink message。
 - Mission 不写 PID 或控制律。
-- Mission 只能通过 `MissionAction` 请求 `takeoff`、`land`、`local_position`、`release_payload` 等通用动作。
+- Mission 只能通过 `MissionAction` 请求 `takeoff`、`land`、`local_position`、
+  `set_servo`、`set_relay` 等通用动作。
 - Mission 不应把具体控制命令绕过 `MissionRunner` 发给 `LinkManager`。
 
 ## missions/<mission_name>/stages/
