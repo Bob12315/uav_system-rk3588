@@ -84,6 +84,50 @@ def test_system_runner_can_start_current_mission() -> None:
     assert runner.mission_runner.mission._start_requested is True
 
 
+def test_system_runner_tracks_selected_stage_for_each_mission() -> None:
+    runner = SystemRunner(_config())
+
+    visual = runner._handle_mission_command(["stage", "IDLE"])
+    runner._switch_mission("rescue_competition")
+    rescue = runner._handle_mission_command(["stage", "TAKEOFF"])
+
+    assert visual.ok
+    assert rescue.ok
+    assert runner.mission_stage_selections == {
+        "visual_tracking": "IDLE",
+        "rescue_competition": "TAKEOFF",
+    }
+    assert runner.web_status_snapshot()["mission_stage_selection"] == "TAKEOFF"
+
+
+def test_system_runner_mission_stage_auto_restores_generic_selection() -> None:
+    runner = SystemRunner(_config())
+    runner._handle_mission_command(["stage", "IDLE"])
+
+    result = runner._handle_mission_command(["stage", "auto"])
+
+    assert result.ok
+    assert result.message == "mission stage auto"
+    assert runner.mission_stage_selections["visual_tracking"] == "AUTO"
+
+
+def test_web_missions_exposes_stage_buttons_for_every_registered_mission() -> None:
+    runner = SystemRunner(_config())
+
+    missions = {item["name"]: item for item in runner.web_missions()}
+
+    assert missions["visual_tracking"]["stage_modes"] == [
+        "IDLE",
+        "APPROACH_TRACK",
+        "OVERHEAD_HOLD",
+        "CORRIDOR_FOLLOW",
+    ]
+    assert "TAKEOFF" in missions["rescue_competition"]["stage_modes"]
+    assert "DROP_SCAN" in missions["rescue_competition"]["stage_modes"]
+    assert missions["visual_tracking"]["selected_stage"] == "AUTO"
+    assert missions["rescue_competition"]["selected_stage"] == "AUTO"
+
+
 def test_rescue_competition_receives_mission_settings(tmp_path) -> None:
     mission_path = tmp_path / "rescue.yaml"
     mission_path.write_text(

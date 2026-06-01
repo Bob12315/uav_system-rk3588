@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>UAV Web Control</title>
-  <link rel="stylesheet" href="/static/style.css?v=classic-ui-restore">
+  <link rel="stylesheet" href="/static/style.css?v=manual-yaw-direction">
 </head>
 <body>
   <header>
@@ -82,6 +82,33 @@
           <button data-confirm="切换到 SITL 将关闭自动发送，确认？" data-command="switch_source sitl" data-source="sitl">SITL</button>
           <button data-confirm="切换到真实飞控将关闭自动发送，确认？" data-command="switch_source real" data-source="real" class="warning">REAL</button>
         </div>
+        <section class="manual-move">
+          <div class="panel-title minor">手动步长移动</div>
+          <div class="manual-move-settings">
+            <label>移动步长 <input id="moveStep" type="number" value="1" min="0.1" step="0.1"> m</label>
+            <label>偏航角度 <input id="yawStep" type="number" value="15" min="1" max="180" step="1"> °</label>
+          </div>
+          <div class="manual-move-layout">
+            <div class="direction-pad">
+              <span></span>
+              <button data-manual-move="forward">前</button>
+              <span></span>
+              <button data-manual-move="left">左</button>
+              <span class="direction-center"></span>
+              <button data-manual-move="right">右</button>
+              <span></span>
+              <button data-manual-move="back">后</button>
+              <span></span>
+            </div>
+            <div class="manual-side-actions">
+              <button data-manual-move="up">上升</button>
+              <button data-manual-move="down">下降</button>
+              <button data-manual-yaw="left">左偏航</button>
+              <button data-manual-yaw="right">右偏航</button>
+            </div>
+          </div>
+          <div class="hint">机体系单步移动；发送手动动作时会关闭自动控制发送。</div>
+        </section>
       </article>
       <article class="panel">
         <div class="panel-title">Mission 控制</div>
@@ -95,7 +122,7 @@
           <dt>Mission</dt><dd id="missionName">--</dd>
           <dt>Stage</dt><dd id="missionStage">--</dd>
           <dt>Controller</dt><dd id="stageController">--</dd>
-          <dt>Fixed</dt><dd id="stageOverride">AUTO</dd>
+          <dt>Selected</dt><dd id="stageOverride">AUTO</dd>
           <dt>Hold</dt><dd id="holdReason">--</dd>
         </dl>
         <div id="missionSteps" class="mission-steps"></div>
@@ -155,6 +182,6 @@
       </article>
     </section>
   </main>
-  <script src="/static/app.js?v=classic-ui-restore"></script>
+  <script src="/static/app.js?v=manual-yaw-direction"></script>
 </body>
 </html>

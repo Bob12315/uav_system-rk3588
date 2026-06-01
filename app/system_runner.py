@@ -67,6 +67,9 @@ class SystemRunner:
         self.latest_mission_name = config.mission_name
         self.latest_mission_stage = "UNKNOWN"
         self.latest_stage_controller = "UNKNOWN"
+        self.mission_stage_selections = {
+            name: "AUTO" for name in available_mission_names()
+        }
         self.latest_hold_reason = ""
         self.last_send_commands: bool | None = None
         self.target_lost_since: float | None = None
@@ -363,6 +366,10 @@ class SystemRunner:
                     "stage": self.latest_mission_stage,
                     "stage_controller": self.latest_stage_controller,
                     "stage_override": self.debug_runtime.config.force_mode,
+                    "mission_stage_selection": self.mission_stage_selections.get(
+                        self.mission_runner.mission.name,
+                        "AUTO",
+                    ),
                     "stage_modes": self._web_stage_modes(),
                     "hold_reason": self.latest_hold_reason,
                     "controllers": asdict(self.controller_switches.snapshot()),
@@ -446,6 +453,7 @@ class SystemRunner:
                 "active": name == active,
                 "config_path": f"missions/{name}/config.yaml",
                 "stage_modes": self._web_stage_modes_for_mission(name),
+                "selected_stage": self.mission_stage_selections.get(name, "AUTO"),
             }
             for name in available_mission_names()
         ]
@@ -584,14 +592,21 @@ class SystemRunner:
             return CommandResult(True, f"active mission={self.mission_runner.mission.name}")
         if action == "stage":
             if len(parts) != 2:
-                return CommandResult(False, "format: mission stage <stage_name>")
+                return CommandResult(False, "format: mission stage <stage_name|auto>")
+            stage_name = parts[1].strip().upper()
+            if stage_name == "AUTO":
+                with self.runtime_config_lock:
+                    self.mission_stage_selections[self.mission_runner.mission.name] = "AUTO"
+                    self.debug_runtime.config.force_mode = None
+                    self.stage_registry.reset_all()
+                return CommandResult(True, "mission stage auto")
             setter = getattr(self.mission_runner.mission, "set_stage", None)
             if not callable(setter):
                 return CommandResult(False, f"mission stage unsupported: {self.mission_runner.mission.name}")
-            stage_name = parts[1].strip().upper()
             try:
                 with self.runtime_config_lock:
                     setter(stage_name)
+                    self.mission_stage_selections[self.mission_runner.mission.name] = stage_name
                     self.debug_runtime.config.force_mode = None
                     self.stage_registry.reset_all()
                 with self.control_command_log_lock:
@@ -656,6 +671,7 @@ class SystemRunner:
 
     def _reset_mission_runtime(self, *, clear_for_safety: bool) -> None:
         self.mission_runner.reset()
+        self.mission_stage_selections[self.mission_runner.mission.name] = "AUTO"
         self.stage_registry.reset_all()
         self.command_shaper.reset()
         self.target_lost_since = None

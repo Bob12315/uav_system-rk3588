@@ -69,6 +69,7 @@ def build_completion_candidates() -> tuple[str, ...]:
         "mission status",
         "mission start",
         "mission reset",
+        "mission stage auto",
         "mission switch ",
         "mission select ",
         "mission use ",

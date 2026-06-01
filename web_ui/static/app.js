@@ -48,6 +48,35 @@ function num(value, digits = 2, unit = "") {
 function boolText(value, yes = "YES", no = "NO") {
   return value ? yes : no;
 }
+function positiveStep(inputId, label) {
+  const value = Number($(inputId).value);
+  if (!Number.isFinite(value) || value <= 0) {
+    $("completionHint").textContent = `${label}必须大于 0`;
+    return null;
+  }
+  return value;
+}
+function executeManualMove(direction) {
+  const step = positiveStep("moveStep", "移动步长");
+  if (step === null) return;
+  const offsets = {
+    forward: [step, 0, 0],
+    back: [-step, 0, 0],
+    left: [0, -step, 0],
+    right: [0, step, 0],
+    up: [0, 0, -step],
+    down: [0, 0, step],
+  };
+  const offset = offsets[direction];
+  if (!offset) return;
+  execute(`local_pos ${offset.join(" ")} body_offset`, "MANUAL_MOVE");
+}
+function executeManualYaw(direction) {
+  const angle = positiveStep("yawStep", "偏航角度");
+  if (angle === null) return;
+  const turn = direction === "left" ? "ccw" : "cw";
+  execute(`condition_yaw ${angle} 20 ${turn} relative`, "MANUAL_MOVE");
+}
 function setButtonActive(selector, predicate) {
   document.querySelectorAll(selector).forEach(button => {
     button.classList.toggle("active-choice", Boolean(predicate(button)));
@@ -87,21 +116,24 @@ function updateControlHighlights(next, drone, controls) {
   }
 }
 function renderMissionSteps(next) {
-  const override = next.stage_override || "";
-  const active = override || next.stage_controller || next.stage || "";
   const selectedMission = $("missionSelect")?.value || next.mission || "";
   const mission = missionCatalog.find(item => item.name === selectedMission);
+  const viewingActiveMission = selectedMission === next.mission;
+  const active = viewingActiveMission ? next.stage || "" : "";
+  const selected = viewingActiveMission
+    ? next.mission_stage_selection || "AUTO"
+    : mission?.selected_stage || "AUTO";
   const modes = mission && Array.isArray(mission.stage_modes) && mission.stage_modes.length
     ? ["AUTO", ...mission.stage_modes]
     : Array.isArray(next.stage_modes) && next.stage_modes.length
       ? next.stage_modes
       : fallbackStageModes;
-  $("stageOverride").textContent = override || "AUTO";
+  $("stageOverride").textContent = selected;
   $("missionSteps").innerHTML = modes.map(mode => {
-    const command = mode === "AUTO" ? "stage mode auto" : `mission stage ${mode}`;
-    const fixed = override && mode === override;
-    const current = !override && mode === active;
-    return `<button class="${fixed ? "fixed" : ""} ${current ? "active-choice" : ""}" data-stage-mode="${mode}" data-command="${command}">${mode}</button>`;
+    const command = `mission stage ${mode}`;
+    const selectedMode = mode === selected;
+    const currentMode = mode !== "AUTO" && mode === active;
+    return `<button class="${selectedMode ? "selected-mode" : ""} ${currentMode ? "current-mode" : ""}" data-stage-mode="${mode}" data-command="${command}" ${viewingActiveMission ? "" : "disabled"}>${mode}</button>`;
   }).join("");
   $("missionSteps").querySelectorAll("[data-stage-mode]").forEach(button => button.onclick = () =>
     execute(button.dataset.command, "STAGE"));
@@ -302,6 +334,10 @@ async function init() {
     if (button.dataset.confirm && !confirm(button.dataset.confirm)) return;
     execute(button.dataset.command, button.dataset.origin || "BUTTON");
   });
+  document.querySelectorAll("[data-manual-move]").forEach(button => button.onclick = () =>
+    executeManualMove(button.dataset.manualMove));
+  document.querySelectorAll("[data-manual-yaw]").forEach(button => button.onclick = () =>
+    executeManualYaw(button.dataset.manualYaw));
   $("takeoffButton").onclick = () => {
     const altitude = $("takeoffAltitude").value;
     if (confirm(`确认起飞至 ${altitude} m？`)) execute(`takeoff ${altitude}`, "BUTTON");

@@ -90,3 +90,34 @@ def test_web_api_executes_command_and_records_audit(tmp_path: Path) -> None:
     assert response.json()["ok"] is True
     audit = client.get("/api/audit").json()
     assert audit[0]["action"] == "target next"
+
+
+def test_web_ui_exposes_manual_step_movement_controls() -> None:
+    static_dir = Path(__file__).parents[1] / "web_ui" / "static"
+    index = (static_dir / "index.html").read_text(encoding="utf-8")
+    script = (static_dir / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="moveStep"' in index
+    assert 'id="yawStep"' in index
+    assert 'data-manual-move="forward"' in index
+    assert 'data-manual-move="down"' in index
+    assert 'data-manual-yaw="left"' in index
+    assert "local_pos ${offset.join(\" \")} body_offset" in script
+    assert "condition_yaw ${angle} 20 ${turn} relative" in script
+    assert "signedAngle" not in script
+
+
+def test_web_ui_distinguishes_selected_and_current_mission_steps() -> None:
+    static_dir = Path(__file__).parents[1] / "web_ui" / "static"
+    script = (static_dir / "app.js").read_text(encoding="utf-8")
+    styles = (static_dir / "style.css").read_text(encoding="utf-8")
+
+    assert 'next.mission_stage_selection || "AUTO"' in script
+    assert 'mission?.selected_stage || "AUTO"' in script
+    assert 'const active = viewingActiveMission ? next.stage || "" : "";' in script
+    assert 'const command = `mission stage ${mode}`;' in script
+    assert 'viewingActiveMission ? "" : "disabled"' in script
+    assert "selected-mode" in script
+    assert "current-mode" in script
+    assert ".mission-steps button.selected-mode" in styles
+    assert ".mission-steps button.current-mode" in styles

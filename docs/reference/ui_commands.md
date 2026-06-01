@@ -151,6 +151,8 @@ mission status
 mission switch <MISSION_NAME>
 mission select <MISSION_NAME>
 mission use <MISSION_NAME>
+mission stage <STAGE_NAME>
+mission stage auto
 mission start
 mission reset
 ```
@@ -168,11 +170,17 @@ rescue_competition
 mission list
 mission switch visual_tracking
 mission switch rescue_competition
+mission stage IDLE
+mission stage TAKEOFF
+mission stage auto
 mission start
 mission reset
 ```
 
 切换或重置 mission 时会清掉当前连续控制队列、重置 stage controller/shaper 状态，并把 `SEND` 置为 `OFF`。确认状态安全后再输入：
+
+`mission stage <STAGE_NAME>` 用于选择当前 mission 的流程步骤。Web UI 会为每个
+mission 展示自己的步骤按钮；`mission stage auto` 恢复自动流程选择。
 
 `mission start` 会请求当前 mission 开始执行。对 `rescue_competition` 来说，它会从 `PREPARE` 等待本地位置有效后进入 `TAKEOFF`。
 

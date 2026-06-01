@@ -22,7 +22,7 @@ gz sim -v4 -r iris_runway.sdf
 cd ~/ardupilot
 ./Tools/autotest/sim_vehicle.py -D -v ArduCopter -f JSON \
   --add-param-file=$HOME/gz_ws/src/ardupilot_gazebo/config/gazebo-iris-gimbal.parm \
-  --console --out=udp:10.31.18.109:14550
+  --console --out=udp:10.31.18.108:14550
 ```
 
 ### 3. 打开 Gazebo 相机流
@@ -42,7 +42,7 @@ gst-launch-1.0 -v \
   ! rtph264depay \
   ! h264parse \
   ! rtph264pay config-interval=1 pt=96 \
-  ! udpsink host=10.31.18.109 port=5600
+  ! udpsink host=10.31.18.108 port=5600
 ```
 
 ## RK3588
