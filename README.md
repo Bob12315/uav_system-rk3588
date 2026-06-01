@@ -87,6 +87,44 @@ bash scripts/deploy/install_systemd_user_services.sh --enable-now
 bash scripts/healthcheck/check_rk3588.sh
 ```
 
+## 使用 AI 部署
+
+在 RK3588 板端打开 AI 编程助手，并将工作目录切换到本仓库后，可以直接发送
+下面的提示词。AI 应先检查环境，再执行能够安全确认的安装和部署步骤；涉及
+`sudo`、硬件参数或飞控实发控制时，需要先向用户说明并等待确认。
+
+```text
+请在当前仓库完成 RK3588 板端部署。
+
+部署规则：
+1. 本项目只支持 Linux ARM64 RK3588。YOLO 只能使用 RKNNLite、RK3588 NPU
+   和 data/models/best-int8-rk3588.rknn，不要添加 x86、CUDA、PyTorch 或 GPU
+   推理路径。
+2. 先阅读 AGENTS.md、docs/user/install.md、docs/user/running.md 和
+   docs/reference/safety.md，再检查 git status。不要覆盖我已有的本地配置，
+   不要使用 git reset --hard 或 git checkout --。
+3. 检查 app 和 yolo conda 环境。缺少环境时，按 README 创建 Python 3.10
+   环境，并分别执行 scripts/install/install_app_env.sh 和
+   scripts/install/install_yolo_env.sh。
+4. 检查 config/app.yaml、config/telemetry.yaml 和 config/yolo.yaml。
+   executor.send_commands 必须保持 false。摄像头、飞控端点或网络参数无法确认时，
+   列出需要我补充的信息，不要猜测。
+5. 先运行 bash scripts/deploy/install_systemd_user_services.sh --dry-run，
+   确认生成内容后再安装用户级 systemd 服务。需要执行 sudo loginctl
+   enable-linger "$USER" 时，先说明用途并等待我确认。
+6. 运行 bash scripts/healthcheck/check_rk3588.sh，并检查两个用户服务的状态和日志。
+   能安全修复的问题直接修复；涉及硬件、sudo 或飞控控制的问题先向我确认。
+7. 不要开启飞控指令发送，不要把 executor.send_commands 改为 true。
+8. 最后汇报：执行过的命令、修改过的文件、服务状态、健康检查结果、仍需人工确认
+   的硬件参数，以及如何访问 Web UI。
+```
+
+部署后的 Web UI 默认地址为：
+
+```text
+http://<RK3588 局域网 IP>:8080/
+```
+
 ## 快速运行
 
 ### 1. 启动 YOLO
