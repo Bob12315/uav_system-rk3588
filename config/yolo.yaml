@@ -1,4 +1,4 @@
-# RK3588 YOLO 感知进程配置
+# RK3588 SITL YOLO 感知进程模板
 # 说明：
 # - 本进程仅支持 RKNN INT8 模型，通过 RK3588 NPU 推理。
 # - bool 值只能使用 true / false，不要加引号。
@@ -27,7 +27,7 @@ classes: []
 # - 本地摄像头：/dev/videoX 或 /dev/v4l/by-id/<device>
 # - UDP H264/RTP：端口号字符串，例如 "5600"
 # - RTSP、本地视频文件或完整 GStreamer pipeline
-source: /dev/video41
+source: "5600"
 
 # 本地摄像头采集参数。
 camera_width: 640

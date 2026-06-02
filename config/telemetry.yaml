@@ -1,4 +1,4 @@
-# MAVLink 遥测链路配置
+# RK3588 SITL MAVLink 遥测链路模板
 # 说明：
 # - 本文件由 app 总控进程读取。
 # - bool 值只能使用 true / false，不要加引号。
@@ -23,8 +23,8 @@ active_source: sitl
 # -----------------------------------------------------------------------------
 sitl:
   # 可选值：serial / udp / tcp / eth。
-  # SITL 常用 tcp，ArduPilot SITL 常见端口为 5762。
-  connection_type: tcp
+  # PC 向 RK3588 推送 MAVLink UDP 数据时使用 udp。
+  connection_type: udp
 
   # connection_type=serial 时使用。
   serial_port: /dev/ttyUSB1
