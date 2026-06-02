@@ -60,8 +60,8 @@ FAILSAFE
 
 | 阶段 | 核心行为 | 输出动作或 controller | 主要退出条件 |
 | --- | --- | --- | --- |
-| `PREPARE` | 等待本地位置，记录 EKF local origin | `IDLE` | `auto_start=true` 或收到 `mission start` |
-| `ARM` | 请求飞控解锁 | `arm`，`once=true` | 遥测返回 `armed=true` |
+| `PREPARE` | 等待本地位置和任务启动请求 | `gimbal_angle(pitch=-90)`，`once=true` | `auto_start=true` 或收到 `mission start` |
+| `ARM` | 请求飞控解锁；解锁后记录任务原点和机头朝向 | `arm`，`once=true` | 遥测返回 `armed=true` 且本地位置有效 |
 | `TAKEOFF` | 请求起飞 | `takeoff`，`once=true` | 相对高度达到起飞高度减容差 |
 | `GOTO_DROPZONE` | 按 `route` 顺序飞到 `drop_route_end_name` | 重复 `local_position` | 航点位置和速度均稳定 |
 | `DROP_SCAN` | 请求 `GUIDED`，按显式扫描点筛选投放目标 | `set_mode`、重复 `local_position` | 目标连续稳定出现，或扫描点耗尽 |
@@ -81,14 +81,18 @@ FAILSAFE
 
 ## 4. 坐标与航线
 
-`route` 使用相对于任务原点的本地 NED 坐标，单位为米。`PREPARE` 第一次收到有效
-本地位置时记录原点，后续将任务相对坐标直接加到 EKF local position：
+`route` 使用相对于任务原点的本地 NED 坐标，单位为米。`ARM` 确认飞控已解锁且
+本地位置有效时，记录位置和当时机头朝向。后续任务坐标会按该航向旋转到 EKF local
+position：
 
 ```text
-x/y：本地水平坐标
+x：解锁时机头朝向为正
+y：解锁时机头朝向右侧为正
 z：NED 高度，向上为负
 z=-5.0：任务原点上方 5 m
 ```
+
+任务自动平移和视觉对准不会发送偏航角或偏航角速度控制，机头维持解锁/起飞时方向。
 
 航点到达不仅检查 `xy_tolerance_m` 和 `z_tolerance_m`，还要求当前三轴合速度不超过
 `max_speed_mps`。`route_hold_s` 可要求到点后继续稳定保持一段时间。
@@ -118,8 +122,12 @@ z=-5.0：任务原点上方 5 m
 
 ### 5.2 对准与偏移
 
-投放对准使用 `FIXED_DOWNWARD_HOLD`。该控制器假设摄像头物理固定垂直向下，只根据
-`ex_cam` / `ey_cam` 输出无人机水平平移命令，不发送云台命令，也不要求云台反馈。
+任务启动后会通过一次性 `gimbal_angle` 动作将云台 pitch 设置为 `-90` 度垂直朝地。
+投放对准使用 `FIXED_DOWNWARD_HOLD`。该控制器只根据 `ex_cam` / `ey_cam` 输出无人机
+水平平移命令，显式保持机体偏航速率为零，不持续发送云台命令，也不要求云台反馈。
+`DROP_ALIGN`、`DROP_DESCEND`、`RECON_ALIGN` 和 `RECON_DESCEND` 共用该控制器；下降
+阶段的上下运动由 `local_position` 动作负责。救援任务的 `CommandShaper` 也将机体
+偏航速率上限设为零。
 每个 `payload_slots` 元素可设置：
 
 ```yaml
@@ -189,6 +197,7 @@ mission 只生成 `MissionAction`。`MissionRunner` 根据 `send_actions` 决定
 | --- | --- |
 | `takeoff` | 起飞 |
 | `arm` | 解锁 |
+| `gimbal_angle` | 任务启动后将云台一次性设置为垂直朝地 |
 | `land` | 降落 |
 | `local_position` | 本地 NED 航点 |
 | `set_mode` | 切换飞控模式，扫描和对准阶段请求 `GUIDED` |
@@ -230,15 +239,18 @@ executor:
 | `fixed_downward_hold` | rescue 固定下视对准控制参数 |
 | `shaper` | 最终命令限幅和平滑参数 |
 
-默认 `config.yaml` 是 dry-run 骨架配置：
+默认 `config.yaml` 已启用 YOLO 视觉扫描，并保持 dry-run 投放：
 
 ```yaml
 auto_start: false
-dry_run_skip_vision: true
+dry_run_skip_vision: false
 dry_run_skip_payload_release: true
+drop_target_classes:
+  - bucket
 ```
 
-它适合先验证流程，不代表实机配置。
+它会使用当前 RKNN 模型输出的 `bucket` 类别进入投放对准，但在 `SEND=OFF` 时不会执行
+真实载荷释放。
 
 ## 9. 操作与诊断
 

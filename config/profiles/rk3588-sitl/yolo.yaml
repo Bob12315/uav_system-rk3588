@@ -8,10 +8,10 @@
 # RKNN 模型
 # -----------------------------------------------------------------------------
 # 仓库内随代码管理的 RKNN INT8 模型。
-model_path: "../data/models/best-int8-rk3588.rknn"
+model_path: "../data/models/sitl-rk3588.rknn"
 
 # 模型类别名称，顺序必须与 RKNN 模型输出一致。
-class_names: ["Target", "bucket", "class_2"]
+class_names: ["bucket"]
 
 # 检测置信度阈值与 NMS IOU 阈值，范围通常为 0.0 到 1.0。
 conf_thres: 0.25
@@ -45,7 +45,7 @@ latest_frame: true
 selection_mode: "class"
 
 # selection_mode=class 时优先选择的类别名。
-target_class: "target"
+target_class: "bucket"
 
 # 锁定目标连续丢失多少帧后自动解锁。
 max_lost_frames: 5

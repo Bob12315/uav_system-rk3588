@@ -166,7 +166,7 @@ def test_rescue_competition_mission_imports_and_stays_idle_by_default() -> None:
     assert output.detail["route_points"] == 0
 
 
-def test_prepare_captures_origin_but_does_not_autostart_by_default() -> None:
+def test_prepare_waits_for_start_without_capturing_unlock_origin() -> None:
     mission = RescueCompetitionMission()
     drone = DroneState(
         local_position_valid=True,
@@ -180,7 +180,7 @@ def test_prepare_captures_origin_but_does_not_autostart_by_default() -> None:
 
     assert output.stage == "PREPARE"
     assert output.hold_reason == ""
-    assert output.detail["origin_captured"] is True
+    assert output.detail["origin_captured"] is False
     assert output.actions == []
 
 
@@ -194,7 +194,8 @@ def test_prepare_autostart_transitions_to_arm_without_emitting_action_yet() -> N
 
     assert output.stage == "ARM"
     assert output.previous_stage == "PREPARE"
-    assert output.actions == []
+    assert output.actions[0].action_type == "gimbal_angle"
+    assert output.actions[0].params == {"pitch": -90.0, "yaw": 0.0, "roll": 0.0}
 
 
 def test_start_request_transitions_from_prepare_to_arm_when_origin_is_ready() -> None:
@@ -214,14 +215,46 @@ def test_arm_stage_requests_unlock_until_vehicle_is_armed() -> None:
     )
 
     waiting = mission.update(_context(actions_enabled=True))
-    armed = mission.update(_context(drone=DroneState(armed=True), actions_enabled=True))
+    armed = mission.update(
+        _context(
+            drone=DroneState(
+                armed=True,
+                local_position_valid=True,
+                local_x=10.0,
+                local_y=20.0,
+                local_z=-1.0,
+                yaw=0.25,
+            ),
+            actions_enabled=True,
+        )
+    )
 
     assert waiting.stage == "ARM"
     assert waiting.hold_reason == "waiting_vehicle_arm"
     assert waiting.actions[0].action_type == "arm"
     assert waiting.actions[0].key == "rescue_arm"
+    assert waiting.actions[1].action_type == "gimbal_angle"
+    assert waiting.actions[1].params == {"pitch": -90.0, "yaw": 0.0, "roll": 0.0}
     assert armed.stage == "TAKEOFF"
     assert armed.previous_stage == "ARM"
+    assert mission._origin == LocalMissionFrame(
+        origin_x=10.0,
+        origin_y=20.0,
+        origin_z=-1.0,
+        yaw_rad=0.25,
+    )
+
+
+def test_arm_stage_waits_for_local_position_before_capturing_unlock_origin() -> None:
+    mission = RescueCompetitionMission(
+        RescueCompetitionMissionConfig(initial_stage=RescueStage.ARM)
+    )
+
+    output = mission.update(_context(drone=DroneState(armed=True), actions_enabled=True))
+
+    assert output.stage == "ARM"
+    assert output.hold_reason == "armed_local_position_not_ready"
+    assert output.detail["origin_captured"] is False
 
 
 def test_takeoff_stage_emits_once_takeoff_action_and_advances_at_altitude() -> None:
@@ -964,6 +997,9 @@ def test_build_rescue_config_parses_route_zones_and_payloads(tmp_path) -> None:
             "auto_start": True,
             "takeoff_altitude_m": 6.5,
             "takeoff_altitude_tolerance_m": 0.6,
+            "startup_gimbal_pitch_deg": -88.0,
+            "startup_gimbal_yaw_deg": 1.0,
+            "startup_gimbal_roll_deg": 2.0,
             "local_position_frame": 9,
             "drop_route_end_name": "drop_center",
             "recce_route_end_name": "recce_center",
@@ -1048,6 +1084,9 @@ def test_build_rescue_config_parses_route_zones_and_payloads(tmp_path) -> None:
     assert config.auto_start is True
     assert config.takeoff_altitude_m == 6.5
     assert config.takeoff_altitude_tolerance_m == 0.6
+    assert config.startup_gimbal_pitch_deg == -88.0
+    assert config.startup_gimbal_yaw_deg == 1.0
+    assert config.startup_gimbal_roll_deg == 2.0
     assert config.local_position_frame == 9
     assert config.drop_route_end_name == "drop_center"
     assert config.recce_route_end_name == "recce_center"

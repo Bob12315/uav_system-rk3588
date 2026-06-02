@@ -46,6 +46,28 @@ def test_postprocess_uses_score_sum_candidate_and_dfl_branch_output() -> None:
     assert (detection.x1, detection.y1, detection.x2, detection.y2) == (104.0, 24.0, 224.0, 144.0)
 
 
+def test_postprocess_supports_flat_single_class_output() -> None:
+    output = np.zeros((1, 5, 2), dtype=np.float32)
+    output[0, :, 0] = [120.0, 140.0, 40.0, 60.0, 0.8]
+
+    detections = postprocess(
+        [output],
+        1.0,
+        0,
+        0,
+        (640, 640, 3),
+        0.25,
+        0.45,
+        class_names=("bucket",),
+    )
+
+    assert len(detections) == 1
+    detection = detections[0]
+    assert detection.class_name == "bucket"
+    assert np.isclose(detection.confidence, 0.8)
+    assert (detection.x1, detection.y1, detection.x2, detection.y2) == (100.0, 110.0, 140.0, 170.0)
+
+
 def test_rknn_iou_tracker_keeps_visible_detection_id() -> None:
     tracker = _IoUTracker(max_lost_frames=5)
     first = Detection(0, "Target", 0.9, 10, 10, 50, 50)

@@ -143,7 +143,8 @@ raw_command, mode_status = mode.update(inputs)
 `FIXED_DOWNWARD_HOLD`：
 
 - 仅供 `rescue_competition` 使用。
-- 摄像头物理固定垂直向下，不发送云台角度或速率命令。
+- mission 启动时通过一次性 action 将云台 pitch 设置为垂直朝地。
+- 对准阶段不发送云台角度或速率命令。
 - 不要求云台反馈。
 - `ex_cam -> vy`
 - `ey_cam -> vx`

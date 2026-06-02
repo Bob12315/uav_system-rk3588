@@ -415,9 +415,13 @@ def test_dispatch_release_payload_rejects_unconfigured_mapping() -> None:
 class _FakeMav:
     def __init__(self) -> None:
         self.command_long_calls = []
+        self.local_position_calls = []
 
     def command_long_send(self, *args) -> None:
         self.command_long_calls.append(args)
+
+    def set_position_target_local_ned_send(self, *args) -> None:
+        self.local_position_calls.append(args)
 
 
 class _FakeMaster:
@@ -476,6 +480,43 @@ def test_command_sender_set_relay_uses_mav_cmd_do_set_relay() -> None:
     call = client.master.mav.command_long_calls[-1]
     assert call[2] == mavutil.mavlink.MAV_CMD_DO_SET_RELAY
     assert call[4:11] == (0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+
+def test_command_sender_velocity_ignores_yaw_axis() -> None:
+    sender, client = _sender_with_fake_client()
+
+    sender._send_velocity(
+        client.master,
+        ControlCommand(
+            command_type=ControlType.VELOCITY,
+            vx=1.0,
+            vy=2.0,
+            vz=3.0,
+            yaw_rate=0.5,
+            frame=8,
+        ),
+    )
+
+    call = client.master.mav.local_position_calls[-1]
+    type_mask = call[4]
+    assert type_mask & mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE
+    assert type_mask & mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
+    assert call[8:11] == (1.0, 2.0, 3.0)
+
+
+def test_command_sender_explicit_yaw_rate_keeps_yaw_rate_enabled() -> None:
+    sender, client = _sender_with_fake_client()
+
+    sender._send_yaw_rate(
+        client.master,
+        ControlCommand(command_type=ControlType.YAW_RATE, yaw_rate=0.5, frame=8),
+    )
+
+    call = client.master.mav.local_position_calls[-1]
+    type_mask = call[4]
+    assert type_mask & mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE
+    assert not type_mask & mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
+    assert call[-1] == pytest.approx(0.5)
 
 
 def test_command_sender_release_payload_does_not_emit_mavlink_without_mapping() -> None:

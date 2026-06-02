@@ -31,8 +31,11 @@ def test_fixed_downward_hold_maps_camera_errors_without_gimbal_commands() -> Non
 
     assert status.mode_name == "FIXED_DOWNWARD_HOLD"
     assert status.detail["fixed_downward_camera"] is True
+    assert status.detail["body_yaw_control"] is False
     assert command.vy_cmd == pytest.approx(0.06)
     assert command.vx_cmd == pytest.approx(-0.05)
+    assert command.vz_cmd == pytest.approx(0.0)
+    assert command.yaw_rate_cmd == pytest.approx(0.0)
     assert command.enable_body is True
     assert command.enable_approach is True
     assert command.enable_gimbal is False

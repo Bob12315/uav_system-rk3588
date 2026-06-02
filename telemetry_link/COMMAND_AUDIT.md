@@ -25,10 +25,11 @@ ArduPilot Copter 对 Guided 运动命令要求：
 
 当前实现：
 
-- `VELOCITY`、`YAW_RATE`、`STOP` 都发送速度三轴 + `yaw_rate`
-- type mask 等效为 ArduPilot 示例里的 `1479`
-- `yaw_rate` 单独命令会用 `vx=vy=vz=0` 搭配目标偏航角速度
-- `stop` 会发送 `vx=vy=vz=yaw_rate=0`
+- `VELOCITY` 和 `STOP` 只发送速度三轴，type mask 同时屏蔽 `yaw` 和 `yaw_rate`。
+- 自动平移、视觉对准和停止不会主动控制偏航轴，机头方向由飞控保持。
+- 显式人工 `yaw_rate` 命令仍发送速度三轴 + `yaw_rate`，type mask 等效为
+  ArduPilot 示例里的 `1479`。
+- `yaw_rate` 单独命令会用 `vx=vy=vz=0` 搭配目标偏航角速度。
 
 ## 已核对，暂不改
 

@@ -207,6 +207,9 @@ class RescueCompetitionMissionConfig:
     auto_start: bool = False
     takeoff_altitude_m: float = 5.0
     takeoff_altitude_tolerance_m: float = 0.5
+    startup_gimbal_pitch_deg: float = -90.0
+    startup_gimbal_yaw_deg: float = 0.0
+    startup_gimbal_roll_deg: float = 0.0
     local_position_frame: int = 1
     drop_route_end_name: str = "drop_center"
     recce_route_end_name: str = "recce_center"
@@ -314,11 +317,15 @@ class RescueCompetitionMission:
         target_error_offset: dict[str, float] | None = None
 
         if self._stage == RescueStage.PREPARE:
-            hold_reason = self._update_prepare(context)
+            hold_reason = self._update_prepare(context, actions)
         elif self._stage == RescueStage.ARM:
             if context.drone.armed:
-                self._transition_to(RescueStage.TAKEOFF)
-                hold_reason = "vehicle_armed"
+                actions.append(self._startup_gimbal_action())
+                if self._capture_origin(context):
+                    self._transition_to(RescueStage.TAKEOFF)
+                    hold_reason = "vehicle_armed"
+                else:
+                    hold_reason = "armed_local_position_not_ready"
             else:
                 actions.append(
                     MissionAction(
@@ -328,6 +335,7 @@ class RescueCompetitionMission:
                         priority=1,
                     )
                 )
+                actions.append(self._startup_gimbal_action())
                 hold_reason = (
                     "waiting_vehicle_arm"
                     if context.actions_enabled
@@ -462,20 +470,44 @@ class RescueCompetitionMission:
         value = str(stage)
         return legacy[value] if value in legacy else RescueStage(value)
 
-    def _update_prepare(self, context: MissionContext) -> str:
+    def _update_prepare(
+        self,
+        context: MissionContext,
+        actions: list[MissionAction],
+    ) -> str:
         if not context.drone.local_position_valid:
             return "local_position_not_ready"
-        if self._origin is None:
-            self._origin = LocalMissionFrame(
-                origin_x=float(context.drone.local_x),
-                origin_y=float(context.drone.local_y),
-                origin_z=float(context.drone.local_z),
-                yaw_rad=float(context.drone.yaw),
-            )
         if self.config.auto_start or self._start_requested:
             self._transition_to(RescueStage.ARM)
             self._start_requested = False
+            actions.append(self._startup_gimbal_action())
         return ""
+
+    def _capture_origin(self, context: MissionContext) -> bool:
+        if self._origin is not None:
+            return True
+        if not context.drone.local_position_valid:
+            return False
+        self._origin = LocalMissionFrame(
+            origin_x=float(context.drone.local_x),
+            origin_y=float(context.drone.local_y),
+            origin_z=float(context.drone.local_z),
+            yaw_rad=float(context.drone.yaw),
+        )
+        return True
+
+    def _startup_gimbal_action(self) -> MissionAction:
+        return MissionAction(
+            "gimbal_angle",
+            params={
+                "pitch": self.config.startup_gimbal_pitch_deg,
+                "yaw": self.config.startup_gimbal_yaw_deg,
+                "roll": self.config.startup_gimbal_roll_deg,
+            },
+            key="rescue_startup_gimbal_downward",
+            once=True,
+            priority=2,
+        )
 
     def _update_goto_dropzone(
         self,
@@ -1206,6 +1238,9 @@ def build_rescue_config(settings: dict[str, Any]) -> RescueCompetitionMissionCon
         auto_start=_strict_bool(settings.get("auto_start", False)),
         takeoff_altitude_m=float(settings.get("takeoff_altitude_m", 5.0)),
         takeoff_altitude_tolerance_m=float(settings.get("takeoff_altitude_tolerance_m", 0.5)),
+        startup_gimbal_pitch_deg=float(settings.get("startup_gimbal_pitch_deg", -90.0)),
+        startup_gimbal_yaw_deg=float(settings.get("startup_gimbal_yaw_deg", 0.0)),
+        startup_gimbal_roll_deg=float(settings.get("startup_gimbal_roll_deg", 0.0)),
         local_position_frame=int(settings.get("local_position_frame", 1)),
         drop_route_end_name=str(settings.get("drop_route_end_name", "drop_center")),
         recce_route_end_name=str(settings.get("recce_route_end_name", "recce_center")),

@@ -87,6 +87,13 @@ class MissionRunner:
                 self.link_manager.disarm(priority=priority)
             elif action_type == "takeoff":
                 self.link_manager.takeoff(float(params["altitude_m"]), priority=priority)
+            elif action_type == "gimbal_angle":
+                self.link_manager.send_gimbal_angle(
+                    pitch=float(params["pitch"]),
+                    yaw=float(params.get("yaw", 0.0)),
+                    roll=float(params.get("roll", 0.0)),
+                    priority=priority,
+                )
             elif action_type == "land":
                 self.link_manager.land(priority=priority)
             elif action_type == "local_position":

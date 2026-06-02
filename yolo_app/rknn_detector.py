@@ -23,7 +23,7 @@ class Detection:
 
 
 class RknnDetector:
-    """RK3588 RKNN YOLO11 INT8 detector using the model-zoo 9-output layout."""
+    """RK3588 RKNN YOLO INT8 detector for supported model-zoo and flat layouts."""
 
     def __init__(
         self,
@@ -104,8 +104,19 @@ def postprocess(
     iou: float,
     class_names: tuple[str, ...] = CLASS_NAMES,
 ) -> list[Detection]:
+    if len(outputs) == 1:
+        return _postprocess_flat_output(
+            output=np.asarray(outputs[0]),
+            scale=scale,
+            pad_x=pad_x,
+            pad_y=pad_y,
+            frame_shape=frame_shape,
+            conf=conf,
+            iou=iou,
+            class_names=class_names,
+        )
     if len(outputs) != 9:
-        raise ValueError(f"expected 9 RKNN YOLO outputs, got {len(outputs)}")
+        raise ValueError(f"expected 1 or 9 RKNN YOLO outputs, got {len(outputs)}")
 
     all_boxes: list[np.ndarray] = []
     all_scores: list[np.ndarray] = []
@@ -136,9 +147,77 @@ def postprocess(
     if not np.any(keep):
         return []
 
-    boxes = boxes[keep]
-    confidences = confidences[keep]
-    class_ids = class_ids[keep]
+    return _build_detections(
+        boxes=boxes[keep],
+        confidences=confidences[keep],
+        class_ids=class_ids[keep],
+        scale=scale,
+        pad_x=pad_x,
+        pad_y=pad_y,
+        frame_shape=frame_shape,
+        conf=conf,
+        iou=iou,
+        class_names=class_names,
+    )
+
+
+def _postprocess_flat_output(
+    output: np.ndarray,
+    scale: float,
+    pad_x: int,
+    pad_y: int,
+    frame_shape,
+    conf: float,
+    iou: float,
+    class_names: tuple[str, ...],
+) -> list[Detection]:
+    if output.ndim != 3 or output.shape[0] != 1 or output.shape[1] < 5:
+        raise ValueError(f"expected flat RKNN YOLO output shape (1, 4 + classes, boxes), got {output.shape}")
+
+    predictions = output[0].astype(np.float32, copy=False)
+    scores = predictions[4:].T
+    class_ids = scores.argmax(axis=1)
+    confidences = scores[np.arange(scores.shape[0]), class_ids]
+    keep = confidences >= conf
+    if not np.any(keep):
+        return []
+
+    cx, cy, width, height = predictions[:4, keep]
+    boxes = np.column_stack(
+        (
+            cx - width / 2.0,
+            cy - height / 2.0,
+            cx + width / 2.0,
+            cy + height / 2.0,
+        )
+    )
+    return _build_detections(
+        boxes=boxes,
+        confidences=confidences[keep],
+        class_ids=class_ids[keep],
+        scale=scale,
+        pad_x=pad_x,
+        pad_y=pad_y,
+        frame_shape=frame_shape,
+        conf=conf,
+        iou=iou,
+        class_names=class_names,
+    )
+
+
+def _build_detections(
+    boxes: np.ndarray,
+    confidences: np.ndarray,
+    class_ids: np.ndarray,
+    scale: float,
+    pad_x: int,
+    pad_y: int,
+    frame_shape,
+    conf: float,
+    iou: float,
+    class_names: tuple[str, ...],
+) -> list[Detection]:
+    boxes = boxes.astype(np.float32, copy=True)
     boxes[:, [0, 2]] = (boxes[:, [0, 2]] - pad_x) / scale
     boxes[:, [1, 3]] = (boxes[:, [1, 3]] - pad_y) / scale
     xywh = np.column_stack(

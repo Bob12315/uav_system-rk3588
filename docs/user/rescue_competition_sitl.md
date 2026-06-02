@@ -309,9 +309,7 @@ dry_run_skip_vision: false
 
 ```yaml
 drop_target_classes:
-  - drop_cylinder
-  - cylinder
-  - target
+  - bucket
 drop_target_min_confidence: 0.45
 drop_target_stable_frames: 5
 drop_target_max_center_error: 0.35
@@ -338,7 +336,13 @@ recon:
 ```
 
 投放扫描完成仍无目标时进入 `GOTO_RECON`；侦察扫描完成仍无危险品时进入
-`RETURN_HOME`。比赛任务使用固定垂直下视摄像头，不发送云台控制命令。
+`RETURN_HOME`。比赛任务启动后会将云台一次性设置为垂直朝地；后续对准阶段不持续
+发送云台控制命令。
+
+任务自动运动只发送平移目标，不发送机体偏航角或偏航角速度目标。机头应保持
+解锁/起飞时方向。`DROP_ALIGN`、`DROP_DESCEND`、`RECON_ALIGN` 和
+`RECON_DESCEND` 共用固定下视对准控制器；该控制器只输出前后左右平移修正，
+下降阶段的上下运动由位置动作负责。
 
 ## 6. 启动 SITL
 
@@ -365,9 +369,8 @@ gz topic \
   -p "data: 1"
 ```
 
-比赛任务把摄像头视为固定垂直下视设备。Gazebo 模型应将相机 pitch 固定为 `-90°`，
-运行期间不要再发送云台角度或速率命令。现有带云台模型也可以用于提供相机流，但需
-在仿真模型侧固定角度。
+比赛任务启动后会发送一次性云台角度动作，将 pitch 设置为 `-90°` 垂直朝地。
+后续 `FIXED_DOWNWARD_HOLD` 对准阶段不会持续发送云台角度或速率命令。
 
 确认 SITL 端口和 `config/telemetry.yaml` 一致。
 

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import math
+
+import pytest
+
 from missions.common.navigation import (
     LocalGoal,
     LocalMissionFrame,
@@ -24,6 +28,16 @@ def test_mission_to_local_position_uses_local_origin_translation() -> None:
     frame = LocalMissionFrame(origin_x=10.0, origin_y=-5.0, origin_z=-3.0)
 
     assert mission_to_local_position((2.5, 2.0, -5.0), frame) == (12.5, -3.0, -8.0)
+
+
+def test_mission_frame_x_axis_follows_captured_yaw() -> None:
+    frame = LocalMissionFrame(origin_x=10.0, origin_y=-5.0, origin_z=-3.0, yaw_rad=math.pi / 2.0)
+    drone = DroneState(local_x=10.0, local_y=0.0, local_z=-8.0)
+
+    assert to_mission_position(drone, frame) == pytest.approx((5.0, 0.0, -5.0))
+    assert mission_to_local_position((5.0, 0.0, -5.0), frame) == pytest.approx(
+        (10.0, 0.0, -8.0)
+    )
 
 
 def test_goal_target_tuple_reads_goal_coordinates() -> None:

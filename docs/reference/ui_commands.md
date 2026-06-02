@@ -182,7 +182,8 @@ mission reset
 `mission stage <STAGE_NAME>` 用于选择当前 mission 的流程步骤。Web UI 会为每个
 mission 展示自己的步骤按钮；`mission stage auto` 恢复自动流程选择。
 
-`mission start` 会请求当前 mission 开始执行。对 `rescue_competition` 来说，它会从 `PREPARE` 等待本地位置有效后进入 `TAKEOFF`。
+`mission start` 会请求当前 mission 开始执行。对 `rescue_competition` 来说，它会从
+`PREPARE` 等待本地位置有效后进入 `ARM`，请求云台垂直朝地和飞控解锁。
 
 ```text
 control send on

@@ -67,7 +67,13 @@ class FixedDownwardHoldMode:
         command = FlightCommand(
             vx_cmd=vx_cmd,
             vy_cmd=vy_cmd,
+            vz_cmd=0.0,
+            yaw_rate_cmd=0.0,
+            gimbal_yaw_rate_cmd=0.0,
+            gimbal_pitch_rate_cmd=0.0,
             enable_body=True,
+            enable_gimbal=False,
+            enable_gimbal_angle=False,
             enable_approach=True,
             active=True,
             valid=True,
@@ -76,7 +82,11 @@ class FixedDownwardHoldMode:
             mode_name=self.name,
             active=command.active,
             valid=True,
-            detail={"fixed_downward_camera": True, "body_motion_active": active},
+            detail={
+                "fixed_downward_camera": True,
+                "body_motion_active": active,
+                "body_yaw_control": False,
+            },
         )
 
     def _hold_reason(self, inputs: MissionStageInput) -> str:

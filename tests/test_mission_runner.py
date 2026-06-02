@@ -39,6 +39,17 @@ class FakeLink:
             raise RuntimeError("servo failed")
         self.calls.append(("set_servo", (channel, pwm), priority))
 
+    def send_gimbal_angle(
+        self,
+        pitch: float,
+        yaw: float,
+        roll: float = 0.0,
+        priority: int = 5,
+    ) -> None:
+        if self.fail:
+            raise RuntimeError("gimbal angle failed")
+        self.calls.append(("gimbal_angle", (pitch, yaw, roll), priority))
+
 
 @dataclass(slots=True)
 class FakeYoloClient:
@@ -111,6 +122,29 @@ def test_non_once_action_can_dispatch_repeatedly() -> None:
         ("set_servo", (9, 1900), 4),
         ("set_servo", (9, 1900), 4),
     ]
+
+
+def test_gimbal_angle_action_dispatches_through_link_manager() -> None:
+    link = FakeLink()
+    runner = MissionRunner(
+        FakeMission(
+            [
+                MissionAction(
+                    "gimbal_angle",
+                    params={"pitch": -90.0, "yaw": 0.0, "roll": 0.0},
+                    key="gimbal-downward",
+                    priority=2,
+                )
+            ]
+        ),
+        link_manager=link,
+        send_actions=True,
+    )
+
+    runner.update(_context())
+    runner.update(_context())
+
+    assert link.calls == [("gimbal_angle", (-90.0, 0.0, 0.0), 2)]
 
 
 def test_send_actions_false_does_not_dispatch_or_mark_once() -> None:

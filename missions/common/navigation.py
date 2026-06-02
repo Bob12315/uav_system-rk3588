@@ -29,9 +29,13 @@ def to_mission_position(
     drone: DroneState,
     frame: LocalMissionFrame,
 ) -> tuple[float, float, float]:
+    dx = float(drone.local_x) - float(frame.origin_x)
+    dy = float(drone.local_y) - float(frame.origin_y)
+    cos_yaw = math.cos(float(frame.yaw_rad))
+    sin_yaw = math.sin(float(frame.yaw_rad))
     return (
-        float(drone.local_x) - float(frame.origin_x),
-        float(drone.local_y) - float(frame.origin_y),
+        cos_yaw * dx + sin_yaw * dy,
+        -sin_yaw * dx + cos_yaw * dy,
         float(drone.local_z) - float(frame.origin_z),
     )
 
@@ -40,9 +44,13 @@ def mission_to_local_position(
     point: tuple[float, float, float],
     frame: LocalMissionFrame,
 ) -> tuple[float, float, float]:
+    x = float(point[0])
+    y = float(point[1])
+    cos_yaw = math.cos(float(frame.yaw_rad))
+    sin_yaw = math.sin(float(frame.yaw_rad))
     return (
-        float(frame.origin_x) + float(point[0]),
-        float(frame.origin_y) + float(point[1]),
+        float(frame.origin_x) + cos_yaw * x - sin_yaw * y,
+        float(frame.origin_y) + sin_yaw * x + cos_yaw * y,
         float(frame.origin_z) + float(point[2]),
     )
 
