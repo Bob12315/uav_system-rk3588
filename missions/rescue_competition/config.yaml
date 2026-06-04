@@ -3,188 +3,102 @@ initial_stage: PREPARE
 auto_start: false
 takeoff_altitude_m: 5.0
 takeoff_altitude_tolerance_m: 0.5
-# Mission 启动后一次性将云台转为垂直朝地。MAVLink pitch 向下为负。
-startup_gimbal_pitch_deg: -90.0
-startup_gimbal_yaw_deg: 0.0
-startup_gimbal_roll_deg: 0.0
-local_position_frame: 1
-drop_route_end_name: drop_center
-recce_route_end_name: recce_center
-home_route_end_name: home
-route_hold_s: 0.0
-align_mode: FIXED_DOWNWARD_HOLD
-dry_run_skip_vision: false
-dry_run_skip_payload_release: true
-search_drop_duration_s: 2.0
-align_drop_duration_s: 1.0
-drop:
-  required_payload_drops: 2
-  scan_direction: left_to_right
-  scan_height_m: 5.0
-  intermediate_height_m: 3.0
-  final_height_m: 1.0
-  ascend_height_m: 5.0
-  scan_width_m: 5.0
-  scan_speed_mps: 0.4
-  scan_timeout_s: 45.0
-  descend_hold_s: 0.3
-  stable_hold_s: 3.0
-  dropped_target_radius_m: 0.8
-  resume_skip_m: 0.6
-  scan_route:
-    - name: drop_scan_left
-      x: 30.0
-      y: -2.5
-      z: -5.0
-      xy_tolerance_m: 0.7
-      z_tolerance_m: 0.4
-      max_speed_mps: 0.5
-    - name: drop_scan_center
-      x: 30.0
-      y: 0.0
-      z: -5.0
-      xy_tolerance_m: 0.7
-      z_tolerance_m: 0.4
-      max_speed_mps: 0.5
-    - name: drop_scan_right
-      x: 30.0
-      y: 2.5
-      z: -5.0
-      xy_tolerance_m: 0.7
-      z_tolerance_m: 0.4
-      max_speed_mps: 0.5
-drop_target_classes:
-  - bucket
-drop_target_min_confidence: 0.45
-drop_target_stable_frames: 5
-drop_target_max_center_error: 0.35
-align:
-  max_ex_cam: 0.08
-  max_ey_cam: 0.08
-  min_target_size: 0.0
-  require_target_locked: true
-  require_target_stable: true
-  hold_s: 0.8
-  timeout_s: 15.0
-  lost_timeout_s: 2.0
-payload_release:
-  delay_after_action_s: 1.0
-scan_duration_s: 3.0
-recce:
-  cylinder_classes:
-    - recce_cylinder
-    - cylinder
-  hazard_classes:
-    - explosive
-    - flammable
-    - corrosive
-    - toxic
-    - oxidizer
-    - biohazard
-    - hazard_sign
-  min_cylinder_confidence: 0.35
-  min_hazard_confidence: 0.35
-  association_mode: inside_cylinder
-  vote_min_count: 3
-  vote_min_confidence_sum: 1.2
-  scan_duration_s: 8.0
-  output_dir: runtime/logs/recce
-  output_json: true
-  output_csv: true
-recon:
-  scan_height_m: 5.0
-  identify_height_m: 2.0
-  scan_width_m: 5.0
-  scan_speed_mps: 0.5
-  scan_timeout_s: 40.0
-  align_hold_s: 0.5
-  descend_hold_s: 0.5
-  reported_target_radius_m: 0.8
-  scan_route:
-    - name: recon_scan_left
-      x: 55.0
-      y: -2.5
-      z: -5.0
-      xy_tolerance_m: 0.7
-      z_tolerance_m: 0.4
-      max_speed_mps: 0.5
-    - name: recon_scan_center
-      x: 55.0
-      y: 0.0
-      z: -5.0
-      xy_tolerance_m: 0.7
-      z_tolerance_m: 0.4
-      max_speed_mps: 0.5
-    - name: recon_scan_right
-      x: 55.0
-      y: 2.5
-      z: -5.0
-      xy_tolerance_m: 0.7
-      z_tolerance_m: 0.4
-      max_speed_mps: 0.5
 land_complete_altitude_m: 0.3
+local_position_frame: 1
+xy_tolerance_m: 0.6
+z_tolerance_m: 0.35
+max_goal_speed_mps: 0.5
 
-# Dry-run skeleton route in mission-local NED coordinates.
-# x 正方向为解锁时机头朝向，y 正方向为该方向右侧。
-# z=-5.0 means 5 m above the captured mission origin.
 route:
-  - name: takeoff_clear
-    x: 3.0
-    y: 0.0
-    z: -5.0
-    xy_tolerance_m: 1.0
-    z_tolerance_m: 0.8
-    max_speed_mps: 0.8
-  - name: drop_entry
-    x: 25.0
-    y: 0.0
-    z: -5.0
-    xy_tolerance_m: 1.5
-    z_tolerance_m: 0.8
-    max_speed_mps: 0.8
-  - name: drop_center
-    x: 30.0
-    y: 0.0
-    z: -5.0
-    xy_tolerance_m: 1.5
-    z_tolerance_m: 0.8
-    max_speed_mps: 0.8
-  - name: recce_entry
-    x: 50.0
-    y: 0.0
-    z: -5.0
-    xy_tolerance_m: 1.5
-    z_tolerance_m: 0.8
-    max_speed_mps: 0.8
-  - name: recce_center
-    x: 55.0
-    y: 0.0
-    z: -5.0
-    xy_tolerance_m: 1.5
-    z_tolerance_m: 0.8
-    max_speed_mps: 0.8
-  - name: home
+  home:
     x: 0.0
     y: 0.0
-    z: -5.0
-    xy_tolerance_m: 1.5
-    z_tolerance_m: 0.8
-    max_speed_mps: 0.8
-drop_zones: []
-recce_zones: []
+  drop_area_center:
+    x: 30.0
+    y: 0.0
+  recce_area_center:
+    x: 55.0
+    y: 0.0
+
+drop:
+  required_payload_drops: 2
+  survey_altitude_m: 5.0
+  transit_altitude_m: 3.0
+  release_altitude_m: 1.0
+  survey_hold_s: 1.2
+  target_count: 2
+  survey_points:
+    - {name: drop_p1, x: 28.0, y: -1.2}
+    - {name: drop_p2, x: 28.0, y: 1.2}
+    - {name: drop_p3, x: 32.0, y: -1.2}
+    - {name: drop_p4, x: 32.0, y: 1.2}
+
+payload:
+  release_wait_s: 1.0
+  return_hold_pwm_after_release: true
+
 payload_slots:
   - id: 1
-    servo_channel: 9
-    release_pwm: 1900
+    servo_channel: 8
     hold_pwm: 1100
+    release_pwm: 1900
     drop_center_x: 0.0
     drop_center_y: 0.0
   - id: 2
-    servo_channel: 10
-    release_pwm: 1900
+    servo_channel: 9
     hold_pwm: 1100
+    release_pwm: 1900
     drop_center_x: 0.0
     drop_center_y: 0.0
+
+recce:
+  survey_altitude_m: 5.0
+  transit_altitude_m: 3.0
+  identify_altitude_m: 2.0
+  survey_hold_s: 1.2
+  capture_hold_s: 1.5
+  visit_max_count: 5
+  required_confirmed_count: 3
+  vote_min_count: 3
+  vote_min_confidence_sum: 1.2
+  output_dir: runtime/logs/recce
+  survey_points:
+    - {name: recce_p1, x: 53.0, y: -1.2}
+    - {name: recce_p2, x: 53.0, y: 1.2}
+    - {name: recce_p3, x: 57.0, y: -1.2}
+    - {name: recce_p4, x: 57.0, y: 1.2}
+
+vision:
+  fov_x_deg: 75.0
+  fov_y_deg: 75.0
+  image_x_sign: 1.0
+  image_y_sign: 1.0
+  cylinder_classes: ["cylinder"]
+  hazard_classes: ["flammable", "toxic", "corrosive", "explosive"]
+  min_cylinder_confidence: 0.4
+  min_hazard_confidence: 0.4
+  cluster_radius_m: 0.8
+  edge_margin_norm: 0.85
+  lock_center_max_error: 0.65
+
+align:
+  kp_vx: 0.8
+  kp_vy: 0.8
+  max_vx_mps: 0.4
+  max_vy_mps: 0.4
+  descend_speed_mps: 0.2
+  max_ex_cam: 0.06
+  max_ey_cam: 0.06
+  deadband_ex_cam: 0.015
+  deadband_ey_cam: 0.015
+  hold_s: 0.5
+  lost_timeout_s: 1.0
+  min_altitude_m: 0.8
+  max_vision_age_s: 0.3
+  max_drone_age_s: 0.3
+  require_target_locked: true
+  vx_sign: 1.0
+  vy_sign: 1.0
 
 input_adapter:
   dt_default: 0.02
@@ -200,41 +114,17 @@ input_adapter:
   gimbal_pitch_tau_s: 0.10
   target_size_tau_s: 0.12
 
-fixed_downward_hold:
-  gates:
-    max_vision_age_s: 0.3
-    max_drone_age_s: 0.3
-    require_target_locked: true
-
-  lateral:
-    kp_vy: 1.5
-    kd_vy: 0.3
-    use_derivative: true
-    deadband_ex_cam: 0.02
-    max_vy: 0.6
-    vy_sign: 1.0
-
-  longitudinal:
-    kp_vx: 1.5
-    kd_vx: 0.3
-    use_derivative: true
-    deadband_ey_cam: 0.02
-    max_forward_vx: 0.8
-    max_backward_vx: 0.8
-    allow_backward: true
-    vx_sign: -1.0
-
 shaper:
-  max_vx: 0.8
-  max_vy: 0.6
-  max_vz: 0.5
+  max_vx: 0.4
+  max_vy: 0.4
+  max_vz: 0.25
   max_yaw_rate: 0.0
-  max_gimbal_yaw_rate: 1.0
-  max_gimbal_pitch_rate: 1.0
-  max_vx_rate: 2.0
-  max_vy_rate: 1.5
-  max_vz_rate: 1.0
+  max_gimbal_yaw_rate: 0.0
+  max_gimbal_pitch_rate: 0.0
+  max_vx_rate: 0.8
+  max_vy_rate: 0.8
+  max_vz_rate: 0.5
   max_yaw_rate_rate: 0.0
-  max_gimbal_yaw_rate_rate: 3.0
-  max_gimbal_pitch_rate_rate: 3.0
+  max_gimbal_yaw_rate_rate: 0.0
+  max_gimbal_pitch_rate_rate: 0.0
   smooth_to_zero_when_disabled: true

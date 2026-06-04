@@ -84,14 +84,13 @@ def test_mission_name_can_be_overridden_from_cli() -> None:
     config = load_app_config(args)
 
     assert config.mission_name == "rescue_competition"
-    assert config.fixed_downward_hold.kp_vx == pytest.approx(1.5)
-    assert config.fixed_downward_hold.kd_vx == pytest.approx(0.3)
-    assert config.fixed_downward_hold.max_forward_vx == pytest.approx(0.8)
-    assert config.fixed_downward_hold.kp_vy == pytest.approx(1.5)
-    assert config.fixed_downward_hold.kd_vy == pytest.approx(0.3)
-    assert config.fixed_downward_hold.max_vy == pytest.approx(0.6)
-    assert config.shaper.max_vx == pytest.approx(0.8)
-    assert config.shaper.max_vy == pytest.approx(0.6)
+    assert config.downward_align_descend.kp_vx == pytest.approx(0.8)
+    assert config.downward_align_descend.kp_vy == pytest.approx(0.8)
+    assert config.downward_align_descend.max_vx_mps == pytest.approx(0.4)
+    assert config.downward_align_descend.max_vy_mps == pytest.approx(0.4)
+    assert config.downward_align_descend.descend_speed_mps == pytest.approx(0.2)
+    assert config.shaper.max_vx == pytest.approx(0.4)
+    assert config.shaper.max_vy == pytest.approx(0.4)
     assert config.shaper.max_yaw_rate == pytest.approx(0.0)
     assert config.shaper.max_yaw_rate_rate == pytest.approx(0.0)
 
@@ -211,12 +210,12 @@ def test_stage_registry_runtime_config_update_preserves_controller_references() 
     assert overhead_mode.body.config.kp_vy == pytest.approx(3.5)
 
 
-def test_stage_registry_exposes_rescue_fixed_downward_hold() -> None:
+def test_stage_registry_exposes_rescue_downward_align_descend() -> None:
     registry = StageRegistry(
         approach_config=ApproachTrackConfig(),
         overhead_config=OverheadHoldConfig(),
     )
 
-    mode = registry.get("FIXED_DOWNWARD_HOLD")
+    mode = registry.get("DOWNWARD_ALIGN_DESCEND")
 
-    assert mode.name == "FIXED_DOWNWARD_HOLD"
+    assert mode.name == "DOWNWARD_ALIGN_DESCEND"

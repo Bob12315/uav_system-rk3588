@@ -59,11 +59,10 @@ MissionStage.update()
 - 决定任务阶段、active stage controller 和一次性动作请求。
 - `visual_tracking/mission.py`：保留现有视觉跟踪任务行为。
 - `visual_tracking/stages/`：视觉跟踪任务的连续控制阶段，例如斜视接近、正上方悬停。
-- `rescue_competition/mission.py`：比赛任务流程，包含起飞、航线、搜索、对准、
-  下降、投放、上升、侦察扫描、返航和降落。
-- `rescue_competition/stages/fixed_downward_hold/`：比赛任务专用下视相机对准，
-  只输出机体水平移动，不持续控制云台。任务启动时的云台垂直朝地动作由 mission
-  通过一次性 `MissionAction` 请求。
+- `rescue_competition/mission.py`：比赛任务流程，包含起飞、投放区扫描建图、
+  投放目标规划、低空微调投放、侦察区扫描建图、低空识别、返航和降落。
+- `rescue_competition/stages/downward_align_descend/`：比赛任务专用固定下视相机
+  微调下降，只输出机体前后、左右、上下速度，不持续控制云台，不输出偏航。
 - `common/navigation.py`：任务层本地坐标转换和到点判断。
 
 允许依赖：

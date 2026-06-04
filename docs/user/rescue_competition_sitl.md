@@ -370,7 +370,7 @@ gz topic \
 ```
 
 比赛任务启动后会发送一次性云台角度动作，将 pitch 设置为 `-90°` 垂直朝地。
-后续 `FIXED_DOWNWARD_HOLD` 对准阶段不会持续发送云台角度或速率命令。
+后续 `DOWNWARD_ALIGN_DESCEND` 对准下降阶段不会持续发送云台角度或速率命令。
 
 确认 SITL 端口和 `config/telemetry.yaml` 一致。
 
@@ -440,7 +440,7 @@ python -m app.main \
 
 ```text
 MissionAction 实发：arm/takeoff/local_position/land/set_servo/set_relay
-FlightCommand 实发：FIXED_DOWNWARD_HOLD 水平对准控制
+FlightCommand 实发：DOWNWARD_ALIGN_DESCEND 水平对准和慢速下降控制
 ```
 
 所以只在 SITL 中使用。

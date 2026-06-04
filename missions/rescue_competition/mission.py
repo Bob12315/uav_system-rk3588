@@ -1,1515 +1,1061 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from fusion.models import SceneDetections, SceneObject
 from missions.base import MissionAction, MissionContext, MissionOutput
 from missions.common.navigation import (
     LocalMissionFrame,
-    goal_target_tuple,
+    LocalGoal,
     hold_elapsed,
     local_goal_stable,
     mission_to_local_position,
     to_mission_position,
 )
-from missions.common.recce import RecceAccumulator, RecceConfig, RecceResultItem
-from missions.common.recce_output import write_recce_results
+from missions.rescue_competition.geometry import (
+    CameraGeometryConfig,
+    detection_to_mission_xy,
+)
+from missions.rescue_competition.recce_report import RecceResult, write_recce_report
+from missions.rescue_competition.survey import (
+    EstimatedObject,
+    SurveyTarget,
+    cluster_estimates,
+    select_targets,
+)
+from telemetry_link.models import DroneState
 
 
 class RescueStage(str, Enum):
     PREPARE = "PREPARE"
     ARM = "ARM"
     TAKEOFF = "TAKEOFF"
-    GOTO_DROPZONE = "GOTO_DROPZONE"
-    FOLLOW_ROUTE_TO_DROP_ZONE = "GOTO_DROPZONE"
-    DROP_SCAN = "DROP_SCAN"
-    SEARCH_DROP_TARGETS = "DROP_SCAN"
-    DROP_ALIGN = "DROP_ALIGN"
-    ALIGN_AND_DROP = "DROP_ALIGN"
-    DROP_DESCEND = "DROP_DESCEND"
-    DROP_RELEASE = "DROP_RELEASE"
-    DROP_ASCEND = "DROP_ASCEND"
-    WAIT_PAYLOAD_RELEASE = "DROP_ASCEND"
-    DROP_RESUME_SCAN = "DROP_RESUME_SCAN"
-    GOTO_RECON = "GOTO_RECON"
-    RESUME_ROUTE_TO_RECCE_ZONE = "GOTO_RECON"
-    RECON_SCAN = "RECON_SCAN"
-    SCAN_RECCE_AREA = "RECON_SCAN"
-    RECON_ALIGN = "RECON_ALIGN"
-    RECON_DESCEND = "RECON_DESCEND"
-    RECON_REPORT = "RECON_REPORT"
+    GOTO_DROP_SURVEY = "GOTO_DROP_SURVEY"
+    SURVEY_DROP_POINTS = "SURVEY_DROP_POINTS"
+    PLAN_DROP_TARGETS = "PLAN_DROP_TARGETS"
+    GOTO_DROP_TARGET = "GOTO_DROP_TARGET"
+    LOCK_DROP_TARGET = "LOCK_DROP_TARGET"
+    ALIGN_DESCEND_DROP = "ALIGN_DESCEND_DROP"
+    RELEASE_PAYLOAD = "RELEASE_PAYLOAD"
+    ASCEND_AFTER_DROP = "ASCEND_AFTER_DROP"
+    NEXT_DROP_OR_RECCE = "NEXT_DROP_OR_RECCE"
+    GOTO_RECCE_SURVEY = "GOTO_RECCE_SURVEY"
+    SURVEY_RECCE_POINTS = "SURVEY_RECCE_POINTS"
+    PLAN_RECCE_TARGETS = "PLAN_RECCE_TARGETS"
+    GOTO_RECCE_TARGET = "GOTO_RECCE_TARGET"
+    LOCK_RECCE_TARGET = "LOCK_RECCE_TARGET"
+    ALIGN_DESCEND_RECCE = "ALIGN_DESCEND_RECCE"
+    CAPTURE_RECCE = "CAPTURE_RECCE"
+    ASCEND_AFTER_RECCE = "ASCEND_AFTER_RECCE"
+    NEXT_RECCE_OR_REPORT = "NEXT_RECCE_OR_REPORT"
+    REPORT_RECCE = "REPORT_RECCE"
     RETURN_HOME = "RETURN_HOME"
-    FOLLOW_ROUTE_HOME = "RETURN_HOME"
     LAND = "LAND"
     FINISH = "FINISH"
-    DONE = "FINISH"
     FAILSAFE = "FAILSAFE"
-    ABORT = "FAILSAFE"
 
 
 @dataclass(slots=True)
-class RoutePoint:
+class SurveyPoint:
     name: str
     x: float
     y: float
-    z: float
-    xy_tolerance_m: float = 1.0
-    z_tolerance_m: float = 0.5
-    max_speed_mps: float = 0.5
-
-
-@dataclass(slots=True)
-class MissionZone:
-    name: str
-    x: float
-    y: float
-    radius_m: float
-    z: float | None = None
-
-
-@dataclass(slots=True)
-class PayloadRelease:
-    type: str
-    channel: int | None = None
-    pwm: int | None = None
-    hold_pwm: int | None = None
-    relay_id: int | None = None
-    state: bool | None = None
 
 
 @dataclass(slots=True)
 class PayloadSlot:
     payload_id: int
-    label: str = ""
-    release: PayloadRelease | None = None
+    servo_channel: int
+    hold_pwm: int
+    release_pwm: int
     drop_center_x: float = 0.0
     drop_center_y: float = 0.0
 
-
-@dataclass(slots=True)
-class DroppedTarget:
-    local_x: float
-    local_y: float
-    timestamp: float
-    payload_id: int
-
     def to_detail(self) -> dict[str, object]:
         return {
-            "local_x": self.local_x,
-            "local_y": self.local_y,
-            "timestamp": self.timestamp,
             "payload_id": self.payload_id,
+            "servo_channel": self.servo_channel,
+            "hold_pwm": self.hold_pwm,
+            "release_pwm": self.release_pwm,
+            "drop_center_x": self.drop_center_x,
+            "drop_center_y": self.drop_center_y,
         }
 
 
 @dataclass(slots=True)
-class ReportedTarget:
-    local_x: float
-    local_y: float
-    label: str
-    confidence: float
-    timestamp: float
-
-    def to_detail(self) -> dict[str, object]:
-        return {
-            "local_x": self.local_x,
-            "local_y": self.local_y,
-            "label": self.label,
-            "confidence": self.confidence,
-            "timestamp": self.timestamp,
-        }
+class RouteConfig:
+    home_x: float = 0.0
+    home_y: float = 0.0
+    drop_area_x: float = 30.0
+    drop_area_y: float = 0.0
+    recce_area_x: float = 55.0
+    recce_area_y: float = 0.0
 
 
 @dataclass(slots=True)
-class DropAlignConfig:
-    max_ex_cam: float = 0.08
-    max_ey_cam: float = 0.08
-    min_target_size: float = 0.0
-    require_target_locked: bool = True
-    require_target_stable: bool = True
-    hold_s: float = 0.8
-    timeout_s: float = 15.0
-    lost_timeout_s: float = 2.0
-
-
-@dataclass(slots=True)
-class DropMissionConfig:
+class DropConfig:
     required_payload_drops: int = 2
-    scan_direction: str = "left_to_right"
-    scan_height_m: float = 5.0
-    intermediate_height_m: float = 3.0
-    final_height_m: float = 1.0
-    ascend_height_m: float = 5.0
-    scan_width_m: float = 5.0
-    scan_speed_mps: float = 0.4
-    scan_timeout_s: float = 45.0
-    descend_hold_s: float = 0.3
-    stable_hold_s: float = 3.0
-    dropped_target_radius_m: float = 0.8
-    resume_skip_m: float = 0.6
-    scan_route: list[RoutePoint] = field(default_factory=list)
+    survey_altitude_m: float = 5.0
+    transit_altitude_m: float = 3.0
+    release_altitude_m: float = 1.0
+    survey_hold_s: float = 1.2
+    target_count: int = 2
+    survey_points: list[SurveyPoint] = field(default_factory=list)
 
 
 @dataclass(slots=True)
-class ReconMissionConfig:
-    scan_height_m: float = 5.0
-    identify_height_m: float = 2.0
-    scan_width_m: float = 5.0
-    scan_speed_mps: float = 0.5
-    scan_timeout_s: float = 40.0
-    align_hold_s: float = 0.5
-    descend_hold_s: float = 0.5
-    reported_target_radius_m: float = 0.8
-    scan_route: list[RoutePoint] = field(default_factory=list)
+class PayloadConfig:
+    release_wait_s: float = 1.0
+    return_hold_pwm_after_release: bool = True
 
 
 @dataclass(slots=True)
-class PayloadReleaseTiming:
-    delay_after_action_s: float = 1.0
-
-
-@dataclass(slots=True)
-class RecceMissionConfig:
-    config: RecceConfig = field(default_factory=RecceConfig)
-    scan_duration_s: float = 8.0
+class RecceConfig:
+    survey_altitude_m: float = 5.0
+    transit_altitude_m: float = 3.0
+    identify_altitude_m: float = 2.0
+    survey_hold_s: float = 1.2
+    capture_hold_s: float = 1.5
+    visit_max_count: int = 5
+    required_confirmed_count: int = 3
+    vote_min_count: int = 3
+    vote_min_confidence_sum: float = 1.2
     output_dir: str = "runtime/logs/recce"
-    output_json: bool = True
-    output_csv: bool = True
+    survey_points: list[SurveyPoint] = field(default_factory=list)
 
 
 @dataclass(slots=True)
-class DropTargetSelection:
-    track_id: int | None
-    class_name: str
-    confidence: float
-    ex: float
-    ey: float
-    target_size: float
-    selected_at: float
+class VisionConfig:
+    geometry: CameraGeometryConfig = field(default_factory=CameraGeometryConfig)
+    cylinder_classes: set[str] = field(default_factory=lambda: {"cylinder"})
+    hazard_classes: set[str] = field(default_factory=set)
+    min_cylinder_confidence: float = 0.4
+    min_hazard_confidence: float = 0.4
+    cluster_radius_m: float = 0.8
+    edge_margin_norm: float = 0.85
+    lock_center_max_error: float = 0.65
 
-    def to_detail(self) -> dict[str, object]:
-        return {
-            "track_id": self.track_id,
-            "class_name": self.class_name,
-            "confidence": self.confidence,
-            "ex": self.ex,
-            "ey": self.ey,
-            "target_size": self.target_size,
-            "selected_at": self.selected_at,
-        }
+
+@dataclass(slots=True)
+class AlignMissionConfig:
+    max_ex_cam: float = 0.06
+    max_ey_cam: float = 0.06
+    hold_s: float = 0.5
+    lost_timeout_s: float = 1.0
+    min_altitude_m: float = 0.8
 
 
 @dataclass(slots=True)
 class RescueCompetitionMissionConfig:
     initial_stage: RescueStage = RescueStage.PREPARE
     idle_mode: str = "IDLE"
+    align_mode: str = "DOWNWARD_ALIGN_DESCEND"
     auto_start: bool = False
     takeoff_altitude_m: float = 5.0
     takeoff_altitude_tolerance_m: float = 0.5
-    startup_gimbal_pitch_deg: float = -90.0
-    startup_gimbal_yaw_deg: float = 0.0
-    startup_gimbal_roll_deg: float = 0.0
-    local_position_frame: int = 1
-    drop_route_end_name: str = "drop_center"
-    recce_route_end_name: str = "recce_center"
-    home_route_end_name: str = "home"
-    route_hold_s: float = 0.0
-    align_mode: str = "FIXED_DOWNWARD_HOLD"
-    dry_run_skip_vision: bool = False
-    dry_run_skip_payload_release: bool = False
-    search_drop_duration_s: float = 2.0
-    align_drop_duration_s: float = 1.0
-    drop_target_classes: list[str] = field(
-        default_factory=lambda: ["drop_cylinder", "cylinder", "target"]
-    )
-    drop_target_min_confidence: float = 0.45
-    drop_target_stable_frames: int = 5
-    drop_target_max_center_error: float = 0.35
-    align: DropAlignConfig = field(default_factory=DropAlignConfig)
-    drop: DropMissionConfig = field(default_factory=DropMissionConfig)
-    payload_release: PayloadReleaseTiming = field(default_factory=PayloadReleaseTiming)
-    recce: RecceMissionConfig = field(default_factory=RecceMissionConfig)
-    recon: ReconMissionConfig = field(default_factory=ReconMissionConfig)
-    scan_duration_s: float = 3.0
     land_complete_altitude_m: float = 0.3
-    route: list[RoutePoint] = field(default_factory=list)
-    drop_zones: list[MissionZone] = field(default_factory=list)
-    recce_zones: list[MissionZone] = field(default_factory=list)
-    payloads: list[PayloadSlot] = field(default_factory=list)
+    local_position_frame: int = 1
+    xy_tolerance_m: float = 0.6
+    z_tolerance_m: float = 0.35
+    max_goal_speed_mps: float = 0.5
+    route: RouteConfig = field(default_factory=RouteConfig)
+    drop: DropConfig = field(default_factory=DropConfig)
+    payload: PayloadConfig = field(default_factory=PayloadConfig)
+    payload_slots: list[PayloadSlot] = field(default_factory=list)
+    recce: RecceConfig = field(default_factory=RecceConfig)
+    vision: VisionConfig = field(default_factory=VisionConfig)
+    align: AlignMissionConfig = field(default_factory=AlignMissionConfig)
 
 
 @dataclass(slots=True)
 class RescueCompetitionMission:
-    config: RescueCompetitionMissionConfig = field(
-        default_factory=RescueCompetitionMissionConfig
-    )
+    config: RescueCompetitionMissionConfig = field(default_factory=RescueCompetitionMissionConfig)
 
     name: str = "rescue_competition"
     _stage: RescueStage = field(init=False)
+    _previous_stage: RescueStage | None = field(init=False, default=None)
     _origin: LocalMissionFrame | None = field(init=False, default=None)
-    _route_index: int = field(init=False, default=0)
-    _drop_scan_index: int = field(init=False, default=0)
-    _recon_scan_index: int = field(init=False, default=0)
-    _payload_index: int = field(init=False, default=0)
-    _drop_count: int = field(init=False, default=0)
     _stage_started_at: float | None = field(init=False, default=None)
     _goal_reached_since: float | None = field(init=False, default=None)
-    _drop_candidate_track_id: int | None = field(init=False, default=None)
-    _drop_candidate_seen_frames: int = field(init=False, default=0)
-    _drop_candidate_last_center: tuple[float, float] | None = field(init=False, default=None)
-    _drop_candidate_class_name: str = field(init=False, default="")
-    _selected_drop_target: DropTargetSelection | None = field(init=False, default=None)
-    _align_ready_since: float | None = field(init=False, default=None)
-    _target_lost_since: float | None = field(init=False, default=None)
-    _payload_release_started_at: float | None = field(init=False, default=None)
-    _recce_accumulator: RecceAccumulator = field(init=False)
-    _recce_output_written: bool = field(init=False, default=False)
-    _recce_results: list[RecceResultItem] = field(init=False, default_factory=list)
-    _recce_output_paths: list[str] = field(init=False, default_factory=list)
+    _drop_scan_index: int = field(init=False, default=0)
+    _drop_estimates: list[EstimatedObject] = field(init=False, default_factory=list)
+    _drop_targets: list[SurveyTarget] = field(init=False, default_factory=list)
+    _drop_target_index: int = field(init=False, default=0)
+    _drop_count: int = field(init=False, default=0)
+    _release_started_at: float | None = field(init=False, default=None)
+    _recce_scan_index: int = field(init=False, default=0)
+    _recce_estimates: list[EstimatedObject] = field(init=False, default_factory=list)
+    _recce_targets: list[SurveyTarget] = field(init=False, default_factory=list)
+    _recce_target_index: int = field(init=False, default=0)
+    _recce_results: list[RecceResult] = field(init=False, default_factory=list)
+    _recce_votes: dict[str, tuple[int, float]] = field(init=False, default_factory=dict)
+    _recce_report_path: str = field(init=False, default="")
     _start_requested: bool = field(init=False, default=False)
-    _dropped_targets: list[DroppedTarget] = field(init=False, default_factory=list)
-    _reported_targets: list[ReportedTarget] = field(init=False, default_factory=list)
-    _recon_candidate: Any | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
-        self._stage = self._stage_value(self.config.initial_stage)
-        self._recce_accumulator = RecceAccumulator(self.config.recce.config)
+        self.reset()
 
     def reset(self) -> None:
-        self._stage = self._stage_value(self.config.initial_stage)
+        self._stage = self.config.initial_stage
+        self._previous_stage = None
         self._origin = None
-        self._route_index = 0
-        self._drop_scan_index = 0
-        self._recon_scan_index = 0
-        self._payload_index = 0
-        self._drop_count = 0
         self._stage_started_at = None
         self._goal_reached_since = None
-        self._reset_drop_candidate()
-        self._selected_drop_target = None
-        self._align_ready_since = None
-        self._target_lost_since = None
-        self._payload_release_started_at = None
-        self._recce_accumulator.reset()
-        self._recce_output_written = False
+        self._drop_scan_index = 0
+        self._drop_estimates = []
+        self._drop_targets = []
+        self._drop_target_index = 0
+        self._drop_count = 0
+        self._release_started_at = None
+        self._recce_scan_index = 0
+        self._recce_estimates = []
+        self._recce_targets = []
+        self._recce_target_index = 0
         self._recce_results = []
-        self._recce_output_paths = []
+        self._recce_votes = {}
+        self._recce_report_path = ""
         self._start_requested = False
-        self._dropped_targets = []
-        self._reported_targets = []
-        self._recon_candidate = None
 
     def start(self) -> None:
         self._start_requested = True
 
     def set_stage(self, stage: str) -> None:
-        self._transition_to(self._stage_value(stage))
-        self._start_requested = False
+        self._transition_to(_stage_value(stage))
+
+    def clear_forced_stage(self) -> None:
+        return None
 
     def update(self, context: MissionContext) -> MissionOutput:
-        previous = self._stage
-        self._ensure_stage_started(context)
+        if self._stage_started_at is None:
+            self._stage_started_at = float(context.timestamp)
         actions: list[MissionAction] = []
-        hold_reason = ""
         active_mode = self.config.idle_mode
-
+        hold_reason = ""
         target_error_offset: dict[str, float] | None = None
 
         if self._stage == RescueStage.PREPARE:
-            hold_reason = self._update_prepare(context, actions)
+            hold_reason = self._prepare(context)
         elif self._stage == RescueStage.ARM:
-            if context.drone.armed:
-                actions.append(self._startup_gimbal_action())
-                if self._capture_origin(context):
-                    self._transition_to(RescueStage.TAKEOFF)
-                    hold_reason = "vehicle_armed"
-                else:
-                    hold_reason = "armed_local_position_not_ready"
-            else:
-                actions.append(
-                    MissionAction(
-                        "arm",
-                        key="rescue_arm",
-                        once=True,
-                        priority=1,
-                    )
-                )
-                actions.append(self._startup_gimbal_action())
-                hold_reason = (
-                    "waiting_vehicle_arm"
-                    if context.actions_enabled
-                    else "arm_actions_disabled"
-                )
+            hold_reason = self._arm(context, actions)
         elif self._stage == RescueStage.TAKEOFF:
-            actions.append(
-                MissionAction(
-                    "takeoff",
-                    params={"altitude_m": self.config.takeoff_altitude_m},
-                    key="rescue_takeoff",
-                    once=True,
-                    priority=2,
-                )
-            )
-            if context.drone.relative_alt_valid and context.drone.relative_altitude >= (
-                self.config.takeoff_altitude_m - self.config.takeoff_altitude_tolerance_m
-            ):
-                self._transition_to(RescueStage.GOTO_DROPZONE)
-        elif self._stage == RescueStage.GOTO_DROPZONE:
-            hold_reason = self._update_goto_dropzone(context, actions)
-        elif self._stage == RescueStage.DROP_SCAN:
-            hold_reason = self._update_drop_scan(context, actions)
-        elif self._stage == RescueStage.DROP_ALIGN:
+            hold_reason = self._takeoff(context, actions)
+        elif self._stage == RescueStage.GOTO_DROP_SURVEY:
+            hold_reason = self._goto_drop_survey(context, actions)
+        elif self._stage == RescueStage.SURVEY_DROP_POINTS:
+            hold_reason = self._survey_drop(context, actions)
+        elif self._stage == RescueStage.PLAN_DROP_TARGETS:
+            hold_reason = self._plan_drop_targets()
+        elif self._stage == RescueStage.GOTO_DROP_TARGET:
+            hold_reason = self._goto_current_drop_target(context, actions)
+        elif self._stage == RescueStage.LOCK_DROP_TARGET:
+            hold_reason = self._lock_target(context, actions, recce=False)
+        elif self._stage == RescueStage.ALIGN_DESCEND_DROP:
             active_mode = self.config.align_mode
             target_error_offset = self._current_payload_offset()
-            hold_reason = self._update_drop_align(context, actions)
-        elif self._stage == RescueStage.DROP_DESCEND:
+            hold_reason = self._align_descend_drop(context)
+        elif self._stage == RescueStage.RELEASE_PAYLOAD:
+            hold_reason = self._release_payload(context, actions)
+        elif self._stage == RescueStage.ASCEND_AFTER_DROP:
+            hold_reason = self._ascend_after_drop(context, actions)
+        elif self._stage == RescueStage.NEXT_DROP_OR_RECCE:
+            hold_reason = self._next_drop_or_recce()
+        elif self._stage == RescueStage.GOTO_RECCE_SURVEY:
+            hold_reason = self._goto_recce_survey(context, actions)
+        elif self._stage == RescueStage.SURVEY_RECCE_POINTS:
+            hold_reason = self._survey_recce(context, actions)
+        elif self._stage == RescueStage.PLAN_RECCE_TARGETS:
+            hold_reason = self._plan_recce_targets()
+        elif self._stage == RescueStage.GOTO_RECCE_TARGET:
+            hold_reason = self._goto_current_recce_target(context, actions)
+        elif self._stage == RescueStage.LOCK_RECCE_TARGET:
+            hold_reason = self._lock_target(context, actions, recce=True)
+        elif self._stage == RescueStage.ALIGN_DESCEND_RECCE:
             active_mode = self.config.align_mode
-            target_error_offset = self._current_payload_offset()
-            hold_reason = self._update_drop_descend(context, actions)
-        elif self._stage == RescueStage.DROP_RELEASE:
-            active_mode = self.config.align_mode
-            target_error_offset = self._current_payload_offset()
-            hold_reason = self._update_drop_release(context, actions)
-        elif self._stage == RescueStage.DROP_ASCEND:
-            hold_reason = self._update_drop_ascend(context, actions)
-        elif self._stage == RescueStage.DROP_RESUME_SCAN:
-            hold_reason = self._update_drop_resume_scan(context, actions)
-        elif self._stage == RescueStage.GOTO_RECON:
-            hold_reason = self._follow_route_until(
-                context,
-                actions,
-                self.config.recce_route_end_name,
-                RescueStage.RECON_SCAN,
-                "enroute",
-            )
-        elif self._stage == RescueStage.RECON_SCAN:
-            hold_reason = self._update_recon_scan(context, actions)
-        elif self._stage == RescueStage.RECON_ALIGN:
-            active_mode = self.config.align_mode
-            hold_reason = self._update_recon_align(context, actions)
-        elif self._stage == RescueStage.RECON_DESCEND:
-            active_mode = self.config.align_mode
-            hold_reason = self._update_recon_descend(context, actions)
-        elif self._stage == RescueStage.RECON_REPORT:
-            hold_reason = self._update_recon_report(context)
+            hold_reason = self._align_descend_recce(context)
+        elif self._stage == RescueStage.CAPTURE_RECCE:
+            hold_reason = self._capture_recce(context)
+        elif self._stage == RescueStage.ASCEND_AFTER_RECCE:
+            hold_reason = self._ascend_after_recce(context, actions)
+        elif self._stage == RescueStage.NEXT_RECCE_OR_REPORT:
+            hold_reason = self._next_recce_or_report()
+        elif self._stage == RescueStage.REPORT_RECCE:
+            hold_reason = self._report_recce(context)
         elif self._stage == RescueStage.RETURN_HOME:
-            hold_reason = self._follow_route_until(
-                context,
-                actions,
-                self.config.home_route_end_name,
-                RescueStage.LAND,
-                "returning_home",
-            )
+            hold_reason = self._return_home(context, actions)
         elif self._stage == RescueStage.LAND:
-            actions.append(
-                MissionAction(
-                    "land",
-                    key="rescue_land",
-                    once=True,
-                    priority=2,
-                )
-            )
-            if context.drone.relative_alt_valid and context.drone.relative_altitude <= self.config.land_complete_altitude_m:
-                self._transition_to(RescueStage.FINISH)
+            hold_reason = self._land(context, actions)
+        elif self._stage == RescueStage.FINISH:
+            hold_reason = "finished"
+        elif self._stage == RescueStage.FAILSAFE:
+            hold_reason = "failsafe"
 
+        detail = self._detail()
+        if target_error_offset is not None:
+            detail["target_error_offset"] = target_error_offset
         return MissionOutput(
             active_mode=active_mode,
             actions=actions,
             stage=self._stage.value,
-            previous_stage=previous.value if previous != self._stage else None,
+            previous_stage=self._previous_stage.value if self._previous_stage else None,
             hold_reason=hold_reason,
             done=self._stage == RescueStage.FINISH,
             aborted=self._stage == RescueStage.FAILSAFE,
-            detail={
-                "mission": self.name,
-                "timestamp": float(context.timestamp),
-                "origin_captured": self._origin is not None,
-                "route_index": self._route_index,
-                "drop_scan_index": self._drop_scan_index,
-                "recon_scan_index": self._recon_scan_index,
-                "payload_index": self._payload_index,
-                "drop_count": self._drop_count,
-                "route_points": len(self.config.route),
-                "drop_scan_points": len(self.config.drop.scan_route),
-                "recon_scan_points": len(self.config.recon.scan_route),
-                "drop_zones": len(self.config.drop_zones),
-                "recce_zones": len(self.config.recce_zones),
-                "payloads": len(self.config.payloads),
-                "required_payload_drops": self.config.drop.required_payload_drops,
-                "dropped_targets": [target.to_detail() for target in self._dropped_targets],
-                "reported_targets": [target.to_detail() for target in self._reported_targets],
-                "target_error_offset": target_error_offset,
-                "selected_drop_target": (
-                    None
-                    if self._selected_drop_target is None
-                    else self._selected_drop_target.to_detail()
-                ),
-                "recce_observation_count": self._recce_accumulator.observation_count,
-                "recce_confirmed_count": self._recce_confirmed_count(),
-                "recce_results": [item.to_dict() for item in self._recce_results],
-                "recce_output_paths": list(self._recce_output_paths),
-            },
+            detail=detail,
         )
 
-    @staticmethod
-    def _stage_value(stage: RescueStage | str) -> RescueStage:
-        if isinstance(stage, RescueStage):
-            return stage
-        legacy = {
-            "FOLLOW_ROUTE_TO_DROP_ZONE": RescueStage.GOTO_DROPZONE,
-            "SEARCH_DROP_TARGETS": RescueStage.DROP_SCAN,
-            "ALIGN_AND_DROP": RescueStage.DROP_ALIGN,
-            "WAIT_PAYLOAD_RELEASE": RescueStage.DROP_ASCEND,
-            "RESUME_ROUTE_TO_RECCE_ZONE": RescueStage.GOTO_RECON,
-            "SCAN_RECCE_AREA": RescueStage.RECON_SCAN,
-            "FOLLOW_ROUTE_HOME": RescueStage.RETURN_HOME,
-            "DONE": RescueStage.FINISH,
-            "ABORT": RescueStage.FAILSAFE,
-        }
-        value = str(stage)
-        return legacy[value] if value in legacy else RescueStage(value)
-
-    def _update_prepare(
-        self,
-        context: MissionContext,
-        actions: list[MissionAction],
-    ) -> str:
+    def _prepare(self, context: MissionContext) -> str:
+        if not (self.config.auto_start or self._start_requested):
+            return "waiting_start"
         if not context.drone.local_position_valid:
-            return "local_position_not_ready"
-        if self.config.auto_start or self._start_requested:
-            self._transition_to(RescueStage.ARM)
-            self._start_requested = False
-            actions.append(self._startup_gimbal_action())
-        return ""
+            return "waiting_local_position"
+        self._transition_to(RescueStage.ARM)
+        return "auto_start"
 
-    def _capture_origin(self, context: MissionContext) -> bool:
-        if self._origin is not None:
-            return True
-        if not context.drone.local_position_valid:
-            return False
-        self._origin = LocalMissionFrame(
-            origin_x=float(context.drone.local_x),
-            origin_y=float(context.drone.local_y),
-            origin_z=float(context.drone.local_z),
-            yaw_rad=float(context.drone.yaw),
-        )
-        return True
-
-    def _startup_gimbal_action(self) -> MissionAction:
-        return MissionAction(
-            "gimbal_angle",
-            params={
-                "pitch": self.config.startup_gimbal_pitch_deg,
-                "yaw": self.config.startup_gimbal_yaw_deg,
-                "roll": self.config.startup_gimbal_roll_deg,
-            },
-            key="rescue_startup_gimbal_downward",
-            once=True,
-            priority=2,
-        )
-
-    def _update_goto_dropzone(
-        self,
-        context: MissionContext,
-        actions: list[MissionAction],
-    ) -> str:
-        return self._follow_route_until(
-            context,
-            actions,
-            self.config.drop_route_end_name,
-            RescueStage.DROP_SCAN,
-            "enroute",
-        )
-
-    def _follow_route_until(
-        self,
-        context: MissionContext,
-        actions: list[MissionAction],
-        end_name: str,
-        next_stage: RescueStage,
-        progress_reason: str,
-    ) -> str:
-        if not self.config.route:
-            self._transition_to(next_stage)
-            return "route_empty"
-        end_index = self._route_index_for_name(end_name)
-        if end_index is None:
-            self._transition_to(RescueStage.FAILSAFE)
-            return "route_invalid"
-        if self._origin is None:
-            if not context.drone.local_position_valid:
-                return "local_position_not_ready"
+    def _arm(self, context: MissionContext, actions: list[MissionAction]) -> str:
+        actions.append(MissionAction("arm", key="rescue_arm", once=True))
+        if context.drone.armed and context.drone.local_position_valid:
             self._origin = LocalMissionFrame(
                 origin_x=float(context.drone.local_x),
                 origin_y=float(context.drone.local_y),
                 origin_z=float(context.drone.local_z),
                 yaw_rad=float(context.drone.yaw),
             )
-        if self._route_index > end_index:
-            self._transition_to(next_stage)
-            return f"route_end_reached:{end_name}"
+            self._transition_to(RescueStage.TAKEOFF)
+            return "armed"
+        return "waiting_armed"
 
-        current_point = self.config.route[min(self._route_index, end_index)]
-        current = to_mission_position(context.drone, self._origin)
-        target = goal_target_tuple(current_point)
-        local_target = mission_to_local_position(target, self._origin)
+    def _takeoff(self, context: MissionContext, actions: list[MissionAction]) -> str:
         actions.append(
             MissionAction(
-                "local_position",
-                params={
-                    "x": local_target[0],
-                    "y": local_target[1],
-                    "z": local_target[2],
-                    "frame": self.config.local_position_frame,
-                },
-                key=f"rescue_route_{self._route_index}_{current_point.name}",
-                once=False,
-                priority=4,
+                "takeoff",
+                {"altitude_m": self.config.takeoff_altitude_m},
+                key="rescue_takeoff",
+                once=True,
             )
         )
-        if local_goal_stable(
-            context.drone,
-            current,
-            target,
-            current_point.xy_tolerance_m,
-            current_point.z_tolerance_m,
-            current_point.max_speed_mps,
+        if (
+            context.drone.relative_alt_valid
+            and context.drone.relative_altitude
+            >= self.config.takeoff_altitude_m - self.config.takeoff_altitude_tolerance_m
         ):
-            if self._goal_reached_since is None:
-                self._goal_reached_since = float(context.timestamp)
-            if not hold_elapsed(
-                context.timestamp,
-                self._goal_reached_since,
-                self.config.route_hold_s,
-            ):
-                return f"arrived:{current_point.name}"
-            arrived_name = current_point.name
-            self._route_index += 1
+            self._transition_to(RescueStage.GOTO_DROP_SURVEY)
+            return "takeoff_altitude_reached"
+        return "taking_off"
+
+    def _goto_drop_survey(self, context: MissionContext, actions: list[MissionAction]) -> str:
+        if not self.config.drop.survey_points:
+            self._transition_to(RescueStage.FAILSAFE)
+            return "no_drop_survey_points"
+        point = self.config.drop.survey_points[0]
+        if self._goto_xy_alt(context, actions, point.x, point.y, self.config.drop.survey_altitude_m, "drop_survey_0"):
+            self._transition_to(RescueStage.SURVEY_DROP_POINTS)
+            return "drop_survey_start"
+        return "goto_drop_survey"
+
+    def _survey_drop(self, context: MissionContext, actions: list[MissionAction]) -> str:
+        if self._drop_scan_index >= len(self.config.drop.survey_points):
+            self._transition_to(RescueStage.PLAN_DROP_TARGETS)
+            return "drop_survey_complete"
+        point = self.config.drop.survey_points[self._drop_scan_index]
+        if not self._goto_xy_alt(
+            context,
+            actions,
+            point.x,
+            point.y,
+            self.config.drop.survey_altitude_m,
+            f"drop_survey_{self._drop_scan_index}",
+        ):
+            return f"goto_{point.name}"
+        self._collect_cylinders(context, self._drop_estimates, point.name)
+        if self._goal_reached_since is None:
+            self._goal_reached_since = float(context.timestamp)
+        if hold_elapsed(context.timestamp, self._goal_reached_since, self.config.drop.survey_hold_s):
+            self._drop_scan_index += 1
             self._goal_reached_since = None
-            if arrived_name == end_name or self._route_index > end_index:
-                self._transition_to(next_stage)
-                return f"route_end_reached:{end_name}"
-            return f"arrived:{arrived_name}"
+        return f"survey_{point.name}"
 
-        self._goal_reached_since = None
-        return f"{progress_reason}:{current_point.name}"
-
-    def _update_drop_scan(
-        self,
-        context: MissionContext,
-        actions: list[MissionAction],
-    ) -> str:
-        actions.append(self._set_mode_action("GUIDED", "drop_scan_guided"))
-        if self._drop_count >= self.config.drop.required_payload_drops:
-            self._transition_to(RescueStage.GOTO_RECON)
-            return "required_payload_drops_complete"
-
-        candidate = None
-        if not self.config.dry_run_skip_vision:
-            candidate = self._update_drop_candidate(context)
-        if candidate is not None:
-            self._select_drop_target(candidate, context, actions)
-            self._drop_scan_index += 1
-            self._transition_to(RescueStage.DROP_ALIGN)
-            return "drop_target_acquired"
-        if self._drop_scan_index >= len(self.config.drop.scan_route):
-            self._transition_to(RescueStage.GOTO_RECON)
-            return "drop_scan_complete_no_target"
-        point = self.config.drop.scan_route[self._drop_scan_index]
-        self._append_local_position_action(
-            actions,
-            goal_target_tuple(point),
-            f"drop_scan_{self._drop_scan_index}_{point.name}",
+    def _plan_drop_targets(self) -> str:
+        clusters = cluster_estimates(
+            self._drop_estimates,
+            radius_m=self.config.vision.cluster_radius_m,
         )
-        if self._mission_goal_stable(
-            context,
-            goal_target_tuple(point),
-            xy_tolerance_m=point.xy_tolerance_m,
-            z_tolerance_m=point.z_tolerance_m,
-            max_speed_mps=point.max_speed_mps,
-        ):
-            self._drop_scan_index += 1
-            if self._drop_scan_index >= len(self.config.drop.scan_route):
-                self._transition_to(RescueStage.GOTO_RECON)
-                return "drop_scan_complete_no_target"
-            return f"drop_scan_arrived:{point.name}"
-        if hold_elapsed(context.timestamp, self._stage_started_at, self.config.drop.scan_timeout_s):
-            self._transition_to(RescueStage.GOTO_RECON)
-            return "drop_scan_timeout"
-        return f"drop_scanning:{point.name}"
-
-    def _update_drop_align(
-        self,
-        context: MissionContext,
-        actions: list[MissionAction],
-    ) -> str:
-        actions.append(self._set_mode_action("GUIDED", "drop_align_guided"))
-        if self.config.dry_run_skip_vision:
-            if hold_elapsed(context.timestamp, self._stage_started_at, self.config.align_drop_duration_s):
-                self._transition_to(RescueStage.DROP_DESCEND)
-                return "drop_align_dry_run_complete"
-            return "aligning_drop_dry_run"
-        lost_reason = self._align_lost_reason(context)
-        if lost_reason:
-            self._align_ready_since = None
-            if self._target_lost_since is None:
-                self._target_lost_since = float(context.timestamp)
-            if hold_elapsed(
-                context.timestamp,
-                self._target_lost_since,
-                self.config.align.lost_timeout_s,
-            ):
-                self._return_to_drop_search(actions)
-                return "drop_target_lost"
-            return lost_reason
-        self._target_lost_since = None
-
-        if hold_elapsed(context.timestamp, self._stage_started_at, self.config.align.timeout_s):
-            self._return_to_drop_search(actions)
-            return "drop_align_timeout"
-        if not self._drop_alignment_ready(context, self._current_payload_offset()):
-            self._align_ready_since = None
-            return "aligning_drop"
-        if self._align_ready_since is None:
-            self._align_ready_since = float(context.timestamp)
-        if not hold_elapsed(context.timestamp, self._align_ready_since, self.config.align.hold_s):
-            return "aligning_drop"
-        self._transition_to(RescueStage.DROP_DESCEND)
-        return "drop_align_complete"
-
-    def _update_drop_descend(
-        self,
-        context: MissionContext,
-        actions: list[MissionAction],
-    ) -> str:
-        actions.append(self._set_mode_action("GUIDED", "drop_descend_guided"))
-        if self.config.dry_run_skip_payload_release and not context.actions_enabled:
-            if hold_elapsed(context.timestamp, self._stage_started_at, self.config.align_drop_duration_s):
-                self._transition_to(RescueStage.DROP_RELEASE)
-                return "drop_descend_dry_run_complete"
-            return "drop_descending_dry_run"
-        target = self._current_xy_target(context, -abs(self.config.drop.final_height_m))
-        self._append_local_position_action(actions, target, "drop_descend_final")
-        if self._mission_goal_stable(context, target, xy_tolerance_m=0.45, z_tolerance_m=0.25):
-            if self._align_ready_since is None:
-                self._align_ready_since = float(context.timestamp)
-            if hold_elapsed(context.timestamp, self._align_ready_since, self.config.drop.stable_hold_s):
-                self._transition_to(RescueStage.DROP_RELEASE)
-                return "drop_descend_complete"
-            return "drop_final_hold"
-        self._align_ready_since = None
-        return "drop_descending"
-
-    def _update_drop_release(
-        self,
-        context: MissionContext,
-        actions: list[MissionAction],
-    ) -> str:
-        if self.config.dry_run_skip_payload_release and not context.actions_enabled:
-            self._record_drop(context)
-            self._payload_release_started_at = float(context.timestamp)
-            self._transition_to(RescueStage.DROP_ASCEND)
-            return "payload_release_simulated"
-        if self._payload_index >= len(self.config.payloads):
+        self._drop_targets = select_targets(
+            clusters,
+            count=self.config.drop.target_count,
+            min_separation_m=self.config.vision.cluster_radius_m,
+        )
+        if len(self._drop_targets) < self.config.drop.required_payload_drops:
             self._transition_to(RescueStage.FAILSAFE)
-            return "no_payload_configured"
-        payload = self.config.payloads[self._payload_index]
-        action = self._release_action(payload)
-        if action is None:
-            self._transition_to(RescueStage.FAILSAFE)
-            return "payload_release_not_configured"
-        if not context.actions_enabled:
-            return "payload_release_actions_disabled"
-        actions.append(action)
-        self._record_drop(context)
-        self._payload_release_started_at = float(context.timestamp)
-        self._transition_to(RescueStage.DROP_ASCEND)
-        return "payload_release_requested"
+            return "not_enough_drop_targets"
+        self._transition_to(RescueStage.GOTO_DROP_TARGET)
+        return "drop_targets_planned"
 
-    def _update_drop_ascend(
-        self,
-        context: MissionContext,
-        actions: list[MissionAction],
-    ) -> str:
-        if self._payload_release_started_at is None:
-            self._payload_release_started_at = float(context.timestamp)
-        if not hold_elapsed(
-            context.timestamp,
-            self._payload_release_started_at,
-            self.config.payload_release.delay_after_action_s,
-        ):
-            return "waiting_payload_release"
-        payload = self._last_payload()
-        hold_action = self._hold_action(payload) if payload is not None else None
-        if hold_action is not None and context.actions_enabled:
-            actions.append(hold_action)
-        target = self._current_xy_target(context, -abs(self.config.drop.ascend_height_m))
-        self._append_local_position_action(actions, target, "drop_ascend_scan_height")
-        if self._mission_goal_stable(context, target, xy_tolerance_m=0.7, z_tolerance_m=0.4):
-            actions.append(
-                MissionAction(
-                    "yolo_unlock_target",
-                    key=f"unlock_drop_target_after_release_{self._drop_count}",
-                    once=True,
-                    priority=5,
-                )
-            )
-            self._clear_drop_target_selection()
-            if self._drop_count >= self.config.drop.required_payload_drops:
-                self._transition_to(RescueStage.GOTO_RECON)
-                return "payload_drops_complete"
-            self._transition_to(RescueStage.DROP_RESUME_SCAN)
-            return "drop_ascend_complete"
-        return "drop_ascending"
-
-    def _update_drop_resume_scan(
-        self,
-        context: MissionContext,
-        actions: list[MissionAction],
-    ) -> str:
-        self._transition_to(RescueStage.DROP_SCAN)
-        return "drop_scan_resumed"
-
-    def _update_recon_scan(
-        self,
-        context: MissionContext,
-        actions: list[MissionAction],
-    ) -> str:
-        actions.append(self._set_mode_action("GUIDED", "recon_scan_guided"))
-        if context.scene is not None and context.scene.valid:
-            self._recce_accumulator.update(context.scene, context.timestamp)
-        candidate = None if self._near_reported_target(context) else self._select_recon_candidate(context.scene)
-        if candidate is not None:
-            self._recon_candidate = candidate
-            self._recon_scan_index += 1
-            self._transition_to(RescueStage.RECON_ALIGN)
-            return "recon_target_acquired"
-        if self._recon_scan_index >= len(self.config.recon.scan_route):
-            self._finalize_recce_results(context.timestamp)
-            self._transition_to(RescueStage.RETURN_HOME)
-            return "recon_scan_complete_no_target"
-        point = self.config.recon.scan_route[self._recon_scan_index]
-        self._append_local_position_action(
-            actions,
-            goal_target_tuple(point),
-            f"recon_scan_{self._recon_scan_index}_{point.name}",
-        )
-        if self._mission_goal_stable(
+    def _goto_current_drop_target(self, context: MissionContext, actions: list[MissionAction]) -> str:
+        target = self._current_drop_target()
+        if target is None:
+            self._transition_to(RescueStage.NEXT_DROP_OR_RECCE)
+            return "no_drop_target"
+        if self._goto_xy_alt(
             context,
-            goal_target_tuple(point),
-            xy_tolerance_m=point.xy_tolerance_m,
-            z_tolerance_m=point.z_tolerance_m,
-            max_speed_mps=point.max_speed_mps,
+            actions,
+            target.x,
+            target.y,
+            self.config.drop.transit_altitude_m,
+            f"drop_target_{target.target_id}",
         ):
-            self._recon_scan_index += 1
-            if self._recon_scan_index >= len(self.config.recon.scan_route):
-                self._finalize_recce_results(context.timestamp)
-                self._transition_to(RescueStage.RETURN_HOME)
-                return "recon_scan_complete_no_target"
-            return f"recon_scan_arrived:{point.name}"
-        if hold_elapsed(context.timestamp, self._stage_started_at, self.config.recon.scan_timeout_s):
-            self._finalize_recce_results(context.timestamp)
-            self._transition_to(RescueStage.RETURN_HOME)
-            return "recon_scan_timeout"
-        return f"recon_scanning:{point.name}"
+            self._transition_to(RescueStage.LOCK_DROP_TARGET)
+            return "at_drop_target"
+        return "goto_drop_target"
 
-    def _update_recon_align(
-        self,
-        context: MissionContext,
-        actions: list[MissionAction],
-    ) -> str:
-        actions.append(self._set_mode_action("GUIDED", "recon_align_guided"))
-        if self._align_lost_reason(context):
-            self._transition_to(RescueStage.RECON_SCAN)
-            return "recon_target_lost"
-        if self._align_ready_since is None:
-            self._align_ready_since = float(context.timestamp)
-        if hold_elapsed(context.timestamp, self._align_ready_since, self.config.recon.align_hold_s):
-            self._transition_to(RescueStage.RECON_DESCEND)
-            return "recon_align_complete"
-        return "recon_aligning"
-
-    def _update_recon_descend(
-        self,
-        context: MissionContext,
-        actions: list[MissionAction],
-    ) -> str:
-        actions.append(self._set_mode_action("GUIDED", "recon_descend_guided"))
-        target = self._current_xy_target(context, -abs(self.config.recon.identify_height_m))
-        self._append_local_position_action(actions, target, "recon_descend_identify")
-        if self._mission_goal_stable(context, target, xy_tolerance_m=0.6, z_tolerance_m=0.35):
-            if self._align_ready_since is None:
-                self._align_ready_since = float(context.timestamp)
-            if hold_elapsed(context.timestamp, self._align_ready_since, self.config.recon.descend_hold_s):
-                self._transition_to(RescueStage.RECON_REPORT)
-                return "recon_descend_complete"
-        return "recon_descending"
-
-    def _update_recon_report(self, context: MissionContext) -> str:
-        if context.scene is not None and context.scene.valid:
-            self._recce_accumulator.update(context.scene, context.timestamp)
-        candidate = self._recon_candidate
-        if candidate is not None and self._origin is not None and context.drone.local_position_valid:
-            pos = to_mission_position(context.drone, self._origin)
-            self._reported_targets.append(
-                ReportedTarget(
-                    local_x=float(pos[0]),
-                    local_y=float(pos[1]),
-                    label=str(getattr(candidate, "class_name", "")),
-                    confidence=float(getattr(candidate, "confidence", 0.0)),
-                    timestamp=float(context.timestamp),
-                )
-            )
-        self._recon_candidate = None
-        self._transition_to(RescueStage.RECON_SCAN)
-        return "recon_target_reported"
-
-    def _finalize_recce_results(self, timestamp: float) -> None:
-        self._recce_results = self._recce_accumulator.results()
-        if self._recce_output_written:
-            return
-        paths = write_recce_results(
-            output_dir=self.config.recce.output_dir,
-            mission=self.name,
-            timestamp=timestamp,
-            items=self._recce_results,
-            write_json=self.config.recce.output_json,
-            write_csv=self.config.recce.output_csv,
-        )
-        self._recce_output_paths = [str(path) for path in paths]
-        self._recce_output_written = True
-
-    def _recce_confirmed_count(self) -> int:
-        return sum(1 for item in self._recce_results if item.status == "confirmed")
-
-    def _ensure_stage_started(self, context: MissionContext) -> None:
-        if self._stage_started_at is None:
-            self._stage_started_at = float(context.timestamp)
-
-    def _transition_to(self, stage: RescueStage) -> None:
-        if self._stage == stage:
-            return
-        self._stage = stage
-        self._stage_started_at = None
-        self._goal_reached_since = None
-        self._align_ready_since = None
-        self._target_lost_since = None
-
-    def _route_index_for_name(self, name: str) -> int | None:
-        for index, point in enumerate(self.config.route):
-            if point.name == name:
-                return index
-        return None
-
-    def _append_local_position_action(
-        self,
-        actions: list[MissionAction],
-        target: tuple[float, float, float],
-        key: str,
-    ) -> None:
-        if self._origin is None:
-            return
-        local_target = mission_to_local_position(target, self._origin)
+    def _lock_target(self, context: MissionContext, actions: list[MissionAction], *, recce: bool) -> str:
+        target = self._current_recce_target() if recce else self._current_drop_target()
+        if target is None:
+            self._transition_to(RescueStage.NEXT_RECCE_OR_REPORT if recce else RescueStage.NEXT_DROP_OR_RECCE)
+            return "no_target"
+        detection = self._select_lock_detection(context, target)
+        if detection is None or detection.track_id is None:
+            return "waiting_lock_candidate"
         actions.append(
             MissionAction(
-                "local_position",
-                params={
-                    "x": local_target[0],
-                    "y": local_target[1],
-                    "z": local_target[2],
-                    "frame": self.config.local_position_frame,
-                },
-                key=key,
-                once=False,
-                priority=4,
+                "yolo_lock_target",
+                {"track_id": int(detection.track_id)},
+                key=f"rescue_lock_{'recce' if recce else 'drop'}_{target.target_id}_{int(context.timestamp * 10)}",
+                once=True,
             )
         )
+        self._transition_to(RescueStage.ALIGN_DESCEND_RECCE if recce else RescueStage.ALIGN_DESCEND_DROP)
+        return "lock_target_requested"
 
-    @staticmethod
-    def _set_mode_action(mode: str, key: str) -> MissionAction:
-        return MissionAction(
-            "set_mode",
-            params={"mode": mode},
-            key=key,
-            once=True,
-            priority=2,
-        )
+    def _align_descend_drop(self, context: MissionContext) -> str:
+        if self._height_m(context.drone) <= max(self.config.drop.release_altitude_m, self.config.align.min_altitude_m):
+            if self._aligned(context):
+                self._transition_to(RescueStage.RELEASE_PAYLOAD)
+                return "drop_release_altitude_reached"
+            return "align_at_release_altitude"
+        return "align_descend_drop"
 
-    def _current_xy_target(self, context: MissionContext, z: float) -> tuple[float, float, float]:
-        current = self._current_mission_position(context)
-        return (current[0], current[1], z)
-
-    def _current_mission_position(self, context: MissionContext) -> tuple[float, float, float]:
-        if self._origin is not None and context.drone.local_position_valid:
-            return to_mission_position(context.drone, self._origin)
-        return (0.0, 0.0, 0.0)
-
-    def _mission_goal_stable(
-        self,
-        context: MissionContext,
-        target: tuple[float, float, float],
-        *,
-        xy_tolerance_m: float,
-        z_tolerance_m: float,
-        max_speed_mps: float = 0.6,
-    ) -> bool:
-        if self._origin is None:
-            return False
-        current = to_mission_position(context.drone, self._origin)
-        return local_goal_stable(
-            context.drone,
-            current,
-            target,
-            xy_tolerance_m,
-            z_tolerance_m,
-            max_speed_mps=max_speed_mps,
-        )
-
-    def _current_payload_offset(self) -> dict[str, float]:
-        payload = self._current_payload()
-        if payload is None:
-            return {"ex_cam": 0.0, "ey_cam": 0.0}
-        return {"ex_cam": payload.drop_center_x, "ey_cam": payload.drop_center_y}
-
-    def _current_payload(self) -> PayloadSlot | None:
-        if 0 <= self._payload_index < len(self.config.payloads):
-            return self.config.payloads[self._payload_index]
-        return None
-
-    def _last_payload(self) -> PayloadSlot | None:
-        index = self._payload_index - 1
-        if 0 <= index < len(self.config.payloads):
-            return self.config.payloads[index]
-        return None
-
-    def _record_drop(self, context: MissionContext) -> None:
-        payload = self._current_payload()
-        payload_id = self._payload_index + 1 if payload is None else payload.payload_id
-        pos = self._current_mission_position(context)
-        self._dropped_targets.append(
-            DroppedTarget(
-                local_x=float(pos[0]),
-                local_y=float(pos[1]),
-                timestamp=float(context.timestamp),
-                payload_id=payload_id,
-            )
-        )
-        self._drop_count += 1
-        if self._payload_index < len(self.config.payloads):
-            self._payload_index += 1
-
-    def _select_drop_target(
-        self,
-        candidate,
-        context: MissionContext,
-        actions: list[MissionAction],
-    ) -> None:
-        self._selected_drop_target = DropTargetSelection(
-            track_id=candidate.track_id,
-            class_name=str(candidate.class_name),
-            confidence=float(candidate.confidence),
-            ex=float(getattr(candidate, "ex", 0.0)),
-            ey=float(getattr(candidate, "ey", 0.0)),
-            target_size=float(getattr(candidate, "target_size", 0.0)),
-            selected_at=float(context.timestamp),
-        )
-        if candidate.track_id is not None:
+    def _release_payload(self, context: MissionContext, actions: list[MissionAction]) -> str:
+        slot = self._current_payload()
+        if slot is None:
+            self._transition_to(RescueStage.FAILSAFE)
+            return "no_payload_slot"
+        if self._release_started_at is None:
             actions.append(
                 MissionAction(
-                    "yolo_lock_target",
-                    params={"track_id": int(candidate.track_id)},
-                    key=f"lock_drop_target_{int(candidate.track_id)}",
+                    "set_servo",
+                    {"channel": slot.servo_channel, "pwm": slot.release_pwm},
+                    key=f"release_payload_{slot.payload_id}",
                     once=True,
-                    priority=5,
                 )
             )
-
-    def _clear_drop_target_selection(self) -> None:
-        self._selected_drop_target = None
-        self._reset_drop_candidate()
-        self._payload_release_started_at = None
-
-    def _return_to_drop_search(self, actions: list[MissionAction]) -> None:
+            self._release_started_at = float(context.timestamp)
+            return "payload_release_requested"
+        if not hold_elapsed(context.timestamp, self._release_started_at, self.config.payload.release_wait_s):
+            return "waiting_payload_release"
+        if self.config.payload.return_hold_pwm_after_release:
+            actions.append(
+                MissionAction(
+                    "set_servo",
+                    {"channel": slot.servo_channel, "pwm": slot.hold_pwm},
+                    key=f"hold_payload_{slot.payload_id}",
+                    once=True,
+                )
+            )
+        self._drop_count += 1
+        target = self._current_drop_target()
+        if target is not None:
+            target.visited = True
+        self._release_started_at = None
         actions.append(
             MissionAction(
                 "yolo_unlock_target",
-                key="unlock_drop_target_for_search",
+                key=f"unlock_after_drop_{slot.payload_id}",
                 once=True,
-                priority=5,
             )
         )
-        self._clear_drop_target_selection()
-        self._transition_to(RescueStage.DROP_SCAN)
+        self._transition_to(RescueStage.ASCEND_AFTER_DROP)
+        return "payload_released"
 
-    def _align_lost_reason(self, context: MissionContext) -> str:
-        if not context.health.vision_fresh:
-            return "drop_target_vision_stale"
-        if not context.inputs.target_valid:
-            return "drop_target_not_ready"
-        return ""
+    def _ascend_after_drop(self, context: MissionContext, actions: list[MissionAction]) -> str:
+        target = self._current_drop_target()
+        x = self.config.route.drop_area_x if target is None else target.x
+        y = self.config.route.drop_area_y if target is None else target.y
+        if self._goto_xy_alt(context, actions, x, y, self.config.drop.transit_altitude_m, "ascend_drop"):
+            self._drop_target_index += 1
+            self._transition_to(RescueStage.NEXT_DROP_OR_RECCE)
+            return "drop_transit_altitude_reached"
+        return "ascending_after_drop"
 
-    def _drop_alignment_ready(
+    def _next_drop_or_recce(self) -> str:
+        if self._drop_count >= self.config.drop.required_payload_drops:
+            self._transition_to(RescueStage.GOTO_RECCE_SURVEY)
+            return "drop_complete"
+        if self._drop_target_index >= len(self._drop_targets):
+            self._transition_to(RescueStage.FAILSAFE)
+            return "drop_incomplete_no_targets"
+        self._transition_to(RescueStage.GOTO_DROP_TARGET)
+        return "next_drop_target"
+
+    def _goto_recce_survey(self, context: MissionContext, actions: list[MissionAction]) -> str:
+        if self._drop_count < self.config.drop.required_payload_drops:
+            self._transition_to(RescueStage.FAILSAFE)
+            return "drop_gate_failed"
+        if not self.config.recce.survey_points:
+            self._transition_to(RescueStage.FAILSAFE)
+            return "no_recce_survey_points"
+        point = self.config.recce.survey_points[0]
+        if self._goto_xy_alt(context, actions, point.x, point.y, self.config.recce.survey_altitude_m, "recce_survey_0"):
+            self._transition_to(RescueStage.SURVEY_RECCE_POINTS)
+            return "recce_survey_start"
+        return "goto_recce_survey"
+
+    def _survey_recce(self, context: MissionContext, actions: list[MissionAction]) -> str:
+        if self._recce_scan_index >= len(self.config.recce.survey_points):
+            self._transition_to(RescueStage.PLAN_RECCE_TARGETS)
+            return "recce_survey_complete"
+        point = self.config.recce.survey_points[self._recce_scan_index]
+        if not self._goto_xy_alt(
+            context,
+            actions,
+            point.x,
+            point.y,
+            self.config.recce.survey_altitude_m,
+            f"recce_survey_{self._recce_scan_index}",
+        ):
+            return f"goto_{point.name}"
+        self._collect_cylinders(context, self._recce_estimates, point.name)
+        if self._goal_reached_since is None:
+            self._goal_reached_since = float(context.timestamp)
+        if hold_elapsed(context.timestamp, self._goal_reached_since, self.config.recce.survey_hold_s):
+            self._recce_scan_index += 1
+            self._goal_reached_since = None
+        return f"survey_{point.name}"
+
+    def _plan_recce_targets(self) -> str:
+        clusters = cluster_estimates(
+            self._recce_estimates,
+            radius_m=self.config.vision.cluster_radius_m,
+        )
+        self._recce_targets = select_targets(
+            clusters,
+            count=self.config.recce.visit_max_count,
+            min_separation_m=self.config.vision.cluster_radius_m,
+        )
+        if not self._recce_targets:
+            self._transition_to(RescueStage.REPORT_RECCE)
+            return "no_recce_targets"
+        self._transition_to(RescueStage.GOTO_RECCE_TARGET)
+        return "recce_targets_planned"
+
+    def _goto_current_recce_target(self, context: MissionContext, actions: list[MissionAction]) -> str:
+        target = self._current_recce_target()
+        if target is None:
+            self._transition_to(RescueStage.REPORT_RECCE)
+            return "no_recce_target"
+        if self._goto_xy_alt(
+            context,
+            actions,
+            target.x,
+            target.y,
+            self.config.recce.transit_altitude_m,
+            f"recce_target_{target.target_id}",
+        ):
+            self._transition_to(RescueStage.LOCK_RECCE_TARGET)
+            return "at_recce_target"
+        return "goto_recce_target"
+
+    def _align_descend_recce(self, context: MissionContext) -> str:
+        if self._height_m(context.drone) <= max(self.config.recce.identify_altitude_m, self.config.align.min_altitude_m):
+            self._transition_to(RescueStage.CAPTURE_RECCE)
+            return "recce_identify_altitude_reached"
+        return "align_descend_recce"
+
+    def _capture_recce(self, context: MissionContext) -> str:
+        target = self._current_recce_target()
+        if target is None:
+            self._transition_to(RescueStage.NEXT_RECCE_OR_REPORT)
+            return "no_recce_target"
+        self._collect_hazard_votes(context)
+        if hold_elapsed(context.timestamp, self._stage_started_at, self.config.recce.capture_hold_s):
+            result = self._build_recce_result(target)
+            self._recce_results.append(result)
+            target.visited = True
+            self._recce_votes = {}
+            self._transition_to(RescueStage.ASCEND_AFTER_RECCE)
+            return "recce_capture_complete"
+        return "capturing_recce"
+
+    def _ascend_after_recce(self, context: MissionContext, actions: list[MissionAction]) -> str:
+        target = self._current_recce_target()
+        x = self.config.route.recce_area_x if target is None else target.x
+        y = self.config.route.recce_area_y if target is None else target.y
+        if self._goto_xy_alt(context, actions, x, y, self.config.recce.transit_altitude_m, "ascend_recce"):
+            self._recce_target_index += 1
+            actions.append(MissionAction("yolo_unlock_target", key=f"unlock_after_recce_{self._recce_target_index}", once=True))
+            self._transition_to(RescueStage.NEXT_RECCE_OR_REPORT)
+            return "recce_transit_altitude_reached"
+        return "ascending_after_recce"
+
+    def _next_recce_or_report(self) -> str:
+        confirmed = sum(1 for item in self._recce_results if item.status == "confirmed")
+        if confirmed >= self.config.recce.required_confirmed_count:
+            self._transition_to(RescueStage.REPORT_RECCE)
+            return "recce_confirmed_complete"
+        if self._recce_target_index >= len(self._recce_targets):
+            self._transition_to(RescueStage.REPORT_RECCE)
+            return "recce_targets_exhausted"
+        self._transition_to(RescueStage.GOTO_RECCE_TARGET)
+        return "next_recce_target"
+
+    def _report_recce(self, context: MissionContext) -> str:
+        if not self._recce_report_path:
+            self._recce_report_path = write_recce_report(
+                output_dir=self.config.recce.output_dir,
+                timestamp=context.timestamp,
+                results=self._recce_results,
+            )
+        self._transition_to(RescueStage.RETURN_HOME)
+        return "recce_report_written"
+
+    def _return_home(self, context: MissionContext, actions: list[MissionAction]) -> str:
+        if self._goto_xy_alt(
+            context,
+            actions,
+            self.config.route.home_x,
+            self.config.route.home_y,
+            self.config.drop.transit_altitude_m,
+            "return_home",
+        ):
+            self._transition_to(RescueStage.LAND)
+            return "home_reached"
+        return "returning_home"
+
+    def _land(self, context: MissionContext, actions: list[MissionAction]) -> str:
+        actions.append(MissionAction("land", key="rescue_land", once=True))
+        if context.drone.relative_alt_valid and context.drone.relative_altitude <= self.config.land_complete_altitude_m:
+            self._transition_to(RescueStage.FINISH)
+            return "landed"
+        return "landing"
+
+    def _goto_xy_alt(
         self,
         context: MissionContext,
-        offset: dict[str, float] | None = None,
+        actions: list[MissionAction],
+        x: float,
+        y: float,
+        altitude_m: float,
+        key: str,
     ) -> bool:
-        inputs = context.inputs
-        config = self.config.align
-        offset = offset or {"ex_cam": 0.0, "ey_cam": 0.0}
-        if not context.health.vision_fresh or not inputs.target_valid:
+        if self._origin is None:
             return False
-        if config.require_target_locked and not inputs.target_locked:
+        goal = LocalGoal(
+            name=key,
+            x=float(x),
+            y=float(y),
+            z=-abs(float(altitude_m)),
+            xy_tolerance_m=self.config.xy_tolerance_m,
+            z_tolerance_m=self.config.z_tolerance_m,
+            max_speed_mps=self.config.max_goal_speed_mps,
+        )
+        lx, ly, lz = mission_to_local_position((goal.x, goal.y, goal.z), self._origin)
+        actions.append(
+            MissionAction(
+                "local_position",
+                {"x": lx, "y": ly, "z": lz, "frame": self.config.local_position_frame},
+                key=f"goto_{key}",
+                once=False,
+            )
+        )
+        if not context.drone.local_position_valid:
             return False
-        if config.require_target_stable and not inputs.target_stable:
-            return False
-        if abs(float(inputs.ex_cam) - float(offset.get("ex_cam", 0.0))) > config.max_ex_cam:
-            return False
-        if abs(float(inputs.ey_cam) - float(offset.get("ey_cam", 0.0))) > config.max_ey_cam:
-            return False
-        if float(inputs.target_size) < config.min_target_size:
-            return False
-        return True
+        current = to_mission_position(context.drone, self._origin)
+        target = (goal.x, goal.y, goal.z)
+        stable = local_goal_stable(
+            context.drone,
+            current,
+            target,
+            goal.xy_tolerance_m,
+            goal.z_tolerance_m,
+            goal.max_speed_mps,
+        )
+        if stable:
+            if self._goal_reached_since is None:
+                self._goal_reached_since = float(context.timestamp)
+            return True
+        self._goal_reached_since = None
+        return False
 
-    def _update_drop_candidate(self, context: MissionContext):
-        candidate = self._select_drop_candidate(context.scene, context)
-        if candidate is None:
-            self._reset_drop_candidate()
-            return None
-        if self._same_drop_candidate(candidate):
-            self._drop_candidate_seen_frames += 1
-        else:
-            self._drop_candidate_track_id = candidate.track_id
-            self._drop_candidate_seen_frames = 1
-            self._drop_candidate_class_name = str(candidate.class_name).lower()
-        self._drop_candidate_last_center = (float(candidate.cx), float(candidate.cy))
-        if self._drop_candidate_seen_frames >= max(1, int(self.config.drop_target_stable_frames)):
-            return candidate
-        return None
+    def _collect_cylinders(
+        self,
+        context: MissionContext,
+        estimates: list[EstimatedObject],
+        source: str,
+    ) -> None:
+        scene = context.scene
+        if scene is None or not scene.valid:
+            return
+        position = self._mission_position(context.drone)
+        if position is None:
+            return
+        altitude_m = self._height_m(context.drone)
+        for detection in scene.detections:
+            if not self._is_cylinder(detection):
+                continue
+            if abs(float(detection.ex)) > self.config.vision.edge_margin_norm:
+                continue
+            if abs(float(detection.ey)) > self.config.vision.edge_margin_norm:
+                continue
+            x, y = detection_to_mission_xy(
+                detection,
+                drone_mission_x=position[0],
+                drone_mission_y=position[1],
+                altitude_m=altitude_m,
+                config=self.config.vision.geometry,
+            )
+            estimates.append(
+                EstimatedObject(
+                    class_name=detection.class_name,
+                    confidence=detection.confidence,
+                    target_size=detection.target_size,
+                    x=x,
+                    y=y,
+                    track_id=detection.track_id,
+                    source=source,
+                    timestamp=context.timestamp,
+                )
+            )
 
-    def _select_drop_candidate(self, scene, context: MissionContext | None = None):
-        if scene is None or not getattr(scene, "valid", False):
+    def _select_lock_detection(
+        self,
+        context: MissionContext,
+        target: SurveyTarget,
+    ) -> SceneObject | None:
+        scene = context.scene
+        if scene is None or not scene.valid:
             return None
-        if context is not None and self._near_dropped_target(context):
+        position = self._mission_position(context.drone)
+        if position is None:
             return None
-        classes = {name.strip().lower() for name in self.config.drop_target_classes if name.strip()}
-        candidates = []
-        for detection in getattr(scene, "detections", []):
-            class_name = str(getattr(detection, "class_name", "")).lower()
-            if classes and class_name not in classes:
+        altitude_m = self._height_m(context.drone)
+        candidates: list[tuple[float, SceneObject]] = []
+        for detection in scene.detections:
+            if not self._is_cylinder(detection):
                 continue
-            if float(getattr(detection, "confidence", 0.0)) < self.config.drop_target_min_confidence:
+            if math.hypot(float(detection.ex), float(detection.ey)) > self.config.vision.lock_center_max_error:
                 continue
-            center_error = self._center_error(detection)
-            if center_error > self.config.drop_target_max_center_error:
-                continue
-            candidates.append((center_error, detection))
+            x, y = detection_to_mission_xy(
+                detection,
+                drone_mission_x=position[0],
+                drone_mission_y=position[1],
+                altitude_m=altitude_m,
+                config=self.config.vision.geometry,
+            )
+            candidates.append((math.hypot(x - target.x, y - target.y), detection))
         if not candidates:
             return None
         return min(candidates, key=lambda item: item[0])[1]
 
-    def _near_dropped_target(self, context: MissionContext) -> bool:
-        if not self._dropped_targets:
-            return False
-        pos = self._current_mission_position(context)
-        radius = self.config.drop.dropped_target_radius_m
-        radius_sq = radius * radius
-        for target in self._dropped_targets:
-            dx = float(pos[0]) - target.local_x
-            dy = float(pos[1]) - target.local_y
-            if (dx * dx + dy * dy) <= radius_sq:
-                return True
-        return False
-
-    def _near_reported_target(self, context: MissionContext) -> bool:
-        if not self._reported_targets:
-            return False
-        pos = self._current_mission_position(context)
-        radius = self.config.recon.reported_target_radius_m
-        radius_sq = radius * radius
-        for target in self._reported_targets:
-            dx = float(pos[0]) - target.local_x
-            dy = float(pos[1]) - target.local_y
-            if (dx * dx + dy * dy) <= radius_sq:
-                return True
-        return False
-
-    def _select_recon_candidate(self, scene):
-        if scene is None or not getattr(scene, "valid", False):
-            return None
-        classes = {name.strip().lower() for name in self.config.recce.config.hazard_classes}
-        candidates = []
-        for detection in getattr(scene, "detections", []):
-            class_name = str(getattr(detection, "class_name", "")).lower()
-            if classes and class_name not in classes:
+    def _collect_hazard_votes(self, context: MissionContext) -> None:
+        scene = context.scene
+        if scene is None or not scene.valid:
+            return
+        for detection in scene.detections:
+            name = detection.class_name.strip().lower()
+            if name not in self.config.vision.hazard_classes:
                 continue
-            if float(getattr(detection, "confidence", 0.0)) < self.config.recce.config.min_hazard_confidence:
+            if detection.confidence < self.config.vision.min_hazard_confidence:
                 continue
-            candidates.append((float(getattr(detection, "confidence", 0.0)), detection))
-        if not candidates:
-            return None
-        return max(candidates, key=lambda item: item[0])[1]
+            count, confidence = self._recce_votes.get(name, (0, 0.0))
+            self._recce_votes[name] = (count + 1, confidence + float(detection.confidence))
 
-    def _same_drop_candidate(self, candidate) -> bool:
-        if candidate.track_id is not None and self._drop_candidate_track_id is not None:
-            return int(candidate.track_id) == int(self._drop_candidate_track_id)
-        if self._drop_candidate_last_center is None:
-            return False
-        if str(candidate.class_name).lower() != self._drop_candidate_class_name:
-            return False
-        dx = float(candidate.cx) - self._drop_candidate_last_center[0]
-        dy = float(candidate.cy) - self._drop_candidate_last_center[1]
-        return (dx * dx + dy * dy) <= 64.0
-
-    @staticmethod
-    def _center_error(detection) -> float:
-        ex = float(getattr(detection, "ex", 0.0))
-        ey = float(getattr(detection, "ey", 0.0))
-        return (ex * ex + ey * ey) ** 0.5
-
-    def _reset_drop_candidate(self) -> None:
-        self._drop_candidate_track_id = None
-        self._drop_candidate_seen_frames = 0
-        self._drop_candidate_last_center = None
-        self._drop_candidate_class_name = ""
-
-    @staticmethod
-    def _target_ready(context: MissionContext) -> bool:
-        return bool(
-            context.health.vision_fresh
-            and context.inputs.target_valid
-            and context.inputs.target_locked
-            and context.inputs.target_stable
+    def _build_recce_result(self, target: SurveyTarget) -> RecceResult:
+        if not self._recce_votes:
+            return RecceResult(target.target_id, target.x, target.y, status="blank")
+        hazard, (count, confidence_sum) = max(
+            self._recce_votes.items(),
+            key=lambda item: (item[1][0], item[1][1]),
+        )
+        confirmed = (
+            count >= self.config.recce.vote_min_count
+            and confidence_sum >= self.config.recce.vote_min_confidence_sum
+        )
+        return RecceResult(
+            target_id=target.target_id,
+            x=target.x,
+            y=target.y,
+            hazard_class=hazard if confirmed else None,
+            vote_count=count,
+            confidence_sum=confidence_sum,
+            status="confirmed" if confirmed else "blank",
         )
 
-    @staticmethod
-    def _release_action(payload: PayloadSlot) -> MissionAction | None:
-        release = payload.release
-        if release is None:
-            return None
-        release_type = str(release.type).strip().lower()
-        key = f"rescue_release_payload_{payload.payload_id}"
-        if release_type == "servo":
-            if release.channel is None or release.pwm is None:
-                return None
-            return MissionAction(
-                "set_servo",
-                params={"channel": int(release.channel), "pwm": int(release.pwm)},
-                key=key,
-                once=True,
-                priority=3,
-            )
-        if release_type == "relay":
-            if release.relay_id is None or release.state is None:
-                return None
-            return MissionAction(
-                "set_relay",
-                params={"relay_id": int(release.relay_id), "state": bool(release.state)},
-                key=key,
-                once=True,
-                priority=3,
-            )
+    def _is_cylinder(self, detection: SceneObject) -> bool:
+        return (
+            detection.class_name.strip().lower() in self.config.vision.cylinder_classes
+            and detection.confidence >= self.config.vision.min_cylinder_confidence
+        )
+
+    def _current_drop_target(self) -> SurveyTarget | None:
+        if 0 <= self._drop_target_index < len(self._drop_targets):
+            return self._drop_targets[self._drop_target_index]
         return None
 
-    @staticmethod
-    def _hold_action(payload: PayloadSlot) -> MissionAction | None:
-        release = payload.release
-        if release is None:
-            return None
-        if str(release.type).strip().lower() != "servo":
-            return None
-        if release.channel is None or release.hold_pwm is None:
-            return None
-        return MissionAction(
-            "set_servo",
-            params={"channel": int(release.channel), "pwm": int(release.hold_pwm)},
-            key=f"rescue_hold_payload_{payload.payload_id}",
-            once=True,
-            priority=3,
+    def _current_recce_target(self) -> SurveyTarget | None:
+        if 0 <= self._recce_target_index < len(self._recce_targets):
+            return self._recce_targets[self._recce_target_index]
+        return None
+
+    def _current_payload(self) -> PayloadSlot | None:
+        if 0 <= self._drop_count < len(self.config.payload_slots):
+            return self.config.payload_slots[self._drop_count]
+        return None
+
+    def _current_payload_offset(self) -> dict[str, float]:
+        slot = self._current_payload()
+        if slot is None:
+            return {"ex_cam": 0.0, "ey_cam": 0.0}
+        return {"ex_cam": slot.drop_center_x, "ey_cam": slot.drop_center_y}
+
+    def _aligned(self, context: MissionContext) -> bool:
+        return (
+            context.inputs.target_valid
+            and abs(float(context.inputs.ex_cam)) <= self.config.align.max_ex_cam
+            and abs(float(context.inputs.ey_cam)) <= self.config.align.max_ey_cam
         )
 
+    def _height_m(self, drone: DroneState) -> float:
+        if drone.relative_alt_valid:
+            return max(0.0, float(drone.relative_altitude))
+        if self._origin is not None and drone.local_position_valid:
+            return max(0.0, -(float(drone.local_z) - float(self._origin.origin_z)))
+        return max(0.0, float(drone.altitude))
 
-def build_rescue_config(settings: dict[str, Any]) -> RescueCompetitionMissionConfig:
-    config = RescueCompetitionMissionConfig(
-        initial_stage=RescueCompetitionMission._stage_value(
-            str(settings.get("initial_stage", RescueStage.PREPARE.value))
-        ),
-        idle_mode=str(settings.get("idle_mode", "IDLE")),
-        auto_start=_strict_bool(settings.get("auto_start", False)),
-        takeoff_altitude_m=float(settings.get("takeoff_altitude_m", 5.0)),
-        takeoff_altitude_tolerance_m=float(settings.get("takeoff_altitude_tolerance_m", 0.5)),
-        startup_gimbal_pitch_deg=float(settings.get("startup_gimbal_pitch_deg", -90.0)),
-        startup_gimbal_yaw_deg=float(settings.get("startup_gimbal_yaw_deg", 0.0)),
-        startup_gimbal_roll_deg=float(settings.get("startup_gimbal_roll_deg", 0.0)),
-        local_position_frame=int(settings.get("local_position_frame", 1)),
-        drop_route_end_name=str(settings.get("drop_route_end_name", "drop_center")),
-        recce_route_end_name=str(settings.get("recce_route_end_name", "recce_center")),
-        home_route_end_name=str(settings.get("home_route_end_name", "home")),
-        route_hold_s=float(settings.get("route_hold_s", 0.0)),
-        align_mode=str(settings.get("align_mode", "FIXED_DOWNWARD_HOLD")),
-        dry_run_skip_vision=_strict_bool(settings.get("dry_run_skip_vision", False)),
-        dry_run_skip_payload_release=_strict_bool(settings.get("dry_run_skip_payload_release", False)),
-        search_drop_duration_s=float(settings.get("search_drop_duration_s", 2.0)),
-        align_drop_duration_s=float(settings.get("align_drop_duration_s", 1.0)),
-        drop_target_classes=_string_list(
-            settings,
-            "drop_target_classes",
-            ["drop_cylinder", "cylinder", "target"],
-        ),
-        drop_target_min_confidence=float(settings.get("drop_target_min_confidence", 0.45)),
-        drop_target_stable_frames=int(settings.get("drop_target_stable_frames", 5)),
-        drop_target_max_center_error=float(settings.get("drop_target_max_center_error", 0.35)),
-        align=_align_config(settings.get("align", {})),
-        drop=_drop_config(settings.get("drop", settings)),
-        payload_release=_payload_release_timing(settings.get("payload_release", {})),
-        recce=_recce_mission_config(settings.get("recce", {}), settings.get("scan_duration_s", None)),
-        recon=_recon_config(settings.get("recon", {})),
-        scan_duration_s=float(settings.get("scan_duration_s", 3.0)),
-        land_complete_altitude_m=float(settings.get("land_complete_altitude_m", 0.3)),
-        route=[_route_point(item, index) for index, item in enumerate(_list(settings, "route"))],
-        drop_zones=[_mission_zone(item, index, "drop_zone") for index, item in enumerate(_list(settings, "drop_zones"))],
-        recce_zones=[_mission_zone(item, index, "recce_zone") for index, item in enumerate(_list(settings, "recce_zones"))],
-        payloads=[_payload_slot(item, index) for index, item in enumerate(_payload_items(settings))],
+    def _mission_position(self, drone: DroneState) -> tuple[float, float, float] | None:
+        if self._origin is None or not drone.local_position_valid:
+            return None
+        return to_mission_position(drone, self._origin)
+
+    def _transition_to(self, stage: RescueStage) -> None:
+        if stage == self._stage:
+            return
+        self._previous_stage = self._stage
+        self._stage = stage
+        self._stage_started_at = None
+        self._goal_reached_since = None
+
+    def _detail(self) -> dict[str, object]:
+        return {
+            "drop_scan_index": self._drop_scan_index,
+            "drop_estimate_count": len(self._drop_estimates),
+            "drop_targets": [item.to_detail() for item in self._drop_targets],
+            "drop_target_index": self._drop_target_index,
+            "drop_count": self._drop_count,
+            "recce_scan_index": self._recce_scan_index,
+            "recce_estimate_count": len(self._recce_estimates),
+            "recce_targets": [item.to_detail() for item in self._recce_targets],
+            "recce_target_index": self._recce_target_index,
+            "recce_results": [item.to_dict() for item in self._recce_results],
+            "recce_report_path": self._recce_report_path,
+            "payload_slots": [item.to_detail() for item in self.config.payload_slots],
+        }
+
+
+def build_rescue_config(settings: dict[str, Any] | None = None) -> RescueCompetitionMissionConfig:
+    data = settings or {}
+    return RescueCompetitionMissionConfig(
+        initial_stage=_stage_value(str(data.get("initial_stage", RescueStage.PREPARE.value))),
+        idle_mode=str(data.get("idle_mode", "IDLE")),
+        align_mode=str(data.get("align_mode", "DOWNWARD_ALIGN_DESCEND")),
+        auto_start=_strict_bool(data.get("auto_start", False), "auto_start"),
+        takeoff_altitude_m=float(data.get("takeoff_altitude_m", 5.0)),
+        takeoff_altitude_tolerance_m=float(data.get("takeoff_altitude_tolerance_m", 0.5)),
+        land_complete_altitude_m=float(data.get("land_complete_altitude_m", 0.3)),
+        local_position_frame=int(data.get("local_position_frame", 1)),
+        xy_tolerance_m=float(data.get("xy_tolerance_m", 0.6)),
+        z_tolerance_m=float(data.get("z_tolerance_m", 0.35)),
+        max_goal_speed_mps=float(data.get("max_goal_speed_mps", 0.5)),
+        route=_route_config(_section(data, "route")),
+        drop=_drop_config(_section(data, "drop")),
+        payload=_payload_config(_section(data, "payload")),
+        payload_slots=_payload_slots(data.get("payload_slots", [])),
+        recce=_recce_config(_section(data, "recce")),
+        vision=_vision_config(_section(data, "vision")),
+        align=_align_config(_section(data, "align")),
     )
-    _validate_route_end_names(config)
-    return config
 
 
-def _list(settings: dict[str, Any], key: str) -> list[Any]:
-    value = settings.get(key, [])
-    if value is None:
-        return []
+def _route_config(data: dict[str, Any]) -> RouteConfig:
+    home = _section(data, "home")
+    drop = _section(data, "drop_area_center")
+    recce = _section(data, "recce_area_center")
+    return RouteConfig(
+        home_x=float(home.get("x", 0.0)),
+        home_y=float(home.get("y", 0.0)),
+        drop_area_x=float(drop.get("x", 30.0)),
+        drop_area_y=float(drop.get("y", 0.0)),
+        recce_area_x=float(recce.get("x", 55.0)),
+        recce_area_y=float(recce.get("y", 0.0)),
+    )
+
+
+def _stage_value(value: str | RescueStage) -> RescueStage:
+    if isinstance(value, RescueStage):
+        return value
+    normalized = str(value).strip().upper()
+    aliases = {
+        "DONE": RescueStage.FINISH,
+        "DROP_SCAN": RescueStage.SURVEY_DROP_POINTS,
+        "RECON_SCAN": RescueStage.SURVEY_RECCE_POINTS,
+        "RECCE_SCAN": RescueStage.SURVEY_RECCE_POINTS,
+    }
+    return aliases.get(normalized, RescueStage(normalized))
+
+
+def _drop_config(data: dict[str, Any]) -> DropConfig:
+    return DropConfig(
+        required_payload_drops=int(data.get("required_payload_drops", 2)),
+        survey_altitude_m=float(data.get("survey_altitude_m", 5.0)),
+        transit_altitude_m=float(data.get("transit_altitude_m", 3.0)),
+        release_altitude_m=float(data.get("release_altitude_m", 1.0)),
+        survey_hold_s=float(data.get("survey_hold_s", 1.2)),
+        target_count=int(data.get("target_count", 2)),
+        survey_points=_survey_points(data.get("survey_points", _default_drop_points())),
+    )
+
+
+def _payload_config(data: dict[str, Any]) -> PayloadConfig:
+    return PayloadConfig(
+        release_wait_s=float(data.get("release_wait_s", 1.0)),
+        return_hold_pwm_after_release=_strict_bool(
+            data.get("return_hold_pwm_after_release", True),
+            "payload.return_hold_pwm_after_release",
+        ),
+    )
+
+
+def _recce_config(data: dict[str, Any]) -> RecceConfig:
+    return RecceConfig(
+        survey_altitude_m=float(data.get("survey_altitude_m", 5.0)),
+        transit_altitude_m=float(data.get("transit_altitude_m", 3.0)),
+        identify_altitude_m=float(data.get("identify_altitude_m", 2.0)),
+        survey_hold_s=float(data.get("survey_hold_s", 1.2)),
+        capture_hold_s=float(data.get("capture_hold_s", 1.5)),
+        visit_max_count=int(data.get("visit_max_count", 5)),
+        required_confirmed_count=int(data.get("required_confirmed_count", 3)),
+        vote_min_count=int(data.get("vote_min_count", 3)),
+        vote_min_confidence_sum=float(data.get("vote_min_confidence_sum", 1.2)),
+        output_dir=str(data.get("output_dir", "runtime/logs/recce")),
+        survey_points=_survey_points(data.get("survey_points", _default_recce_points())),
+    )
+
+
+def _vision_config(data: dict[str, Any]) -> VisionConfig:
+    return VisionConfig(
+        geometry=CameraGeometryConfig(
+            fov_x_deg=float(data.get("fov_x_deg", 75.0)),
+            fov_y_deg=float(data.get("fov_y_deg", 75.0)),
+            image_x_sign=float(data.get("image_x_sign", 1.0)),
+            image_y_sign=float(data.get("image_y_sign", 1.0)),
+        ),
+        cylinder_classes={item.strip().lower() for item in _string_list(data, "cylinder_classes", ["cylinder"])},
+        hazard_classes={item.strip().lower() for item in _string_list(data, "hazard_classes", [])},
+        min_cylinder_confidence=float(data.get("min_cylinder_confidence", 0.4)),
+        min_hazard_confidence=float(data.get("min_hazard_confidence", 0.4)),
+        cluster_radius_m=float(data.get("cluster_radius_m", 0.8)),
+        edge_margin_norm=float(data.get("edge_margin_norm", 0.85)),
+        lock_center_max_error=float(data.get("lock_center_max_error", 0.65)),
+    )
+
+
+def _align_config(data: dict[str, Any]) -> AlignMissionConfig:
+    return AlignMissionConfig(
+        max_ex_cam=float(data.get("max_ex_cam", 0.06)),
+        max_ey_cam=float(data.get("max_ey_cam", 0.06)),
+        hold_s=float(data.get("hold_s", 0.5)),
+        lost_timeout_s=float(data.get("lost_timeout_s", 1.0)),
+        min_altitude_m=float(data.get("min_altitude_m", 0.8)),
+    )
+
+
+def _payload_slots(value: Any) -> list[PayloadSlot]:
+    items = value if isinstance(value, list) else []
+    if not items:
+        items = [
+            {"id": 1, "servo_channel": 8, "hold_pwm": 1100, "release_pwm": 1900},
+            {"id": 2, "servo_channel": 9, "hold_pwm": 1100, "release_pwm": 1900},
+        ]
+    slots: list[PayloadSlot] = []
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise ValueError("payload_slots entries must be mappings")
+        slots.append(
+            PayloadSlot(
+                payload_id=int(item.get("id", item.get("payload_id", index + 1))),
+                servo_channel=int(item.get("servo_channel", index + 8)),
+                hold_pwm=int(item.get("hold_pwm", 1100)),
+                release_pwm=int(item.get("release_pwm", 1900)),
+                drop_center_x=float(item.get("drop_center_x", 0.0)),
+                drop_center_y=float(item.get("drop_center_y", 0.0)),
+            )
+        )
+    return slots
+
+
+def _survey_points(value: Any) -> list[SurveyPoint]:
     if not isinstance(value, list):
-        raise ValueError(f"rescue_competition.{key} must be a list")
+        raise ValueError("survey_points must be a list")
+    points: list[SurveyPoint] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise ValueError("survey_points entries must be mappings")
+        points.append(
+            SurveyPoint(
+                name=str(item.get("name", f"p{index + 1}")),
+                x=float(item["x"]),
+                y=float(item["y"]),
+            )
+        )
+    return points
+
+
+def _default_drop_points() -> list[dict[str, object]]:
+    return [
+        {"name": "drop_p1", "x": 28.0, "y": -1.2},
+        {"name": "drop_p2", "x": 28.0, "y": 1.2},
+        {"name": "drop_p3", "x": 32.0, "y": -1.2},
+        {"name": "drop_p4", "x": 32.0, "y": 1.2},
+    ]
+
+
+def _default_recce_points() -> list[dict[str, object]]:
+    return [
+        {"name": "recce_p1", "x": 53.0, "y": -1.2},
+        {"name": "recce_p2", "x": 53.0, "y": 1.2},
+        {"name": "recce_p3", "x": 57.0, "y": -1.2},
+        {"name": "recce_p4", "x": 57.0, "y": 1.2},
+    ]
+
+
+def _section(data: dict[str, Any], key: str) -> dict[str, Any]:
+    value = data.get(key, {})
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"{key} must be a mapping")
     return value
 
 
-def _payload_items(settings: dict[str, Any]) -> list[Any]:
-    if "payload_slots" in settings:
-        return _list(settings, "payload_slots")
-    return _list(settings, "payloads")
+def _string_list(data: dict[str, Any], key: str, default: list[str]) -> list[str]:
+    value = data.get(key, default)
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError(f"{key} must be a list of strings")
+    return list(value)
 
 
-def _string_list(
-    settings: dict[str, Any],
-    key: str,
-    default: list[str],
-) -> list[str]:
-    value = settings.get(key, default)
-    if value is None:
-        return []
-    if not isinstance(value, list):
-        raise ValueError(f"rescue_competition.{key} must be a list")
-    return [str(item) for item in value]
-
-
-def _route_point(item: Any, index: int) -> RoutePoint:
-    data = _mapping(item, "route", index)
-    return RoutePoint(
-        name=str(data.get("name", f"route_{index + 1}")),
-        x=float(data["x"]),
-        y=float(data["y"]),
-        z=float(data["z"]),
-        xy_tolerance_m=float(data.get("xy_tolerance_m", data.get("radius_m", 1.0))),
-        z_tolerance_m=float(data.get("z_tolerance_m", 0.5)),
-        max_speed_mps=float(data.get("max_speed_mps", 0.5)),
-    )
-
-
-def _mission_zone(item: Any, index: int, prefix: str) -> MissionZone:
-    data = _mapping(item, prefix, index)
-    return MissionZone(
-        name=str(data.get("name", f"{prefix}_{index + 1}")),
-        x=float(data["x"]),
-        y=float(data["y"]),
-        radius_m=float(data["radius_m"]),
-        z=None if data.get("z") is None else float(data["z"]),
-    )
-
-
-def _payload_slot(item: Any, index: int) -> PayloadSlot:
-    data = _mapping(item, "payloads", index)
-    release = data.get("release")
-    if release is None and data.get("servo_channel") is not None:
-        release = {
-            "type": "servo",
-            "channel": data.get("servo_channel"),
-            "pwm": data.get("release_pwm"),
-            "hold_pwm": data.get("hold_pwm"),
-        }
-    return PayloadSlot(
-        payload_id=int(data.get("payload_id", data.get("id", index + 1))),
-        label=str(data.get("label", "")),
-        release=_payload_release(release, index),
-        drop_center_x=float(data.get("drop_center_x", 0.0)),
-        drop_center_y=float(data.get("drop_center_y", 0.0)),
-    )
-
-
-def _payload_release(item: Any, index: int) -> PayloadRelease | None:
-    if item is None:
-        return None
-    data = _mapping(item, "payloads.release", index)
-    release_type = str(data.get("type", "")).strip().lower()
-    if release_type == "servo":
-        return PayloadRelease(
-            type=release_type,
-            channel=int(data["channel"]) if data.get("channel") is not None else None,
-            pwm=int(data["pwm"]) if data.get("pwm") is not None else None,
-            hold_pwm=int(data["hold_pwm"]) if data.get("hold_pwm") is not None else None,
-        )
-    if release_type == "relay":
-        return PayloadRelease(
-            type=release_type,
-            relay_id=int(data["relay_id"]) if data.get("relay_id") is not None else None,
-            state=_strict_bool(data["state"]) if data.get("state") is not None else None,
-        )
-    raise ValueError(f"rescue_competition.payloads[{index}].release.type must be servo or relay")
-
-
-def _align_config(item: Any) -> DropAlignConfig:
-    if item is None:
-        item = {}
-    if not isinstance(item, dict):
-        raise ValueError("rescue_competition.align must be a mapping")
-    return DropAlignConfig(
-        max_ex_cam=float(item.get("max_ex_cam", 0.08)),
-        max_ey_cam=float(item.get("max_ey_cam", 0.08)),
-        min_target_size=float(item.get("min_target_size", 0.0)),
-        require_target_locked=_strict_bool(item.get("require_target_locked", True)),
-        require_target_stable=_strict_bool(item.get("require_target_stable", True)),
-        hold_s=float(item.get("hold_s", 0.8)),
-        timeout_s=float(item.get("timeout_s", 15.0)),
-        lost_timeout_s=float(item.get("lost_timeout_s", 2.0)),
-    )
-
-
-def _drop_config(item: Any) -> DropMissionConfig:
-    if item is None:
-        item = {}
-    if not isinstance(item, dict):
-        raise ValueError("rescue_competition.drop must be a mapping")
-    direction = str(item.get("scan_direction", "left_to_right")).strip().lower()
-    if direction not in {"left_to_right", "right_to_left"}:
-        raise ValueError("rescue_competition.drop.scan_direction must be left_to_right or right_to_left")
-    return DropMissionConfig(
-        required_payload_drops=int(item.get("required_payload_drops", 2)),
-        scan_direction=direction,
-        scan_height_m=float(item.get("drop_scan_height_m", item.get("scan_height_m", 5.0))),
-        intermediate_height_m=float(
-            item.get("drop_intermediate_height_m", item.get("intermediate_height_m", 3.0))
-        ),
-        final_height_m=float(item.get("drop_final_height_m", item.get("final_height_m", 1.0))),
-        ascend_height_m=float(item.get("drop_ascend_height_m", item.get("ascend_height_m", 5.0))),
-        scan_width_m=float(item.get("drop_scan_width_m", item.get("scan_width_m", 5.0))),
-        scan_speed_mps=float(item.get("drop_scan_speed_mps", item.get("scan_speed_mps", 0.4))),
-        scan_timeout_s=float(item.get("drop_scan_timeout_s", item.get("scan_timeout_s", 45.0))),
-        descend_hold_s=float(item.get("drop_descend_hold_s", item.get("descend_hold_s", 0.3))),
-        stable_hold_s=float(item.get("drop_stable_hold_s", item.get("stable_hold_s", 3.0))),
-        dropped_target_radius_m=float(
-            item.get("dropped_target_radius_m", item.get("target_blacklist_radius_m", 0.8))
-        ),
-        resume_skip_m=float(item.get("drop_resume_skip_m", item.get("resume_skip_m", 0.6))),
-        scan_route=[
-            _route_point(point, index)
-            for index, point in enumerate(_list(item, "scan_route"))
-        ],
-    )
-
-
-def _recon_config(item: Any) -> ReconMissionConfig:
-    if item is None:
-        item = {}
-    if not isinstance(item, dict):
-        raise ValueError("rescue_competition.recon must be a mapping")
-    return ReconMissionConfig(
-        scan_height_m=float(item.get("scan_height_m", 5.0)),
-        identify_height_m=float(item.get("identify_height_m", 2.0)),
-        scan_width_m=float(item.get("scan_width_m", 5.0)),
-        scan_speed_mps=float(item.get("scan_speed_mps", 0.5)),
-        scan_timeout_s=float(item.get("scan_timeout_s", 40.0)),
-        align_hold_s=float(item.get("align_hold_s", 0.5)),
-        descend_hold_s=float(item.get("descend_hold_s", 0.5)),
-        reported_target_radius_m=float(item.get("reported_target_radius_m", 0.8)),
-        scan_route=[
-            _route_point(point, index)
-            for index, point in enumerate(_list(item, "scan_route"))
-        ],
-    )
-
-
-def _payload_release_timing(item: Any) -> PayloadReleaseTiming:
-    if item is None:
-        item = {}
-    if not isinstance(item, dict):
-        raise ValueError("rescue_competition.payload_release must be a mapping")
-    return PayloadReleaseTiming(
-        delay_after_action_s=float(item.get("delay_after_action_s", 1.0)),
-    )
-
-
-def _recce_mission_config(item: Any, legacy_scan_duration: Any = None) -> RecceMissionConfig:
-    if item is None:
-        item = {}
-    if not isinstance(item, dict):
-        raise ValueError("rescue_competition.recce must be a mapping")
-    scan_default = 3.0 if legacy_scan_duration is None else float(legacy_scan_duration)
-    return RecceMissionConfig(
-        config=RecceConfig(
-            cylinder_classes=set(_string_list(item, "cylinder_classes", ["recce_cylinder", "cylinder"])),
-            hazard_classes=set(
-                _string_list(
-                    item,
-                    "hazard_classes",
-                    [
-                        "explosive",
-                        "flammable",
-                        "corrosive",
-                        "toxic",
-                        "oxidizer",
-                        "biohazard",
-                        "hazard_sign",
-                    ],
-                )
-            ),
-            min_cylinder_confidence=float(item.get("min_cylinder_confidence", 0.35)),
-            min_hazard_confidence=float(item.get("min_hazard_confidence", 0.35)),
-            vote_min_count=int(item.get("vote_min_count", 3)),
-            vote_min_confidence_sum=float(item.get("vote_min_confidence_sum", 1.2)),
-        ),
-        scan_duration_s=float(item.get("scan_duration_s", scan_default)),
-        output_dir=str(item.get("output_dir", "runtime/logs/recce")),
-        output_json=_strict_bool(item.get("output_json", True)),
-        output_csv=_strict_bool(item.get("output_csv", True)),
-    )
-
-
-def _mapping(item: Any, key: str, index: int) -> dict[str, Any]:
-    if not isinstance(item, dict):
-        raise ValueError(f"rescue_competition.{key}[{index}] must be a mapping")
-    return item
-
-
-def _validate_route_end_names(config: RescueCompetitionMissionConfig) -> None:
-    if not config.route:
-        return
-    names = {point.name for point in config.route}
-    for field_name, end_name in (
-        ("drop_route_end_name", config.drop_route_end_name),
-        ("recce_route_end_name", config.recce_route_end_name),
-        ("home_route_end_name", config.home_route_end_name),
-    ):
-        if end_name not in names:
-            raise ValueError(f"rescue_competition.{field_name} not found in route: {end_name}")
-
-
-def _strict_bool(value: Any) -> bool:
+def _strict_bool(value: Any, path: str) -> bool:
     if isinstance(value, bool):
         return value
-    if isinstance(value, str):
-        lowered = value.strip().lower()
-        if lowered in {"1", "true", "yes", "y", "on"}:
-            return True
-        if lowered in {"0", "false", "no", "n", "off"}:
-            return False
-    raise ValueError(f"invalid payload release boolean: {value!r}")
+    raise ValueError(f"{path} must be a YAML bool (true/false), got {value!r}")

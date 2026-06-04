@@ -50,7 +50,7 @@ class SystemRunner:
         self.stage_registry = StageRegistry(
             approach_config=config.approach_track,
             overhead_config=config.overhead_hold,
-            fixed_downward_config=config.fixed_downward_hold,
+            downward_align_descend_config=config.downward_align_descend,
         )
         self.command_shaper = CommandShaper(config=config.shaper)
         self.executor = FlightCommandExecutor(config=config.executor)
@@ -714,7 +714,14 @@ class SystemRunner:
         if not path:
             return CommandResult(False, "mission config reload is unavailable for legacy config")
         try:
-            input_adapter_cfg, health_cfg, approach_cfg, overhead_cfg, fixed_downward_cfg, shaper_cfg = load_mission_stage_runtime_config(
+            (
+                input_adapter_cfg,
+                health_cfg,
+                approach_cfg,
+                overhead_cfg,
+                downward_align_descend_cfg,
+                shaper_cfg,
+            ) = load_mission_stage_runtime_config(
                 self.config.mission_config_path,
             )
         except Exception as exc:
@@ -726,12 +733,15 @@ class SystemRunner:
             copy_dataclass_values(self.config.health, health_cfg)
             copy_dataclass_values(self.config.approach_track, approach_cfg)
             copy_dataclass_values(self.config.overhead_hold, overhead_cfg)
-            copy_dataclass_values(self.config.fixed_downward_hold, fixed_downward_cfg)
+            copy_dataclass_values(
+                self.config.downward_align_descend,
+                downward_align_descend_cfg,
+            )
             copy_dataclass_values(self.config.shaper, shaper_cfg)
             self.stage_registry.apply_configs(
                 approach_config=approach_cfg,
                 overhead_config=overhead_cfg,
-                fixed_downward_config=fixed_downward_cfg,
+                downward_align_descend_config=downward_align_descend_cfg,
                 reset=True,
             )
             self.input_adapter.config = self.config.input_adapter

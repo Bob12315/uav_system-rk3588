@@ -123,7 +123,7 @@ def test_web_missions_exposes_stage_buttons_for_every_registered_mission() -> No
         "CORRIDOR_FOLLOW",
     ]
     assert "TAKEOFF" in missions["rescue_competition"]["stage_modes"]
-    assert "DROP_SCAN" in missions["rescue_competition"]["stage_modes"]
+    assert "SURVEY_DROP_POINTS" in missions["rescue_competition"]["stage_modes"]
     assert missions["visual_tracking"]["selected_stage"] == "AUTO"
     assert missions["rescue_competition"]["selected_stage"] == "AUTO"
 
@@ -134,24 +134,22 @@ def test_rescue_competition_receives_mission_settings(tmp_path) -> None:
         yaml.safe_dump(
             {
                 "name": "rescue_competition",
-                "initial_stage": "DONE",
+                "initial_stage": "FINISH",
                 "idle_mode": "CORRIDOR_FOLLOW",
-                "drop_route_end_name": "route_1",
-                "recce_route_end_name": "route_1",
-                "home_route_end_name": "route_1",
-                "dry_run_skip_vision": True,
-                "dry_run_skip_payload_release": True,
                 "recce": {
+                    "capture_hold_s": 2.5,
+                    "output_dir": str(tmp_path / "recce"),
+                },
+                "vision": {
                     "cylinder_classes": ["cylinder"],
                     "hazard_classes": ["flammable"],
-                    "scan_duration_s": 6.0,
-                    "output_dir": str(tmp_path / "recce"),
-                    "output_json": True,
-                    "output_csv": False,
                 },
-                "route": [{"x": 1.0, "y": 2.0, "z": -3.0}],
-                "drop_zones": [{"x": 4.0, "y": 5.0, "radius_m": 1.5}],
-                "payloads": [{"payload_id": 1}],
+                "route": {
+                    "home": {"x": 1.0, "y": 2.0},
+                    "drop_area_center": {"x": 30.0, "y": 0.0},
+                    "recce_area_center": {"x": 55.0, "y": 0.0},
+                },
+                "payload_slots": [{"id": 1, "servo_channel": 8}],
             }
         ),
         encoding="utf-8",
@@ -173,15 +171,13 @@ def test_rescue_competition_receives_mission_settings(tmp_path) -> None:
     mission = build_mission(config.mission_name, config)
 
     assert isinstance(mission, RescueCompetitionMission)
-    assert mission.config.initial_stage == RescueStage.DONE
+    assert mission.config.initial_stage == RescueStage.FINISH
     assert mission.config.idle_mode == "CORRIDOR_FOLLOW"
-    assert mission.config.drop_route_end_name == "route_1"
-    assert mission.config.dry_run_skip_vision is True
-    assert mission.config.dry_run_skip_payload_release is True
-    assert mission.config.recce.config.cylinder_classes == {"cylinder"}
-    assert mission.config.recce.config.hazard_classes == {"flammable"}
-    assert mission.config.recce.scan_duration_s == 6.0
-    assert mission.config.recce.output_csv is False
-    assert len(mission.config.route) == 1
-    assert len(mission.config.drop_zones) == 1
-    assert len(mission.config.payloads) == 1
+    assert mission.config.route.home_x == pytest.approx(1.0)
+    assert mission.config.route.home_y == pytest.approx(2.0)
+    assert mission.config.vision.cylinder_classes == {"cylinder"}
+    assert mission.config.vision.hazard_classes == {"flammable"}
+    assert mission.config.recce.capture_hold_s == pytest.approx(2.5)
+    assert mission.config.recce.output_dir == str(tmp_path / "recce")
+    assert len(mission.config.payload_slots) == 1
+    assert mission.config.payload_slots[0].servo_channel == 8

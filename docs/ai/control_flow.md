@@ -140,14 +140,15 @@ raw_command, mode_status = mode.update(inputs)
 - `ex_cam -> vy`
 - `ey_cam -> vx`
 
-`FIXED_DOWNWARD_HOLD`：
+`DOWNWARD_ALIGN_DESCEND`：
 
 - 仅供 `rescue_competition` 使用。
-- mission 启动时通过一次性 action 将云台 pitch 设置为垂直朝地。
-- 对准阶段不发送云台角度或速率命令。
+- 固定下视相机，不发送云台角度或速率命令。
 - 不要求云台反馈。
+- 不输出偏航，`yaw_rate_cmd=0`。
 - `ex_cam -> vy`
 - `ey_cam -> vx`
+- 目标对准后输出慢速 `vz` 下降；未对准时保持高度，只做水平微调。
 
 ## 9. debug runtime
 

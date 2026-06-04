@@ -1,1 +1,1 @@
-"""Stage controllers used only by the rescue competition mission."""
+"""Stage controllers for the rescue competition mission."""

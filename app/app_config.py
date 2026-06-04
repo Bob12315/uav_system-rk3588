@@ -25,8 +25,8 @@ from missions.visual_tracking.stages.overhead_hold.config import (
     OverheadGimbalConfig,
     OverheadHoldConfig,
 )
-from missions.rescue_competition.stages.fixed_downward_hold import (
-    FixedDownwardHoldConfig,
+from missions.rescue_competition.stages.downward_align_descend import (
+    DownwardAlignDescendConfig,
 )
 from missions.visual_tracking import VisualTrackingMissionConfig
 from app.health_monitor import HealthMonitorConfig
@@ -99,7 +99,7 @@ class AppConfig:
     visual_tracking: VisualTrackingMissionConfig
     approach_track: ApproachTrackConfig
     overhead_hold: OverheadHoldConfig
-    fixed_downward_hold: FixedDownwardHoldConfig
+    downward_align_descend: DownwardAlignDescendConfig
     shaper: CommandShaperConfig
     executor: FlightCommandExecutorConfig
     debug: StageDebugConfig
@@ -215,7 +215,7 @@ def load_app_config(args: argparse.Namespace) -> AppConfig:
     health_cfg = _build_health_monitor_config(mission_data)
     approach_track_cfg = _build_approach_track_config(mission_data, mission_data)
     overhead_hold_cfg = _build_overhead_hold_config(mission_data, mission_data)
-    fixed_downward_hold_cfg = _build_fixed_downward_hold_config(mission_data)
+    downward_align_descend_cfg = _build_downward_align_descend_config(mission_data)
     shaper_cfg = _build_shaper_config(_section(mission_data, "shaper"))
     executor_cfg = _build_executor_config(executor_data)
     debug_cfg = StageDebugConfig()
@@ -338,7 +338,7 @@ def load_app_config(args: argparse.Namespace) -> AppConfig:
         visual_tracking=visual_tracking_cfg,
         approach_track=approach_track_cfg,
         overhead_hold=overhead_hold_cfg,
-        fixed_downward_hold=fixed_downward_hold_cfg,
+        downward_align_descend=downward_align_descend_cfg,
         shaper=shaper_cfg,
         executor=executor_cfg,
         debug=debug_cfg,
@@ -357,7 +357,7 @@ def load_mission_stage_runtime_config(
     HealthMonitorConfig,
     ApproachTrackConfig,
     OverheadHoldConfig,
-    FixedDownwardHoldConfig,
+    DownwardAlignDescendConfig,
     CommandShaperConfig,
 ]:
     mission_data = _normalize_mission_config(_load_yaml_if_exists(mission_config_path))
@@ -366,7 +366,7 @@ def load_mission_stage_runtime_config(
         _build_health_monitor_config(mission_data),
         _build_approach_track_config(mission_data, mission_data),
         _build_overhead_hold_config(mission_data, mission_data),
-        _build_fixed_downward_hold_config(mission_data),
+        _build_downward_align_descend_config(mission_data),
         _build_shaper_config(_section(mission_data, "shaper")),
     )
 
@@ -653,51 +653,30 @@ def _build_overhead_hold_config(
     )
 
 
-def _build_fixed_downward_hold_config(
+def _build_downward_align_descend_config(
     mission_data: dict[str, Any],
-) -> FixedDownwardHoldConfig:
-    mode = _section(mission_data, "fixed_downward_hold")
-    lateral = _section(mode, "lateral")
-    longitudinal = _section(mode, "longitudinal")
-    gates = _section(mode, "gates")
-    return FixedDownwardHoldConfig(
-        kp_vy=float(lateral.get("kp_vy", 1.0)),
-        kd_vy=float(lateral.get("kd_vy", 0.0)),
-        use_derivative_vy=_cfg_bool(
-            lateral,
-            "use_derivative",
-            False,
-            "fixed_downward_hold.lateral",
-        ),
-        deadband_ex_cam=float(lateral.get("deadband_ex_cam", 0.02)),
-        max_vy=float(lateral.get("max_vy", 1.0)),
-        vy_sign=float(lateral.get("vy_sign", 1.0)),
-        kp_vx=float(longitudinal.get("kp_vx", 1.0)),
-        kd_vx=float(longitudinal.get("kd_vx", 0.0)),
-        use_derivative_vx=_cfg_bool(
-            longitudinal,
-            "use_derivative",
-            False,
-            "fixed_downward_hold.longitudinal",
-        ),
-        deadband_ey_cam=float(longitudinal.get("deadband_ey_cam", 0.02)),
-        max_forward_vx=float(longitudinal.get("max_forward_vx", 0.8)),
-        max_backward_vx=float(longitudinal.get("max_backward_vx", 0.2)),
-        allow_backward=_cfg_bool(
-            longitudinal,
-            "allow_backward",
-            True,
-            "fixed_downward_hold.longitudinal",
-        ),
-        vx_sign=float(longitudinal.get("vx_sign", -1.0)),
-        max_vision_age_s=float(gates.get("max_vision_age_s", 0.3)),
-        max_drone_age_s=float(gates.get("max_drone_age_s", 0.3)),
+) -> DownwardAlignDescendConfig:
+    mode = _section(mission_data, "align")
+    return DownwardAlignDescendConfig(
+        kp_vx=float(mode.get("kp_vx", 0.8)),
+        kp_vy=float(mode.get("kp_vy", 0.8)),
+        max_vx_mps=float(mode.get("max_vx_mps", 0.4)),
+        max_vy_mps=float(mode.get("max_vy_mps", 0.4)),
+        descend_speed_mps=float(mode.get("descend_speed_mps", 0.2)),
+        max_ex_cam=float(mode.get("max_ex_cam", 0.06)),
+        max_ey_cam=float(mode.get("max_ey_cam", 0.06)),
+        deadband_ex_cam=float(mode.get("deadband_ex_cam", 0.015)),
+        deadband_ey_cam=float(mode.get("deadband_ey_cam", 0.015)),
+        max_vision_age_s=float(mode.get("max_vision_age_s", 0.3)),
+        max_drone_age_s=float(mode.get("max_drone_age_s", 0.3)),
         require_target_locked=_cfg_bool(
-            gates,
+            mode,
             "require_target_locked",
             True,
-            "fixed_downward_hold.gates",
+            "align",
         ),
+        vx_sign=float(mode.get("vx_sign", 1.0)),
+        vy_sign=float(mode.get("vy_sign", 1.0)),
         dt_min=float(mode.get("dt_min", 1e-3)),
     )
 

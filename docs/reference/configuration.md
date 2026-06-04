@@ -102,24 +102,23 @@ initial_stage: PREPARE
 auto_start: false
 takeoff_altitude_m: 5.0
 local_position_frame: 1
-align_mode: FIXED_DOWNWARD_HOLD
+align_mode: DOWNWARD_ALIGN_DESCEND
 land_complete_altitude_m: 0.3
-route: []
-drop_zones: []
-recce_zones: []
+route:
+  home: {x: 0.0, y: 0.0}
+  drop_area_center: {x: 30.0, y: 0.0}
+  recce_area_center: {x: 55.0, y: 0.0}
 payload_slots: []
 ```
 
 - `auto_start`：默认 false，避免加载 rescue mission 后自动起飞。
 - `route`：任务相对本地坐标航点。mission 会在解锁后记录 EKF local origin 和机头
   朝向；路线 `x` 正方向为解锁时机头方向。
-- `startup_gimbal_pitch_deg/startup_gimbal_yaw_deg/startup_gimbal_roll_deg`：任务启动后
-  一次性设置的云台角度，默认 pitch 为 `-90` 度垂直朝地。
-- `payload_slots`：投放载荷列表，可为每个载荷配置舵机或继电器动作。
-- `drop`：投放搜索、下降、投放后上升和恢复扫描参数。
-- `recce` / `recon`：侦察扫描、目标识别和结果输出参数。
-- `drop.scan_route` / `recon.scan_route`：任务相对 NED 坐标下的显式扫描航点。
-- `fixed_downward_hold`：比赛任务垂直下视时的水平对准参数，对准阶段不持续控制云台。
+- `payload_slots`：投放载荷列表，当前按舵机通道配置 `hold_pwm` 和 `release_pwm`。
+- `drop`：投放区 5m 扫描、3m 转场、1m 投放和扫描点参数。
+- `recce`：侦察区 5m 扫描、3m 转场、2m 识别和结果输出参数。
+- `vision`：圆筒/危险品类别、相机视场角、图像到地面估算和聚类参数。
+- `align`：固定下视微调下降参数；对准阶段不持续控制云台、不输出偏航。
 - `land_complete_altitude_m`：降落完成的相对高度阈值。
 
 ## missions/<mission_name>/config.yaml

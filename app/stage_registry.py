@@ -6,9 +6,9 @@ from missions.base_stage import MissionStage
 from missions.visual_tracking.stages.approach_track import ApproachTrackConfig, ApproachTrackMode
 from missions.visual_tracking.stages.corridor_follow import CorridorFollowMode
 from missions.visual_tracking.stages.overhead_hold import OverheadHoldConfig, OverheadHoldMode
-from missions.rescue_competition.stages.fixed_downward_hold import (
-    FixedDownwardHoldConfig,
-    FixedDownwardHoldMode,
+from missions.rescue_competition.stages.downward_align_descend import (
+    DownwardAlignDescendConfig,
+    DownwardAlignDescendMode,
 )
 
 
@@ -16,8 +16,8 @@ from missions.rescue_competition.stages.fixed_downward_hold import (
 class StageRegistry:
     approach_config: ApproachTrackConfig
     overhead_config: OverheadHoldConfig
-    fixed_downward_config: FixedDownwardHoldConfig = field(
-        default_factory=FixedDownwardHoldConfig
+    downward_align_descend_config: DownwardAlignDescendConfig = field(
+        default_factory=DownwardAlignDescendConfig
     )
     _stages: dict[str, MissionStage] = field(init=False)
 
@@ -25,8 +25,8 @@ class StageRegistry:
         self._stages = {
             ApproachTrackMode.name: ApproachTrackMode(config=self.approach_config),
             OverheadHoldMode.name: OverheadHoldMode(config=self.overhead_config),
-            FixedDownwardHoldMode.name: FixedDownwardHoldMode(
-                config=self.fixed_downward_config
+            DownwardAlignDescendMode.name: DownwardAlignDescendMode(
+                config=self.downward_align_descend_config
             ),
             CorridorFollowMode.name: CorridorFollowMode(),
         }
@@ -46,13 +46,16 @@ class StageRegistry:
         *,
         approach_config: ApproachTrackConfig,
         overhead_config: OverheadHoldConfig,
-        fixed_downward_config: FixedDownwardHoldConfig | None = None,
+        downward_align_descend_config: DownwardAlignDescendConfig | None = None,
         reset: bool = True,
     ) -> None:
         copy_dataclass_values(self.approach_config, approach_config)
         copy_dataclass_values(self.overhead_config, overhead_config)
-        if fixed_downward_config is not None:
-            copy_dataclass_values(self.fixed_downward_config, fixed_downward_config)
+        if downward_align_descend_config is not None:
+            copy_dataclass_values(
+                self.downward_align_descend_config,
+                downward_align_descend_config,
+            )
         if reset:
             self.reset_all()
 
