@@ -17,6 +17,6 @@ class DownwardAlignDescendConfig:
     max_vision_age_s: float = 0.3
     max_drone_age_s: float = 0.3
     require_target_locked: bool = True
-    vx_sign: float = 1.0
+    vx_sign: float = -1.0
     vy_sign: float = 1.0
     dt_min: float = 1e-3

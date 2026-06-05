@@ -98,7 +98,7 @@ align:
   max_vision_age_s: 0.3
   max_drone_age_s: 0.3
   require_target_locked: true
-  vx_sign: 1.0
+  vx_sign: -1.0
   vy_sign: 1.0
 
 input_adapter:

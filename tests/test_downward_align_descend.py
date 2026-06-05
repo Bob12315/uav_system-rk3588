@@ -32,7 +32,7 @@ def test_downward_align_descend_maps_camera_errors_without_yaw_or_gimbal() -> No
 
     assert status.mode_name == "DOWNWARD_ALIGN_DESCEND"
     assert status.detail["aligned"] is True
-    assert command.vx_cmd == pytest.approx(0.04)
+    assert command.vx_cmd == pytest.approx(-0.04)
     assert command.vy_cmd == pytest.approx(0.032)
     assert command.vz_cmd == pytest.approx(0.2)
     assert command.yaw_rate_cmd == pytest.approx(0.0)
