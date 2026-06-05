@@ -20,7 +20,7 @@ transitions:
 
 recovery:
   lost_target:
-    recenter_gimbal_enabled: true
+    recenter_gimbal_enabled: false
     recenter_after_s: 10.0
     recenter_pitch_deg: 0.0
     recenter_yaw_deg: 0.0

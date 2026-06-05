@@ -58,12 +58,13 @@ python -m app.main --connect-telemetry --send-commands true
 
 - `target_valid=false`。
 - mode 不应输出有效跟踪命令。
-- 丢目标一段时间后可按配置触发云台回中。
+- 默认不触发云台回中；如需搜索策略，必须显式配置打开。
 
 需要确认：
 
 - 丢目标不会继续前进。
 - 丢目标不会保留旧速度。
+- 丢目标不会自动把云台转到预设角度，除非已显式启用恢复动作。
 
 ## telemetry 丢失
 

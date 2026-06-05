@@ -422,12 +422,16 @@ class LinkManager:
         y: float,
         z: float,
         frame: int,
+        yaw: float | None = None,
         priority: int = 4,
     ) -> None:
+        params = {"x": float(x), "y": float(y), "z": float(z), "frame": int(frame)}
+        if yaw is not None:
+            params["yaw"] = float(yaw)
         self.submit_action_command(
             ActionCommand(
                 action_type=ActionType.LOCAL_POSITION,
-                params={"x": float(x), "y": float(y), "z": float(z), "frame": int(frame)},
+                params=params,
                 priority=priority,
                 retries_left=self.cfg.action_cmd_retries,
                 retry_interval_sec=self.cfg.action_retry_interval_sec,

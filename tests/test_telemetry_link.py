@@ -519,6 +519,25 @@ def test_command_sender_explicit_yaw_rate_keeps_yaw_rate_enabled() -> None:
     assert call[-1] == pytest.approx(0.5)
 
 
+def test_command_sender_local_position_can_hold_yaw() -> None:
+    sender, client = _sender_with_fake_client()
+
+    sender._send_local_position(
+        client.master,
+        ActionCommand(
+            action_type=ActionType.LOCAL_POSITION,
+            params={"x": 1.0, "y": 2.0, "z": -3.0, "frame": 1, "yaw": 0.75},
+        ),
+    )
+
+    call = client.master.mav.local_position_calls[-1]
+    type_mask = call[4]
+    assert not type_mask & mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE
+    assert type_mask & mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
+    assert call[5:8] == (1.0, 2.0, -3.0)
+    assert call[14] == pytest.approx(0.75)
+
+
 def test_command_sender_release_payload_does_not_emit_mavlink_without_mapping() -> None:
     sender, client = _sender_with_fake_client()
 

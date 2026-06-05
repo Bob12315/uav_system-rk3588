@@ -37,6 +37,8 @@ def detection_to_mission_xy(
     drone_mission_y: float,
     altitude_m: float,
     config: CameraGeometryConfig,
+    drone_yaw_rad: float = 0.0,
+    mission_yaw_rad: float = 0.0,
 ) -> tuple[float, float]:
     offset_forward, offset_right = image_offset_to_ground(
         nx=float(detection.ex),
@@ -44,7 +46,12 @@ def detection_to_mission_xy(
         altitude_m=altitude_m,
         config=config,
     )
+    yaw_delta = float(drone_yaw_rad) - float(mission_yaw_rad)
+    cos_yaw = math.cos(yaw_delta)
+    sin_yaw = math.sin(yaw_delta)
+    mission_forward = cos_yaw * offset_forward - sin_yaw * offset_right
+    mission_right = sin_yaw * offset_forward + cos_yaw * offset_right
     return (
-        float(drone_mission_x) + offset_forward,
-        float(drone_mission_y) + offset_right,
+        float(drone_mission_x) + mission_forward,
+        float(drone_mission_y) + mission_right,
     )

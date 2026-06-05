@@ -244,6 +244,7 @@ class SystemRunner:
                         "link": asdict(link) if link is not None else {},
                         "health": {"hold_reason": health.hold_reason},
                         "command": asdict(shaped),
+                        "mission_detail": dict(mission.detail),
                     }
 
                 if (now - last_print_time) >= print_sleep_sec:

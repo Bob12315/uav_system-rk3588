@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>UAV Web Control</title>
-  <link rel="stylesheet" href="/static/style.css?v=manual-yaw-direction">
+  <link rel="stylesheet" href="/static/style.css?v=field-map-large">
 </head>
 <body>
   <header>
@@ -29,6 +29,14 @@
           <canvas id="hitCanvas"></canvas>
           <div id="videoOffline" class="overlay-note">等待 YOLO Web 视频流</div>
         </div>
+      </article>
+      <article class="panel field-map-panel">
+        <div class="panel-title">场地态势图</div>
+        <div class="field-map-wrap">
+          <canvas id="fieldMap"></canvas>
+          <div id="fieldMapEmpty" class="field-map-empty">等待 mission 坐标</div>
+        </div>
+        <div id="fieldMapLegend" class="field-map-legend"></div>
       </article>
       <article class="panel target-panel">
         <div class="panel-title">目标列表</div>
@@ -182,6 +190,6 @@
       </article>
     </section>
   </main>
-  <script src="/static/app.js?v=manual-yaw-direction"></script>
+  <script src="/static/app.js?v=field-map-large"></script>
 </body>
 </html>

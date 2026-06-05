@@ -239,12 +239,14 @@ class CommandSender(threading.Thread):
                 )
                 self.client.send_raw_message(lambda master: self._send_global_goto(master, command))
             elif command.action_type == ActionType.LOCAL_POSITION:
+                yaw = command.params.get("yaw")
                 self.logger.info(
-                    "sending action command=local_position x=%.2f y=%.2f z=%.2f frame=%s",
+                    "sending action command=local_position x=%.2f y=%.2f z=%.2f frame=%s yaw=%s",
                     float(command.params["x"]),
                     float(command.params["y"]),
                     float(command.params["z"]),
                     int(command.params["frame"]),
+                    "ignore" if yaw is None else f"{float(yaw):.3f}",
                 )
                 self.client.send_raw_message(lambda master: self._send_local_position(master, command))
             elif command.action_type == ActionType.REPOSITION:
@@ -423,6 +425,9 @@ class CommandSender(threading.Thread):
             | mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
         )
 
+    def _position_with_yaw_type_mask(self) -> int:
+        return self._position_only_type_mask() & ~mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE
+
     def _send_global_goto(self, master, command: ActionCommand) -> None:
         master.mav.set_position_target_global_int_send(
             0,
@@ -444,12 +449,13 @@ class CommandSender(threading.Thread):
         )
 
     def _send_local_position(self, master, command: ActionCommand) -> None:
+        yaw = command.params.get("yaw")
         master.mav.set_position_target_local_ned_send(
             0,
             master.target_system,
             master.target_component,
             int(command.params["frame"]),
-            self._position_only_type_mask(),
+            self._position_only_type_mask() if yaw is None else self._position_with_yaw_type_mask(),
             float(command.params["x"]),
             float(command.params["y"]),
             float(command.params["z"]),
@@ -459,7 +465,7 @@ class CommandSender(threading.Thread):
             0.0,
             0.0,
             0.0,
-            0.0,
+            0.0 if yaw is None else float(yaw),
             0.0,
         )
 

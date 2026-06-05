@@ -50,6 +50,19 @@ class FakeLink:
             raise RuntimeError("gimbal angle failed")
         self.calls.append(("gimbal_angle", (pitch, yaw, roll), priority))
 
+    def local_position(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        frame: int,
+        yaw: float | None = None,
+        priority: int = 4,
+    ) -> None:
+        if self.fail:
+            raise RuntimeError("local position failed")
+        self.calls.append(("local_position", (x, y, z, frame, yaw), priority))
+
 
 @dataclass(slots=True)
 class FakeYoloClient:
@@ -145,6 +158,27 @@ def test_gimbal_angle_action_dispatches_through_link_manager() -> None:
     runner.update(_context())
 
     assert link.calls == [("gimbal_angle", (-90.0, 0.0, 0.0), 2)]
+
+
+def test_local_position_action_dispatches_optional_yaw() -> None:
+    link = FakeLink()
+    runner = MissionRunner(
+        FakeMission(
+            [
+                MissionAction(
+                    "local_position",
+                    params={"x": 1.0, "y": 2.0, "z": -3.0, "frame": 1, "yaw": 0.75},
+                    priority=4,
+                )
+            ]
+        ),
+        link_manager=link,
+        send_actions=True,
+    )
+
+    runner.update(_context())
+
+    assert link.calls == [("local_position", (1.0, 2.0, -3.0, 1, 0.75), 4)]
 
 
 def test_send_actions_false_does_not_dispatch_or_mark_once() -> None:

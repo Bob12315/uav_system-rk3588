@@ -305,7 +305,7 @@ def load_app_config(args: argparse.Namespace) -> AppConfig:
         lost_target_recenter_enabled=_cfg_bool(
             recovery_data,
             "lost_target_recenter_enabled",
-            True,
+            False,
             "recovery.lost_target",
         ),
         lost_target_recenter_timeout_sec=float(
@@ -853,7 +853,7 @@ def _normalize_recovery_config(
         return {
             "lost_target_recenter_enabled": lost_target.get(
                 "recenter_gimbal_enabled",
-                True,
+                False,
             ),
             "lost_target_recenter_timeout_sec": lost_target.get("recenter_after_s", 10.0),
             "lost_target_recenter_pitch_deg": lost_target.get("recenter_pitch_deg", 0.0),
@@ -863,7 +863,7 @@ def _normalize_recovery_config(
     return {
         "lost_target_recenter_enabled": runtime_fallback.get(
             "lost_target_recenter_enabled",
-            True,
+            False,
         ),
         "lost_target_recenter_timeout_sec": runtime_fallback.get(
             "lost_target_recenter_timeout_sec",

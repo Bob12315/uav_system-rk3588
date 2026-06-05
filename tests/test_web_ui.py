@@ -121,3 +121,22 @@ def test_web_ui_distinguishes_selected_and_current_mission_steps() -> None:
     assert "current-mode" in script
     assert ".mission-steps button.selected-mode" in styles
     assert ".mission-steps button.current-mode" in styles
+
+
+def test_web_ui_exposes_read_only_field_map() -> None:
+    static_dir = Path(__file__).parents[1] / "web_ui" / "static"
+    index = (static_dir / "index.html").read_text(encoding="utf-8")
+    script = (static_dir / "app.js").read_text(encoding="utf-8")
+    styles = (static_dir / "style.css").read_text(encoding="utf-8")
+
+    assert 'id="fieldMap"' in index
+    assert 'id="fieldMapLegend"' in index
+    assert "function renderFieldMap(next)" in script
+    assert "mission_detail" in script
+    assert "mission_position" in script
+    assert "drawCoordinateTicks" in script
+    assert "drawTargetCoordinateList" in script
+    assert "筒坐标" in script
+    assert "Number(item.seen_count || 0) > 0" in script
+    assert "ctx.rotate" not in script
+    assert ".field-map-wrap" in styles

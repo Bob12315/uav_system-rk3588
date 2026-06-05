@@ -47,6 +47,7 @@ def test_loads_mission_local_config_layout() -> None:
     assert config.health.max_vision_age_s == pytest.approx(0.3)
     assert config.health.max_drone_age_s == pytest.approx(0.3)
     assert config.health.max_gimbal_age_s == pytest.approx(0.3)
+    assert config.runtime.lost_target_recenter_enabled is False
 
 
 def test_loads_independent_web_and_terminal_ui_settings() -> None:

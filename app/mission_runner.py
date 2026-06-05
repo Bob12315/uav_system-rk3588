@@ -102,6 +102,7 @@ class MissionRunner:
                     float(params["y"]),
                     float(params["z"]),
                     int(params.get("frame", 1)),
+                    yaw=None if params.get("yaw") is None else float(params["yaw"]),
                     priority=priority,
                 )
             elif action_type == "global_goto":

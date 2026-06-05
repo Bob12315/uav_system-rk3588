@@ -77,7 +77,7 @@ transitions:
 
 recovery:
   lost_target:
-    recenter_gimbal_enabled: true
+    recenter_gimbal_enabled: false
     recenter_after_s: 10.0
     recenter_pitch_deg: 0.0
     recenter_yaw_deg: 0.0
@@ -87,7 +87,7 @@ recovery:
 - `auto_switch_enabled`：是否允许自动切换模式。
 - `freshness`：各数据源最大允许年龄。
 - `transitions`：模式间切换阈值。
-- `recovery.lost_target`：丢目标后的正常恢复动作。
+- `recovery.lost_target`：丢目标后的可选恢复动作，默认不自动控制云台回中。
 
 ## missions/rescue_competition/config.yaml
 

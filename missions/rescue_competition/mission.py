@@ -117,6 +117,7 @@ class RecceConfig:
     survey_altitude_m: float = 5.0
     transit_altitude_m: float = 3.0
     identify_altitude_m: float = 2.0
+    visual_descend_altitude_m: float = 1.0
     survey_hold_s: float = 1.2
     capture_hold_s: float = 1.5
     visit_max_count: int = 5
@@ -292,7 +293,7 @@ class RescueCompetitionMission:
         elif self._stage == RescueStage.FAILSAFE:
             hold_reason = "failsafe"
 
-        detail = self._detail()
+        detail = self._detail(context.drone)
         if target_error_offset is not None:
             detail["target_error_offset"] = target_error_offset
         return MissionOutput(
@@ -415,7 +416,7 @@ class RescueCompetitionMission:
         if target is None:
             self._transition_to(RescueStage.NEXT_RECCE_OR_REPORT if recce else RescueStage.NEXT_DROP_OR_RECCE)
             return "no_target"
-        detection = self._select_lock_detection(context, target)
+        detection = self._select_center_lock_detection(context) if recce else self._select_lock_detection(context, target)
         if detection is None or detection.track_id is None:
             return "waiting_lock_candidate"
         actions.append(
@@ -560,7 +561,7 @@ class RescueCompetitionMission:
             actions,
             target.x,
             target.y,
-            self.config.recce.transit_altitude_m,
+            self.config.recce.identify_altitude_m,
             f"recce_target_{target.target_id}",
         ):
             self._transition_to(RescueStage.LOCK_RECCE_TARGET)
@@ -568,9 +569,13 @@ class RescueCompetitionMission:
         return "goto_recce_target"
 
     def _align_descend_recce(self, context: MissionContext) -> str:
-        if self._height_m(context.drone) <= max(self.config.recce.identify_altitude_m, self.config.align.min_altitude_m):
+        target_altitude_m = max(
+            self.config.recce.visual_descend_altitude_m,
+            self.config.align.min_altitude_m,
+        )
+        if self._height_m(context.drone) <= target_altitude_m:
             self._transition_to(RescueStage.CAPTURE_RECCE)
-            return "recce_identify_altitude_reached"
+            return "recce_visual_descend_altitude_reached"
         return "align_descend_recce"
 
     def _capture_recce(self, context: MissionContext) -> str:
@@ -664,7 +669,13 @@ class RescueCompetitionMission:
         actions.append(
             MissionAction(
                 "local_position",
-                {"x": lx, "y": ly, "z": lz, "frame": self.config.local_position_frame},
+                {
+                    "x": lx,
+                    "y": ly,
+                    "z": lz,
+                    "frame": self.config.local_position_frame,
+                    "yaw": self._origin.yaw_rad,
+                },
                 key=f"goto_{key}",
                 once=False,
             )
@@ -714,6 +725,8 @@ class RescueCompetitionMission:
                 drone_mission_y=position[1],
                 altitude_m=altitude_m,
                 config=self.config.vision.geometry,
+                drone_yaw_rad=float(context.drone.yaw),
+                mission_yaw_rad=float(self._origin.yaw_rad) if self._origin is not None else 0.0,
             )
             estimates.append(
                 EstimatedObject(
@@ -752,11 +765,27 @@ class RescueCompetitionMission:
                 drone_mission_y=position[1],
                 altitude_m=altitude_m,
                 config=self.config.vision.geometry,
+                drone_yaw_rad=float(context.drone.yaw),
+                mission_yaw_rad=float(self._origin.yaw_rad) if self._origin is not None else 0.0,
             )
             candidates.append((math.hypot(x - target.x, y - target.y), detection))
         if not candidates:
             return None
         return min(candidates, key=lambda item: item[0])[1]
+
+    def _select_center_lock_detection(self, context: MissionContext) -> SceneObject | None:
+        scene = context.scene
+        if scene is None or not scene.valid:
+            return None
+        candidates = [
+            detection
+            for detection in scene.detections
+            if self._is_cylinder(detection)
+            and math.hypot(float(detection.ex), float(detection.ey)) <= self.config.vision.lock_center_max_error
+        ]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda item: math.hypot(float(item.ex), float(item.ey)))
 
     def _collect_hazard_votes(self, context: MissionContext) -> None:
         scene = context.scene
@@ -846,21 +875,47 @@ class RescueCompetitionMission:
         self._stage_started_at = None
         self._goal_reached_since = None
 
-    def _detail(self) -> dict[str, object]:
-        return {
+    def _detail(self, drone: DroneState | None = None) -> dict[str, object]:
+        detail: dict[str, object] = {
             "drop_scan_index": self._drop_scan_index,
             "drop_estimate_count": len(self._drop_estimates),
             "drop_targets": [item.to_detail() for item in self._drop_targets],
             "drop_target_index": self._drop_target_index,
             "drop_count": self._drop_count,
+            "drop_required_count": self.config.drop.required_payload_drops,
             "recce_scan_index": self._recce_scan_index,
             "recce_estimate_count": len(self._recce_estimates),
             "recce_targets": [item.to_detail() for item in self._recce_targets],
             "recce_target_index": self._recce_target_index,
             "recce_results": [item.to_dict() for item in self._recce_results],
+            "recce_required_confirmed_count": self.config.recce.required_confirmed_count,
             "recce_report_path": self._recce_report_path,
             "payload_slots": [item.to_detail() for item in self.config.payload_slots],
+            "route": {
+                "home": {"x": self.config.route.home_x, "y": self.config.route.home_y},
+                "drop_area_center": {"x": self.config.route.drop_area_x, "y": self.config.route.drop_area_y},
+                "recce_area_center": {"x": self.config.route.recce_area_x, "y": self.config.route.recce_area_y},
+            },
+            "drop_survey_points": [
+                {"name": item.name, "x": item.x, "y": item.y}
+                for item in self.config.drop.survey_points
+            ],
+            "recce_survey_points": [
+                {"name": item.name, "x": item.x, "y": item.y}
+                for item in self.config.recce.survey_points
+            ],
         }
+        if self._origin is not None:
+            detail["origin"] = {
+                "local_x": self._origin.origin_x,
+                "local_y": self._origin.origin_y,
+                "local_z": self._origin.origin_z,
+                "yaw_rad": self._origin.yaw_rad,
+            }
+            if drone is not None and drone.local_position_valid:
+                x, y, z = to_mission_position(drone, self._origin)
+                detail["mission_position"] = {"x": x, "y": y, "z": z}
+        return detail
 
 
 def build_rescue_config(settings: dict[str, Any] | None = None) -> RescueCompetitionMissionConfig:
@@ -941,6 +996,7 @@ def _recce_config(data: dict[str, Any]) -> RecceConfig:
         survey_altitude_m=float(data.get("survey_altitude_m", 5.0)),
         transit_altitude_m=float(data.get("transit_altitude_m", 3.0)),
         identify_altitude_m=float(data.get("identify_altitude_m", 2.0)),
+        visual_descend_altitude_m=float(data.get("visual_descend_altitude_m", 1.0)),
         survey_hold_s=float(data.get("survey_hold_s", 1.2)),
         capture_hold_s=float(data.get("capture_hold_s", 1.5)),
         visit_max_count=int(data.get("visit_max_count", 5)),

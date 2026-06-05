@@ -57,7 +57,7 @@ button.active-choice {
 .panel-title { color: var(--accent); text-transform: uppercase; font-weight: 700; margin-bottom: 10px; }
 .panel-title span { float: right; text-transform: none; font-weight: 400; }
 .panel-title.minor { margin: 14px 0 8px; font-size: 12px; color: var(--accent); }
-.top-grid { display: grid; grid-template-columns: minmax(500px, 2.6fr) minmax(270px, 1fr); gap: 12px; }
+.top-grid { display: grid; grid-template-columns: minmax(420px, 1.45fr) minmax(360px, 1.2fr) minmax(300px, 1fr); gap: 12px; align-items: start; }
 .video-wrap { position: relative; aspect-ratio: 4 / 3; background: #03060a; display: flex; justify-content: center; }
 #video { max-height: 100%; max-width: 100%; width: 100%; object-fit: contain; }
 #hitCanvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
@@ -106,6 +106,39 @@ button.active-choice {
 .current-target { padding: 9px; margin-bottom: 10px; background: var(--panel2); }
 .button-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
 .mini-state { display: flex; gap: 24px; margin-top: 15px; color: var(--muted); }
+.field-map-wrap {
+  position: relative;
+  height: 720px;
+  min-height: 620px;
+  background: #08111a;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  overflow: hidden;
+}
+#fieldMap {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.field-map-empty {
+  position: absolute;
+  left: 14px;
+  bottom: 12px;
+  color: var(--muted);
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  pointer-events: none;
+}
+.field-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  min-height: 22px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-family: Consolas, monospace;
+  font-size: 12px;
+}
 .controls-grid { display: grid; grid-template-columns: 1.25fr 1fr; gap: 12px; margin-top: 12px; }
 .takeoff-row, .mission-row, .source-actions { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
 .takeoff-row input { width: 85px; }

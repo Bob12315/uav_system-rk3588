@@ -1,5 +1,8 @@
 # SITL + Gazebo + RK3588（UDP）
 
+cd uav_project/uav_system-rk3588/
+./scripts/run_iris_gimbal_sitl.sh
+
 PC 跑仿真；RK3588 收 MAVLink（UDP 14550）和视频（UDP 5600）。以下 IP 按现场修改。
 
 | 角色 | 示例 IP |

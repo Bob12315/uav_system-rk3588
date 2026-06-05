@@ -7,6 +7,24 @@ let currentConfigPath = "";
 let currentOriginal = "";
 let missionCatalog = [];
 const fallbackStageModes = ["AUTO", "IDLE", "APPROACH_TRACK", "OVERHEAD_HOLD", "CORRIDOR_FOLLOW"];
+const FIELD_DEFAULTS = {
+  bounds: {xMin: -8, xMax: 62, yMin: -6, yMax: 6},
+  takeoff: {x: 0, y: 0, xLen: 8, yLen: 8, label: "起降区"},
+  drop: {x: 30, y: 0, xLen: 5, yLen: 8, label: "投放区"},
+  recce: {x: 55, y: 0, xLen: 5, yLen: 8, label: "侦察区"},
+  dropSurvey: [
+    {name: "D1", x: 28, y: -1.2},
+    {name: "D2", x: 28, y: 1.2},
+    {name: "D3", x: 32, y: -1.2},
+    {name: "D4", x: 32, y: 1.2},
+  ],
+  recceSurvey: [
+    {name: "R1", x: 53, y: -1.2},
+    {name: "R2", x: 53, y: 1.2},
+    {name: "R3", x: 57, y: -1.2},
+    {name: "R4", x: 57, y: 1.2},
+  ],
+};
 
 async function json(url, options = {}) {
   const response = await fetch(url, {headers: {"Content-Type": "application/json"}, ...options});
@@ -138,6 +156,265 @@ function renderMissionSteps(next) {
   $("missionSteps").querySelectorAll("[data-stage-mode]").forEach(button => button.onclick = () =>
     execute(button.dataset.command, "STAGE"));
 }
+function pointList(items, fallback, prefix) {
+  return Array.isArray(items) && items.length
+    ? items.map((item, index) => ({
+        name: item.name || `${prefix}${index + 1}`,
+        x: Number(item.x),
+        y: Number(item.y),
+      }))
+    : fallback;
+}
+function fieldMapModel(next) {
+  const detail = next.mission_detail || {};
+  const route = detail.route || {};
+  const dropCenter = route.drop_area_center || {};
+  const recceCenter = route.recce_area_center || {};
+  const home = route.home || {};
+  const missionPosition = detail.mission_position || null;
+  const drone = next.drone || {};
+  const dronePosition = missionPosition || (
+    drone.local_position_valid
+      ? {x: Number(drone.local_x), y: Number(drone.local_y), z: Number(drone.local_z), fallback: true}
+      : null
+  );
+  const dropTargets = Array.isArray(detail.drop_targets) ? detail.drop_targets : [];
+  const recceTargets = Array.isArray(detail.recce_targets) ? detail.recce_targets : [];
+  const recceResults = Array.isArray(detail.recce_results) ? detail.recce_results : [];
+  const recceStatus = new Map(recceResults.map(item => [Number(item.target_id), item.status || "blank"]));
+  return {
+    bounds: FIELD_DEFAULTS.bounds,
+    areas: {
+      takeoff: {...FIELD_DEFAULTS.takeoff, x: Number(home.x ?? FIELD_DEFAULTS.takeoff.x), y: Number(home.y ?? FIELD_DEFAULTS.takeoff.y)},
+      drop: {...FIELD_DEFAULTS.drop, x: Number(dropCenter.x ?? FIELD_DEFAULTS.drop.x), y: Number(dropCenter.y ?? FIELD_DEFAULTS.drop.y)},
+      recce: {...FIELD_DEFAULTS.recce, x: Number(recceCenter.x ?? FIELD_DEFAULTS.recce.x), y: Number(recceCenter.y ?? FIELD_DEFAULTS.recce.y)},
+    },
+    dropSurvey: pointList(detail.drop_survey_points, FIELD_DEFAULTS.dropSurvey, "D"),
+    recceSurvey: pointList(detail.recce_survey_points, FIELD_DEFAULTS.recceSurvey, "R"),
+    dropTargets: dropTargets.filter(item => Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y)) && Number(item.seen_count || 0) > 0),
+    recceTargets: recceTargets.filter(item => Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y)) && Number(item.seen_count || 0) > 0),
+    recceStatus,
+    drone: dronePosition,
+    stage: next.stage || "--",
+    dropCount: Number(detail.drop_count || 0),
+    requiredDrops: Math.max(1, Number(detail.drop_required_count || 0) || (detail.payload_slots || []).length || 2),
+    dropScanIndex: Number(detail.drop_scan_index || 0),
+    recceScanIndex: Number(detail.recce_scan_index || 0),
+    dropTargetIndex: Number(detail.drop_target_index || 0),
+    recceTargetIndex: Number(detail.recce_target_index || 0),
+    confirmedCount: recceResults.filter(item => item.status === "confirmed").length,
+    requiredConfirmed: Math.max(1, Number(detail.recce_required_confirmed_count || 3)),
+    hasMissionPosition: Boolean(missionPosition),
+  };
+}
+function resizeFieldCanvas(canvas) {
+  const rect = canvas.getBoundingClientRect();
+  const ratio = window.devicePixelRatio || 1;
+  const width = Math.max(1, Math.round(rect.width * ratio));
+  const height = Math.max(1, Math.round(rect.height * ratio));
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  return {ctx, rect};
+}
+function worldToCanvas(x, y, bounds, rect) {
+  const pad = 42;
+  const usableW = Math.max(1, rect.width - pad * 2);
+  const usableH = Math.max(1, rect.height - pad * 2);
+  const scale = Math.min(
+    usableW / (bounds.yMax - bounds.yMin),
+    usableH / (bounds.xMax - bounds.xMin),
+  );
+  const plotW = (bounds.yMax - bounds.yMin) * scale;
+  const plotH = (bounds.xMax - bounds.xMin) * scale;
+  const left = (rect.width - plotW) / 2;
+  const top = (rect.height - plotH) / 2;
+  return [
+    left + (Number(y) - bounds.yMin) * scale,
+    top + (bounds.xMax - Number(x)) * scale,
+  ];
+}
+function drawFieldLabel(ctx, text, x, y, options = {}) {
+  ctx.fillStyle = options.color || "#d7e6f5";
+  ctx.font = options.font || "12px Consolas, monospace";
+  ctx.textAlign = options.align || "center";
+  ctx.textBaseline = options.baseline || "middle";
+  ctx.fillText(text, x, y);
+}
+function drawArea(ctx, model, area, fill, stroke) {
+  const [x1, y1] = worldToCanvas(area.x - area.xLen / 2, area.y - area.yLen / 2, model.bounds, model.rect);
+  const [x2, y2] = worldToCanvas(area.x + area.xLen / 2, area.y + area.yLen / 2, model.bounds, model.rect);
+  const left = Math.min(x1, x2);
+  const top = Math.min(y1, y2);
+  const width = Math.abs(x2 - x1);
+  const height = Math.abs(y2 - y1);
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 1;
+  ctx.fillRect(left, top, width, height);
+  ctx.strokeRect(left, top, width, height);
+  drawFieldLabel(ctx, area.label, left + width / 2, top + height / 2, {color: stroke});
+}
+function drawCoordinateTicks(ctx, model) {
+  const bounds = model.bounds;
+  ctx.strokeStyle = "rgba(147,168,191,.50)";
+  ctx.fillStyle = "#93a8bf";
+  ctx.lineWidth = 1;
+  ctx.font = "11px Consolas, monospace";
+  ctx.textBaseline = "middle";
+  for (let x = 0; x <= bounds.xMax; x += 10) {
+    const [leftX, leftY] = worldToCanvas(x, bounds.yMin, bounds, model.rect);
+    const [rightX, rightY] = worldToCanvas(x, bounds.yMax, bounds, model.rect);
+    ctx.beginPath();
+    ctx.moveTo(leftX - 5, leftY);
+    ctx.lineTo(leftX, leftY);
+    ctx.moveTo(rightX, rightY);
+    ctx.lineTo(rightX + 5, rightY);
+    ctx.stroke();
+    ctx.textAlign = "right";
+    ctx.fillText(`x=${x}`, leftX - 8, leftY);
+  }
+  ctx.textBaseline = "top";
+  for (let y = bounds.yMin; y <= bounds.yMax; y += 2) {
+    const [tickX, tickY] = worldToCanvas(bounds.xMin, y, bounds, model.rect);
+    ctx.beginPath();
+    ctx.moveTo(tickX, tickY);
+    ctx.lineTo(tickX, tickY + 5);
+    ctx.stroke();
+    ctx.textAlign = "center";
+    ctx.fillText(`${y}`, tickX, tickY + 8);
+  }
+  drawFieldLabel(ctx, "x/m", 24, model.rect.height / 2, {color: "#93a8bf", align: "left"});
+  drawFieldLabel(ctx, "y/m", model.rect.width / 2, model.rect.height - 16, {color: "#93a8bf"});
+}
+function drawField(ctx, model) {
+  ctx.clearRect(0, 0, model.rect.width, model.rect.height);
+  drawArea(ctx, model, model.areas.takeoff, "rgba(147,168,191,.10)", "rgba(147,168,191,.75)");
+  drawArea(ctx, model, model.areas.drop, "rgba(57,200,191,.12)", "rgba(57,200,191,.82)");
+  drawArea(ctx, model, model.areas.recce, "rgba(237,169,61,.14)", "rgba(237,169,61,.85)");
+  const [x0a, y0a] = worldToCanvas(model.bounds.xMin, 0, model.bounds, model.rect);
+  const [x0b, y0b] = worldToCanvas(model.bounds.xMax, 0, model.bounds, model.rect);
+  ctx.strokeStyle = "rgba(147,168,191,.45)";
+  ctx.setLineDash([5, 5]);
+  ctx.beginPath();
+  ctx.moveTo(x0a, y0a);
+  ctx.lineTo(x0b, y0b);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  drawCoordinateTicks(ctx, model);
+  drawFieldLabel(ctx, "+x 前方", model.rect.width - 56, 22, {color: "#93a8bf"});
+  drawFieldLabel(ctx, "+y 右方", model.rect.width - 56, 40, {color: "#93a8bf"});
+}
+function drawSurveyPoints(ctx, model) {
+  const drawPoint = (point, index, activeIndex, color) => {
+    const [x, y] = worldToCanvas(point.x, point.y, model.bounds, model.rect);
+    const done = index < activeIndex;
+    const active = index === activeIndex;
+    ctx.beginPath();
+    ctx.arc(x, y, active ? 5 : 4, 0, Math.PI * 2);
+    ctx.fillStyle = done ? color : "#08111a";
+    ctx.strokeStyle = active ? "#e6edf6" : color;
+    ctx.lineWidth = active ? 2 : 1;
+    ctx.fill();
+    ctx.stroke();
+    drawFieldLabel(ctx, point.name, x, y - 12, {color});
+  };
+  model.dropSurvey.forEach((point, index) => drawPoint(point, index, model.dropScanIndex, "#39c8bf"));
+  model.recceSurvey.forEach((point, index) => drawPoint(point, index, model.recceScanIndex, "#eda93d"));
+}
+function drawDrone(ctx, model) {
+  if (!model.drone || !Number.isFinite(Number(model.drone.x)) || !Number.isFinite(Number(model.drone.y))) return;
+  const [x, y] = worldToCanvas(model.drone.x, model.drone.y, model.bounds, model.rect);
+  ctx.fillStyle = "#e6edf6";
+  ctx.strokeStyle = "#08111a";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, y - 9);
+  ctx.lineTo(x - 6, y + 7);
+  ctx.lineTo(x, y + 4);
+  ctx.lineTo(x + 6, y + 7);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  drawFieldLabel(ctx, `UAV ${num(model.drone.x, 1)}, ${num(model.drone.y, 1)}`, x + 46, y - 14, {align: "left"});
+  drawFieldLabel(ctx, `z=${num(model.drone.z, 1)}`, x + 46, y + 2, {align: "left", color: "#93a8bf"});
+}
+function drawTargets(ctx, model) {
+  const drawTarget = (target, kind, index) => {
+    const isDrop = kind === "drop";
+    const current = isDrop ? index === model.dropTargetIndex : index === model.recceTargetIndex;
+    const visited = Boolean(target.visited);
+    const status = isDrop ? "" : model.recceStatus.get(Number(target.target_id)) || "pending";
+    const confirmed = status === "confirmed";
+    const color = confirmed ? "#2bc277" : isDrop ? "#39c8bf" : "#eda93d";
+    const [x, y] = worldToCanvas(target.x, target.y, model.bounds, model.rect);
+    ctx.beginPath();
+    ctx.arc(x, y, current ? 7 : 5, 0, Math.PI * 2);
+    ctx.fillStyle = visited && !confirmed ? "rgba(147,168,191,.75)" : color;
+    ctx.strokeStyle = current ? "#e6edf6" : "#08111a";
+    ctx.lineWidth = current ? 2 : 1;
+    ctx.fill();
+    ctx.stroke();
+    const label = `${isDrop ? "D" : "R"}-T${target.target_id}`;
+    drawFieldLabel(ctx, label, x + 9, y - 10, {align: "left", color});
+    drawFieldLabel(ctx, `seen=${target.seen_count ?? 0}`, x + 9, y + 5, {align: "left", color: "#93a8bf"});
+  };
+  model.dropTargets.forEach((target, index) => drawTarget(target, "drop", index));
+  model.recceTargets.forEach((target, index) => drawTarget(target, "recce", index));
+}
+function drawTargetCoordinateList(ctx, model) {
+  const targets = [
+    ...model.dropTargets.map(target => ({...target, prefix: "D"})),
+    ...model.recceTargets.map(target => ({...target, prefix: "R"})),
+  ];
+  if (!targets.length) return;
+  const maxRows = 8;
+  const rows = targets.slice(0, maxRows).map(target =>
+    `${target.prefix}-T${target.target_id}: x=${num(target.x, 2)} y=${num(target.y, 2)}`
+  );
+  if (targets.length > maxRows) rows.push(`... +${targets.length - maxRows}`);
+  const x = 16;
+  const rowH = 16;
+  const width = 188;
+  const height = 28 + rows.length * rowH;
+  const y = model.rect.height - height - 14;
+  ctx.fillStyle = "rgba(8,17,26,.84)";
+  ctx.strokeStyle = "rgba(147,168,191,.55)";
+  ctx.lineWidth = 1;
+  ctx.fillRect(x, y, width, height);
+  ctx.strokeRect(x, y, width, height);
+  drawFieldLabel(ctx, "筒坐标", x + 10, y + 14, {align: "left", color: "#e6edf6"});
+  rows.forEach((row, index) => {
+    drawFieldLabel(ctx, row, x + 10, y + 32 + index * rowH, {
+      align: "left",
+      color: "#93a8bf",
+      font: "11px Consolas, monospace",
+    });
+  });
+}
+function renderFieldMap(next) {
+  const canvas = $("fieldMap");
+  if (!canvas) return;
+  const {ctx, rect} = resizeFieldCanvas(canvas);
+  const model = fieldMapModel(next);
+  model.rect = rect;
+  drawField(ctx, model);
+  drawSurveyPoints(ctx, model);
+  drawTargets(ctx, model);
+  drawDrone(ctx, model);
+  drawTargetCoordinateList(ctx, model);
+  $("fieldMapEmpty").style.display = model.hasMissionPosition ? "none" : "block";
+  $("fieldMapLegend").innerHTML = [
+    `Stage: ${escapeHtml(model.stage)}`,
+    `Drop: ${model.dropCount}/${model.requiredDrops}`,
+    `Drop targets: ${model.dropTargets.length}`,
+    `Recce confirmed: ${model.confirmedCount}/${model.requiredConfirmed}`,
+    model.hasMissionPosition ? "Coord: mission" : "Coord: local fallback",
+  ].map(item => `<span>${item}</span>`).join("");
+}
 function renderStatus(next) {
   state = next;
   const link = next.link || {};
@@ -211,6 +488,7 @@ function renderStatus(next) {
   });
   $("events").innerHTML = (next.events || []).map(item =>
     `<div class="log-line">${stamp(item.timestamp)} ${escapeHtml(item.level)} &nbsp; ${escapeHtml(item.message)}</div>`).join("");
+  renderFieldMap(next);
 }
 function renderDetections(scene, target) {
   $("frameId").textContent = scene.frame_id ?? "--";
