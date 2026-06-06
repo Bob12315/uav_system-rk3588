@@ -6,6 +6,8 @@ let historyIndex = -1;
 let currentConfigPath = "";
 let currentOriginal = "";
 let missionCatalog = [];
+let actionSpecs = [];
+let selectedActionName = "";
 const fallbackStageModes = ["AUTO", "IDLE", "APPROACH_TRACK", "OVERHEAD_HOLD", "CORRIDOR_FOLLOW"];
 const FIELD_DEFAULTS = {
   bounds: {xMin: -8, xMax: 62, yMin: -6, yMax: 6},
@@ -489,6 +491,7 @@ function renderStatus(next) {
   $("events").innerHTML = (next.events || []).map(item =>
     `<div class="log-line">${stamp(item.timestamp)} ${escapeHtml(item.level)} &nbsp; ${escapeHtml(item.message)}</div>`).join("");
   renderFieldMap(next);
+  renderActionLabStatus(next.action_lab?.status || null);
 }
 function renderDetections(scene, target) {
   $("frameId").textContent = scene.frame_id ?? "--";
@@ -538,6 +541,91 @@ async function loadMissions() {
     `<option value="${item.name}" ${item.active ? "selected" : ""}>${item.name}</option>`).join("");
   renderMissionSteps(state || {});
 }
+async function loadActionLab() {
+  const result = await json("/api/actions/list");
+  actionSpecs = result.actions || [];
+  $("actionButtons").innerHTML = actionSpecs.map(spec =>
+    `<button data-action-name="${escapeHtml(spec.name)}">${escapeHtml(spec.label || spec.name)}</button>`
+  ).join("");
+  $("actionButtons").querySelectorAll("[data-action-name]").forEach(button => {
+    button.onclick = () => selectAction(button.dataset.actionName);
+  });
+  if (actionSpecs.length) selectAction(actionSpecs[0].name);
+}
+function selectAction(name) {
+  const spec = actionSpecs.find(item => item.name === name);
+  if (!spec) return;
+  selectedActionName = spec.name;
+  $("actionParams").value = JSON.stringify(spec.default_params || {}, null, 2);
+  $("completionHint").textContent = spec.description || spec.label || spec.name;
+  document.querySelectorAll("[data-action-name]").forEach(button =>
+    button.classList.toggle("active-choice", button.dataset.actionName === selectedActionName));
+}
+async function refreshActionStatus() {
+  const result = await json("/api/actions/status");
+  if (!result.ok) throw new Error(result.error || "action status failed");
+  renderActionLabStatus(result.action_lab?.status || null);
+  return result;
+}
+function renderActionLabStatus(status) {
+  if (!$("actionState")) return;
+  const last = status?.last_result || {};
+  const detail = last.detail || {};
+  $("actionState").textContent = status?.state || "--";
+  $("actionName").textContent = status?.action_name || "--";
+  $("actionRunning").textContent = String(Boolean(status?.running));
+  $("actionReason").textContent = last.reason || "--";
+  $("actionDone").textContent = String(Boolean(last.done));
+  $("actionFailed").textContent = String(Boolean(last.failed));
+  const highlights = {
+    command: detail.command,
+    estimated_objects: detail.estimated_objects,
+    channels: detail.channels,
+    release_sent: detail.release_sent,
+    hold_sent: detail.hold_sent,
+    release_time: detail.release_time,
+  };
+  $("actionHighlights").innerHTML = Object.entries(highlights)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => `<div><span>${escapeHtml(key)}</span><code>${escapeHtml(JSON.stringify(value))}</code></div>`)
+    .join("");
+  $("actionStatusJson").textContent = JSON.stringify(status || {}, null, 2);
+}
+function parseActionParams() {
+  try {
+    const value = $("actionParams").value.trim();
+    return value ? JSON.parse(value) : {};
+  } catch (error) {
+    $("completionHint").textContent = `Action params JSON 错误: ${error.message}`;
+    return null;
+  }
+}
+async function startActionLabAction() {
+  if (!selectedActionName) return;
+  const params = parseActionParams();
+  if (params === null) return;
+  const result = await json("/api/actions/start", {
+    method: "POST",
+    body: JSON.stringify({
+      name: selectedActionName,
+      params,
+      send_actions: $("actionSendToggle").checked,
+    }),
+  });
+  if (!result.ok) throw new Error(result.error || "action start failed");
+  $("completionHint").textContent = result.note || "action started";
+  renderActionLabStatus(result.status);
+}
+async function stopActionLabAction() {
+  const result = await json("/api/actions/stop", {method: "POST", body: "{}"});
+  if (!result.ok) throw new Error(result.error || "action stop failed");
+  renderActionLabStatus(result.status);
+}
+async function resetActionLabAction() {
+  const result = await json("/api/actions/reset", {method: "POST", body: "{}"});
+  if (!result.ok) throw new Error(result.error || "action reset failed");
+  renderActionLabStatus(result.status);
+}
 async function loadConfigFiles() {
   const files = await json("/api/config/files");
   $("configFiles").innerHTML = files.map(path => `<button data-path="${path}">${path}</button>`).join("");
@@ -545,19 +633,28 @@ async function loadConfigFiles() {
 }
 function startStatusUpdates() {
   let fallbackTimer = null;
+  let actionTimer = null;
   const pollStatus = () => json("/api/status").then(renderStatus).catch(error => {
     $("completionHint").textContent = `状态刷新失败: ${error.message}`;
   });
+  const startActionTimer = () => {
+    if (actionTimer !== null) return;
+    actionTimer = setInterval(() => refreshActionStatus().catch(error => {
+      $("completionHint").textContent = `Action Lab 刷新失败: ${error.message}`;
+    }), 1000);
+  };
   const startFallback = () => {
     if (fallbackTimer !== null) return;
     pollStatus();
     fallbackTimer = setInterval(pollStatus, 500);
+    startActionTimer();
   };
   try {
     const socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/status`);
     socket.onmessage = event => renderStatus(JSON.parse(event.data));
     socket.onerror = startFallback;
     socket.onclose = startFallback;
+    socket.onopen = startActionTimer;
   } catch {
     startFallback();
   }
@@ -656,8 +753,12 @@ async function init() {
   $("reconnectTelemetry").onclick = () => confirm("重连通信将关闭自动发送，确认？") && json("/api/services/telemetry/reconnect", {method: "POST"}).then(loadAudit);
   $("restartYolo").onclick = () => confirm("确认重启 YOLO 服务？") && json("/api/services/yolo/restart", {method: "POST"}).then(loadAudit);
   $("restartApp").onclick = () => confirm("重启 App 将关闭自动发送并暂时断开网页，确认？") && json("/api/services/app/restart", {method: "POST"}).then(loadAudit);
+  $("actionStart").onclick = () => startActionLabAction().catch(error => { $("completionHint").textContent = error.message; });
+  $("actionStop").onclick = () => stopActionLabAction().catch(error => { $("completionHint").textContent = error.message; });
+  $("actionReset").onclick = () => resetActionLabAction().catch(error => { $("completionHint").textContent = error.message; });
+  $("actionRefresh").onclick = () => refreshActionStatus().catch(error => { $("completionHint").textContent = error.message; });
   completions = (await json("/api/commands/completions")).commands;
-  await Promise.all([loadAudit(), loadMissions(), loadConfigFiles()]);
+  await Promise.all([loadAudit(), loadMissions(), loadConfigFiles(), loadActionLab()]);
   startStatusUpdates();
 }
 init().catch(error => { $("completionHint").textContent = error.message; });

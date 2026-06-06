@@ -94,6 +94,14 @@ class MissionRunner:
                     roll=float(params.get("roll", 0.0)),
                     priority=priority,
                 )
+            elif action_type == "condition_yaw":
+                self.link_manager.condition_yaw(
+                    yaw_deg=float(params["yaw_deg"]),
+                    yaw_speed_deg_s=float(params.get("yaw_speed_deg_s", 20.0)),
+                    direction=int(params.get("direction", 0)),
+                    relative=bool(params.get("relative", False)),
+                    priority=priority,
+                )
             elif action_type == "land":
                 self.link_manager.land(priority=priority)
             elif action_type == "local_position":

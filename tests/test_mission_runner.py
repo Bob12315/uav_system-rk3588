@@ -50,6 +50,24 @@ class FakeLink:
             raise RuntimeError("gimbal angle failed")
         self.calls.append(("gimbal_angle", (pitch, yaw, roll), priority))
 
+    def condition_yaw(
+        self,
+        yaw_deg: float,
+        yaw_speed_deg_s: float = 20.0,
+        direction: int = 0,
+        relative: bool = False,
+        priority: int = 4,
+    ) -> None:
+        if self.fail:
+            raise RuntimeError("condition yaw failed")
+        self.calls.append(
+            (
+                "condition_yaw",
+                (yaw_deg, yaw_speed_deg_s, direction, relative),
+                priority,
+            )
+        )
+
     def local_position(
         self,
         x: float,
@@ -179,6 +197,32 @@ def test_local_position_action_dispatches_optional_yaw() -> None:
     runner.update(_context())
 
     assert link.calls == [("local_position", (1.0, 2.0, -3.0, 1, 0.75), 4)]
+
+
+def test_condition_yaw_action_dispatches_through_link_manager() -> None:
+    link = FakeLink()
+    runner = MissionRunner(
+        FakeMission(
+            [
+                MissionAction(
+                    "condition_yaw",
+                    params={
+                        "yaw_deg": 45.0,
+                        "yaw_speed_deg_s": 30.0,
+                        "direction": 0,
+                        "relative": False,
+                    },
+                    priority=4,
+                )
+            ]
+        ),
+        link_manager=link,
+        send_actions=True,
+    )
+
+    runner.update(_context())
+
+    assert link.calls == [("condition_yaw", (45.0, 30.0, 0, False), 4)]
 
 
 def test_send_actions_false_does_not_dispatch_or_mark_once() -> None:

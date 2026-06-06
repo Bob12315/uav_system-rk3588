@@ -146,6 +146,41 @@
       <div id="completionHint" class="hint">Tab 补全 / ↑ ↓ 查看输入记录</div>
     </section>
 
+    <section class="panel action-lab">
+      <div class="panel-title">Action Lab <span id="actionDryRun">Dry-run only in current build</span></div>
+      <div class="action-lab-layout">
+        <div>
+          <div id="actionButtons" class="action-buttons"></div>
+          <label class="action-send">
+            <input id="actionSendToggle" type="checkbox">
+            Send actions to vehicle/simulator
+          </label>
+          <div class="hint">Dry-run only in current build</div>
+        </div>
+        <div>
+          <textarea id="actionParams" spellcheck="false"></textarea>
+          <div class="button-row">
+            <button id="actionStart">Start</button>
+            <button id="actionStop" class="stop">Stop</button>
+            <button id="actionReset">Reset</button>
+            <button id="actionRefresh">Refresh Status</button>
+          </div>
+        </div>
+        <div class="action-status-panel">
+          <dl class="action-status-summary">
+            <dt>State</dt><dd id="actionState">--</dd>
+            <dt>Action</dt><dd id="actionName">--</dd>
+            <dt>Running</dt><dd id="actionRunning">--</dd>
+            <dt>Reason</dt><dd id="actionReason">--</dd>
+            <dt>Done</dt><dd id="actionDone">--</dd>
+            <dt>Failed</dt><dd id="actionFailed">--</dd>
+          </dl>
+          <div id="actionHighlights" class="action-highlights"></div>
+        </div>
+      </div>
+      <pre id="actionStatusJson" class="action-json"></pre>
+    </section>
+
     <section class="bottom-grid">
       <article class="panel log-panel">
         <div class="panel-title">用户输入记录</div>

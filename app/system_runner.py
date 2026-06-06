@@ -20,6 +20,8 @@ from app.health_monitor import HealthMonitor
 from app.mission_runner import MissionRunner
 from app.stage_registry import StageRegistry, copy_dataclass_values
 from app.service_manager import ServiceManager
+from missions.common.actions.action_lab import action_lab_specs, create_action_lab_registry
+from missions.common.actions.runner import ActionRunner
 from missions.common.control import (
     CommandShaper,
     FlightCommand,
@@ -79,6 +81,10 @@ class SystemRunner:
         self.system_events: deque[dict[str, object]] = deque(maxlen=160)
         self.latest_snapshot: dict[str, object] = {}
         self.external_processes: dict[str, subprocess.Popen] = {}
+        self.action_runner = ActionRunner(create_action_lab_registry())
+        self.action_lab_specs = action_lab_specs()
+        self.action_lab_enabled = True
+        self.action_lab_send_actions = False
 
     def run(self) -> None:
         self.services.start()
@@ -378,11 +384,63 @@ class SystemRunner:
                     "control_commands": list(self.control_command_log)[:40],
                     "events": list(self.system_events)[:40],
                     "actions": self.mission_runner.get_action_log_lines()[:20],
+                    "action_lab": self._action_lab_snapshot(),
                 }
             )
         manager = self.services.link_manager
         snapshot["active_source"] = manager.get_active_source() if manager is not None else "none"
         return self._json_safe(snapshot)
+
+    def action_lab_context(self) -> dict[str, object]:
+        with self.control_command_log_lock:
+            snapshot = dict(self.latest_snapshot)
+        context: dict[str, object] = {
+            "timestamp": time.time(),
+            "drone": snapshot.get("drone", {}),
+            "scene": snapshot.get("scene", {}),
+            "perception": snapshot.get("perception", {}),
+        }
+        drone = context["drone"]
+        if isinstance(drone, dict):
+            if all(name in drone for name in ("local_x", "local_y", "local_z")):
+                context["local_position"] = {
+                    "x": drone.get("local_x"),
+                    "y": drone.get("local_y"),
+                    "z": drone.get("local_z"),
+                }
+            for source, target in (
+                ("target_valid", "target_valid"),
+                ("tracking_state", "tracking_state"),
+                ("track_id", "track_id"),
+                ("ex", "ex_cam"),
+                ("ey", "ey_cam"),
+            ):
+                perception = context.get("perception")
+                if isinstance(perception, dict) and source in perception:
+                    context[target] = perception[source]
+            if "target_locked" not in context:
+                perception = context.get("perception")
+                if isinstance(perception, dict):
+                    context["target_locked"] = str(perception.get("tracking_state", "")).lower() == "locked"
+            if "control_allowed" in drone:
+                context["control_allowed"] = drone.get("control_allowed")
+            if "relative_altitude" in drone:
+                context["relative_altitude"] = drone.get("relative_altitude")
+        return self._json_safe(context)
+
+    def action_lab_tick(self) -> dict[str, object]:
+        if not getattr(self, "action_runner", None):
+            return {}
+        self.action_runner.update(self.action_lab_context())
+        return self.action_runner.status()
+
+    def _action_lab_snapshot(self) -> dict[str, object]:
+        return {
+            "enabled": bool(self.action_lab_enabled),
+            "send_actions": bool(self.action_lab_send_actions),
+            "specs": list(self.action_lab_specs),
+            "status": self.action_runner.status(),
+        }
 
     def _web_stage_modes(self) -> list[str]:
         mission_name = self.mission_runner.mission.name

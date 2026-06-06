@@ -10,7 +10,7 @@ import yaml
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.app_config import ROOT_DIR, UiConfig
 from uav_ui.completion_catalog import COMMAND_COMPLETIONS
@@ -26,6 +26,12 @@ class CommandRequest(BaseModel):
 class ConfigWriteRequest(BaseModel):
     content: str
     action: str = "save"
+
+
+class ActionStartRequest(BaseModel):
+    name: str
+    params: dict = Field(default_factory=dict)
+    send_actions: bool | None = None
 
 
 class WebUiServer:
@@ -97,6 +103,72 @@ def create_app(runner, config: UiConfig) -> FastAPI:
     @app.get("/api/events")
     def events():
         return runner.web_status_snapshot().get("events", [])
+
+    @app.get("/api/actions/list")
+    def action_list():
+        try:
+            return {"ok": True, "actions": list(getattr(runner, "action_lab_specs", []))}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.get("/api/actions/status")
+    def action_status():
+        try:
+            status = runner.action_lab_tick()
+            return {
+                "ok": True,
+                "action_lab": {
+                    "enabled": bool(getattr(runner, "action_lab_enabled", False)),
+                    "send_actions": bool(getattr(runner, "action_lab_send_actions", False)),
+                    "status": status,
+                },
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/actions/start")
+    def action_start(request: ActionStartRequest):
+        try:
+            if request.send_actions is not None:
+                runner.action_lab_send_actions = bool(request.send_actions)
+            result = runner.action_runner.start(request.name, dict(request.params or {}))
+            return {
+                "ok": True,
+                "result": result.to_dict(),
+                "status": runner.action_runner.status(),
+                "send_actions_effective": False,
+                "note": "dry_run_only",
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/actions/stop")
+    def action_stop():
+        try:
+            result = runner.action_runner.stop()
+            return {
+                "ok": True,
+                "result": result.to_dict(),
+                "status": runner.action_runner.status(),
+                "send_actions_effective": False,
+                "note": "dry_run_only",
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/actions/reset")
+    def action_reset():
+        try:
+            result = runner.action_runner.reset()
+            return {
+                "ok": True,
+                "result": result.to_dict(),
+                "status": runner.action_runner.status(),
+                "send_actions_effective": False,
+                "note": "dry_run_only",
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     @app.get("/api/yolo/stream")
     def yolo_stream():
