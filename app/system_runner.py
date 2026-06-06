@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 import math
 import os
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from pymavlink import mavutil
 
 from app.app_config import AppConfig, ROOT_DIR, load_mission_stage_runtime_config, load_telemetry_config
 from app.blackbox_recorder import BlackboxRecorder
@@ -146,6 +148,11 @@ class SystemRunner:
         self.action_lab_send_actions = False
         self.action_lab_dispatched_keys: set[str] = set()
         self.action_lab_last_dispatch: dict[str, list[dict[str, object]]] = self._empty_action_lab_dispatch()
+        self.action_lab_last_servo_command: dict[str, object] | None = None
+        self._last_vehicle_armed: bool | None = None
+        self.arm_heading_yaw_rad: float | None = None
+        self.arm_heading_time: float | None = None
+        self.arm_heading_fallback = False
 
     def run(self) -> None:
         self.services.start()
@@ -519,6 +526,12 @@ class SystemRunner:
         }
         drone = context["drone"]
         if isinstance(drone, dict):
+            self._update_arm_heading(drone)
+            if self.arm_heading_yaw_rad is not None:
+                context["arm_heading_yaw_rad"] = self.arm_heading_yaw_rad
+                context["arm_heading_time"] = self.arm_heading_time
+                if self.arm_heading_fallback:
+                    context["arm_heading_fallback"] = True
             if all(name in drone for name in ("local_x", "local_y", "local_z")):
                 context["local_position"] = {
                     "x": drone.get("local_x"),
@@ -545,11 +558,48 @@ class SystemRunner:
                 context["relative_altitude"] = drone.get("relative_altitude")
         return self._json_safe(context)
 
+    def _update_arm_heading(self, drone: dict[str, object]) -> None:
+        vehicle_armed = bool(drone.get("armed", False))
+        yaw = self._float_or_none(drone.get("yaw"))
+        if (
+            vehicle_armed
+            and self._last_vehicle_armed is False
+            and yaw is not None
+        ):
+            self.arm_heading_yaw_rad = yaw
+            self.arm_heading_time = time.time()
+            self.arm_heading_fallback = False
+            self.logger.info("arm heading yaw recorded yaw_rad=%s", yaw)
+        elif (
+            vehicle_armed
+            and self.arm_heading_yaw_rad is None
+            and yaw is not None
+        ):
+            self.arm_heading_yaw_rad = yaw
+            self.arm_heading_time = time.time()
+            self.arm_heading_fallback = True
+            self.logger.info("arm heading yaw fallback recorded yaw_rad=%s", yaw)
+        self._last_vehicle_armed = vehicle_armed
+
+    @staticmethod
+    def _float_or_none(value: object) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
     def action_lab_tick(self) -> dict[str, object]:
         if not getattr(self, "action_runner", None):
             return {}
         result = self.action_runner.update(self.action_lab_context())
-        self.action_lab_last_dispatch = self._dispatch_action_lab_actions(result.actions)
+        self.action_lab_last_dispatch = self._dispatch_action_lab_result(result.to_dict())
+        self.logger.info(
+            "action_lab_tick called current_action=%s reason=%s actions=%s dispatch=%s",
+            self.action_runner.action_name,
+            result.reason,
+            result.actions,
+            self.action_lab_last_dispatch,
+        )
         return self.action_runner.status()
 
     def action_lab_status_payload(self) -> dict[str, object]:
@@ -567,6 +617,7 @@ class SystemRunner:
             self.action_lab_send_actions = bool(send_actions)
         self.action_lab_dispatched_keys.clear()
         self.action_lab_last_dispatch = self._empty_action_lab_dispatch()
+        self.action_lab_last_servo_command = None
         return self.action_runner.start(action_name, dict(params or {}))
 
     def action_lab_stop_action(self):
@@ -576,6 +627,7 @@ class SystemRunner:
     def action_lab_reset_action(self):
         self.action_lab_dispatched_keys.clear()
         self.action_lab_last_dispatch = self._empty_action_lab_dispatch()
+        self.action_lab_last_servo_command = None
         return self.action_runner.reset()
 
     def _action_lab_snapshot(self) -> dict[str, object]:
@@ -595,6 +647,7 @@ class SystemRunner:
             "dry_run_only": not bool(effective),
             "note": note,
             "dispatch": self._json_safe(self.action_lab_last_dispatch),
+            "last_servo_command": self._json_safe(self.action_lab_last_servo_command),
             "status": status,
         }
 
@@ -603,59 +656,322 @@ class SystemRunner:
             return False, "dry_run_only"
         if not bool(self.controller_switches.snapshot().send_commands):
             return False, "send_commands_disabled"
-        if self.action_runner.action_name != "payload_release":
-            return False, "only_payload_release_dispatch_enabled"
-        return True, ""
+        if self.action_runner.action_name == "payload_release":
+            return True, "payload_set_servo_dispatch_enabled"
+        if self.action_runner.action_name == "goto_waypoint":
+            return True, "goto_waypoint_local_position_dispatch_enabled"
+        if self.action_runner.action_name == "align_descend":
+            return True, "action_dispatch_enabled"
+        return False, "action_dispatch_not_enabled"
 
     @staticmethod
     def _empty_action_lab_dispatch() -> dict[str, list[dict[str, object]]]:
         return {"sent": [], "skipped": [], "errors": []}
 
+    def _dispatch_action_lab_result(self, result: dict[str, object]) -> dict[str, list[dict[str, object]]]:
+        actions = list(result.get("actions") or [])
+        detail = result.get("detail")
+        if isinstance(detail, dict):
+            command = detail.get("command")
+            if isinstance(command, dict) and command.get("type") == "flight_command":
+                self.logger.info(
+                    "align_descend command generated flight_command vx=%.3f vy=%.3f vz=%.3f active=%s valid=%s",
+                    float(command.get("vx_cmd", 0.0)),
+                    float(command.get("vy_cmd", 0.0)),
+                    float(command.get("vz_cmd", 0.0)),
+                    bool(command.get("active", False)),
+                    bool(command.get("valid", False)),
+                )
+                actions.append(
+                    {
+                        "action_type": "flight_command",
+                        "params": command,
+                        "key": f"{self.action_runner.action_name or 'action_lab'}_flight_command",
+                        "once": False,
+                        "priority": int(command.get("priority", 5)),
+                    }
+                )
+        return self._dispatch_action_lab_actions(actions)
+
     def _dispatch_action_lab_actions(self, actions: list[object]) -> dict[str, list[dict[str, object]]]:
         dispatch = self._empty_action_lab_dispatch()
         effective, note = self._action_lab_dispatch_gate()
+        self.logger.info(
+            "action_lab dispatch gate send_actions_requested=%s send_commands=%s effective=%s note=%s",
+            bool(self.action_lab_send_actions),
+            bool(self.controller_switches.snapshot().send_commands),
+            bool(effective),
+            note,
+        )
         if not actions:
             return dispatch
         if not effective:
             for action in actions:
-                dispatch["skipped"].append({"action": action, "reason": note})
-            return dispatch
-
-        manager = self.services.link_manager
-        if manager is None:
-            for action in actions:
-                dispatch["errors"].append({"action": action, "error": "telemetry_not_connected"})
+                dispatch["skipped"].append(
+                    {
+                        "action": action,
+                        "action_type": self._action_type_for_status(action),
+                        "reason": note,
+                    }
+                )
+            self.logger.info("action_lab dispatch skipped note=%s actions=%s", note, actions)
             return dispatch
 
         for action in actions:
             if not isinstance(action, dict):
                 dispatch["skipped"].append({"action": action, "reason": "invalid_action"})
                 continue
-            if action.get("action_type") != "set_servo":
-                dispatch["skipped"].append({"action": action, "reason": "only_set_servo_enabled"})
+            action_type = str(action.get("action_type") or "")
+            if not self._action_lab_action_supported(action_type):
+                dispatch["skipped"].append(
+                    {"action": action, "action_type": action_type, "reason": "unsupported_action_type"}
+                )
                 continue
             key = str(action.get("key") or "")
-            if bool(action.get("once", False)) and key and key in self.action_lab_dispatched_keys:
-                dispatch["skipped"].append({"action": action, "reason": "once_already_dispatched"})
-                continue
-            params = action.get("params")
-            if not isinstance(params, dict):
-                dispatch["errors"].append({"action": action, "error": "missing_params"})
+            once_enabled = bool(action.get("once", False)) and action_type != "flight_command"
+            if once_enabled and key and key in self.action_lab_dispatched_keys:
+                dispatch["skipped"].append(
+                    {"action": action, "action_type": action_type, "reason": "once_already_dispatched"}
+                )
                 continue
             try:
-                manager.set_servo(
-                    int(params["channel"]),
-                    int(params["pwm"]),
-                    priority=int(action.get("priority", 3)),
-                )
+                outcome = self._dispatch_action_lab_action(action)
             except Exception as exc:
-                self.logger.exception("action lab set_servo dispatch failed")
-                dispatch["errors"].append({"action": action, "error": str(exc)})
+                self.logger.exception("action lab dispatch failed")
+                dispatch["errors"].append({"action": action, "action_type": action_type, "error": str(exc)})
+                if isinstance(action, dict) and action.get("action_type") == "set_servo":
+                    self.action_lab_last_servo_command = {
+                        "channel": (action.get("params") or {}).get("channel")
+                        if isinstance(action.get("params"), dict)
+                        else None,
+                        "pwm": (action.get("params") or {}).get("pwm")
+                        if isinstance(action.get("params"), dict)
+                        else None,
+                        "priority": action.get("priority", 3),
+                        "time": time.time(),
+                        "key": str(action.get("key") or ""),
+                        "ack": None,
+                        "error": str(exc),
+                    }
                 continue
-            if bool(action.get("once", False)) and key:
+            if outcome["status"] == "sent":
+                sent = {"action": action, **dict(outcome.get("detail") or {})}
+                dispatch["sent"].append(sent)
+                self.logger.info("action_lab dispatch sent action_type=%s detail=%s", action_type, sent)
+            elif outcome["status"] == "skipped":
+                skipped = {
+                    "action": action,
+                    "action_type": action_type,
+                    "reason": str(outcome["reason"]),
+                    **dict(outcome.get("detail") or {}),
+                }
+                dispatch["skipped"].append(skipped)
+                self.logger.info("action_lab dispatch skipped action_type=%s reason=%s", action_type, outcome["reason"])
+                continue
+            else:
+                dispatch["errors"].append(
+                    {"action": action, "action_type": action_type, "error": str(outcome["reason"])}
+                )
+                self.logger.info("action_lab dispatch error action_type=%s reason=%s", action_type, outcome["reason"])
+                continue
+            if once_enabled and key:
                 self.action_lab_dispatched_keys.add(key)
-            dispatch["sent"].append({"action": action})
         return dispatch
+
+    @staticmethod
+    def _action_type_for_status(action: object) -> str:
+        if isinstance(action, dict):
+            return str(action.get("action_type") or "")
+        return ""
+
+    def _dispatch_action_lab_action(self, action: dict[str, object]) -> dict[str, object]:
+        action_type = str(action.get("action_type") or "")
+        if action_type == "set_servo":
+            return self._dispatch_set_servo(action)
+        if action_type == "local_position":
+            return self._dispatch_local_position(action)
+        if action_type == "flight_command":
+            return self._dispatch_flight_command(action)
+        return {"status": "skipped", "reason": "unsupported_action_type"}
+
+    def _action_lab_action_supported(self, action_type: str) -> bool:
+        action_name = self.action_runner.action_name
+        if action_name == "payload_release":
+            return action_type == "set_servo"
+        if action_name == "goto_waypoint":
+            return action_type == "local_position"
+        if action_name == "align_descend":
+            return action_type == "flight_command"
+        return False
+
+    def _action_params(self, action: dict[str, object]) -> dict[str, object]:
+        params = action.get("params")
+        if not isinstance(params, dict):
+            raise ValueError("missing_params")
+        return params
+
+    def _dispatch_set_servo(self, action: dict[str, object]) -> dict[str, object]:
+        manager = self.services.link_manager
+        if manager is None:
+            params = action.get("params") if isinstance(action.get("params"), dict) else {}
+            self.action_lab_last_servo_command = {
+                "channel": params.get("channel"),
+                "pwm": params.get("pwm"),
+                "priority": action.get("priority", 3),
+                "time": time.time(),
+                "key": str(action.get("key") or ""),
+                "ack": None,
+                "error": "telemetry_not_connected",
+            }
+            return {"status": "error", "reason": "telemetry_not_connected"}
+        params = self._action_params(action)
+        channel = int(params["channel"])
+        pwm = int(params["pwm"])
+        priority = int(action.get("priority", 3))
+        self.logger.info(
+            "action_lab dispatch set_servo channel=%s pwm=%s priority=%s key=%s",
+            channel,
+            pwm,
+            priority,
+            action.get("key"),
+        )
+        manager.set_servo(
+            channel,
+            pwm,
+            priority=priority,
+        )
+        self.action_lab_last_servo_command = {
+            "channel": channel,
+            "pwm": pwm,
+            "priority": priority,
+            "time": time.time(),
+            "key": str(action.get("key") or ""),
+            "ack": None,
+            "error": None,
+        }
+        return {
+            "status": "sent",
+            "detail": {
+                "action_type": "set_servo",
+                "channel": channel,
+                "pwm": pwm,
+                "key": str(action.get("key") or ""),
+            },
+        }
+
+    def _dispatch_local_position(self, action: dict[str, object]) -> dict[str, object]:
+        manager = self.services.link_manager
+        sender = getattr(manager, "local_position", None) if manager is not None else None
+        if not callable(sender):
+            return {"status": "skipped", "reason": "local_position_dispatch_not_available"}
+
+        params = self._action_params(action)
+        x = float(params["x"])
+        y = float(params["y"])
+        z = float(params["z"])
+        frame = int(params.get("frame", 1))
+        yaw = None if params.get("yaw") is None else float(params["yaw"])
+        priority = int(action.get("priority", 4))
+        if yaw is not None and not self._callable_accepts_keyword(sender, "yaw"):
+            return {"status": "skipped", "reason": "local_position_yaw_not_supported"}
+        self.logger.info(
+            "action_lab dispatch local_position x=%s y=%s z=%s frame=%s yaw=%s priority=%s key=%s",
+            x,
+            y,
+            z,
+            frame,
+            yaw,
+            priority,
+            action.get("key"),
+        )
+        sender(
+            x,
+            y,
+            z,
+            frame,
+            yaw=yaw,
+            priority=priority,
+        )
+        detail: dict[str, object] = {
+            "action_type": "local_position",
+            "x": x,
+            "y": y,
+            "z": z,
+            "frame": frame,
+            "key": str(action.get("key") or ""),
+        }
+        if yaw is not None:
+            detail["yaw"] = yaw
+        return {"status": "sent", "detail": detail}
+
+    def _dispatch_flight_command(self, action: dict[str, object]) -> dict[str, object]:
+        command = self._action_params(action)
+        valid = bool(command.get("valid", False))
+        active = bool(command.get("active", False))
+        vx = float(command.get("vx_cmd", 0.0))
+        vy = float(command.get("vy_cmd", 0.0))
+        vz = float(command.get("vz_cmd", 0.0))
+        yaw_rate = float(command.get("yaw_rate_cmd", 0.0))
+        priority = int(action.get("priority", command.get("priority", 5)))
+        send_vx = vx if active else 0.0
+        send_vy = vy if active else 0.0
+        send_vz = vz if active else 0.0
+        send_yaw_rate = yaw_rate if active else 0.0
+        detail = {
+            "action_type": "flight_command",
+            "vx_cmd": send_vx,
+            "vy_cmd": send_vy,
+            "vz_cmd": send_vz,
+            "yaw_rate_cmd": send_yaw_rate,
+            "priority": priority,
+            "key": str(action.get("key") or ""),
+            "active": active,
+            "valid": valid,
+            "enable_body": bool(command.get("enable_body", False)),
+            "enable_approach": bool(command.get("enable_approach", False)),
+        }
+        if not valid:
+            return {
+                "status": "skipped",
+                "reason": "flight_command_inactive",
+                "detail": detail,
+            }
+
+        manager = self.services.link_manager
+        sender = getattr(manager, "send_velocity_command", None) if manager is not None else None
+        if not callable(sender):
+            return {
+                "status": "skipped",
+                "reason": "flight_command_dispatch_not_available",
+                "detail": detail,
+            }
+
+        frame = mavutil.mavlink.MAV_FRAME_BODY_NED
+        self.logger.info(
+            "action_lab dispatch flight_command vx=%.3f vy=%.3f vz=%.3f yaw_rate=%.3f frame=BODY_NED priority=%s key=%s active=%s",
+            send_vx,
+            send_vy,
+            send_vz,
+            send_yaw_rate,
+            priority,
+            action.get("key"),
+            active,
+        )
+        sender(send_vx, send_vy, send_vz, frame=frame)
+        detail["frame"] = frame
+        return {"status": "sent", "detail": detail}
+
+    @staticmethod
+    def _callable_accepts_keyword(func, name: str) -> bool:
+        try:
+            signature = inspect.signature(func)
+        except (TypeError, ValueError):
+            return True
+        return any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            or parameter.name == name
+            for parameter in signature.parameters.values()
+        )
 
     def _web_stage_modes(self) -> list[str]:
         if self.mission_runner is None:

@@ -20,8 +20,8 @@ class GotoWaypointAction(ActionModule):
             raise ValueError("altitude_m must be positive")
 
         yaw_mode = str(data.get("yaw_mode", "hold")).strip().lower()
-        if yaw_mode not in {"hold", "fixed"}:
-            raise ValueError("yaw_mode must be hold or fixed")
+        if yaw_mode not in {"hold", "fixed", "arm_heading"}:
+            raise ValueError("yaw_mode must be hold, fixed, or arm_heading")
         yaw_rad = None
         if yaw_mode == "fixed":
             yaw_rad = self._required_float(data, "yaw_rad")
@@ -59,13 +59,24 @@ class GotoWaypointAction(ActionModule):
         if self.stopped:
             return ActionResult(done=True, reason="stopped")
 
-        current = self._current_position(context or {})
+        context_data = context or {}
+        arm_heading_yaw_rad = self._arm_heading_yaw(context_data)
+        if self.yaw_mode == "arm_heading" and arm_heading_yaw_rad is None:
+            detail = self._detail(None, None, None)
+            detail["note"] = "yaw_mode arm_heading requires arm_heading_yaw_rad from vehicle context"
+            return ActionResult(
+                failed=True,
+                reason="missing_arm_heading_yaw",
+                detail=detail,
+            )
+
+        current = self._current_position(context_data)
         if current is None:
             self.reached_updates = 0
             return ActionResult(
-                actions=[self._action_dict()],
+                actions=[self._action_dict(arm_heading_yaw_rad)],
                 reason="waiting_for_position",
-                detail=self._detail(None, None, None),
+                detail=self._detail(None, None, None, context_data),
             )
 
         dx = self.target_x - current["x"]
@@ -82,11 +93,11 @@ class GotoWaypointAction(ActionModule):
         else:
             self.reached_updates = 0
 
-        detail = self._detail(current, distance_xy_m, z_error_m)
+        detail = self._detail(current, distance_xy_m, z_error_m, context_data)
         if self.reached_updates >= self.min_hold_updates:
             return ActionResult(done=True, reason="waypoint_reached", detail=detail)
         return ActionResult(
-            actions=[self._action_dict()],
+            actions=[self._action_dict(arm_heading_yaw_rad)],
             reason="goto_active",
             detail=detail,
         )
@@ -111,7 +122,7 @@ class GotoWaypointAction(ActionModule):
         self.key = ""
         self.reached_updates = 0
 
-    def _action_dict(self) -> dict[str, Any]:
+    def _action_dict(self, arm_heading_yaw_rad: float | None = None) -> dict[str, Any]:
         params: dict[str, Any] = {
             "x": self.target_x,
             "y": self.target_y,
@@ -120,6 +131,8 @@ class GotoWaypointAction(ActionModule):
         }
         if self.yaw_mode == "fixed":
             params["yaw"] = self.yaw_rad
+        elif self.yaw_mode == "arm_heading":
+            params["yaw"] = arm_heading_yaw_rad
         return {
             "action_type": "local_position",
             "params": params,
@@ -133,8 +146,10 @@ class GotoWaypointAction(ActionModule):
         current: dict[str, float] | None,
         distance_xy_m: float | None,
         z_error_m: float | None,
+        context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return {
+        context_data = context or {}
+        detail = {
             "target": {
                 "x": self.target_x,
                 "y": self.target_y,
@@ -147,6 +162,21 @@ class GotoWaypointAction(ActionModule):
             "reached_updates": self.reached_updates,
             "yaw_mode": self.yaw_mode,
         }
+        arm_heading_yaw_rad = self._arm_heading_yaw(context_data)
+        if arm_heading_yaw_rad is not None:
+            detail["arm_heading_yaw_rad"] = arm_heading_yaw_rad
+        if context_data.get("arm_heading_fallback"):
+            detail["arm_heading_fallback"] = True
+        return detail
+
+    def _arm_heading_yaw(self, context: dict[str, Any]) -> float | None:
+        value = context.get("arm_heading_yaw_rad")
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     def _current_position(self, context: dict[str, Any]) -> dict[str, float] | None:
         value = context.get("local_position")

@@ -543,6 +543,11 @@ class CommandSender(threading.Thread):
         )
 
     def _send_set_servo(self, master, command: ActionCommand) -> None:
+        self.logger.info(
+            "sending COMMAND_LONG MAV_CMD_DO_SET_SERVO command=183 param1_channel=%s param2_pwm=%s",
+            float(command.params["channel"]),
+            float(command.params["pwm"]),
+        )
         self._command_long(
             master,
             mavutil.mavlink.MAV_CMD_DO_SET_SERVO,

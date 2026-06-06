@@ -17,6 +17,7 @@ class AlignDescendConfig:
     descend_speed_mps: float = 0.2
     max_ex_cam: float = 0.06
     max_ey_cam: float = 0.06
+    min_altitude_m: float = 2.0
     deadband_ex_cam: float = 0.015
     deadband_ey_cam: float = 0.015
     vx_sign: float = -1.0
@@ -33,6 +34,8 @@ class AlignDescendConfig:
         for name in ("max_ex_cam", "max_ey_cam"):
             if float(getattr(self, name)) <= 0.0:
                 raise ValueError(f"{name} must be positive")
+        if float(self.min_altitude_m) <= 0.0:
+            raise ValueError("min_altitude_m must be positive")
         for name in ("deadband_ex_cam", "deadband_ey_cam"):
             if float(getattr(self, name)) < 0.0:
                 raise ValueError(f"{name} must be non-negative")
@@ -115,7 +118,14 @@ class AlignDescendAction(ActionModule):
 
     def start(self, params: dict[str, Any] | None = None) -> None:
         data = params or {}
-        self.config = AlignDescendConfig(**dict(data.get("config") or {}))
+        config_data = dict(data.get("config") or {})
+        if "kp_x" in config_data and "kp_vx" not in config_data:
+            config_data["kp_vx"] = config_data.pop("kp_x")
+        if "kp_y" in config_data and "kp_vy" not in config_data:
+            config_data["kp_vy"] = config_data.pop("kp_y")
+        if "min_altitude_m" in data and "min_altitude_m" not in config_data:
+            config_data["min_altitude_m"] = data["min_altitude_m"]
+        self.config = AlignDescendConfig(**config_data)
 
         expected_dt_s = float(data.get("expected_dt_s", 0.1))
         if expected_dt_s <= 0.0:
@@ -147,6 +157,8 @@ class AlignDescendAction(ActionModule):
             raise ValueError("max_updates must be at least 1")
 
         self.finish_altitude_m = self._finish_altitude(data)
+        if self.finish_altitude_m is not None and self.finish_altitude_m < self.config.min_altitude_m:
+            self.finish_altitude_m = self.config.min_altitude_m
         self.started = True
         self.stopped = False
         self.done = False
@@ -199,7 +211,19 @@ class AlignDescendAction(ActionModule):
 
         data = context or {}
         inputs = self._inputs(data)
-        height_m = self._height_m(data)
+        height_m = self._current_altitude_m(data)
+        if height_m is None:
+            self.failed = True
+            self.failure_reason = "missing_altitude"
+            detail = self._failed_detail("missing_altitude", height_m=None)
+            self.last_detail = detail
+            return ActionResult(
+                actions=[],
+                failed=True,
+                reason="missing_altitude",
+                detail=detail,
+            )
+
         command, command_detail = compute_align_descend_command(inputs, self.config)
         target_ok = command_detail["enabled"] is True
 
@@ -233,20 +257,32 @@ class AlignDescendAction(ActionModule):
         elif target_ok:
             self.hold_updates = 0
 
-        if (
-            self.finish_altitude_m is not None
-            and height_m is not None
-            and height_m <= self.finish_altitude_m
-            and self.hold_updates >= self.hold_updates_required
-        ):
+        if height_m <= self.config.min_altitude_m:
             self.done = True
             detail = self._detail(
                 command=_inactive_command(),
-                command_detail={**command_detail, "hold_reason": "align_descend_done"},
+                command_detail={**command_detail, "hold_reason": "min_altitude_reached"},
                 height_m=height_m,
             )
             self.last_detail = detail
-            return ActionResult(actions=[], done=True, reason="align_descend_done", detail=detail)
+            return ActionResult(actions=[], done=True, reason="min_altitude_reached", detail=detail)
+
+        if self.finish_altitude_m is not None and height_m <= self.finish_altitude_m:
+            self.done = True
+            done_reason = (
+                "aligned_at_finish_altitude"
+                if target_ok
+                and command_detail["aligned"] is True
+                and self.hold_updates >= self.hold_updates_required
+                else "finish_altitude_reached"
+            )
+            detail = self._detail(
+                command=_inactive_command(),
+                command_detail={**command_detail, "hold_reason": done_reason},
+                height_m=height_m,
+            )
+            self.last_detail = detail
+            return ActionResult(actions=[], done=True, reason=done_reason, detail=detail)
 
         reason = "align_descending" if target_ok and command_detail["aligned"] else command_detail["hold_reason"]
         detail = self._detail(
@@ -307,33 +343,46 @@ class AlignDescendAction(ActionModule):
             inputs["target_locked"] = True
         return inputs
 
-    def _height_m(self, context: dict[str, Any]) -> float | None:
-        candidates: list[dict[str, Any]] = [context]
+    def _current_altitude_m(self, context: dict[str, Any]) -> float | None:
+        for name in ("relative_altitude", "relative_altitude_m"):
+            value = self._float_from(context, name)
+            if value is not None:
+                return max(0.0, value)
+
+        value = self._float_from(context, "altitude_m")
+        if value is not None:
+            return max(0.0, value)
+
+        value = self._negative_local_z(context)
+        if value is not None:
+            return value
+
         drone = context.get("drone")
         if isinstance(drone, dict):
-            candidates.append(drone)
+            for name in ("relative_altitude", "relative_altitude_m"):
+                value = self._float_from(drone, name)
+                if value is not None:
+                    return max(0.0, value)
+            value = self._negative_local_z(drone)
+            if value is not None:
+                return value
             local_position = drone.get("local_position")
             if isinstance(local_position, dict):
-                candidates.append(local_position)
-        local_position = context.get("local_position")
-        if isinstance(local_position, dict):
-            candidates.append(local_position)
+                value = self._negative_local_z(local_position)
+                if value is not None:
+                    return value
 
-        for name in ("relative_altitude", "relative_altitude_m"):
-            value = self._first_float(candidates, name)
-            if value is not None:
-                return max(0.0, value)
+        value = self._float_from(context, "altitude")
+        if value is not None:
+            return max(0.0, value)
+        return None
 
-        local_z = self._first_float(candidates, "local_z")
+    def _negative_local_z(self, source: dict[str, Any]) -> float | None:
+        local_z = self._float_from(source, "local_z")
         if local_z is None:
-            local_z = self._first_float(candidates, "z")
+            local_z = self._float_from(source, "z")
         if local_z is not None and local_z < 0.0:
-            return -local_z
-
-        for name in ("altitude", "altitude_m"):
-            value = self._first_float(candidates, name)
-            if value is not None:
-                return max(0.0, value)
+            return max(0.0, -local_z)
         return None
 
     def _detail(
@@ -407,6 +456,18 @@ class AlignDescendAction(ActionModule):
                 return value
         return None
 
+    @staticmethod
+    def _float_from(item: dict[str, Any], name: str) -> float | None:
+        if name not in item:
+            return None
+        try:
+            value = float(item[name])
+        except (TypeError, ValueError):
+            return None
+        if math.isfinite(value):
+            return value
+        return None
+
 
 def _command_dict(*, vx: float, vy: float, vz: float, enabled: bool) -> dict[str, Any]:
     return {
@@ -429,7 +490,12 @@ def _command_dict(*, vx: float, vy: float, vz: float, enabled: bool) -> dict[str
 
 
 def _inactive_command() -> dict[str, Any]:
-    return _command_dict(vx=0.0, vy=0.0, vz=0.0, enabled=False)
+    command = _command_dict(vx=0.0, vy=0.0, vz=0.0, enabled=False)
+    command["enable_body"] = True
+    command["enable_approach"] = False
+    command["active"] = False
+    command["valid"] = True
+    return command
 
 
 def _clamp(value: float, low: float, high: float) -> float:

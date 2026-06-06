@@ -42,6 +42,26 @@ executor:
 python -m app.main --connect-telemetry --send-commands true
 ```
 
+## Action Lab payload release
+
+Action Lab 的 `payload_release` 使用 `MAV_CMD_DO_SET_SERVO`，推荐参数
+`servo_outputs` 表示飞控 `SERVO` 输出通道和每通道 PWM，不是遥控器 RC 输入通道号。
+
+如果遥控器 CH13/CH14 当前映射到飞控物理输出 8/9，且两个抛投舵机方向相反，
+则 payload release 应配置：
+
+```json
+{
+  "servo_outputs": [
+    {"channel": 8, "release_pwm": 1200, "hold_pwm": 1700},
+    {"channel": 9, "release_pwm": 1700, "hold_pwm": 1200}
+  ]
+}
+```
+
+UI 勾选 `Send actions` 只表示请求下发；系统级 `send_commands=false` 时仍不会调用
+`LinkManager.set_servo()`。
+
 ## control_allowed
 
 `control_allowed` 来自 telemetry/fusion 对飞控模式的判断。它必须只在安全控制模式下为 true。

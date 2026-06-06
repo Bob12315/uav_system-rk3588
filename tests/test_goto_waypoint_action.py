@@ -55,6 +55,36 @@ def test_fixed_yaw_outputs_yaw_param() -> None:
     assert result.actions[0]["params"]["yaw"] == pytest.approx(1.57)
 
 
+def test_arm_heading_yaw_outputs_context_arm_heading() -> None:
+    action = GotoWaypointAction()
+    action.start({"x": 1, "y": 2, "altitude_m": 5, "yaw_mode": "arm_heading"})
+
+    result = action.update({"arm_heading_yaw_rad": -0.75})
+
+    assert result.reason == "waiting_for_position"
+    assert result.actions[0]["params"] == {
+        "x": 1.0,
+        "y": 2.0,
+        "z": -5.0,
+        "frame": 1,
+        "yaw": pytest.approx(-0.75),
+    }
+    assert result.detail["arm_heading_yaw_rad"] == pytest.approx(-0.75)
+
+
+def test_arm_heading_yaw_missing_context_fails_without_action() -> None:
+    action = GotoWaypointAction()
+    action.start({"x": 1, "y": 2, "altitude_m": 5, "yaw_mode": "arm_heading"})
+
+    result = action.update({})
+
+    assert result.failed is True
+    assert result.reason == "missing_arm_heading_yaw"
+    assert result.actions == []
+    assert result.detail["target"]["z"] == pytest.approx(-5.0)
+    assert "requires arm_heading_yaw_rad" in result.detail["note"]
+
+
 def test_missing_position_waits_and_keeps_outputting_action() -> None:
     action = GotoWaypointAction()
     action.start({"x": 1, "y": 2, "altitude_m": 5})

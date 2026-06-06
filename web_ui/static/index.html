@@ -147,7 +147,7 @@
     </section>
 
     <section class="panel action-lab">
-      <div class="panel-title">Action Lab <span id="actionDryRun">Dry-run only in current build</span></div>
+      <div class="panel-title">Action Lab <span id="actionDryRun">Dry-run until SEND is enabled</span></div>
       <div class="action-lab-layout">
         <div>
           <div id="actionButtons" class="action-buttons"></div>
@@ -155,7 +155,7 @@
             <input id="actionSendToggle" type="checkbox">
             Send actions to vehicle/simulator
           </label>
-          <div class="hint">Dry-run only in current build</div>
+          <div class="hint" id="actionParamHint">Send actions still requires system SEND=ON.</div>
         </div>
         <div>
           <textarea id="actionParams" spellcheck="false"></textarea>

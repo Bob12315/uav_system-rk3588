@@ -196,12 +196,11 @@ def test_aligned_low_altitude_finishes_after_required_hold() -> None:
     action.start({"finish_altitude_m": 1.0, "hold_updates_required": 2})
 
     first = action.update(_active_context(ex_cam=0.02, ey_cam=0.02, drone={"relative_altitude": 0.9}))
-    second = action.update(_active_context(ex_cam=0.02, ey_cam=0.02, drone={"relative_altitude": 0.8}))
 
-    assert first.done is False
-    assert second.done is True
-    assert second.reason == "align_descend_done"
-    assert second.detail["command"]["active"] is False
+    assert first.done is True
+    assert first.reason == "min_altitude_reached"
+    assert first.detail["command"]["active"] is False
+    assert first.detail["command"]["vz_cmd"] == pytest.approx(0.0)
 
 
 def test_finish_altitude_uses_safer_max_of_finish_and_min_altitude() -> None:
@@ -218,9 +217,9 @@ def test_hold_counter_resets_when_alignment_is_lost() -> None:
     action = AlignDescendAction()
     action.start({"finish_altitude_m": 1.0, "hold_updates_required": 2})
 
-    first = action.update(_active_context(ex_cam=0.0, ey_cam=0.0, drone={"relative_altitude": 0.8}))
-    second = action.update(_active_context(ex_cam=0.2, ey_cam=0.0, drone={"relative_altitude": 0.8}))
-    third = action.update(_active_context(ex_cam=0.0, ey_cam=0.0, drone={"relative_altitude": 0.8}))
+    first = action.update(_active_context(ex_cam=0.0, ey_cam=0.0, drone={"relative_altitude": 3.0}))
+    second = action.update(_active_context(ex_cam=0.2, ey_cam=0.0, drone={"relative_altitude": 3.0}))
+    third = action.update(_active_context(ex_cam=0.0, ey_cam=0.0, drone={"relative_altitude": 3.0}))
 
     assert first.detail["hold_updates"] == 1
     assert second.detail["hold_updates"] == 0
@@ -299,6 +298,7 @@ def test_context_perception_input_is_supported() -> None:
 
     result = action.update(
         {
+            "relative_altitude": 5.0,
             "perception": {
                 "target_valid": True,
                 "tracking_state": "locked",
@@ -318,6 +318,7 @@ def test_context_target_input_is_supported() -> None:
 
     result = action.update(
         {
+            "relative_altitude": 5.0,
             "target": {
                 "target_valid": True,
                 "target_locked": True,
@@ -357,3 +358,85 @@ def test_output_is_plain_json_serializable_dict() -> None:
     assert isinstance(result.detail["command"], dict)
     assert result.detail["command"]["type"] == "flight_command"
     json.dumps(result.to_dict())
+
+
+def test_above_finish_altitude_allows_descent_when_aligned() -> None:
+    action = AlignDescendAction()
+    action.start({"finish_altitude_m": 3.0, "config": {"min_altitude_m": 2.5}})
+
+    result = action.update(_active_context(ex_cam=0.0, ey_cam=0.0, relative_altitude=4.0))
+
+    assert result.done is False
+    assert result.reason == "align_descending"
+    assert result.detail["command"]["active"] is True
+    assert result.detail["command"]["vz_cmd"] == pytest.approx(0.2)
+
+
+def test_finish_altitude_reached_stops_and_done() -> None:
+    action = AlignDescendAction()
+    action.start({"finish_altitude_m": 3.0, "config": {"min_altitude_m": 2.5}})
+
+    result = action.update(_active_context(ex_cam=0.2, ey_cam=0.0, relative_altitude=3.0))
+
+    assert result.done is True
+    assert result.reason == "finish_altitude_reached"
+    assert result.detail["command"]["active"] is False
+    assert result.detail["command"]["vx_cmd"] == pytest.approx(0.0)
+    assert result.detail["command"]["vy_cmd"] == pytest.approx(0.0)
+    assert result.detail["command"]["vz_cmd"] == pytest.approx(0.0)
+
+
+def test_aligned_at_finish_altitude_uses_specific_reason() -> None:
+    action = AlignDescendAction()
+    action.start({"finish_altitude_m": 3.0, "hold_updates_required": 1, "config": {"min_altitude_m": 2.5}})
+
+    result = action.update(_active_context(ex_cam=0.0, ey_cam=0.0, relative_altitude=3.0))
+
+    assert result.done is True
+    assert result.reason == "aligned_at_finish_altitude"
+    assert result.detail["command"]["vz_cmd"] == pytest.approx(0.0)
+
+
+def test_min_altitude_reached_stops_and_done() -> None:
+    action = AlignDescendAction()
+    action.start({"finish_altitude_m": 3.0, "config": {"min_altitude_m": 2.5}})
+
+    result = action.update(_active_context(ex_cam=0.0, ey_cam=0.0, relative_altitude=2.4))
+
+    assert result.done is True
+    assert result.reason == "min_altitude_reached"
+    assert result.detail["command"]["active"] is False
+    assert result.detail["command"]["enable_approach"] is False
+    assert result.detail["command"]["vz_cmd"] == pytest.approx(0.0)
+
+
+def test_missing_altitude_fails_without_descent() -> None:
+    action = AlignDescendAction()
+    action.start()
+
+    result = action.update(_valid_inputs())
+
+    assert result.failed is True
+    assert result.reason == "missing_altitude"
+    assert result.detail["command"]["active"] is False
+    assert result.detail["command"]["vx_cmd"] == pytest.approx(0.0)
+    assert result.detail["command"]["vy_cmd"] == pytest.approx(0.0)
+    assert result.detail["command"]["vz_cmd"] == pytest.approx(0.0)
+
+
+def test_local_z_altitude_source_prevents_descent_below_min_altitude() -> None:
+    action = AlignDescendAction()
+    action.start({"config": {"min_altitude_m": 2.5}})
+
+    result = action.update(_active_context(ex_cam=0.0, ey_cam=0.0, local_z=-2.0))
+
+    assert result.done is True
+    assert result.reason == "min_altitude_reached"
+    assert result.detail["command"]["vz_cmd"] == pytest.approx(0.0)
+
+
+def test_invalid_finish_below_min_altitude_is_clamped() -> None:
+    action = AlignDescendAction()
+    action.start({"finish_altitude_m": 1.0, "config": {"min_altitude_m": 2.5}})
+
+    assert action.finish_altitude_m == pytest.approx(2.5)

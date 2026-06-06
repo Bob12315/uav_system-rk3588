@@ -7,14 +7,17 @@ from .result import ActionResult
 
 
 class PayloadReleaseAction(ActionModule):
+    # Payload release uses MAV_CMD_DO_SET_SERVO servo output numbers.
+    # These are flight-controller SERVO outputs, not RC input channels.
     def __init__(self) -> None:
         self.reset()
 
     def start(self, params: dict[str, Any] | None = None) -> None:
         data = params or {}
-        self.channels = self._channels(data)
-        self.release_pwm = self._pwm(data, "release_pwm")
-        self.hold_pwm = self._pwm(data, "hold_pwm")
+        self.servo_outputs = self._servo_outputs(data)
+        self.channels = [item["channel"] for item in self.servo_outputs]
+        self.release_pwm = self.servo_outputs[0]["release_pwm"]
+        self.hold_pwm = self.servo_outputs[0]["hold_pwm"]
         self.payload_id = self._required_id(data, "payload_id")
         self.target_id = self._required_id(data, "target_id")
         self.release_wait_updates = int(data.get("release_wait_updates", 5))
@@ -51,7 +54,7 @@ class PayloadReleaseAction(ActionModule):
             detail = self._detail()
             self.last_detail = detail
             return ActionResult(
-                actions=self._servo_actions(self.release_pwm, "release"),
+                actions=self._servo_actions("release"),
                 reason="release_sent",
                 detail=detail,
             )
@@ -69,7 +72,7 @@ class PayloadReleaseAction(ActionModule):
             detail = self._detail()
             self.last_detail = detail
             return ActionResult(
-                actions=self._servo_actions(self.hold_pwm, "hold"),
+                actions=self._servo_actions("hold"),
                 done=True,
                 reason="payload_released",
                 detail=detail,
@@ -84,6 +87,7 @@ class PayloadReleaseAction(ActionModule):
     def reset(self) -> None:
         self.started = False
         self.state = "idle"
+        self.servo_outputs: list[dict[str, int]] = []
         self.channels: list[int] = []
         self.release_pwm = 0
         self.hold_pwm = 0
@@ -101,22 +105,28 @@ class PayloadReleaseAction(ActionModule):
         self.stopped = False
         self.last_detail: dict[str, Any] = {}
 
-    def _servo_actions(self, pwm: int, phase: str) -> list[dict[str, Any]]:
+    def _servo_actions(self, phase: str) -> list[dict[str, Any]]:
+        pwm_name = f"{phase}_pwm"
         return [
             {
                 "action_type": "set_servo",
-                "params": {"channel": channel, "pwm": pwm},
-                "key": f"{self.key}_{phase}_rc{channel}",
+                "params": {"channel": item["channel"], "pwm": item[pwm_name]},
+                "key": f"{self.key}_{phase}_servo{item['channel']}",
                 "once": True,
                 "priority": self.priority,
             }
-            for channel in self.channels
+            for item in self.servo_outputs
         ]
 
     def _detail(self) -> dict[str, Any]:
         return {
             "state": self.state,
             "channels": list(self.channels),
+            "servo_channels": list(self.channels),
+            "servo_outputs": [dict(item) for item in self.servo_outputs],
+            "channel_semantics": (
+                "servo output channel for MAV_CMD_DO_SET_SERVO, not RC input channel"
+            ),
             "release_pwm": self.release_pwm,
             "hold_pwm": self.hold_pwm,
             "payload_id": self.payload_id,
@@ -128,34 +138,79 @@ class PayloadReleaseAction(ActionModule):
             "release_wait_updates": int(self.release_wait_updates),
         }
 
+    def _servo_outputs(self, params: dict[str, Any]) -> list[dict[str, int]]:
+        if params.get("servo_outputs") is not None:
+            raw_outputs = params["servo_outputs"]
+            if not isinstance(raw_outputs, list):
+                raise ValueError("servo_outputs must be a list")
+            if not raw_outputs:
+                raise ValueError("servo_outputs must be non-empty")
+            outputs: list[dict[str, int]] = []
+            seen: set[int] = set()
+            for item in raw_outputs:
+                if not isinstance(item, dict):
+                    raise ValueError("servo_outputs entries must be dicts")
+                channel = self._channel_value(item.get("channel"))
+                if channel in seen:
+                    continue
+                outputs.append(
+                    {
+                        "channel": channel,
+                        "release_pwm": self._pwm(item, "release_pwm"),
+                        "hold_pwm": self._pwm(item, "hold_pwm"),
+                    }
+                )
+                seen.add(channel)
+            if not outputs:
+                raise ValueError("servo_outputs must be non-empty")
+            return outputs
+
+        if params.get("servo_channels") is None and params.get("channels") is None and params.get("channel") is None:
+            return [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}]
+
+        release_pwm = self._pwm(params, "release_pwm")
+        hold_pwm = self._pwm(params, "hold_pwm")
+        return [
+            {"channel": channel, "release_pwm": release_pwm, "hold_pwm": hold_pwm}
+            for channel in self._channels(params)
+        ]
+
     def _channels(self, params: dict[str, Any]) -> list[int]:
         raw_channels: Any
-        if params.get("channels") is not None:
+        if params.get("servo_channels") is not None:
+            raw_channels = params["servo_channels"]
+            if not isinstance(raw_channels, list):
+                raise ValueError("servo_channels must be a list")
+        elif params.get("channels") is not None:
             raw_channels = params["channels"]
             if not isinstance(raw_channels, list):
                 raise ValueError("channels must be a list")
         elif params.get("channel") is not None:
             raw_channels = [params["channel"]]
         else:
-            raw_channels = [13]
+            raw_channels = [8]
 
         if not raw_channels:
             raise ValueError("channels must be non-empty")
         channels: list[int] = []
         seen: set[int] = set()
         for value in raw_channels:
-            try:
-                channel = int(value)
-            except (TypeError, ValueError) as exc:
-                raise ValueError("channel must be an integer") from exc
-            if channel <= 0:
-                raise ValueError("channel must be positive")
+            channel = self._channel_value(value)
             if channel not in seen:
                 channels.append(channel)
                 seen.add(channel)
         if not channels:
             raise ValueError("channels must be non-empty")
         return channels
+
+    def _channel_value(self, value: Any) -> int:
+        try:
+            channel = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("channel must be an integer") from exc
+        if channel <= 0:
+            raise ValueError("channel must be positive")
+        return channel
 
     def _pwm(self, params: dict[str, Any], name: str) -> int:
         if name not in params:

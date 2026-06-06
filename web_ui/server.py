@@ -130,6 +130,8 @@ def create_app(runner, config: UiConfig) -> FastAPI:
                 dict(request.params or {}),
                 send_actions=request.send_actions,
             )
+            if not result.failed:
+                runner.action_lab_tick()
             action_lab = runner.action_lab_status_payload()
             return {
                 "ok": True,

@@ -557,7 +557,14 @@ function selectAction(name) {
   if (!spec) return;
   selectedActionName = spec.name;
   $("actionParams").value = JSON.stringify(spec.default_params || {}, null, 2);
-  $("completionHint").textContent = spec.description || spec.label || spec.name;
+  let hint = spec.description || spec.label || spec.name;
+  if (spec.name === "payload_release") {
+    hint = `${hint} servo_outputs 是飞控 SERVO 输出通道配置，不是遥控器 RC 输入通道。舵机插在输出 8 就填 channel=8。`;
+  } else if (spec.name === "goto_waypoint") {
+    hint = `${hint} yaw_mode="arm_heading" 表示移动时机头保持解锁/ARM 时刻的朝向。`;
+  }
+  $("completionHint").textContent = hint;
+  if ($("actionParamHint")) $("actionParamHint").textContent = hint;
   document.querySelectorAll("[data-action-name]").forEach(button =>
     button.classList.toggle("active-choice", button.dataset.actionName === selectedActionName));
 }
@@ -575,7 +582,7 @@ function renderActionLabStatus(actionLab) {
   const note = actionLab?.note || "";
   if ($("actionDryRun")) {
     $("actionDryRun").textContent = actionLab?.send_actions_effective
-      ? "Payload set_servo dispatch enabled"
+      ? `Dispatch enabled${note ? `: ${note}` : ""}`
       : `Dry-run${note ? `: ${note}` : ""}`;
   }
   $("actionState").textContent = status?.state || "--";
@@ -588,6 +595,9 @@ function renderActionLabStatus(actionLab) {
     command: detail.command,
     estimated_objects: detail.estimated_objects,
     channels: detail.channels,
+    servo_channels: detail.servo_channels,
+    servo_outputs: detail.servo_outputs,
+    channel_semantics: detail.channel_semantics,
     release_sent: detail.release_sent,
     hold_sent: detail.hold_sent,
     release_time: detail.release_time,

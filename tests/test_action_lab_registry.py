@@ -38,10 +38,14 @@ def test_action_lab_specs_are_json_serializable() -> None:
     ]
 
 
-def test_payload_release_spec_defaults_to_rc13() -> None:
+def test_payload_release_spec_defaults_to_servo_output_8() -> None:
     payload_spec = next(item for item in action_lab_specs() if item["name"] == "payload_release")
 
-    assert payload_spec["default_params"]["channels"] == [13]
+    assert payload_spec["default_params"]["servo_outputs"] == [
+        {"channel": 8, "release_pwm": 1200, "hold_pwm": 1700},
+        {"channel": 9, "release_pwm": 1700, "hold_pwm": 1200},
+    ]
+    assert "SERVO output" in payload_spec["description"]
 
 
 def test_action_lab_does_not_auto_register_default_registry() -> None:

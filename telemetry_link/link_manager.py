@@ -512,6 +512,12 @@ class LinkManager:
         )
 
     def set_servo(self, channel: int, pwm: int, priority: int = 3) -> None:
+        self.logger.info(
+            "link_manager.set_servo channel=%s pwm=%s priority=%s",
+            int(channel),
+            int(pwm),
+            int(priority),
+        )
         self.submit_action_command(
             ActionCommand(
                 action_type=ActionType.SET_SERVO,

@@ -9,9 +9,9 @@ from missions.common.actions.payload_release import PayloadReleaseAction
 
 def _params(**overrides):
     data = {
-        "channel": 13,
-        "release_pwm": 1900,
-        "hold_pwm": 1100,
+        "servo_outputs": [
+            {"channel": 8, "release_pwm": 1200, "hold_pwm": 1700},
+        ],
         "payload_id": "payload_1",
         "target_id": "target_a",
     }
@@ -22,14 +22,20 @@ def _params(**overrides):
 @pytest.mark.parametrize(
     "params",
     [
-        {"hold_pwm": 1100, "payload_id": "p", "target_id": "t"},
-        {"release_pwm": 1900, "payload_id": "p", "target_id": "t"},
-        _params(release_pwm=499),
-        _params(release_pwm=2501),
-        _params(hold_pwm=499),
-        _params(hold_pwm=2501),
-        _params(channel=0),
-        _params(channels=[]),
+        _params(servo_outputs=[{"channel": 8, "hold_pwm": 1700}]),
+        _params(servo_outputs=[{"channel": 8, "release_pwm": 1200}]),
+        _params(servo_outputs=[{"channel": 8, "release_pwm": 499, "hold_pwm": 1700}]),
+        _params(servo_outputs=[{"channel": 8, "release_pwm": 2501, "hold_pwm": 1700}]),
+        _params(servo_outputs=[{"channel": 8, "release_pwm": 1200, "hold_pwm": 499}]),
+        _params(servo_outputs=[{"channel": 8, "release_pwm": 1200, "hold_pwm": 2501}]),
+        _params(servo_outputs=[]),
+        _params(servo_outputs="8"),
+        _params(servo_outputs=[{"channel": 0, "release_pwm": 1200, "hold_pwm": 1700}]),
+        _params(servo_outputs=None, servo_channels=[0]),
+        _params(servo_outputs=None, servo_channels="8"),
+        _params(servo_outputs=None, servo_channels=None, channels=[]),
+        _params(servo_outputs=None, servo_channels=[8], release_pwm=None),
+        _params(servo_outputs=None, servo_channels=[8], hold_pwm=None),
         _params(payload_id=""),
         _params(target_id=""),
         _params(release_wait_updates=0),
@@ -49,24 +55,27 @@ def test_update_before_start_fails() -> None:
     assert result.reason == "action_not_started"
 
 
-def test_default_channel_is_rc13() -> None:
+def test_default_servo_channel_is_output_8() -> None:
     action = PayloadReleaseAction()
     action.start(
         {
-            "release_pwm": 1900,
-            "hold_pwm": 1100,
             "payload_id": "payload_1",
             "target_id": "target_a",
         }
     )
 
-    assert action.channels == [13]
-    assert action.update({}).detail["channels"] == [13]
+    result = action.update({})
+
+    assert action.channels == [8]
+    assert result.detail["channels"] == [8]
+    assert result.detail["servo_channels"] == [8]
+    assert result.detail["servo_outputs"] == [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}]
+    assert "not RC input channel" in result.detail["channel_semantics"]
 
 
-def test_single_channel_rc13_release_action() -> None:
+def test_single_servo_output_8_release_action() -> None:
     action = PayloadReleaseAction()
-    action.start(_params(channel=13))
+    action.start(_params(servo_outputs=[{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}]))
 
     result = action.update({"timestamp": 12.5})
 
@@ -74,39 +83,122 @@ def test_single_channel_rc13_release_action() -> None:
     assert result.done is False
     assert len(result.actions) == 1
     assert result.actions[0]["action_type"] == "set_servo"
-    assert result.actions[0]["params"] == {"channel": 13, "pwm": 1900}
+    assert result.actions[0]["params"] == {"channel": 8, "pwm": 1200}
     assert result.actions[0]["once"] is True
+    assert result.actions[0]["key"].endswith("_release_servo8")
     assert result.detail["release_time"] == pytest.approx(12.5)
 
 
-def test_single_channel_rc14_release_action() -> None:
+def test_single_servo_output_9_release_action() -> None:
     action = PayloadReleaseAction()
-    action.start(_params(channel=14))
+    action.start(_params(servo_outputs=[{"channel": 9, "release_pwm": 1700, "hold_pwm": 1200}]))
 
     result = action.update({})
 
     assert result.actions[0]["action_type"] == "set_servo"
-    assert result.actions[0]["params"]["channel"] == 14
+    assert result.actions[0]["params"]["channel"] == 9
+    assert result.actions[0]["params"]["pwm"] == 1700
 
 
-def test_dual_channel_rc13_rc14_release_actions() -> None:
+def test_dual_servo_outputs_use_per_channel_release_and_hold_pwm() -> None:
     action = PayloadReleaseAction()
-    action.start(_params(channels=[13, 14], channel=99))
+    action.start(
+        _params(
+            servo_outputs=[
+                {"channel": 8, "release_pwm": 1200, "hold_pwm": 1700},
+                {"channel": 9, "release_pwm": 1700, "hold_pwm": 1200},
+            ],
+            servo_channels=[1],
+            channels=[2],
+        )
+    )
+
+    release = action.update({})
+    for _ in range(5):
+        hold = action.update({})
+
+    assert [item["params"] for item in release.actions] == [
+        {"channel": 8, "pwm": 1200},
+        {"channel": 9, "pwm": 1700},
+    ]
+    assert release.actions[0]["key"].endswith("_release_servo8")
+    assert release.actions[1]["key"].endswith("_release_servo9")
+    assert hold.actions[0]["params"] == {"channel": 8, "pwm": 1700}
+    assert hold.actions[1]["params"] == {"channel": 9, "pwm": 1200}
+    assert hold.actions[0]["key"].endswith("_hold_servo8")
+    assert hold.actions[1]["key"].endswith("_hold_servo9")
+
+
+def test_legacy_channels_are_compatible_servo_outputs() -> None:
+    action = PayloadReleaseAction()
+    action.start(_params(servo_outputs=None, channels=[14], release_pwm=1300, hold_pwm=1800))
 
     result = action.update({})
 
-    assert [item["params"]["channel"] for item in result.actions] == [13, 14]
-    assert result.actions[0]["key"].endswith("_release_rc13")
-    assert result.actions[1]["key"].endswith("_release_rc14")
+    assert result.actions[0]["params"] == {"channel": 14, "pwm": 1300}
+    assert result.actions[0]["key"].endswith("_release_servo14")
+    assert not result.actions[0]["key"].endswith("_release_rc14")
+
+
+def test_servo_outputs_take_priority_over_legacy_channels() -> None:
+    action = PayloadReleaseAction()
+    action.start(
+        _params(
+            servo_outputs=[{"channel": 9, "release_pwm": 1700, "hold_pwm": 1200}],
+            servo_channels=[8],
+            channels=[14],
+            release_pwm=1300,
+            hold_pwm=1800,
+        )
+    )
+
+    result = action.update({})
+
+    assert result.actions[0]["params"] == {"channel": 9, "pwm": 1700}
+
+
+def test_servo_channels_legacy_format_uses_global_pwm() -> None:
+    action = PayloadReleaseAction()
+    action.start(
+        _params(
+            servo_outputs=None,
+            servo_channels=[8, 9],
+            channels=[14],
+            release_pwm=1300,
+            hold_pwm=1800,
+        )
+    )
+
+    release = action.update({})
+    for _ in range(5):
+        hold = action.update({})
+
+    assert [item["params"] for item in release.actions] == [
+        {"channel": 8, "pwm": 1300},
+        {"channel": 9, "pwm": 1300},
+    ]
+    assert [item["params"] for item in hold.actions] == [
+        {"channel": 8, "pwm": 1800},
+        {"channel": 9, "pwm": 1800},
+    ]
 
 
 def test_channels_are_deduplicated_in_order() -> None:
     action = PayloadReleaseAction()
-    action.start(_params(channels=[13, 14, 13]))
+    action.start(
+        _params(
+            servo_outputs=[
+                {"channel": 8, "release_pwm": 1200, "hold_pwm": 1700},
+                {"channel": 9, "release_pwm": 1700, "hold_pwm": 1200},
+                {"channel": 8, "release_pwm": 1300, "hold_pwm": 1800},
+            ]
+        )
+    )
 
     result = action.update({})
 
-    assert result.detail["channels"] == [13, 14]
+    assert result.detail["channels"] == [8, 9]
+    assert result.detail["servo_channels"] == [8, 9]
 
 
 def test_wait_phase_does_not_repeat_release() -> None:
@@ -135,8 +227,8 @@ def test_wait_completion_sends_hold_pwm_once_and_finishes() -> None:
     assert done.done is True
     assert done.reason == "payload_released"
     assert done.actions[0]["action_type"] == "set_servo"
-    assert done.actions[0]["params"] == {"channel": 13, "pwm": 1100}
-    assert done.actions[0]["key"].endswith("_hold_rc13")
+    assert done.actions[0]["params"] == {"channel": 8, "pwm": 1700}
+    assert done.actions[0]["key"].endswith("_hold_servo8")
     assert after.done is True
     assert after.reason == "payload_released"
     assert after.actions == []
@@ -205,13 +297,20 @@ def test_default_and_custom_key() -> None:
     default_result = default_action.update({})
     custom_result = custom_action.update({})
 
-    assert default_result.actions[0]["key"] == "payload_release_p1_t1_release_rc13"
-    assert custom_result.actions[0]["key"] == "custom_release_release_rc13"
+    assert default_result.actions[0]["key"] == "payload_release_p1_t1_release_servo8"
+    assert custom_result.actions[0]["key"] == "custom_release_release_servo8"
 
 
 def test_output_is_plain_json_serializable_set_servo_dict() -> None:
     action = PayloadReleaseAction()
-    action.start(_params(channels=[13, 14]))
+    action.start(
+        _params(
+            servo_outputs=[
+                {"channel": 8, "release_pwm": 1200, "hold_pwm": 1700},
+                {"channel": 9, "release_pwm": 1700, "hold_pwm": 1200},
+            ]
+        )
+    )
 
     result = action.update({"timestamp": 1.0})
 
