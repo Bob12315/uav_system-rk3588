@@ -119,7 +119,9 @@ def create_app(runner, config: UiConfig) -> FastAPI:
                 "ok": True,
                 "action_lab": {
                     "enabled": bool(getattr(runner, "action_lab_enabled", False)),
-                    "send_actions": bool(getattr(runner, "action_lab_send_actions", False)),
+                    "send_actions": False,
+                    "requested_send_actions": bool(getattr(runner, "action_lab_send_actions", False)),
+                    "dry_run_only": True,
                     "status": status,
                 },
             }

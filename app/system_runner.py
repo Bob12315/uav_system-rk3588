@@ -552,7 +552,9 @@ class SystemRunner:
     def _action_lab_snapshot(self) -> dict[str, object]:
         return {
             "enabled": bool(self.action_lab_enabled),
-            "send_actions": bool(self.action_lab_send_actions),
+            "send_actions": False,
+            "requested_send_actions": bool(self.action_lab_send_actions),
+            "dry_run_only": True,
             "specs": list(self.action_lab_specs),
             "status": self.action_runner.status(),
         }
