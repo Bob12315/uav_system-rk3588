@@ -9,26 +9,105 @@ import yaml
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
-from missions.visual_tracking.stages.approach_track.config import (
-    ApproachBodyConfig,
-    ApproachForwardConfig,
-    ApproachGimbalConfig,
-    ApproachTrackConfig,
-)
-from missions.common.control.command_shaper import CommandShaperConfig
-from missions.common.control.debug_config import StageDebugConfig
-from missions.common.control.executor import FlightCommandExecutorConfig
-from missions.common.control.input_adapter import InputAdapterConfig
-from missions.visual_tracking.stages.overhead_hold.config import (
-    OverheadApproachConfig,
-    OverheadBodyConfig,
-    OverheadGimbalConfig,
-    OverheadHoldConfig,
-)
-from missions.rescue_competition.stages.downward_align_descend import (
-    DownwardAlignDescendConfig,
-)
-from missions.visual_tracking import VisualTrackingMissionConfig
+try:
+    from missions.visual_tracking.stages.approach_track.config import (
+        ApproachBodyConfig,
+        ApproachForwardConfig,
+        ApproachGimbalConfig,
+        ApproachTrackConfig,
+    )
+    from missions.common.control.command_shaper import CommandShaperConfig
+    from missions.common.control.debug_config import StageDebugConfig
+    from missions.common.control.executor import FlightCommandExecutorConfig
+    from missions.common.control.input_adapter import InputAdapterConfig
+    from missions.visual_tracking.stages.overhead_hold.config import (
+        OverheadApproachConfig,
+        OverheadBodyConfig,
+        OverheadGimbalConfig,
+        OverheadHoldConfig,
+    )
+    from missions.rescue_competition.stages.downward_align_descend import (
+        DownwardAlignDescendConfig,
+    )
+    from missions.visual_tracking import VisualTrackingMissionConfig
+
+    MISSION_MODULES_AVAILABLE = True
+    MISSION_MODULES_IMPORT_ERROR: ModuleNotFoundError | None = None
+except ModuleNotFoundError as exc:
+    MISSION_MODULES_AVAILABLE = False
+    MISSION_MODULES_IMPORT_ERROR = exc
+
+    class _FallbackConfig:
+        def __init__(self, **kwargs: Any) -> None:
+            self.__dict__.update(kwargs)
+
+    class ApproachBodyConfig(_FallbackConfig):
+        pass
+
+    class ApproachForwardConfig(_FallbackConfig):
+        pass
+
+    class ApproachGimbalConfig(_FallbackConfig):
+        pass
+
+    class ApproachTrackConfig(_FallbackConfig):
+        pass
+
+    class CommandShaperConfig(_FallbackConfig):
+        pass
+
+    class FlightCommandExecutorConfig(_FallbackConfig):
+        def __init__(
+            self,
+            *,
+            body_frame: int = 1,
+            gimbal_roll_deg: float = 0.0,
+            log_commands: bool = True,
+            send_commands: bool = False,
+        ) -> None:
+            super().__init__(
+                body_frame=body_frame,
+                gimbal_roll_deg=gimbal_roll_deg,
+                log_commands=log_commands,
+                send_commands=send_commands,
+            )
+
+    class InputAdapterConfig(_FallbackConfig):
+        pass
+
+    class OverheadApproachConfig(_FallbackConfig):
+        pass
+
+    class OverheadBodyConfig(_FallbackConfig):
+        pass
+
+    class OverheadGimbalConfig(_FallbackConfig):
+        pass
+
+    class OverheadHoldConfig(_FallbackConfig):
+        pass
+
+    class DownwardAlignDescendConfig(_FallbackConfig):
+        pass
+
+    class VisualTrackingMissionConfig(_FallbackConfig):
+        pass
+
+    class StageDebugConfig(_FallbackConfig):
+        def __init__(
+            self,
+            *,
+            force_mode: str | None = None,
+            enable_gimbal: bool | None = None,
+            enable_body: bool | None = None,
+            enable_approach: bool | None = None,
+        ) -> None:
+            super().__init__(
+                force_mode=force_mode,
+                enable_gimbal=enable_gimbal,
+                enable_body=enable_body,
+                enable_approach=enable_approach,
+            )
 from app.health_monitor import HealthMonitorConfig
 from telemetry_link.config import TelemetryConfig, load_config_file as load_telemetry_config
 from uav_ui.yolo_command_client import YoloCommandConfig
@@ -94,6 +173,7 @@ class AppConfig:
     telemetry: TelemetryConfig
     yolo_command: YoloCommandConfig
     mission_name: str
+    mission_enabled: bool
     mission_settings: dict[str, Any]
     input_adapter: InputAdapterConfig
     visual_tracking: VisualTrackingMissionConfig
@@ -198,6 +278,15 @@ def load_app_config(args: argparse.Namespace) -> AppConfig:
         )
     telemetry_cfg = load_telemetry_config(args.telemetry_config)
     yolo_command_cfg = load_yolo_command_config(args.yolo_config)
+    mission_enabled = bool(MISSION_MODULES_AVAILABLE)
+    if not mission_enabled:
+        mission_name = "action_lab_only"
+        mission_config_path = None
+        mission_data = {"name": mission_name, "enabled": False}
+        print(
+            "mission modules unavailable, running action-lab-only mode: "
+            f"{MISSION_MODULES_IMPORT_ERROR}"
+        )
 
     runtime_data = _section(app_data, "runtime")
     services_data = _section(app_data, "services")
@@ -333,6 +422,7 @@ def load_app_config(args: argparse.Namespace) -> AppConfig:
         telemetry=telemetry_cfg,
         yolo_command=yolo_command_cfg,
         mission_name=mission_name,
+        mission_enabled=mission_enabled,
         mission_settings=dict(mission_data),
         input_adapter=input_adapter_cfg,
         visual_tracking=visual_tracking_cfg,

@@ -1,9 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from missions.base import MissionOutput
-from missions.common.control.debug_config import StageDebugConfig
-from missions.common.control.types import FlightCommand
+from typing import Any
+
+try:
+    from missions.base import MissionOutput
+    from missions.common.control.debug_config import StageDebugConfig
+    from missions.common.control.types import FlightCommand
+except ModuleNotFoundError:
+    MissionOutput = Any
+    FlightCommand = Any
+
+    @dataclass
+    class StageDebugConfig:
+        force_mode: str | None = None
+        enable_gimbal: bool | None = None
+        enable_body: bool | None = None
+        enable_approach: bool | None = None
 
 
 @dataclass(slots=True)

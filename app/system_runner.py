@@ -8,8 +8,9 @@ import subprocess
 import threading
 import time
 from collections import deque
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -17,23 +18,66 @@ from app.app_config import AppConfig, ROOT_DIR, load_mission_stage_runtime_confi
 from app.blackbox_recorder import BlackboxRecorder
 from app.debug_runtime import DebugRuntime
 from app.health_monitor import HealthMonitor
-from app.mission_runner import MissionRunner
-from app.stage_registry import StageRegistry, copy_dataclass_values
 from app.service_manager import ServiceManager
 from missions.common.actions.action_lab import action_lab_specs, create_action_lab_registry
 from missions.common.actions.runner import ActionRunner
-from missions.common.control import (
-    CommandShaper,
-    FlightCommand,
-    FlightCommandExecutor,
-    StageInputAdapter,
-)
-from missions.base import MissionContext
-from missions.registry import available_mission_names, build_mission, build_mission_from_settings
 from uav_ui.control_switches import ControlRuntimeSwitches
 from uav_ui.terminal_ui import run_terminal_ui
 from uav_ui.ui_commands import CommandResult, build_ui_command_handler, format_controller_snapshot
 from uav_ui.yolo_command_client import YoloCommandClient
+
+try:
+    from app.mission_runner import MissionRunner
+    from app.stage_registry import StageRegistry, copy_dataclass_values
+    from missions.common.control import (
+        CommandShaper,
+        FlightCommand,
+        FlightCommandExecutor,
+        StageInputAdapter,
+    )
+    from missions.base import MissionContext
+    from missions.registry import available_mission_names, build_mission, build_mission_from_settings
+
+    MISSION_RUNTIME_AVAILABLE = True
+    MISSION_RUNTIME_IMPORT_ERROR: ModuleNotFoundError | None = None
+except ModuleNotFoundError as exc:
+    MissionRunner = Any
+    StageRegistry = Any
+    CommandShaper = Any
+    FlightCommandExecutor = Any
+    StageInputAdapter = Any
+    MissionContext = Any
+    MISSION_RUNTIME_AVAILABLE = False
+    MISSION_RUNTIME_IMPORT_ERROR = exc
+
+    def available_mission_names() -> tuple[str, ...]:
+        return ("action_lab_only",)
+
+    def build_mission(*_args, **_kwargs):
+        raise RuntimeError("mission runtime unavailable")
+
+    def build_mission_from_settings(*_args, **_kwargs):
+        raise RuntimeError("mission runtime unavailable")
+
+    def copy_dataclass_values(_target, _source) -> None:
+        return None
+
+    @dataclass
+    class FlightCommand:
+        vx_cmd: float = 0.0
+        vy_cmd: float = 0.0
+        vz_cmd: float = 0.0
+        yaw_rate_cmd: float = 0.0
+        gimbal_yaw_rate_cmd: float = 0.0
+        gimbal_pitch_rate_cmd: float = 0.0
+        gimbal_yaw_angle_cmd: float = 0.0
+        gimbal_pitch_angle_cmd: float = 0.0
+        enable_body: bool = False
+        enable_gimbal: bool = False
+        enable_gimbal_angle: bool = False
+        enable_approach: bool = False
+        active: bool = False
+        valid: bool = True
 
 
 class SystemRunner:
@@ -42,20 +86,35 @@ class SystemRunner:
         self.stop_event = stop_event or threading.Event()
         self.logger = logging.getLogger(self.__class__.__name__)
         self.services = ServiceManager(config, self.stop_event)
-        self.input_adapter = StageInputAdapter(config=config.input_adapter)
         self.health_monitor = HealthMonitor(config.health)
-        self.mission_runner = MissionRunner(
-            build_mission(config.mission_name, config),
-            link_manager=self.services.link_manager,
-            yolo_client=YoloCommandClient(config.yolo_command),
+        self.mission_enabled = bool(
+            getattr(config, "mission_enabled", True) and MISSION_RUNTIME_AVAILABLE
         )
-        self.stage_registry = StageRegistry(
-            approach_config=config.approach_track,
-            overhead_config=config.overhead_hold,
-            downward_align_descend_config=config.downward_align_descend,
-        )
-        self.command_shaper = CommandShaper(config=config.shaper)
-        self.executor = FlightCommandExecutor(config=config.executor)
+        if not self.mission_enabled:
+            reason = MISSION_RUNTIME_IMPORT_ERROR or "mission disabled by configuration"
+            self.logger.warning(
+                "mission modules unavailable, running action-lab-only mode: %s",
+                reason,
+            )
+            self.input_adapter = None
+            self.mission_runner = None
+            self.stage_registry = None
+            self.command_shaper = None
+            self.executor = None
+        else:
+            self.input_adapter = StageInputAdapter(config=config.input_adapter)
+            self.mission_runner = MissionRunner(
+                build_mission(config.mission_name, config),
+                link_manager=self.services.link_manager,
+                yolo_client=YoloCommandClient(config.yolo_command),
+            )
+            self.stage_registry = StageRegistry(
+                approach_config=config.approach_track,
+                overhead_config=config.overhead_hold,
+                downward_align_descend_config=config.downward_align_descend,
+            )
+            self.command_shaper = CommandShaper(config=config.shaper)
+            self.executor = FlightCommandExecutor(config=config.executor)
         self.blackbox = BlackboxRecorder(config.blackbox)
         self.debug_runtime = DebugRuntime(config.debug)
         self.controller_switches = ControlRuntimeSwitches(
@@ -67,9 +126,9 @@ class SystemRunner:
         self.control_command_log: deque[str] = deque(maxlen=120)
         self.control_command_log_lock = threading.Lock()
         self.runtime_config_lock = threading.RLock()
-        self.latest_mission_name = config.mission_name
-        self.latest_mission_stage = "UNKNOWN"
-        self.latest_stage_controller = "UNKNOWN"
+        self.latest_mission_name = config.mission_name if self.mission_enabled else "action_lab_only"
+        self.latest_mission_stage = "UNKNOWN" if self.mission_enabled else "NO_MISSION"
+        self.latest_stage_controller = "UNKNOWN" if self.mission_enabled else "NO_MISSION"
         self.mission_stage_selections = {
             name: "AUTO" for name in available_mission_names()
         }
@@ -88,15 +147,20 @@ class SystemRunner:
 
     def run(self) -> None:
         self.services.start()
-        self.mission_runner.link_manager = self.services.link_manager
+        if self.mission_runner is not None:
+            self.mission_runner.link_manager = self.services.link_manager
         self.blackbox.start()
-        self.executor.set_telemetry_link(self.services.link_manager)
+        if self.executor is not None:
+            self.executor.set_telemetry_link(self.services.link_manager)
         if self.config.ui.web_enabled:
             from web_ui.server import WebUiServer
 
             self.web_server = WebUiServer(self, self.config.ui)
             self.web_server.start()
         try:
+            if not self.mission_enabled:
+                self._action_lab_only_loop()
+                return
             if self.config.ui.terminal_enabled and self.services.link_manager is not None:
                 self._run_with_ui()
             else:
@@ -108,7 +172,8 @@ class SystemRunner:
 
     def stop(self) -> None:
         self.stop_event.set()
-        self.executor.reset()
+        if self.executor is not None:
+            self.executor.reset()
         self.blackbox.close()
         if self.web_server is not None:
             self.web_server.stop()
@@ -143,6 +208,59 @@ class SystemRunner:
         finally:
             self.stop_event.set()
             control_thread.join(timeout=1.0)
+
+    def _action_lab_only_loop(self) -> None:
+        loop_sleep_sec = 1.0 / max(self.config.runtime.loop_hz, 0.1)
+        print_sleep_sec = 1.0 / max(self.config.runtime.print_rate_hz, 0.1)
+        started_at = time.time()
+        last_print_time = 0.0
+
+        try:
+            while not self.stop_event.is_set():
+                now = time.time()
+                run_seconds = self.config.runtime.run_seconds
+                if run_seconds is not None and (now - started_at) >= run_seconds:
+                    self.stop_event.set()
+                    break
+
+                perception = self.services.get_perception(now)
+                scene = self.services.get_scene_detections(now)
+                drone = self.services.get_drone_state()
+                gimbal = self.services.get_gimbal_state()
+                link = self.services.get_link_status()
+                self.services.fusion_manager.update(perception, drone, gimbal)
+                command = FlightCommand(valid=True)
+
+                with self.control_command_log_lock:
+                    self.latest_mission_name = "action_lab_only"
+                    self.latest_mission_stage = "NO_MISSION"
+                    self.latest_stage_controller = "NO_MISSION"
+                    self.latest_hold_reason = "mission_disabled"
+                    self.latest_snapshot = {
+                        "perception": asdict(perception),
+                        "scene": asdict(scene),
+                        "drone": asdict(drone),
+                        "gimbal": asdict(gimbal),
+                        "link": asdict(link) if link is not None else {},
+                        "health": {"hold_reason": "mission_disabled"},
+                        "command": asdict(command),
+                        "mission_detail": {
+                            "enabled": False,
+                            "name": "action_lab_only",
+                            "reason": "mission_modules_unavailable",
+                        },
+                    }
+
+                if (now - last_print_time) >= print_sleep_sec:
+                    self.logger.info(
+                        "mode=action_lab_only mission disabled; web UI active; SEND=OFF"
+                    )
+                    last_print_time = now
+
+                time.sleep(loop_sleep_sec)
+        except Exception:
+            self.logger.exception("app action-lab-only loop failed")
+            self.stop_event.set()
 
     def _control_loop(self) -> None:
         loop_sleep_sec = 1.0 / max(self.config.runtime.loop_hz, 0.1)
@@ -374,16 +492,13 @@ class SystemRunner:
                     "stage": self.latest_mission_stage,
                     "stage_controller": self.latest_stage_controller,
                     "stage_override": self.debug_runtime.config.force_mode,
-                    "mission_stage_selection": self.mission_stage_selections.get(
-                        self.mission_runner.mission.name,
-                        "AUTO",
-                    ),
+                    "mission_stage_selection": self._active_mission_stage_selection(),
                     "stage_modes": self._web_stage_modes(),
                     "hold_reason": self.latest_hold_reason,
                     "controllers": asdict(self.controller_switches.snapshot()),
                     "control_commands": list(self.control_command_log)[:40],
                     "events": list(self.system_events)[:40],
-                    "actions": self.mission_runner.get_action_log_lines()[:20],
+                    "actions": self._mission_action_log_lines()[:20],
                     "action_lab": self._action_lab_snapshot(),
                 }
             )
@@ -443,6 +558,8 @@ class SystemRunner:
         }
 
     def _web_stage_modes(self) -> list[str]:
+        if self.mission_runner is None:
+            return ["NO_MISSION"]
         mission_name = self.mission_runner.mission.name
         if mission_name == "rescue_competition":
             from missions.rescue_competition.mission import RescueStage
@@ -451,6 +568,16 @@ class SystemRunner:
         if mission_name == "visual_tracking":
             return ["AUTO", "IDLE", "APPROACH_TRACK", "OVERHEAD_HOLD", "CORRIDOR_FOLLOW"]
         return ["AUTO", "IDLE"]
+
+    def _active_mission_stage_selection(self) -> str:
+        if self.mission_runner is None:
+            return "NO_MISSION"
+        return self.mission_stage_selections.get(self.mission_runner.mission.name, "AUTO")
+
+    def _mission_action_log_lines(self) -> list[str]:
+        if self.mission_runner is None:
+            return []
+        return self.mission_runner.get_action_log_lines()
 
     @classmethod
     def _json_safe(cls, value):
@@ -506,6 +633,17 @@ class SystemRunner:
         return result
 
     def web_missions(self) -> list[dict[str, object]]:
+        if self.mission_runner is None:
+            return [
+                {
+                    "name": "action_lab_only",
+                    "active": True,
+                    "enabled": False,
+                    "config_path": "",
+                    "stage_modes": ["NO_MISSION"],
+                    "selected_stage": "NO_MISSION",
+                }
+            ]
         active = self.mission_runner.mission.name
         return [
             {
@@ -519,6 +657,8 @@ class SystemRunner:
         ]
 
     def _web_stage_modes_for_mission(self, mission_name: str) -> list[str]:
+        if self.mission_runner is None:
+            return ["NO_MISSION"]
         if mission_name == "rescue_competition":
             from missions.rescue_competition.mission import RescueStage
 
@@ -528,6 +668,8 @@ class SystemRunner:
         return []
 
     def apply_active_mission_config(self, relative_path: str) -> CommandResult:
+        if self.mission_runner is None:
+            return CommandResult(True, "mission disabled; configuration saved for later use")
         active_path = f"missions/{self.mission_runner.mission.name}/config.yaml"
         if relative_path != active_path:
             return CommandResult(True, "mission config saved; applies when that mission is selected")
@@ -557,8 +699,10 @@ class SystemRunner:
             return CommandResult(False, f"telemetry configuration invalid: {exc}")
         self.disable_automatic_sending("telemetry_reconnect")
         self.services.reconnect_telemetry(config)
-        self.mission_runner.link_manager = self.services.link_manager
-        self.executor.set_telemetry_link(self.services.link_manager)
+        if self.mission_runner is not None:
+            self.mission_runner.link_manager = self.services.link_manager
+        if self.executor is not None:
+            self.executor.set_telemetry_link(self.services.link_manager)
         self._record_event("LINK", "telemetry reconnect started; SEND remains OFF")
         return CommandResult(True, "telemetry reconnect started; SEND remains OFF")
 
@@ -607,11 +751,13 @@ class SystemRunner:
                 f"Mission {self.latest_mission_name} stage={self.latest_mission_stage}",
                 f"Stage controller {self.latest_stage_controller}",
                 f"Hold {self.latest_hold_reason or 'none'}",
-                *self.mission_runner.get_action_log_lines(),
+                *self._mission_action_log_lines(),
                 *list(self.control_command_log),
             ]
 
     def _set_stage_override(self, mode_name: str | None) -> CommandResult:
+        if self.stage_registry is None:
+            return CommandResult(False, "mission disabled; stage override unavailable")
         with self.runtime_config_lock:
             if mode_name is None:
                 self.debug_runtime.config.force_mode = None
@@ -632,6 +778,8 @@ class SystemRunner:
             return CommandResult(True, f"stage override forced {normalized}")
 
     def _handle_mission_command(self, parts: list[str]) -> CommandResult:
+        if self.mission_runner is None:
+            return CommandResult(False, "mission disabled; running action_lab_only")
         if not parts:
             return CommandResult(
                 False,
@@ -694,6 +842,8 @@ class SystemRunner:
         )
 
     def _switch_mission(self, mission_name: str) -> CommandResult:
+        if self.mission_runner is None:
+            return CommandResult(False, "mission disabled; running action_lab_only")
         normalized = mission_name.strip().lower()
         if normalized not in available_mission_names():
             return CommandResult(
@@ -729,6 +879,22 @@ class SystemRunner:
         )
 
     def _reset_mission_runtime(self, *, clear_for_safety: bool) -> None:
+        if self.mission_runner is None:
+            self.target_lost_since = None
+            self.lost_target_recenter_sent = False
+            with self.control_command_log_lock:
+                self.latest_mission_name = "action_lab_only"
+                self.latest_mission_stage = "NO_MISSION"
+                self.latest_stage_controller = "NO_MISSION"
+                self.latest_hold_reason = "mission_disabled"
+                self.control_command_log.clear()
+            if clear_for_safety:
+                self.controller_switches.set_send_commands(False)
+                if self.services.link_manager is not None:
+                    clear_sender = getattr(self.services.link_manager, "clear_continuous_commands", None)
+                    if callable(clear_sender):
+                        clear_sender()
+            return
         self.mission_runner.reset()
         self.mission_stage_selections[self.mission_runner.mission.name] = "AUTO"
         self.stage_registry.reset_all()
@@ -769,6 +935,8 @@ class SystemRunner:
         )
 
     def _reload_mission_stage_config(self) -> CommandResult:
+        if self.mission_runner is None:
+            return CommandResult(False, "mission disabled; stage config reload unavailable")
         path = self.config.mission_config_path
         if not path:
             return CommandResult(False, "mission config reload is unavailable for legacy config")

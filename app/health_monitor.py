@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Any
 
-from missions.common.control.types import MissionStageInput
+try:
+    from missions.common.control.types import MissionStageInput
+except ModuleNotFoundError:
+    MissionStageInput = Any
 
 
 @dataclass(slots=True)
@@ -107,4 +111,3 @@ class HealthMonitor:
         if max_age_s < 0.0:
             return False
         return age_s <= max_age_s
-
