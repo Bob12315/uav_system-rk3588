@@ -491,7 +491,7 @@ function renderStatus(next) {
   $("events").innerHTML = (next.events || []).map(item =>
     `<div class="log-line">${stamp(item.timestamp)} ${escapeHtml(item.level)} &nbsp; ${escapeHtml(item.message)}</div>`).join("");
   renderFieldMap(next);
-  renderActionLabStatus(next.action_lab?.status || null);
+  renderActionLabStatus(next.action_lab || null);
 }
 function renderDetections(scene, target) {
   $("frameId").textContent = scene.frame_id ?? "--";
@@ -564,13 +564,20 @@ function selectAction(name) {
 async function refreshActionStatus() {
   const result = await json("/api/actions/status");
   if (!result.ok) throw new Error(result.error || "action status failed");
-  renderActionLabStatus(result.action_lab?.status || null);
+  renderActionLabStatus(result.action_lab || null);
   return result;
 }
-function renderActionLabStatus(status) {
+function renderActionLabStatus(actionLab) {
   if (!$("actionState")) return;
+  const status = actionLab?.status || actionLab || {};
   const last = status?.last_result || {};
   const detail = last.detail || {};
+  const note = actionLab?.note || "";
+  if ($("actionDryRun")) {
+    $("actionDryRun").textContent = actionLab?.send_actions_effective
+      ? "Payload set_servo dispatch enabled"
+      : `Dry-run${note ? `: ${note}` : ""}`;
+  }
   $("actionState").textContent = status?.state || "--";
   $("actionName").textContent = status?.action_name || "--";
   $("actionRunning").textContent = String(Boolean(status?.running));
@@ -589,7 +596,7 @@ function renderActionLabStatus(status) {
     .filter(([, value]) => value !== undefined)
     .map(([key, value]) => `<div><span>${escapeHtml(key)}</span><code>${escapeHtml(JSON.stringify(value))}</code></div>`)
     .join("");
-  $("actionStatusJson").textContent = JSON.stringify(status || {}, null, 2);
+  $("actionStatusJson").textContent = JSON.stringify(actionLab || status || {}, null, 2);
 }
 function parseActionParams() {
   try {
@@ -614,17 +621,17 @@ async function startActionLabAction() {
   });
   if (!result.ok) throw new Error(result.error || "action start failed");
   $("completionHint").textContent = result.note || "action started";
-  renderActionLabStatus(result.status);
+  renderActionLabStatus(result.action_lab || result.status);
 }
 async function stopActionLabAction() {
   const result = await json("/api/actions/stop", {method: "POST", body: "{}"});
   if (!result.ok) throw new Error(result.error || "action stop failed");
-  renderActionLabStatus(result.status);
+  renderActionLabStatus(result.action_lab || result.status);
 }
 async function resetActionLabAction() {
   const result = await json("/api/actions/reset", {method: "POST", body: "{}"});
   if (!result.ok) throw new Error(result.error || "action reset failed");
-  renderActionLabStatus(result.status);
+  renderActionLabStatus(result.action_lab || result.status);
 }
 async function loadConfigFiles() {
   const files = await json("/api/config/files");

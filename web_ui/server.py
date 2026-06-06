@@ -115,31 +115,29 @@ def create_app(runner, config: UiConfig) -> FastAPI:
     def action_status():
         try:
             status = runner.action_lab_tick()
-            return {
-                "ok": True,
-                "action_lab": {
-                    "enabled": bool(getattr(runner, "action_lab_enabled", False)),
-                    "send_actions": False,
-                    "requested_send_actions": bool(getattr(runner, "action_lab_send_actions", False)),
-                    "dry_run_only": True,
-                    "status": status,
-                },
-            }
+            action_lab = runner.action_lab_status_payload()
+            action_lab["enabled"] = bool(getattr(runner, "action_lab_enabled", False))
+            action_lab["status"] = status
+            return {"ok": True, "action_lab": action_lab}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
     @app.post("/api/actions/start")
     def action_start(request: ActionStartRequest):
         try:
-            if request.send_actions is not None:
-                runner.action_lab_send_actions = bool(request.send_actions)
-            result = runner.action_runner.start(request.name, dict(request.params or {}))
+            result = runner.action_lab_start_action(
+                request.name,
+                dict(request.params or {}),
+                send_actions=request.send_actions,
+            )
+            action_lab = runner.action_lab_status_payload()
             return {
                 "ok": True,
                 "result": result.to_dict(),
-                "status": runner.action_runner.status(),
-                "send_actions_effective": False,
-                "note": "dry_run_only",
+                "status": action_lab["status"],
+                "action_lab": action_lab,
+                "send_actions_effective": action_lab["send_actions_effective"],
+                "note": action_lab["note"],
             }
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -147,13 +145,15 @@ def create_app(runner, config: UiConfig) -> FastAPI:
     @app.post("/api/actions/stop")
     def action_stop():
         try:
-            result = runner.action_runner.stop()
+            result = runner.action_lab_stop_action()
+            action_lab = runner.action_lab_status_payload()
             return {
                 "ok": True,
                 "result": result.to_dict(),
-                "status": runner.action_runner.status(),
-                "send_actions_effective": False,
-                "note": "dry_run_only",
+                "status": action_lab["status"],
+                "action_lab": action_lab,
+                "send_actions_effective": action_lab["send_actions_effective"],
+                "note": action_lab["note"],
             }
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -161,13 +161,15 @@ def create_app(runner, config: UiConfig) -> FastAPI:
     @app.post("/api/actions/reset")
     def action_reset():
         try:
-            result = runner.action_runner.reset()
+            result = runner.action_lab_reset_action()
+            action_lab = runner.action_lab_status_payload()
             return {
                 "ok": True,
                 "result": result.to_dict(),
-                "status": runner.action_runner.status(),
-                "send_actions_effective": False,
-                "note": "dry_run_only",
+                "status": action_lab["status"],
+                "action_lab": action_lab,
+                "send_actions_effective": action_lab["send_actions_effective"],
+                "note": action_lab["note"],
             }
         except Exception as exc:
             return {"ok": False, "error": str(exc)}

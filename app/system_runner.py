@@ -144,6 +144,8 @@ class SystemRunner:
         self.action_lab_specs = action_lab_specs()
         self.action_lab_enabled = True
         self.action_lab_send_actions = False
+        self.action_lab_dispatched_keys: set[str] = set()
+        self.action_lab_last_dispatch: dict[str, list[dict[str, object]]] = self._empty_action_lab_dispatch()
 
     def run(self) -> None:
         self.services.start()
@@ -546,18 +548,114 @@ class SystemRunner:
     def action_lab_tick(self) -> dict[str, object]:
         if not getattr(self, "action_runner", None):
             return {}
-        self.action_runner.update(self.action_lab_context())
+        result = self.action_runner.update(self.action_lab_context())
+        self.action_lab_last_dispatch = self._dispatch_action_lab_actions(result.actions)
         return self.action_runner.status()
 
+    def action_lab_status_payload(self) -> dict[str, object]:
+        status = self.action_runner.status() if getattr(self, "action_runner", None) else {}
+        return self._action_lab_payload(status)
+
+    def action_lab_start_action(
+        self,
+        action_name: str,
+        params: dict[str, object] | None = None,
+        *,
+        send_actions: bool | None = None,
+    ):
+        if send_actions is not None:
+            self.action_lab_send_actions = bool(send_actions)
+        self.action_lab_dispatched_keys.clear()
+        self.action_lab_last_dispatch = self._empty_action_lab_dispatch()
+        return self.action_runner.start(action_name, dict(params or {}))
+
+    def action_lab_stop_action(self):
+        self.action_lab_last_dispatch = self._empty_action_lab_dispatch()
+        return self.action_runner.stop()
+
+    def action_lab_reset_action(self):
+        self.action_lab_dispatched_keys.clear()
+        self.action_lab_last_dispatch = self._empty_action_lab_dispatch()
+        return self.action_runner.reset()
+
     def _action_lab_snapshot(self) -> dict[str, object]:
-        return {
+        return self._action_lab_payload(self.action_runner.status()) | {
             "enabled": bool(self.action_lab_enabled),
-            "send_actions": False,
-            "requested_send_actions": bool(self.action_lab_send_actions),
-            "dry_run_only": True,
             "specs": list(self.action_lab_specs),
-            "status": self.action_runner.status(),
         }
+
+    def _action_lab_payload(self, status: dict[str, object]) -> dict[str, object]:
+        requested = bool(self.action_lab_send_actions)
+        effective, note = self._action_lab_dispatch_gate()
+        return {
+            "send_actions": bool(effective),
+            "requested_send_actions": requested,
+            "send_actions_requested": requested,
+            "send_actions_effective": bool(effective),
+            "dry_run_only": not bool(effective),
+            "note": note,
+            "dispatch": self._json_safe(self.action_lab_last_dispatch),
+            "status": status,
+        }
+
+    def _action_lab_dispatch_gate(self) -> tuple[bool, str]:
+        if not bool(self.action_lab_send_actions):
+            return False, "dry_run_only"
+        if not bool(self.controller_switches.snapshot().send_commands):
+            return False, "send_commands_disabled"
+        if self.action_runner.action_name != "payload_release":
+            return False, "only_payload_release_dispatch_enabled"
+        return True, ""
+
+    @staticmethod
+    def _empty_action_lab_dispatch() -> dict[str, list[dict[str, object]]]:
+        return {"sent": [], "skipped": [], "errors": []}
+
+    def _dispatch_action_lab_actions(self, actions: list[object]) -> dict[str, list[dict[str, object]]]:
+        dispatch = self._empty_action_lab_dispatch()
+        effective, note = self._action_lab_dispatch_gate()
+        if not actions:
+            return dispatch
+        if not effective:
+            for action in actions:
+                dispatch["skipped"].append({"action": action, "reason": note})
+            return dispatch
+
+        manager = self.services.link_manager
+        if manager is None:
+            for action in actions:
+                dispatch["errors"].append({"action": action, "error": "telemetry_not_connected"})
+            return dispatch
+
+        for action in actions:
+            if not isinstance(action, dict):
+                dispatch["skipped"].append({"action": action, "reason": "invalid_action"})
+                continue
+            if action.get("action_type") != "set_servo":
+                dispatch["skipped"].append({"action": action, "reason": "only_set_servo_enabled"})
+                continue
+            key = str(action.get("key") or "")
+            if bool(action.get("once", False)) and key and key in self.action_lab_dispatched_keys:
+                dispatch["skipped"].append({"action": action, "reason": "once_already_dispatched"})
+                continue
+            params = action.get("params")
+            if not isinstance(params, dict):
+                dispatch["errors"].append({"action": action, "error": "missing_params"})
+                continue
+            try:
+                manager.set_servo(
+                    int(params["channel"]),
+                    int(params["pwm"]),
+                    priority=int(action.get("priority", 3)),
+                )
+            except Exception as exc:
+                self.logger.exception("action lab set_servo dispatch failed")
+                dispatch["errors"].append({"action": action, "error": str(exc)})
+                continue
+            if bool(action.get("once", False)) and key:
+                self.action_lab_dispatched_keys.add(key)
+            dispatch["sent"].append({"action": action})
+        return dispatch
 
     def _web_stage_modes(self) -> list[str]:
         if self.mission_runner is None:
