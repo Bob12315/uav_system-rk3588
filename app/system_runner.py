@@ -591,6 +591,8 @@ class SystemRunner:
     def action_lab_tick(self) -> dict[str, object]:
         if not getattr(self, "action_runner", None):
             return {}
+        if self.action_runner.state != "running":
+            return self.action_runner.status()
         result = self.action_runner.update(self.action_lab_context())
         self.action_lab_last_dispatch = self._dispatch_action_lab_result(result.to_dict())
         self.logger.info(

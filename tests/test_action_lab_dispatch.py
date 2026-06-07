@@ -210,6 +210,68 @@ def test_goto_waypoint_status_route_includes_dispatch_keys() -> None:
     assert dispatch["sent"][0]["z"] == -1.5
 
 
+def test_align_descend_status_route_includes_altitude_and_command_fields() -> None:
+    runner = _runner()
+    app = create_app(runner, runner.config.ui)
+    start_route = next(route for route in app.routes if getattr(route, "path", "") == "/api/actions/start")
+    status_route = next(route for route in app.routes if getattr(route, "path", "") == "/api/actions/status")
+    with runner.control_command_log_lock:
+        runner.latest_snapshot = {
+            "drone": {"relative_altitude": 3.0, "control_allowed": True},
+            "perception": {
+                "target_valid": True,
+                "tracking_state": "locked",
+                "ex": 0.0,
+                "ey": 0.0,
+            },
+        }
+
+    start_route.endpoint(
+        ActionStartRequest(
+            name="align_descend",
+            params={"finish_altitude_m": 3.0, "config": {"min_altitude_m": 2.5}},
+            send_actions=False,
+        )
+    )
+    response = status_route.endpoint()
+
+    detail = response["action_lab"]["status"]["last_result"]["detail"]
+    assert detail["current_altitude_m"] == 3.0
+    assert detail["finish_altitude_m"] == 3.0
+    assert detail["min_altitude_m"] == 2.5
+    assert detail["altitude_source"] == "relative_altitude"
+    assert detail["reached_finish_altitude"] is True
+    assert detail["command"]["vz_cmd"] == 0.0
+
+
+def test_align_descend_missing_altitude_dispatches_zero_stop_when_send_enabled() -> None:
+    runner = _runner()
+    runner.controller_switches.set_send_commands(True)
+    with runner.control_command_log_lock:
+        runner.latest_snapshot = {
+            "drone": {"control_allowed": True},
+            "perception": {
+                "target_valid": True,
+                "tracking_state": "locked",
+                "ex": 0.0,
+                "ey": 0.0,
+            },
+        }
+
+    runner.action_lab_start_action("align_descend", {}, send_actions=True)
+    runner.action_lab_tick()
+
+    payload = runner.action_lab_status_payload()
+    result = payload["status"]["last_result"]
+    assert result["failed"] is True
+    assert result["reason"] == "missing_altitude"
+    assert runner.services.link_manager.calls == [
+        ("send_velocity_command", (0.0, 0.0, 0.0, 8), 0)
+    ]
+    assert payload["dispatch"]["sent"][0]["active"] is False
+    assert payload["dispatch"]["sent"][0]["vz_cmd"] == 0.0
+
+
 def test_goto_waypoint_local_position_unavailable_is_skipped() -> None:
     runner = _runner()
     runner.controller_switches.set_send_commands(True)

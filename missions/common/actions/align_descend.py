@@ -49,6 +49,12 @@ class AlignDescendConfig:
             raise ValueError("vy_sign must be non-zero")
 
 
+@dataclass(frozen=True, slots=True)
+class _AltitudeSample:
+    value_m: float
+    source: str
+
+
 def compute_align_descend_command(
     inputs: dict[str, Any],
     config: AlignDescendConfig,
@@ -211,11 +217,11 @@ class AlignDescendAction(ActionModule):
 
         data = context or {}
         inputs = self._inputs(data)
-        height_m = self._current_altitude_m(data)
-        if height_m is None:
+        altitude = self._current_altitude(data)
+        if altitude is None:
             self.failed = True
             self.failure_reason = "missing_altitude"
-            detail = self._failed_detail("missing_altitude", height_m=None)
+            detail = self._failed_detail("missing_altitude", height_m=None, altitude_source="")
             self.last_detail = detail
             return ActionResult(
                 actions=[],
@@ -239,7 +245,8 @@ class AlignDescendAction(ActionModule):
                     detail = self._detail(
                         command=_inactive_command(),
                         command_detail={**command_detail, "hold_reason": "align_retry"},
-                        height_m=height_m,
+                        height_m=altitude.value_m,
+                        altitude_source=altitude.source,
                     )
                     self.last_detail = detail
                     return ActionResult(actions=[], reason="align_retry", detail=detail)
@@ -249,7 +256,11 @@ class AlignDescendAction(ActionModule):
                     actions=[],
                     failed=True,
                     reason="target_lost_timeout",
-                    detail=self._failed_detail("target_lost_timeout", height_m=height_m),
+                    detail=self._failed_detail(
+                        "target_lost_timeout",
+                        height_m=altitude.value_m,
+                        altitude_source=altitude.source,
+                    ),
                 )
 
         if target_ok and command_detail["aligned"] is True:
@@ -257,17 +268,18 @@ class AlignDescendAction(ActionModule):
         elif target_ok:
             self.hold_updates = 0
 
-        if height_m <= self.config.min_altitude_m:
+        if altitude.value_m <= self.config.min_altitude_m:
             self.done = True
             detail = self._detail(
                 command=_inactive_command(),
                 command_detail={**command_detail, "hold_reason": "min_altitude_reached"},
-                height_m=height_m,
+                height_m=altitude.value_m,
+                altitude_source=altitude.source,
             )
             self.last_detail = detail
             return ActionResult(actions=[], done=True, reason="min_altitude_reached", detail=detail)
 
-        if self.finish_altitude_m is not None and height_m <= self.finish_altitude_m:
+        if self.finish_altitude_m is not None and altitude.value_m <= self.finish_altitude_m:
             self.done = True
             done_reason = (
                 "aligned_at_finish_altitude"
@@ -279,7 +291,8 @@ class AlignDescendAction(ActionModule):
             detail = self._detail(
                 command=_inactive_command(),
                 command_detail={**command_detail, "hold_reason": done_reason},
-                height_m=height_m,
+                height_m=altitude.value_m,
+                altitude_source=altitude.source,
             )
             self.last_detail = detail
             return ActionResult(actions=[], done=True, reason=done_reason, detail=detail)
@@ -288,7 +301,8 @@ class AlignDescendAction(ActionModule):
         detail = self._detail(
             command=command,
             command_detail={**command_detail, "hold_reason": reason},
-            height_m=height_m,
+            height_m=altitude.value_m,
+            altitude_source=altitude.source,
         )
         self.last_detail = detail
         return ActionResult(actions=[], reason=reason, detail=detail)
@@ -344,45 +358,65 @@ class AlignDescendAction(ActionModule):
         return inputs
 
     def _current_altitude_m(self, context: dict[str, Any]) -> float | None:
+        altitude = self._current_altitude(context)
+        return None if altitude is None else altitude.value_m
+
+    def _current_altitude(self, context: dict[str, Any]) -> _AltitudeSample | None:
         for name in ("relative_altitude", "relative_altitude_m"):
             value = self._float_from(context, name)
             if value is not None:
-                return max(0.0, value)
+                return _AltitudeSample(max(0.0, value), name)
 
         value = self._float_from(context, "altitude_m")
         if value is not None:
-            return max(0.0, value)
+            return _AltitudeSample(max(0.0, value), "altitude_m")
 
-        value = self._negative_local_z(context)
-        if value is not None:
-            return value
+        altitude = self._negative_local_z(context, "local_z")
+        if altitude is not None:
+            return altitude
+
+        local_position = context.get("local_position")
+        if isinstance(local_position, dict):
+            altitude = self._negative_local_z(local_position, "local_position.local_z")
+            if altitude is not None:
+                return altitude
 
         drone = context.get("drone")
         if isinstance(drone, dict):
             for name in ("relative_altitude", "relative_altitude_m"):
                 value = self._float_from(drone, name)
                 if value is not None:
-                    return max(0.0, value)
-            value = self._negative_local_z(drone)
-            if value is not None:
-                return value
+                    return _AltitudeSample(max(0.0, value), f"drone.{name}")
+            altitude = self._negative_local_z(drone, "drone.local_z")
+            if altitude is not None:
+                return altitude
             local_position = drone.get("local_position")
             if isinstance(local_position, dict):
-                value = self._negative_local_z(local_position)
+                altitude = self._negative_local_z(local_position, "drone.local_position.local_z")
+                if altitude is not None:
+                    return altitude
+
+        vehicle = context.get("vehicle")
+        if isinstance(vehicle, dict):
+            for name in ("relative_altitude", "relative_altitude_m"):
+                value = self._float_from(vehicle, name)
                 if value is not None:
-                    return value
+                    return _AltitudeSample(max(0.0, value), f"vehicle.{name}")
+            altitude = self._negative_local_z(vehicle, "vehicle.local_z")
+            if altitude is not None:
+                return altitude
 
         value = self._float_from(context, "altitude")
         if value is not None:
-            return max(0.0, value)
+            return _AltitudeSample(max(0.0, value), "altitude")
         return None
 
-    def _negative_local_z(self, source: dict[str, Any]) -> float | None:
+    def _negative_local_z(self, source: dict[str, Any], source_name: str) -> _AltitudeSample | None:
         local_z = self._float_from(source, "local_z")
         if local_z is None:
             local_z = self._float_from(source, "z")
         if local_z is not None and local_z < 0.0:
-            return max(0.0, -local_z)
+            return _AltitudeSample(max(0.0, -local_z), source_name)
         return None
 
     def _detail(
@@ -391,20 +425,37 @@ class AlignDescendAction(ActionModule):
         command: dict[str, Any],
         command_detail: dict[str, Any],
         height_m: float | None,
+        altitude_source: str = "",
     ) -> dict[str, Any]:
+        reached_finish_altitude = (
+            height_m is not None
+            and self.finish_altitude_m is not None
+            and height_m <= self.finish_altitude_m
+        )
         return {
             "command": command,
             "enabled": bool(command_detail.get("enabled", False)),
             "aligned": bool(command_detail.get("aligned", False)),
             "hold_reason": str(command_detail.get("hold_reason", "")),
             "height_m": height_m,
+            "current_altitude_m": height_m,
+            "finish_altitude_m": self.finish_altitude_m,
+            "min_altitude_m": self.config.min_altitude_m,
+            "altitude_source": altitude_source,
+            "reached_finish_altitude": bool(reached_finish_altitude),
             "lost_updates": int(self.lost_updates),
             "hold_updates": int(self.hold_updates),
             "retries": int(self.retries),
             "update_count": int(self.update_count),
         }
 
-    def _failed_detail(self, reason: str | None = None, *, height_m: float | None = None) -> dict[str, Any]:
+    def _failed_detail(
+        self,
+        reason: str | None = None,
+        *,
+        height_m: float | None = None,
+        altitude_source: str = "",
+    ) -> dict[str, Any]:
         return self._detail(
             command=_inactive_command(),
             command_detail={
@@ -413,6 +464,7 @@ class AlignDescendAction(ActionModule):
                 "hold_reason": reason or self.failure_reason or "align_descend_failed",
             },
             height_m=height_m,
+            altitude_source=altitude_source,
         )
 
     @staticmethod

@@ -368,6 +368,11 @@ def test_above_finish_altitude_allows_descent_when_aligned() -> None:
 
     assert result.done is False
     assert result.reason == "align_descending"
+    assert result.detail["current_altitude_m"] == pytest.approx(4.0)
+    assert result.detail["finish_altitude_m"] == pytest.approx(3.0)
+    assert result.detail["min_altitude_m"] == pytest.approx(2.5)
+    assert result.detail["altitude_source"] == "relative_altitude"
+    assert result.detail["reached_finish_altitude"] is False
     assert result.detail["command"]["active"] is True
     assert result.detail["command"]["vz_cmd"] == pytest.approx(0.2)
 
@@ -380,7 +385,13 @@ def test_finish_altitude_reached_stops_and_done() -> None:
 
     assert result.done is True
     assert result.reason == "finish_altitude_reached"
+    assert result.detail["current_altitude_m"] == pytest.approx(3.0)
+    assert result.detail["finish_altitude_m"] == pytest.approx(3.0)
+    assert result.detail["min_altitude_m"] == pytest.approx(2.5)
+    assert result.detail["altitude_source"] == "relative_altitude"
+    assert result.detail["reached_finish_altitude"] is True
     assert result.detail["command"]["active"] is False
+    assert result.detail["command"]["enable_approach"] is False
     assert result.detail["command"]["vx_cmd"] == pytest.approx(0.0)
     assert result.detail["command"]["vy_cmd"] == pytest.approx(0.0)
     assert result.detail["command"]["vz_cmd"] == pytest.approx(0.0)
@@ -405,8 +416,12 @@ def test_min_altitude_reached_stops_and_done() -> None:
 
     assert result.done is True
     assert result.reason == "min_altitude_reached"
+    assert result.detail["current_altitude_m"] == pytest.approx(2.4)
+    assert result.detail["min_altitude_m"] == pytest.approx(2.5)
     assert result.detail["command"]["active"] is False
     assert result.detail["command"]["enable_approach"] is False
+    assert result.detail["command"]["vx_cmd"] == pytest.approx(0.0)
+    assert result.detail["command"]["vy_cmd"] == pytest.approx(0.0)
     assert result.detail["command"]["vz_cmd"] == pytest.approx(0.0)
 
 
@@ -418,6 +433,11 @@ def test_missing_altitude_fails_without_descent() -> None:
 
     assert result.failed is True
     assert result.reason == "missing_altitude"
+    assert result.detail["current_altitude_m"] is None
+    assert result.detail["finish_altitude_m"] is None
+    assert result.detail["min_altitude_m"] == pytest.approx(2.0)
+    assert result.detail["altitude_source"] == ""
+    assert result.detail["reached_finish_altitude"] is False
     assert result.detail["command"]["active"] is False
     assert result.detail["command"]["vx_cmd"] == pytest.approx(0.0)
     assert result.detail["command"]["vy_cmd"] == pytest.approx(0.0)
@@ -432,6 +452,37 @@ def test_local_z_altitude_source_prevents_descent_below_min_altitude() -> None:
 
     assert result.done is True
     assert result.reason == "min_altitude_reached"
+    assert result.detail["altitude_source"] == "local_z"
+    assert result.detail["command"]["vz_cmd"] == pytest.approx(0.0)
+
+
+def test_vehicle_relative_altitude_source_is_supported() -> None:
+    action = AlignDescendAction()
+    action.start({"finish_altitude_m": 3.0, "config": {"min_altitude_m": 2.5}})
+
+    result = action.update(
+        _valid_inputs(ex_cam=0.0, ey_cam=0.0, vehicle={"relative_altitude": 4.0})
+    )
+
+    assert result.done is False
+    assert result.detail["current_altitude_m"] == pytest.approx(4.0)
+    assert result.detail["altitude_source"] == "vehicle.relative_altitude"
+    assert result.detail["command"]["vz_cmd"] == pytest.approx(0.2)
+
+
+def test_vehicle_local_z_source_stops_at_finish_altitude() -> None:
+    action = AlignDescendAction()
+    action.start({"finish_altitude_m": 3.0, "config": {"min_altitude_m": 2.5}})
+
+    result = action.update(
+        _valid_inputs(ex_cam=0.2, ey_cam=0.0, vehicle={"local_z": -3.0})
+    )
+
+    assert result.done is True
+    assert result.reason == "finish_altitude_reached"
+    assert result.detail["current_altitude_m"] == pytest.approx(3.0)
+    assert result.detail["altitude_source"] == "vehicle.local_z"
+    assert result.detail["reached_finish_altitude"] is True
     assert result.detail["command"]["vz_cmd"] == pytest.approx(0.0)
 
 
