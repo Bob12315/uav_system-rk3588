@@ -140,3 +140,17 @@ def test_web_ui_exposes_read_only_field_map() -> None:
     assert "Number(item.seen_count || 0) > 0" in script
     assert "ctx.rotate" not in script
     assert ".field-map-wrap" in styles
+
+
+def test_action_lab_start_uses_confirmation_instead_of_send_checkbox() -> None:
+    static_dir = Path(__file__).parents[1] / "web_ui" / "static"
+    index = (static_dir / "index.html").read_text(encoding="utf-8")
+    script = (static_dir / "app.js").read_text(encoding="utf-8")
+
+    assert "actionSendToggle" not in index
+    assert "Send actions to vehicle/simulator" not in index
+    assert "Start 会二次确认；确认后向 vehicle/simulator 请求下发" in index
+    assert 'window.confirm("即将启动 Action，并向 vehicle/simulator 下发控制指令。\\n确认继续？")' in script
+    assert "if (!confirmed) return;" in script
+    assert "send_actions: true" in script
+    assert "$(\"actionSendToggle\").checked" not in script

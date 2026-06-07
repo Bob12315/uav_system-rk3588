@@ -147,15 +147,11 @@
     </section>
 
     <section class="panel action-lab">
-      <div class="panel-title">Action Lab <span id="actionDryRun">Dry-run until SEND is enabled</span></div>
+      <div class="panel-title">Action Lab <span id="actionDryRun">Start 会二次确认；确认后向 vehicle/simulator 请求下发。系统级 send_commands=false 时仍不会实发。</span></div>
       <div class="action-lab-layout">
         <div>
           <div id="actionButtons" class="action-buttons"></div>
-          <label class="action-send">
-            <input id="actionSendToggle" type="checkbox">
-            Send actions to vehicle/simulator
-          </label>
-          <div class="hint" id="actionParamHint">Send actions still requires system SEND=ON.</div>
+          <div class="hint" id="actionParamHint">Start 会二次确认；确认后向 vehicle/simulator 请求下发。系统级 send_commands=false 时仍不会实发。</div>
         </div>
         <div>
           <textarea id="actionParams" spellcheck="false"></textarea>

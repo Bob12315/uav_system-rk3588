@@ -621,12 +621,14 @@ async function startActionLabAction() {
   if (!selectedActionName) return;
   const params = parseActionParams();
   if (params === null) return;
+  const confirmed = window.confirm("即将启动 Action，并向 vehicle/simulator 下发控制指令。\n确认继续？");
+  if (!confirmed) return;
   const result = await json("/api/actions/start", {
     method: "POST",
     body: JSON.stringify({
       name: selectedActionName,
       params,
-      send_actions: $("actionSendToggle").checked,
+      send_actions: true,
     }),
   });
   if (!result.ok) throw new Error(result.error || "action start failed");
