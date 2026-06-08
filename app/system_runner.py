@@ -617,16 +617,28 @@ class SystemRunner:
     ):
         if send_actions is not None:
             self.action_lab_send_actions = bool(send_actions)
+        if (
+            self.action_runner.state == "running"
+            and self.action_runner.action_name
+            and self.action_runner.action_name != action_name
+        ):
+            self.logger.info(
+                "action_lab switching action old=%s new=%s",
+                self.action_runner.action_name,
+                action_name,
+            )
+            self.action_runner.stop()
         self.action_lab_dispatched_keys.clear()
         self.action_lab_last_dispatch = self._empty_action_lab_dispatch()
         self.action_lab_last_servo_command = None
         return self.action_runner.start(action_name, dict(params or {}))
 
     def action_lab_stop_action(self):
-        self.action_lab_last_dispatch = self._empty_action_lab_dispatch()
         return self.action_runner.stop()
 
     def action_lab_reset_action(self):
+        if self.action_runner.current_action is not None and self.action_runner.state == "running":
+            self.action_runner.stop()
         self.action_lab_dispatched_keys.clear()
         self.action_lab_last_dispatch = self._empty_action_lab_dispatch()
         self.action_lab_last_servo_command = None
@@ -642,7 +654,7 @@ class SystemRunner:
         requested = bool(self.action_lab_send_actions)
         effective, note = self._action_lab_dispatch_gate()
         return {
-            "send_actions": bool(effective),
+            "send_actions": requested,
             "requested_send_actions": requested,
             "send_actions_requested": requested,
             "send_actions_effective": bool(effective),
@@ -653,18 +665,31 @@ class SystemRunner:
             "status": status,
         }
 
-    def _action_lab_dispatch_gate(self) -> tuple[bool, str]:
+    def _action_lab_dispatch_gate(self, action_type: str | None = None) -> tuple[bool, str]:
         if not bool(self.action_lab_send_actions):
             return False, "dry_run_only"
         if not bool(self.controller_switches.snapshot().send_commands):
             return False, "send_commands_disabled"
+        if action_type is not None:
+            return self._action_lab_dispatch_decision(action_type)
         if self.action_runner.action_name == "payload_release":
             return True, "payload_set_servo_dispatch_enabled"
         if self.action_runner.action_name == "goto_waypoint":
-            return True, "goto_waypoint_local_position_dispatch_enabled"
+            return True, "local_position_dispatch_enabled"
+        if self.action_runner.action_name == "survey_area":
+            return True, "action_dispatch_enabled"
         if self.action_runner.action_name == "align_descend":
             return True, "action_dispatch_enabled"
         return False, "action_dispatch_not_enabled"
+
+    def _action_lab_dispatch_decision(self, action_type: str) -> tuple[bool, str]:
+        if action_type == "set_servo":
+            return True, "payload_set_servo_dispatch_enabled"
+        if action_type == "local_position":
+            return True, "local_position_dispatch_enabled"
+        if action_type == "flight_command":
+            return True, "action_dispatch_enabled"
+        return False, "unsupported_action_type"
 
     @staticmethod
     def _empty_action_lab_dispatch() -> dict[str, list[dict[str, object]]]:
@@ -699,7 +724,8 @@ class SystemRunner:
         dispatch = self._empty_action_lab_dispatch()
         effective, note = self._action_lab_dispatch_gate()
         self.logger.info(
-            "action_lab dispatch gate send_actions_requested=%s send_commands=%s effective=%s note=%s",
+            "action_lab dispatch gate current_action=%s send_actions_requested=%s send_commands=%s effective=%s note=%s",
+            self.action_runner.action_name,
             bool(self.action_lab_send_actions),
             bool(self.controller_switches.snapshot().send_commands),
             bool(effective),
@@ -707,26 +733,23 @@ class SystemRunner:
         )
         if not actions:
             return dispatch
-        if not effective:
-            for action in actions:
-                dispatch["skipped"].append(
-                    {
-                        "action": action,
-                        "action_type": self._action_type_for_status(action),
-                        "reason": note,
-                    }
-                )
-            self.logger.info("action_lab dispatch skipped note=%s actions=%s", note, actions)
-            return dispatch
 
         for action in actions:
             if not isinstance(action, dict):
                 dispatch["skipped"].append({"action": action, "reason": "invalid_action"})
                 continue
             action_type = str(action.get("action_type") or "")
-            if not self._action_lab_action_supported(action_type):
+            action_allowed, action_note = self._action_lab_dispatch_gate(action_type)
+            self.logger.info(
+                "action_lab dispatch decision current_action=%s action_type=%s dispatch_allowed=%s note=%s",
+                self.action_runner.action_name,
+                action_type,
+                bool(action_allowed),
+                action_note,
+            )
+            if not action_allowed:
                 dispatch["skipped"].append(
-                    {"action": action, "action_type": action_type, "reason": "unsupported_action_type"}
+                    {"action": action, "action_type": action_type, "reason": action_note}
                 )
                 continue
             key = str(action.get("key") or "")
@@ -795,16 +818,6 @@ class SystemRunner:
         if action_type == "flight_command":
             return self._dispatch_flight_command(action)
         return {"status": "skipped", "reason": "unsupported_action_type"}
-
-    def _action_lab_action_supported(self, action_type: str) -> bool:
-        action_name = self.action_runner.action_name
-        if action_name == "payload_release":
-            return action_type == "set_servo"
-        if action_name == "goto_waypoint":
-            return action_type == "local_position"
-        if action_name == "align_descend":
-            return action_type == "flight_command"
-        return False
 
     def _action_params(self, action: dict[str, object]) -> dict[str, object]:
         params = action.get("params")

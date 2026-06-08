@@ -125,6 +125,11 @@ def create_app(runner, config: UiConfig) -> FastAPI:
     @app.post("/api/actions/start")
     def action_start(request: ActionStartRequest):
         try:
+            logging.getLogger("WebUiServer").info(
+                "/api/actions/start action=%s send_actions=%s",
+                request.name,
+                request.send_actions,
+            )
             result = runner.action_lab_start_action(
                 request.name,
                 dict(request.params or {}),

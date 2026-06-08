@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -102,7 +104,10 @@ def test_web_ui_exposes_manual_step_movement_controls() -> None:
     assert 'data-manual-move="forward"' in index
     assert 'data-manual-move="down"' in index
     assert 'data-manual-yaw="left"' in index
-    assert "local_pos ${offset.join(\" \")} body_offset" in script
+    assert "bodyOffsetToLocalOffset" in script
+    assert 'state?.drone?.yaw' in script
+    assert 'local_pos ${localOffset.map(commandNumber).join(" ")} offset' in script
+    assert 'body_offset' not in script
     assert "condition_yaw ${angle} 20 ${turn} relative" in script
     assert "signedAngle" not in script
 
@@ -148,9 +153,167 @@ def test_action_lab_start_uses_confirmation_instead_of_send_checkbox() -> None:
     script = (static_dir / "app.js").read_text(encoding="utf-8")
 
     assert "actionSendToggle" not in index
+    assert "actionStop" not in index
+    assert 'id="actionRunToggle"' in index
+    assert 'id="actionSelected"' in index
+    assert 'id="actionRunningAction"' in index
+    assert 'id="actionSwitchHint"' in index
     assert "Send actions to vehicle/simulator" not in index
     assert "Start 会二次确认；确认后向 vehicle/simulator 请求下发" in index
     assert 'window.confirm("即将启动 Action，并向 vehicle/simulator 下发控制指令。\\n确认继续？")' in script
     assert "if (!confirmed) return;" in script
     assert "send_actions: true" in script
+    assert 'console.log("Action Lab start request body", requestBody);' in script
+    assert "?v=action-lab-run-toggle" in index
     assert "$(\"actionSendToggle\").checked" not in script
+    assert "$(\"actionStop\")" not in script
+    assert "let actionParamCache = {};" in script
+    assert "function cacheSelectedActionParams()" in script
+    assert "function toggleActionLabRun()" in script
+    assert "selectedActionIsRunning()" in script
+    confirm_index = script.index('window.confirm("即将启动 Action')
+    cancel_index = script.index("if (!confirmed) return;", confirm_index)
+    body_index = script.index("const requestBody = {", cancel_index)
+    send_actions_index = script.index("send_actions: true", body_index)
+    post_index = script.index('json("/api/actions/start"', send_actions_index)
+    assert confirm_index < cancel_index < body_index < send_actions_index < post_index
+
+
+def test_action_lab_start_confirm_controls_api_request() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    root = Path(__file__).parents[1]
+    code = r"""
+const fs = require("fs");
+const source = fs.readFileSync("web_ui/static/app.js", "utf8");
+const start = source.indexOf("async function startActionLabAction()");
+const end = source.indexOf("\nasync function stopActionLabAction()", start);
+if (start < 0 || end < 0) throw new Error("startActionLabAction source not found");
+const fnSource = source.slice(start, end);
+let selectedActionName = "align_descend";
+let confirmValue = false;
+let calls = [];
+let logs = [];
+function parseActionParams() { return {foo: 1}; }
+async function json(url, options) {
+  calls.push({url, options, body: JSON.parse(options.body)});
+  return {ok: true, note: "ok", action_lab: {status: {last_result: {detail: {}}}}};
+}
+function $(id) { return {textContent: ""}; }
+function renderActionLabStatus() {}
+globalThis.window = {confirm: () => confirmValue};
+globalThis.console = {log: (...args) => logs.push(args)};
+eval(fnSource);
+(async () => {
+  await startActionLabAction();
+  if (calls.length !== 0) throw new Error("confirm=false should not call start API");
+  confirmValue = true;
+  await startActionLabAction();
+  if (calls.length !== 1) throw new Error("confirm=true should call start API once");
+  if (calls[0].url !== "/api/actions/start") throw new Error("wrong start URL");
+  if (calls[0].body.send_actions !== true) throw new Error("send_actions was not true");
+  if (!logs.some(item => item[0] === "Action Lab start request body" && item[1].send_actions === true)) {
+    throw new Error("missing start request console log");
+  }
+})().catch(error => {
+  process.stderr.write(error.stack || String(error));
+  process.exit(1);
+});
+"""
+    result = subprocess.run(
+        [node, "-e", code],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_action_lab_frontend_caches_params_and_uses_run_toggle() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    root = Path(__file__).parents[1]
+    code = r"""
+const fs = require("fs");
+const source = fs.readFileSync("web_ui/static/app.js", "utf8");
+const start = source.indexOf("async function loadActionLab()");
+const end = source.indexOf("\nasync function loadConfigFiles()", start);
+if (start < 0 || end < 0) throw new Error("Action Lab source not found");
+const fnSource = source.slice(start, end);
+let selectedActionName = "";
+let actionParamCache = {};
+let latestActionLab = null;
+let actionSpecs = [
+  {name: "goto_waypoint", label: "Goto", default_params: {x: 1}},
+  {name: "payload_release", label: "Payload", default_params: {channel: 8}},
+];
+let stopCalls = 0;
+let startCalls = 0;
+const elements = {
+  actionParams: {value: "", oninput: null},
+  actionState: {textContent: ""},
+  actionDryRun: {textContent: ""},
+  actionSelected: {textContent: ""},
+  actionRunningAction: {textContent: ""},
+  actionRunning: {textContent: ""},
+  actionReason: {textContent: ""},
+  actionDone: {textContent: ""},
+  actionFailed: {textContent: ""},
+  actionRunToggle: {textContent: "", classList: {toggle: () => {}}},
+  actionSwitchHint: {textContent: ""},
+  actionHighlights: {innerHTML: ""},
+  actionStatusJson: {textContent: ""},
+  completionHint: {textContent: ""},
+  actionParamHint: {textContent: ""},
+};
+function $(id) { return elements[id]; }
+function escapeHtml(value) { return String(value); }
+globalThis.document = {querySelectorAll: () => []};
+eval(fnSource);
+stopActionLabAction = () => { stopCalls += 1; return Promise.resolve(); };
+startActionLabAction = () => { startCalls += 1; return Promise.resolve(); };
+selectAction("goto_waypoint");
+elements.actionParams.value = "{\"x\":42}";
+selectAction("payload_release");
+if (elements.actionParams.value !== JSON.stringify({channel: 8}, null, 2)) {
+  throw new Error("payload should load default on first open");
+}
+elements.actionParams.value = "{\"channel\":9}";
+selectAction("goto_waypoint");
+if (elements.actionParams.value !== "{\"x\":42}") {
+  throw new Error("goto params were not cached");
+}
+selectAction("payload_release");
+if (elements.actionParams.value !== "{\"channel\":9}") {
+  throw new Error("payload params were not cached");
+}
+renderActionLabStatus({status: {running: true, action_name: "payload_release", last_result: {}}, note: "action_dispatch_enabled", send_actions_effective: true});
+if (elements.actionRunToggle.textContent !== "停止") throw new Error("running selected action should show stop");
+toggleActionLabRun().then(() => {
+  if (stopCalls !== 1 || startCalls !== 0) throw new Error("toggle should stop selected running action");
+  selectAction("goto_waypoint");
+  if (!elements.actionSwitchHint.textContent.includes("点击“开始”将停止 payload_release 并启动 goto_waypoint")) {
+    throw new Error("missing running/selected switch hint");
+  }
+  if (elements.actionRunToggle.textContent !== "开始") throw new Error("different selected action should show start");
+  return toggleActionLabRun();
+}).then(() => {
+  if (startCalls !== 1) throw new Error("toggle should start selected non-running action");
+}).catch(error => {
+  process.stderr.write(error.stack || String(error));
+  process.exit(1);
+});
+"""
+    result = subprocess.run(
+        [node, "-e", code],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr

@@ -156,8 +156,7 @@
         <div>
           <textarea id="actionParams" spellcheck="false"></textarea>
           <div class="button-row">
-            <button id="actionStart">Start</button>
-            <button id="actionStop" class="stop">Stop</button>
+            <button id="actionRunToggle">开始</button>
             <button id="actionReset">Reset</button>
             <button id="actionRefresh">Refresh Status</button>
           </div>
@@ -165,12 +164,14 @@
         <div class="action-status-panel">
           <dl class="action-status-summary">
             <dt>State</dt><dd id="actionState">--</dd>
-            <dt>Action</dt><dd id="actionName">--</dd>
+            <dt>Selected</dt><dd id="actionSelected">--</dd>
+            <dt>Running Action</dt><dd id="actionRunningAction">--</dd>
             <dt>Running</dt><dd id="actionRunning">--</dd>
             <dt>Reason</dt><dd id="actionReason">--</dd>
             <dt>Done</dt><dd id="actionDone">--</dd>
             <dt>Failed</dt><dd id="actionFailed">--</dd>
           </dl>
+          <div id="actionSwitchHint" class="hint"></div>
           <div id="actionHighlights" class="action-highlights"></div>
         </div>
       </div>
@@ -221,6 +222,6 @@
       </article>
     </section>
   </main>
-  <script src="/static/app.js?v=field-map-large"></script>
+  <script src="/static/app.js?v=action-lab-run-toggle"></script>
 </body>
 </html>

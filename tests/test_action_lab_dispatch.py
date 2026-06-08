@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 from app.app_config import build_arg_parser, load_app_config
@@ -64,6 +65,20 @@ def _goto_params(**overrides: object) -> dict[str, object]:
         "y": 0.0,
         "altitude_m": 1.5,
         "yaw_mode": "hold",
+    }
+    data.update(overrides)
+    return data
+
+
+def _survey_params(**overrides: object) -> dict[str, object]:
+    data: dict[str, object] = {
+        "waypoints": [
+            {"x": 0.0, "y": 0.0, "altitude_m": 5.0},
+            {"x": 2.0, "y": 0.0, "altitude_m": 5.0},
+        ],
+        "capture_updates_per_waypoint": 3,
+        "max_updates_per_waypoint": 200,
+        "detection_source": "scene",
     }
     data.update(overrides)
     return data
@@ -180,12 +195,53 @@ def test_goto_waypoint_local_position_dispatches_when_gates_enabled() -> None:
     payload = runner.action_lab_status_payload()
     assert payload["send_actions_requested"] is True
     assert payload["send_actions_effective"] is True
-    assert payload["note"] == "goto_waypoint_local_position_dispatch_enabled"
+    assert payload["note"] == "local_position_dispatch_enabled"
     assert payload["dispatch"]["sent"][0]["action_type"] == "local_position"
     assert payload["dispatch"]["sent"][0]["x"] == 1.0
     assert payload["dispatch"]["sent"][0]["y"] == 0.0
     assert payload["dispatch"]["sent"][0]["z"] == -1.5
     assert payload["dispatch"]["sent"][0]["frame"] == 1
+
+
+def test_survey_area_local_position_dispatches_like_goto_waypoint(caplog) -> None:
+    runner = _runner()
+    runner.controller_switches.set_send_commands(True)
+
+    with caplog.at_level(logging.INFO, logger="SystemRunner"):
+        runner.action_lab_start_action("survey_area", _survey_params(), send_actions=True)
+        runner.action_lab_tick()
+
+    assert runner.services.link_manager.calls == [
+        ("local_position", (0.0, 0.0, -5.0, 1, None), 4)
+    ]
+    payload = runner.action_lab_status_payload()
+    assert payload["send_actions_requested"] is True
+    assert payload["send_actions_effective"] is True
+    assert payload["note"] == "action_dispatch_enabled"
+    assert payload["dispatch"]["sent"][0]["action_type"] == "local_position"
+    assert payload["dispatch"]["sent"][0]["x"] == 0.0
+    assert payload["dispatch"]["sent"][0]["y"] == 0.0
+    assert payload["dispatch"]["sent"][0]["z"] == -5.0
+    assert payload["dispatch"]["sent"][0]["frame"] == 1
+    assert payload["dispatch"]["sent"][0]["key"] == "survey_waypoint_0"
+    assert "current_action=survey_area action_type=local_position dispatch_allowed=True" in caplog.text
+
+
+def test_survey_area_local_position_respects_send_commands_gate() -> None:
+    runner = _runner()
+    runner.controller_switches.set_send_commands(False)
+
+    runner.action_lab_start_action("survey_area", _survey_params(), send_actions=True)
+    runner.action_lab_tick()
+
+    payload = runner.action_lab_status_payload()
+    assert runner.services.link_manager.calls == []
+    assert payload["send_actions_requested"] is True
+    assert payload["send_actions_effective"] is False
+    assert payload["note"] == "send_commands_disabled"
+    assert payload["dispatch"]["sent"] == []
+    assert payload["dispatch"]["skipped"][0]["action_type"] == "local_position"
+    assert payload["dispatch"]["skipped"][0]["reason"] == "send_commands_disabled"
 
 
 def test_goto_waypoint_status_route_includes_dispatch_keys() -> None:
@@ -208,6 +264,35 @@ def test_goto_waypoint_status_route_includes_dispatch_keys() -> None:
     assert set(dispatch) == {"sent", "skipped", "errors"}
     assert dispatch["sent"][0]["action_type"] == "local_position"
     assert dispatch["sent"][0]["z"] == -1.5
+
+
+def test_action_start_route_receives_send_actions_true_and_status_reports_requested(caplog) -> None:
+    runner = _runner()
+    runner.controller_switches.set_send_commands(False)
+    app = create_app(runner, runner.config.ui)
+    start_route = next(route for route in app.routes if getattr(route, "path", "") == "/api/actions/start")
+    status_route = next(route for route in app.routes if getattr(route, "path", "") == "/api/actions/status")
+
+    with caplog.at_level(logging.INFO, logger="WebUiServer"):
+        response = start_route.endpoint(
+            ActionStartRequest(
+                name="goto_waypoint",
+                params=_goto_params(),
+                send_actions=True,
+            )
+        )
+    status = status_route.endpoint()
+
+    assert response["ok"] is True
+    assert response["action_lab"]["send_actions"] is True
+    assert response["action_lab"]["requested_send_actions"] is True
+    assert response["action_lab"]["send_actions_requested"] is True
+    assert response["action_lab"]["send_actions_effective"] is False
+    assert response["action_lab"]["dry_run_only"] is True
+    assert response["action_lab"]["note"] == "send_commands_disabled"
+    assert status["action_lab"]["requested_send_actions"] is True
+    assert status["action_lab"]["send_actions_requested"] is True
+    assert "/api/actions/start action=goto_waypoint send_actions=True" in caplog.text
 
 
 def test_align_descend_status_route_includes_altitude_and_command_fields() -> None:
@@ -270,6 +355,77 @@ def test_align_descend_missing_altitude_dispatches_zero_stop_when_send_enabled()
     ]
     assert payload["dispatch"]["sent"][0]["active"] is False
     assert payload["dispatch"]["sent"][0]["vz_cmd"] == 0.0
+
+
+def test_action_lab_start_sets_running_state() -> None:
+    runner = _runner()
+
+    result = runner.action_lab_start_action("payload_release", _payload_params(), send_actions=True)
+
+    assert result.reason == "action_started"
+    assert runner.action_runner.status()["state"] == "running"
+    assert runner.action_runner.status()["action_name"] == "payload_release"
+
+
+def test_action_lab_starting_different_action_stops_current_and_starts_new() -> None:
+    runner = _runner()
+    first = runner.action_lab_start_action("align_descend", {}, send_actions=True)
+    old_action = runner.action_runner.current_action
+
+    second = runner.action_lab_start_action("payload_release", _payload_params(), send_actions=True)
+
+    assert first.reason == "action_started"
+    assert second.reason == "action_started"
+    assert getattr(old_action, "stopped", False) is True
+    assert runner.action_runner.status()["state"] == "running"
+    assert runner.action_runner.status()["action_name"] == "payload_release"
+
+
+def test_action_lab_starting_new_action_clears_dispatch_keys_and_last_dispatch() -> None:
+    runner = _runner()
+    runner.action_lab_start_action("align_descend", {}, send_actions=True)
+    runner.action_lab_dispatched_keys.add("already_sent")
+    runner.action_lab_last_dispatch = {
+        "sent": [{"action_type": "flight_command"}],
+        "skipped": [{"reason": "old"}],
+        "errors": [{"error": "old"}],
+    }
+
+    runner.action_lab_start_action("payload_release", _payload_params(), send_actions=True)
+
+    assert runner.action_lab_dispatched_keys == set()
+    assert runner.action_lab_last_dispatch == {"sent": [], "skipped": [], "errors": []}
+
+
+def test_action_lab_reset_clears_dispatch_and_does_not_restart() -> None:
+    runner = _runner()
+    runner.action_lab_start_action("payload_release", _payload_params(), send_actions=True)
+    runner.action_lab_dispatched_keys.add("already_sent")
+    runner.action_lab_last_dispatch = {
+        "sent": [{"action_type": "set_servo"}],
+        "skipped": [{"reason": "old"}],
+        "errors": [{"error": "old"}],
+    }
+
+    result = runner.action_lab_reset_action()
+
+    assert result.reason == "action_reset"
+    assert runner.action_runner.status()["state"] == "idle"
+    assert runner.action_runner.status()["action_name"] is None
+    assert runner.action_lab_dispatched_keys == set()
+    assert runner.action_lab_last_dispatch == {"sent": [], "skipped": [], "errors": []}
+    assert runner.services.link_manager.calls == []
+
+
+def test_action_lab_stop_sets_stopped_state() -> None:
+    runner = _runner()
+    runner.action_lab_start_action("payload_release", _payload_params(), send_actions=True)
+
+    result = runner.action_lab_stop_action()
+
+    assert result.reason == "action_stopped"
+    assert runner.action_runner.status()["state"] == "stopped"
+    assert runner.action_runner.status()["action_name"] == "payload_release"
 
 
 def test_goto_waypoint_local_position_unavailable_is_skipped() -> None:

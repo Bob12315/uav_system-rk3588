@@ -8,6 +8,8 @@ let currentOriginal = "";
 let missionCatalog = [];
 let actionSpecs = [];
 let selectedActionName = "";
+let actionParamCache = {};
+let latestActionLab = null;
 const fallbackStageModes = ["AUTO", "IDLE", "APPROACH_TRACK", "OVERHEAD_HOLD", "CORRIDOR_FOLLOW"];
 const FIELD_DEFAULTS = {
   bounds: {xMin: -8, xMax: 62, yMin: -6, yMax: 6},
@@ -76,6 +78,20 @@ function positiveStep(inputId, label) {
   }
   return value;
 }
+function commandNumber(value) {
+  const normalized = Math.abs(value) < 1e-9 ? 0 : value;
+  return Number(normalized.toFixed(6)).toString();
+}
+function bodyOffsetToLocalOffset(offset, yaw) {
+  const [forward, right, down] = offset;
+  const cosYaw = Math.cos(yaw);
+  const sinYaw = Math.sin(yaw);
+  return [
+    forward * cosYaw - right * sinYaw,
+    forward * sinYaw + right * cosYaw,
+    down,
+  ];
+}
 function executeManualMove(direction) {
   const step = positiveStep("moveStep", "移动步长");
   if (step === null) return;
@@ -89,7 +105,13 @@ function executeManualMove(direction) {
   };
   const offset = offsets[direction];
   if (!offset) return;
-  execute(`local_pos ${offset.join(" ")} body_offset`, "MANUAL_MOVE");
+  const yaw = Number(state?.drone?.yaw);
+  if (!Number.isFinite(yaw) && (offset[0] !== 0 || offset[1] !== 0)) {
+    $("completionHint").textContent = "缺少当前偏航姿态，无法换算机体系水平步长";
+    return;
+  }
+  const localOffset = Number.isFinite(yaw) ? bodyOffsetToLocalOffset(offset, yaw) : offset;
+  execute(`local_pos ${localOffset.map(commandNumber).join(" ")} offset`, "MANUAL_MOVE");
 }
 function executeManualYaw(direction) {
   const angle = positiveStep("yawStep", "偏航角度");
@@ -552,11 +574,19 @@ async function loadActionLab() {
   });
   if (actionSpecs.length) selectAction(actionSpecs[0].name);
 }
+function cacheSelectedActionParams() {
+  if (!selectedActionName || !$("actionParams")) return;
+  actionParamCache[selectedActionName] = $("actionParams").value;
+}
 function selectAction(name) {
   const spec = actionSpecs.find(item => item.name === name);
   if (!spec) return;
+  cacheSelectedActionParams();
   selectedActionName = spec.name;
-  $("actionParams").value = JSON.stringify(spec.default_params || {}, null, 2);
+  if (actionParamCache[selectedActionName] === undefined) {
+    actionParamCache[selectedActionName] = JSON.stringify(spec.default_params || {}, null, 2);
+  }
+  $("actionParams").value = actionParamCache[selectedActionName];
   let hint = spec.description || spec.label || spec.name;
   if (spec.name === "payload_release") {
     hint = `${hint} servo_outputs 是飞控 SERVO 输出通道配置，不是遥控器 RC 输入通道。舵机插在输出 8 就填 channel=8。`;
@@ -567,6 +597,7 @@ function selectAction(name) {
   if ($("actionParamHint")) $("actionParamHint").textContent = hint;
   document.querySelectorAll("[data-action-name]").forEach(button =>
     button.classList.toggle("active-choice", button.dataset.actionName === selectedActionName));
+  renderActionLabStatus(latestActionLab);
 }
 async function refreshActionStatus() {
   const result = await json("/api/actions/status");
@@ -576,21 +607,35 @@ async function refreshActionStatus() {
 }
 function renderActionLabStatus(actionLab) {
   if (!$("actionState")) return;
-  const status = actionLab?.status || actionLab || {};
+  if (actionLab) latestActionLab = actionLab;
+  const payload = latestActionLab || {};
+  const status = payload?.status || payload || {};
   const last = status?.last_result || {};
   const detail = last.detail || {};
-  const note = actionLab?.note || "";
+  const note = payload?.note || "";
+  const runningAction = status?.running ? status?.action_name || "" : "";
+  const selectedIsRunning = Boolean(runningAction && runningAction === selectedActionName);
   if ($("actionDryRun")) {
-    $("actionDryRun").textContent = actionLab?.send_actions_effective
+    $("actionDryRun").textContent = payload?.send_actions_effective
       ? `Dispatch enabled${note ? `: ${note}` : ""}`
       : `Dry-run${note ? `: ${note}` : ""}`;
   }
   $("actionState").textContent = status?.state || "--";
-  $("actionName").textContent = status?.action_name || "--";
+  $("actionSelected").textContent = selectedActionName || "--";
+  $("actionRunningAction").textContent = runningAction || "--";
   $("actionRunning").textContent = String(Boolean(status?.running));
   $("actionReason").textContent = last.reason || "--";
   $("actionDone").textContent = String(Boolean(last.done));
   $("actionFailed").textContent = String(Boolean(last.failed));
+  if ($("actionRunToggle")) {
+    $("actionRunToggle").textContent = selectedIsRunning ? "停止" : "开始";
+    $("actionRunToggle").classList.toggle("stop", selectedIsRunning);
+  }
+  if ($("actionSwitchHint")) {
+    $("actionSwitchHint").textContent = runningAction && runningAction !== selectedActionName
+      ? `当前运行：${runningAction}；当前选中：${selectedActionName || "--"}。点击“开始”将停止 ${runningAction} 并启动 ${selectedActionName || "--"}。`
+      : "";
+  }
   const highlights = {
     command: detail.command,
     estimated_objects: detail.estimated_objects,
@@ -606,9 +651,10 @@ function renderActionLabStatus(actionLab) {
     .filter(([, value]) => value !== undefined)
     .map(([key, value]) => `<div><span>${escapeHtml(key)}</span><code>${escapeHtml(JSON.stringify(value))}</code></div>`)
     .join("");
-  $("actionStatusJson").textContent = JSON.stringify(actionLab || status || {}, null, 2);
+  $("actionStatusJson").textContent = JSON.stringify(payload || status || {}, null, 2);
 }
 function parseActionParams() {
+  cacheSelectedActionParams();
   try {
     const value = $("actionParams").value.trim();
     return value ? JSON.parse(value) : {};
@@ -617,19 +663,32 @@ function parseActionParams() {
     return null;
   }
 }
+function selectedActionIsRunning() {
+  const status = latestActionLab?.status || {};
+  return Boolean(status?.running && status?.action_name === selectedActionName);
+}
+async function toggleActionLabRun() {
+  if (selectedActionIsRunning()) {
+    await stopActionLabAction();
+  } else {
+    await startActionLabAction();
+  }
+}
 async function startActionLabAction() {
   if (!selectedActionName) return;
   const params = parseActionParams();
   if (params === null) return;
   const confirmed = window.confirm("即将启动 Action，并向 vehicle/simulator 下发控制指令。\n确认继续？");
   if (!confirmed) return;
+  const requestBody = {
+    name: selectedActionName,
+    params,
+    send_actions: true,
+  };
+  console.log("Action Lab start request body", requestBody);
   const result = await json("/api/actions/start", {
     method: "POST",
-    body: JSON.stringify({
-      name: selectedActionName,
-      params,
-      send_actions: true,
-    }),
+    body: JSON.stringify(requestBody),
   });
   if (!result.ok) throw new Error(result.error || "action start failed");
   $("completionHint").textContent = result.note || "action started";
@@ -641,6 +700,7 @@ async function stopActionLabAction() {
   renderActionLabStatus(result.action_lab || result.status);
 }
 async function resetActionLabAction() {
+  cacheSelectedActionParams();
   const result = await json("/api/actions/reset", {method: "POST", body: "{}"});
   if (!result.ok) throw new Error(result.error || "action reset failed");
   renderActionLabStatus(result.action_lab || result.status);
@@ -772,8 +832,8 @@ async function init() {
   $("reconnectTelemetry").onclick = () => confirm("重连通信将关闭自动发送，确认？") && json("/api/services/telemetry/reconnect", {method: "POST"}).then(loadAudit);
   $("restartYolo").onclick = () => confirm("确认重启 YOLO 服务？") && json("/api/services/yolo/restart", {method: "POST"}).then(loadAudit);
   $("restartApp").onclick = () => confirm("重启 App 将关闭自动发送并暂时断开网页，确认？") && json("/api/services/app/restart", {method: "POST"}).then(loadAudit);
-  $("actionStart").onclick = () => startActionLabAction().catch(error => { $("completionHint").textContent = error.message; });
-  $("actionStop").onclick = () => stopActionLabAction().catch(error => { $("completionHint").textContent = error.message; });
+  $("actionParams").oninput = () => cacheSelectedActionParams();
+  $("actionRunToggle").onclick = () => toggleActionLabRun().catch(error => { $("completionHint").textContent = error.message; });
   $("actionReset").onclick = () => resetActionLabAction().catch(error => { $("completionHint").textContent = error.message; });
   $("actionRefresh").onclick = () => refreshActionStatus().catch(error => { $("completionHint").textContent = error.message; });
   completions = (await json("/api/commands/completions")).commands;
