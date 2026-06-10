@@ -5,10 +5,10 @@ import logging
 import time
 from typing import Any
 
-from pymavlink import mavutil
 
 from app.dispatch_policy import ACTION_DISPATCH_POLICY, DispatchRule
 from app.safety_gate import SafetyGate
+from telemetry_link.frames import BODY_NED, LOCAL_NED
 
 
 class ActionDispatcher:
@@ -79,6 +79,8 @@ class ActionDispatcher:
         if action_name == "payload_release":
             return True, "payload_set_servo_dispatch_enabled"
         if action_name == "goto_waypoint":
+            return True, "local_position_dispatch_enabled"
+        if action_name == "survey_area":
             return True, "local_position_dispatch_enabled"
         if action_name == "align_descend":
             return True, "action_dispatch_enabled"
@@ -285,10 +287,15 @@ class ActionDispatcher:
             priority,
             action.get("key"),
         )
-        set_servo = getattr(link_manager, "set_servo", None)
-        if not callable(set_servo):
-            return {"status": "error", "reason": "set_servo_not_callable"}
-        set_servo(channel, pwm, priority=priority)
+        # prefer semantic wrapper (T4)
+        wrapper = getattr(link_manager, "set_servo_output_pwm", None)
+        if callable(wrapper):
+            wrapper(servo_output=channel, pwm=pwm, priority=priority)
+        else:
+            set_servo = getattr(link_manager, "set_servo", None)
+            if not callable(set_servo):
+                return {"status": "error", "reason": "set_servo_not_callable"}
+            set_servo(channel, pwm, priority=priority)
         self.last_servo_command = {
             "channel": channel,
             "pwm": pwm,
@@ -314,17 +321,45 @@ class ActionDispatcher:
         *,
         link_manager: object | None,
     ) -> dict[str, object]:
-        sender = getattr(link_manager, "local_position", None) if link_manager is not None else None
-        if not callable(sender):
-            return {"status": "skipped", "reason": "local_position_dispatch_not_available"}
-
         params = self._action_params(action)
         x = float(params["x"])
         y = float(params["y"])
         z = float(params["z"])
-        frame = int(params.get("frame", 1))
+        frame = int(params.get("frame", LOCAL_NED))
         yaw = None if params.get("yaw") is None else float(params["yaw"])
         priority = int(action.get("priority", 4))
+
+        # prefer semantic wrapper when frame matches (T4)
+        if frame == LOCAL_NED:
+            wrapper = getattr(link_manager, "goto_local_ned", None)
+            if callable(wrapper):
+                self._logger.info(
+                    "action_lab dispatch goto_local_ned x_north_m=%s y_east_m=%s z_down_m=%s yaw_rad=%s priority=%s key=%s",
+                    x, y, z, yaw, priority, action.get("key"),
+                )
+                wrapper(
+                    x_north_m=x,
+                    y_east_m=y,
+                    z_down_m=z,
+                    yaw_rad=yaw,
+                    priority=priority,
+                )
+                detail: dict[str, object] = {
+                    "action_type": "local_position",
+                    "x": x,
+                    "y": y,
+                    "z": z,
+                    "frame": frame,
+                    "key": str(action.get("key") or ""),
+                }
+                if yaw is not None:
+                    detail["yaw"] = yaw
+                return {"status": "sent", "detail": detail}
+
+        # fallback: original local_position
+        sender = getattr(link_manager, "local_position", None)
+        if not callable(sender):
+            return {"status": "skipped", "reason": "local_position_dispatch_not_available"}
         if yaw is not None and not self._callable_accepts_keyword(sender, "yaw"):
             return {"status": "skipped", "reason": "local_position_yaw_not_supported"}
         self._logger.info(
@@ -388,6 +423,23 @@ class ActionDispatcher:
                 "detail": detail,
             }
 
+        frame = BODY_NED
+        # prefer semantic wrapper (T4)
+        wrapper = getattr(link_manager, "send_body_velocity", None)
+        if callable(wrapper):
+            self._logger.info(
+                "action_lab dispatch send_body_velocity vx_forward_mps=%.3f vy_right_mps=%.3f vz_down_mps=%.3f key=%s active=%s",
+                send_vx, send_vy, send_vz, action.get("key"), active,
+            )
+            wrapper(
+                vx_forward_mps=send_vx,
+                vy_right_mps=send_vy,
+                vz_down_mps=send_vz,
+            )
+            detail["frame"] = frame
+            return {"status": "sent", "detail": detail}
+
+        # fallback: original send_velocity_command
         sender = getattr(link_manager, "send_velocity_command", None) if link_manager is not None else None
         if not callable(sender):
             return {
@@ -395,8 +447,6 @@ class ActionDispatcher:
                 "reason": "flight_command_dispatch_not_available",
                 "detail": detail,
             }
-
-        frame = mavutil.mavlink.MAV_FRAME_BODY_NED
         self._logger.info(
             "action_lab dispatch flight_command vx=%.3f vy=%.3f vz=%.3f yaw_rate=%.3f frame=BODY_NED priority=%s key=%s active=%s",
             send_vx,

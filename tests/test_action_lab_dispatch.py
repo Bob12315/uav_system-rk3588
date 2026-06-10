@@ -13,6 +13,40 @@ class FakeLink:
     calls: list[tuple[str, tuple[object, ...], int]] = field(default_factory=list)
     fail: bool = False
 
+    # ── semantic wrappers (T4 preferred path) ─────────────────────
+    def goto_local_ned(
+        self,
+        x_north_m: float,
+        y_east_m: float,
+        z_down_m: float,
+        yaw_rad: float | None = None,
+        priority: int = 4,
+    ) -> None:
+        if self.fail:
+            raise RuntimeError("local position failed")
+        self.calls.append(("goto_local_ned", (x_north_m, y_east_m, z_down_m, yaw_rad), priority))
+
+    def send_body_velocity(
+        self,
+        vx_forward_mps: float,
+        vy_right_mps: float,
+        vz_down_mps: float,
+    ) -> None:
+        if self.fail:
+            raise RuntimeError("velocity failed")
+        self.calls.append(("send_body_velocity", (vx_forward_mps, vy_right_mps, vz_down_mps), 0))
+
+    def set_servo_output_pwm(
+        self,
+        servo_output: int,
+        pwm: int,
+        priority: int = 3,
+    ) -> None:
+        if self.fail:
+            raise RuntimeError("servo failed")
+        self.calls.append(("set_servo_output_pwm", (servo_output, pwm), priority))
+
+    # ── legacy interfaces (fallback compat) ───────────────────────
     def set_servo(self, channel: int, pwm: int, priority: int = 3) -> None:
         if self.fail:
             raise RuntimeError("servo failed")
@@ -190,7 +224,7 @@ def test_goto_waypoint_local_position_dispatches_when_gates_enabled() -> None:
     runner.action_lab_tick()
 
     assert runner.services.link_manager.calls == [
-        ("local_position", (1.0, 0.0, -1.5, 1, None), 4)
+        ("goto_local_ned", (1.0, 0.0, -1.5, None), 4)
     ]
     payload = runner.action_lab_status_payload()
     assert payload["send_actions_requested"] is True
@@ -211,15 +245,20 @@ def test_survey_area_local_position_dispatches_like_goto_waypoint(caplog) -> Non
         runner.action_lab_start_action("survey_area", _survey_params(), send_actions=True)
         runner.action_lab_tick()
 
-    assert runner.services.link_manager.calls == []
+    assert runner.services.link_manager.calls == [
+        ("goto_local_ned", (0.0, 0.0, -5.0, None), 4)
+    ]
     payload = runner.action_lab_status_payload()
     assert payload["send_actions_requested"] is True
-    assert payload["send_actions_effective"] is False
-    assert payload["note"] == "action_dispatch_not_enabled"
-    assert payload["dispatch"]["sent"] == []
-    assert payload["dispatch"]["skipped"][0]["action_type"] == "local_position"
-    assert payload["dispatch"]["skipped"][0]["reason"] == "action_dispatch_not_enabled"
-    assert "current_action=survey_area action_type=local_position dispatch_allowed=False" in caplog.text
+    assert payload["send_actions_effective"] is True
+    assert payload["note"] == "local_position_dispatch_enabled"
+    assert payload["dispatch"]["sent"][0]["action_type"] == "local_position"
+    assert payload["dispatch"]["sent"][0]["x"] == 0.0
+    assert payload["dispatch"]["sent"][0]["y"] == 0.0
+    assert payload["dispatch"]["sent"][0]["z"] == -5.0
+    assert payload["dispatch"]["sent"][0]["frame"] == 1
+    assert payload["dispatch"]["sent"][0]["key"] == "survey_waypoint_0"
+    assert "current_action=survey_area action_type=local_position dispatch_allowed=True" in caplog.text
 
 
 def test_survey_area_local_position_respects_send_commands_gate() -> None:
@@ -237,6 +276,33 @@ def test_survey_area_local_position_respects_send_commands_gate() -> None:
     assert payload["dispatch"]["sent"] == []
     assert payload["dispatch"]["skipped"][0]["action_type"] == "local_position"
     assert payload["dispatch"]["skipped"][0]["reason"] == "send_commands_disabled"
+
+
+def test_survey_area_send_actions_false_is_dry_run_only() -> None:
+    runner = _runner()
+    runner.controller_switches.set_send_commands(True)
+
+    runner.action_lab_start_action("survey_area", _survey_params(), send_actions=False)
+    runner.action_lab_tick()
+
+    assert runner.services.link_manager.calls == []
+    payload = runner.action_lab_status_payload()
+    assert payload["send_actions_requested"] is False
+    assert payload["send_actions_effective"] is False
+    assert payload["note"] == "dry_run_only"
+    assert payload["dispatch"]["sent"] == []
+
+
+def test_target_lock_still_not_dispatched() -> None:
+    """target_lock remains blocked in phase 4A — yolo_lock_target is not implemented."""
+    runner = _runner()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_start_action("target_lock", {}, send_actions=True)
+    runner.action_lab_tick()
+    payload = runner.action_lab_status_payload()
+    assert runner.services.link_manager.calls == []
+    assert payload["dry_run_only"] is True
+    assert payload["dispatch"]["sent"] == []
 
 
 def test_goto_waypoint_status_route_includes_dispatch_keys() -> None:
@@ -346,7 +412,7 @@ def test_align_descend_missing_altitude_dispatches_zero_stop_when_send_enabled()
     assert result["failed"] is True
     assert result["reason"] == "missing_altitude"
     assert runner.services.link_manager.calls == [
-        ("send_velocity_command", (0.0, 0.0, 0.0, 8), 0)
+        ("send_body_velocity", (0.0, 0.0, 0.0), 0)
     ]
     assert payload["dispatch"]["sent"][0]["active"] is False
     assert payload["dispatch"]["sent"][0]["vz_cmd"] == 0.0
@@ -445,8 +511,8 @@ def test_goto_waypoint_once_false_dispatches_each_update() -> None:
     runner.action_lab_tick()
 
     assert runner.services.link_manager.calls == [
-        ("local_position", (1.0, 0.0, -1.5, 1, None), 4),
-        ("local_position", (1.0, 0.0, -1.5, 1, None), 4),
+        ("goto_local_ned", (1.0, 0.0, -1.5, None), 4),
+        ("goto_local_ned", (1.0, 0.0, -1.5, None), 4),
     ]
 
 
@@ -504,7 +570,7 @@ def test_align_descend_flight_command_dispatches_when_gates_enabled() -> None:
     dispatch = runner._dispatch_action_lab_result(_align_result(_flight_command()))
 
     assert runner.services.link_manager.calls == [
-        ("send_velocity_command", (0.4, -0.329, 0.0, 8), 0)
+        ("send_body_velocity", (0.4, -0.329, 0.0), 0)
     ]
     assert dispatch["sent"][0]["action_type"] == "flight_command"
     assert dispatch["sent"][0]["vx_cmd"] == 0.4
@@ -526,8 +592,8 @@ def test_align_descend_flight_command_once_false_dispatches_each_update() -> Non
     runner._dispatch_action_lab_result(_align_result(_flight_command()))
 
     assert runner.services.link_manager.calls == [
-        ("send_velocity_command", (0.4, -0.329, 0.0, 8), 0),
-        ("send_velocity_command", (0.4, -0.329, 0.0, 8), 0),
+        ("send_body_velocity", (0.4, -0.329, 0.0), 0),
+        ("send_body_velocity", (0.4, -0.329, 0.0), 0),
     ]
 
 
@@ -547,8 +613,8 @@ def test_align_descend_flight_command_ignores_once_true_for_continuous_dispatch(
     runner._dispatch_action_lab_actions([action])
 
     assert runner.services.link_manager.calls == [
-        ("send_velocity_command", (0.4, -0.329, 0.0, 8), 0),
-        ("send_velocity_command", (0.4, -0.329, 0.0, 8), 0),
+        ("send_body_velocity", (0.4, -0.329, 0.0), 0),
+        ("send_body_velocity", (0.4, -0.329, 0.0), 0),
     ]
     assert runner.action_lab_dispatched_keys == set()
 
@@ -575,7 +641,7 @@ def test_align_descend_flight_command_inactive_valid_sends_zero_velocity_stop() 
     dispatch = runner._dispatch_action_lab_result(_align_result(_flight_command(active=False)))
 
     assert runner.services.link_manager.calls == [
-        ("send_velocity_command", (0.0, 0.0, 0.0, 8), 0)
+        ("send_body_velocity", (0.0, 0.0, 0.0), 0)
     ]
     assert dispatch["skipped"] == []
     assert dispatch["sent"][0]["action_type"] == "flight_command"
@@ -625,7 +691,7 @@ def test_goto_waypoint_local_position_dispatch_preserves_yaw() -> None:
     runner.action_lab_tick()
 
     assert runner.services.link_manager.calls == [
-        ("local_position", (1.0, 0.0, -1.5, 1, 0.5), 4)
+        ("goto_local_ned", (1.0, 0.0, -1.5, 0.5), 4)
     ]
     payload = runner.action_lab_status_payload()
     assert payload["dispatch"]["sent"][0]["yaw"] == 0.5
@@ -648,7 +714,7 @@ def test_goto_waypoint_arm_heading_dispatch_sent_includes_yaw() -> None:
     assert runner.arm_heading_yaw_rad == 1.25
     assert runner.arm_heading_fallback is False
     assert runner.services.link_manager.calls == [
-        ("local_position", (1.0, 0.0, -1.5, 1, 1.25), 4)
+        ("goto_local_ned", (1.0, 0.0, -1.5, 1.25), 4)
     ]
     payload = runner.action_lab_status_payload()
     assert payload["dispatch"]["sent"][0]["yaw"] == 1.25
@@ -671,7 +737,7 @@ def test_payload_release_dispatches_release_pwm_to_servo_output_8() -> None:
     runner.action_lab_start_action("payload_release", _payload_params(), send_actions=True)
     runner.action_lab_tick()
 
-    assert runner.services.link_manager.calls == [("set_servo", (8, 1200), 3)]
+    assert runner.services.link_manager.calls == [("set_servo_output_pwm", (8, 1200), 3)]
     payload = runner.action_lab_status_payload()
     assert payload["send_actions_requested"] is True
     assert payload["send_actions_effective"] is True
@@ -692,8 +758,8 @@ def test_payload_release_dispatches_hold_pwm_to_servo_output_8() -> None:
     for _ in range(6):
         runner.action_lab_tick()
 
-    assert ("set_servo", (8, 1200), 3) in runner.services.link_manager.calls
-    assert ("set_servo", (8, 1700), 3) in runner.services.link_manager.calls
+    assert ("set_servo_output_pwm", (8, 1200), 3) in runner.services.link_manager.calls
+    assert ("set_servo_output_pwm", (8, 1700), 3) in runner.services.link_manager.calls
     payload = runner.action_lab_status_payload()
     assert payload["dispatch"]["sent"][0]["channel"] == 8
     assert payload["dispatch"]["sent"][0]["pwm"] == 1700
@@ -717,8 +783,8 @@ def test_payload_release_dual_servo_outputs_dispatch() -> None:
     runner.action_lab_tick()
 
     assert runner.services.link_manager.calls == [
-        ("set_servo", (8, 1200), 3),
-        ("set_servo", (9, 1700), 3),
+        ("set_servo_output_pwm", (8, 1200), 3),
+        ("set_servo_output_pwm", (9, 1700), 3),
     ]
     payload = runner.action_lab_status_payload()
     assert [item["channel"] for item in payload["dispatch"]["sent"]] == [8, 9]
@@ -741,7 +807,7 @@ def test_once_key_dispatches_only_once() -> None:
     first = runner._dispatch_action_lab_actions([action])
     second = runner._dispatch_action_lab_actions([action])
 
-    assert runner.services.link_manager.calls == [("set_servo", (8, 1900), 3)]
+    assert runner.services.link_manager.calls == [("set_servo_output_pwm", (8, 1900), 3)]
     assert len(first["sent"]) == 1
     assert second["skipped"][0]["reason"] == "once_already_dispatched"
 
@@ -786,3 +852,71 @@ def test_set_servo_exception_goes_to_errors_without_breaking_api() -> None:
     assert response["action_lab"]["dispatch"]["sent"] == []
     assert "servo failed" in response["action_lab"]["dispatch"]["errors"][0]["error"]
     assert response["action_lab"]["last_servo_command"]["error"] == "servo failed"
+
+
+# ======================================================================
+# T4 — fallback path tests (link_manager without semantic wrappers)
+# ======================================================================
+
+
+@dataclass(slots=True)
+class _FakeLinkFallback:
+    """A link_manager stub that only exposes the legacy interfaces,
+    NOT the T1 semantic wrappers.  Used to confirm the fallback path
+    still works."""
+    calls: list[tuple[str, tuple[object, ...], int]] = field(default_factory=list)
+    fail: bool = False
+
+    def local_position(self, x, y, z, frame, yaw=None, priority=4):
+        if self.fail:
+            raise RuntimeError("local position failed")
+        self.calls.append(("local_position", (x, y, z, frame, yaw), priority))
+
+    def send_velocity_command(self, vx, vy, vz, frame=1):
+        if self.fail:
+            raise RuntimeError("velocity failed")
+        self.calls.append(("send_velocity_command", (vx, vy, vz, frame), 0))
+
+    def set_servo(self, channel, pwm, priority=3):
+        if self.fail:
+            raise RuntimeError("servo failed")
+        self.calls.append(("set_servo", (channel, pwm), priority))
+
+
+def _runner_fallback() -> SystemRunner:
+    args = build_arg_parser().parse_args(["--run-seconds", "0.1", "--no-yolo-udp"])
+    config = load_app_config(args)
+    runner = SystemRunner(config)
+    runner.services.link_manager = _FakeLinkFallback()
+    return runner
+
+
+def test_fallback_local_position_still_dispatches_when_wrappers_absent() -> None:
+    runner = _runner_fallback()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_start_action("goto_waypoint", _goto_params(), send_actions=True)
+    runner.action_lab_tick()
+    assert runner.services.link_manager.calls == [
+        ("local_position", (1.0, 0.0, -1.5, 1, None), 4)
+    ]
+
+
+def test_fallback_flight_command_still_dispatches_when_wrappers_absent() -> None:
+    runner = _runner_fallback()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_start_action("align_descend", {}, send_actions=True)
+    dispatch = runner._dispatch_action_lab_result(_align_result(_flight_command()))
+    assert runner.services.link_manager.calls == [
+        ("send_velocity_command", (0.4, -0.329, 0.0, 8), 0)
+    ]
+    assert dispatch["sent"][0]["action_type"] == "flight_command"
+
+
+def test_fallback_set_servo_still_dispatches_when_wrappers_absent() -> None:
+    runner = _runner_fallback()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_start_action("payload_release", _payload_params(), send_actions=True)
+    runner.action_lab_tick()
+    assert runner.services.link_manager.calls == [
+        ("set_servo", (8, 1200), 3)
+    ]

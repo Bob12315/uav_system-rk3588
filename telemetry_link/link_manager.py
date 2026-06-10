@@ -9,6 +9,7 @@ try:
     from .command_queue import CommandQueue
     from .command_sender import CommandSender
     from .config import EndpointConfig, TelemetryConfig
+    from .frames import BODY_NED, LOCAL_NED
     from .mavlink_client import MavlinkClient
     from .models import ActionCommand, ActionType, ControlCommand, ControlType, DroneState, GimbalRateCommand, GimbalState, LinkStatus
     from .state_cache import StateCache
@@ -17,6 +18,7 @@ except ImportError:  # pragma: no cover - supports direct script execution
     from command_queue import CommandQueue
     from command_sender import CommandSender
     from config import EndpointConfig, TelemetryConfig
+    from frames import BODY_NED, LOCAL_NED
     from mavlink_client import MavlinkClient
     from models import ActionCommand, ActionType, ControlCommand, ControlType, DroneState, GimbalRateCommand, GimbalState, LinkStatus
     from state_cache import StateCache
@@ -542,15 +544,9 @@ class LinkManager:
         )
 
     def release_payload(self, payload_id: int, priority: int = 3) -> None:
-        self.submit_action_command(
-            ActionCommand(
-                action_type=ActionType.RELEASE_PAYLOAD,
-                params={"payload_id": int(payload_id)},
-                priority=priority,
-                retries_left=0,
-                retry_interval_sec=self.cfg.action_retry_interval_sec,
-                created_at=time.time(),
-            )
+        raise NotImplementedError(
+            "release_payload is disabled; use set_servo_output_pwm(...) "
+            "or set_servo(...) for MAV_CMD_DO_SET_SERVO payload release"
         )
 
     def request_message_interval(self, message_name: str, rate_hz: float, priority: int = 6) -> None:
@@ -640,3 +636,71 @@ class LinkManager:
                 frame=frame,
             )
         )
+
+    # ------------------------------------------------------------------
+    # semantic wrappers (added T1 — zero behavioural change)
+    # ------------------------------------------------------------------
+
+    def goto_local_ned(
+        self,
+        x_north_m: float,
+        y_east_m: float,
+        z_down_m: float,
+        yaw_rad: float | None = None,
+        priority: int = 4,
+    ) -> None:
+        """Position target in LOCAL_NED frame.
+
+        x_north_m  – metres North
+        y_east_m   – metres East
+        z_down_m   – metres Down (positive = down)
+        yaw_rad    – optional target yaw in radians
+        priority   – lower value = higher priority
+        """
+        self.local_position(
+            x=x_north_m,
+            y=y_east_m,
+            z=z_down_m,
+            frame=LOCAL_NED,
+            yaw=yaw_rad,
+            priority=priority,
+        )
+        return
+
+    def send_body_velocity(
+        self,
+        vx_forward_mps: float,
+        vy_right_mps: float,
+        vz_down_mps: float,
+    ) -> None:
+        """Velocity command in BODY_NED (body-fixed) frame.
+
+        vx_forward_mps – forward velocity (m/s)
+        vy_right_mps   – right velocity (m/s)
+        vz_down_mps    – down velocity (m/s)
+        """
+        self.send_velocity_command(
+            vx=vx_forward_mps,
+            vy=vy_right_mps,
+            vz=vz_down_mps,
+            frame=BODY_NED,
+        )
+        return
+
+    def set_servo_output_pwm(
+        self,
+        servo_output: int,
+        pwm: int,
+        priority: int = 3,
+    ) -> None:
+        """Set a flight-controller SERVO output PWM value.
+
+        servo_output is a flight-controller SERVO output number,
+        NOT an RC input channel.  This maps to MAV_CMD_DO_SET_SERVO.
+        """
+        self.set_servo(
+            channel=servo_output,
+            pwm=pwm,
+            priority=priority,
+        )
+        return

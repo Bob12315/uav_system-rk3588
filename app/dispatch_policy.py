@@ -16,7 +16,7 @@ class DispatchRule:
 
 ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
     "local_position": DispatchRule(
-        allowed_actions={"goto_waypoint"},
+        allowed_actions={"goto_waypoint", "survey_area"},
         requires_send_actions=True,
         requires_send_commands=True,
     ),
