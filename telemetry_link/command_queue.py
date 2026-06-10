@@ -5,7 +5,7 @@ import threading
 import time
 
 try:
-    from .models import ActionCommand, ControlCommand, GimbalRateCommand, QueuedAction
+    from .models import ActionCommand, ActionType, ControlCommand, GimbalRateCommand, QueuedAction
 except ImportError:  # pragma: no cover - supports direct script execution
     from models import ActionCommand, ControlCommand, GimbalRateCommand, QueuedAction
 
@@ -65,9 +65,30 @@ class CommandQueue:
             item = heapq.heappop(self._action_heap)
             return item.command
 
-    def clear_actions(self) -> None:
+    def clear_actions(self, action_type: str | ActionType | None = None) -> None:
         with self._lock:
-            self._action_heap.clear()
+            if action_type is None:
+                self._action_heap.clear()
+                return
+            self._action_heap = [
+                item for item in self._action_heap
+                if item.command.action_type != action_type
+            ]
+            heapq.heapify(self._action_heap)
+
+    def put_latest_action(self, command: ActionCommand) -> None:
+        """Replace any pending action of the same type, then enqueue."""
+        with self._lock:
+            self._action_heap = [
+                item for item in self._action_heap
+                if item.command.action_type != command.action_type
+            ]
+            heapq.heapify(self._action_heap)
+            self._sequence += 1
+            heapq.heappush(
+                self._action_heap,
+                QueuedAction(priority=command.priority, sequence=self._sequence, command=command),
+            )
 
     def requeue_action(self, command: ActionCommand) -> None:
         command.created_at = time.time()

@@ -559,6 +559,7 @@ class SystemRunner:
         *,
         send_actions: bool | None = None,
     ):
+        ActionRuntimeService.clear_navigation_queue(self.services.link_manager)
         if (
             self.action_runtime.runner.state == "running"
             and self.action_runtime.action_name
@@ -572,9 +573,11 @@ class SystemRunner:
         return self.action_runtime.start(action_name, params, send_actions=send_actions)
 
     def action_lab_stop_action(self):
+        ActionRuntimeService.clear_navigation_queue(self.services.link_manager)
         return self.action_runtime.stop()
 
     def action_lab_reset_action(self):
+        ActionRuntimeService.clear_navigation_queue(self.services.link_manager)
         return self.action_runtime.reset()
 
     # ------------------------------------------------------------------
@@ -614,18 +617,21 @@ class SystemRunner:
     def action_mission_start(self) -> dict[str, object]:
         if self.action_mission_orchestrator is None:
             return self.action_mission_status_payload()
+        ActionRuntimeService.clear_navigation_queue(self.services.link_manager)
         self.action_mission_orchestrator.start()
         return self.action_mission_status_payload()
 
     def action_mission_stop(self) -> dict[str, object]:
         if self.action_mission_orchestrator is None:
             return self.action_mission_status_payload()
+        ActionRuntimeService.clear_navigation_queue(self.services.link_manager)
         self.action_mission_orchestrator.stop()
         return self.action_mission_status_payload()
 
     def action_mission_reset(self) -> dict[str, object]:
         if self.action_mission_orchestrator is None:
             return self.action_mission_status_payload()
+        ActionRuntimeService.clear_navigation_queue(self.services.link_manager)
         self.action_mission_orchestrator.reset()
         return self.action_mission_status_payload()
 

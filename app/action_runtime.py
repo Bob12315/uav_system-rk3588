@@ -95,6 +95,15 @@ class ActionRuntimeService:
     def status(self) -> dict[str, object]:
         return self.runner.status()
 
+    @staticmethod
+    def clear_navigation_queue(link_manager: object | None) -> None:
+        """Clear pending LOCAL_POSITION actions so stale targets don't linger."""
+        if link_manager is None:
+            return
+        clear = getattr(link_manager, "clear_pending_local_position_actions", None)
+        if callable(clear):
+            clear()
+
     def status_payload(self, *, send_commands: bool) -> dict[str, object]:
         return self.dispatcher.payload(
             status=self.runner.status(),

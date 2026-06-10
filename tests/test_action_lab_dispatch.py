@@ -1180,3 +1180,21 @@ def test_yolo_lock_target_exception_goes_to_errors() -> None:
 
     assert dispatch["sent"] == []
     assert "yolo failed" in dispatch["errors"][0]["error"]
+
+
+def test_action_lab_start_stop_reset_clear_navigation_queue_does_not_crash() -> None:
+    """SystemRunner action_lab_start/stop/reset safely calls
+    clear_navigation_queue even though FakeLink lacks that method."""
+    runner = _runner()
+    # start a goto_waypoint action (FakeLink — nothing to clear)
+    runner.action_lab_start_action("goto_waypoint", {"x": 1.0, "y": 0.0, "altitude_m": 1.5})
+    assert runner.action_runtime.runner.state == "running"
+
+    runner.action_lab_stop_action()
+    assert runner.action_runtime.runner.state in ("idle", "stopped")
+
+    runner.action_lab_start_action("goto_waypoint", {"x": 2.0, "y": 0.0, "altitude_m": 2.0})
+    assert runner.action_runtime.runner.state == "running"
+
+    runner.action_lab_reset_action()
+    assert runner.action_runtime.runner.state == "idle"

@@ -277,6 +277,14 @@ class LinkManager:
     def submit_action_command(self, command: ActionCommand) -> None:
         self._active_runtime().command_queue.put_action(command)
 
+    def submit_latest_action_command(self, command: ActionCommand) -> None:
+        """Replace any pending action of the same type with this one."""
+        self._active_runtime().command_queue.put_latest_action(command)
+
+    def clear_pending_local_position_actions(self) -> None:
+        """Remove all queued LOCAL_POSITION commands so stale targets don't linger."""
+        self._active_runtime().command_queue.clear_actions(ActionType.LOCAL_POSITION)
+
     def clear_continuous_commands(self) -> None:
         runtime = self._active_runtime()
         runtime.command_queue.clear_control()
@@ -430,7 +438,7 @@ class LinkManager:
         params = {"x": float(x), "y": float(y), "z": float(z), "frame": int(frame)}
         if yaw is not None:
             params["yaw"] = float(yaw)
-        self.submit_action_command(
+        self.submit_latest_action_command(
             ActionCommand(
                 action_type=ActionType.LOCAL_POSITION,
                 params=params,

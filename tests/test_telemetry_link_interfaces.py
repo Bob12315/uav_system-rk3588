@@ -346,3 +346,109 @@ def test_set_servo_output_pwm_doc_confirms_servo_not_rc() -> None:
     assert doc is not None
     assert "SERVO output" in doc or "servo_output" in doc
     assert "NOT an RC" in doc
+
+
+# ── CommandQueue: put_latest_action / clear_actions ──────────────────
+
+
+def _make_local_position_cmd(x: float = 0.0, y: float = 0.0, z: float = 0.0, priority: int = 4) -> ActionCommand:
+    return ActionCommand(
+        action_type=ActionType.LOCAL_POSITION,
+        params={"x": float(x), "y": float(y), "z": float(z), "frame": 1},
+        priority=priority,
+        created_at=0.0,
+    )
+
+
+def _make_set_servo_cmd(channel: int = 8, pwm: int = 1500, priority: int = 3) -> ActionCommand:
+    return ActionCommand(
+        action_type=ActionType.SET_SERVO,
+        params={"channel": int(channel), "pwm": int(pwm)},
+        priority=priority,
+        created_at=0.0,
+    )
+
+
+def test_put_latest_action_replaces_same_type() -> None:
+    from telemetry_link.command_queue import CommandQueue
+
+    q = CommandQueue()
+    q.put_latest_action(_make_local_position_cmd(x=1.0))
+    q.put_latest_action(_make_local_position_cmd(x=2.0))
+
+    cmd = q.get_next_action()
+    assert cmd is not None
+    assert cmd.params["x"] == pytest.approx(2.0)
+
+    cmd = q.get_next_action()
+    assert cmd is None  # only one remained
+
+
+def test_put_latest_action_does_not_affect_other_types() -> None:
+    from telemetry_link.command_queue import CommandQueue
+
+    q = CommandQueue()
+    q.put_action(_make_set_servo_cmd(channel=1))
+    q.put_latest_action(_make_local_position_cmd(x=99.0))
+    q.put_action(_make_set_servo_cmd(channel=2))
+
+    # Two SET_SERVO and one LOCAL_POSITION — all three remain
+    types = []
+    for _ in range(3):
+        cmd = q.get_next_action()
+        assert cmd is not None
+        types.append(cmd.action_type)
+
+    assert types.count(ActionType.SET_SERVO) == 2
+    assert types.count(ActionType.LOCAL_POSITION) == 1
+    assert q.get_next_action() is None
+
+
+def test_clear_actions_by_type_removes_only_matching() -> None:
+    from telemetry_link.command_queue import CommandQueue
+
+    q = CommandQueue()
+    q.put_action(_make_set_servo_cmd(channel=1))
+    q.put_action(_make_local_position_cmd(x=1.0))
+    q.put_action(_make_set_servo_cmd(channel=2))
+
+    q.clear_actions(ActionType.LOCAL_POSITION)
+
+    cmd = q.get_next_action()
+    assert cmd is not None
+    assert cmd.action_type == ActionType.SET_SERVO
+
+    cmd = q.get_next_action()
+    assert cmd is not None
+    assert cmd.action_type == ActionType.SET_SERVO
+
+    assert q.get_next_action() is None
+
+
+def test_clear_actions_without_type_clears_all() -> None:
+    from telemetry_link.command_queue import CommandQueue
+
+    q = CommandQueue()
+    q.put_action(_make_set_servo_cmd())
+    q.put_action(_make_local_position_cmd())
+
+    q.clear_actions()  # no type filter — clears everything
+
+    assert q.get_next_action() is None
+
+
+def test_local_position_latest_only_prevents_pileup() -> None:
+    """LinkManager.local_position uses latest-only, so two calls produce one action."""
+    manager = LinkManager(_config())
+    manager.local_position(1.0, 2.0, -3.0, frame=1, priority=4)
+    manager.local_position(10.0, 20.0, -30.0, frame=1, priority=4)
+
+    queue = _cq(manager)
+    cmd = queue.get_next_action()
+    assert cmd is not None
+    assert cmd.params["x"] == pytest.approx(10.0)
+    assert cmd.params["y"] == pytest.approx(20.0)
+    assert cmd.params["z"] == pytest.approx(-30.0)
+
+    # only one entry remains
+    assert queue.get_next_action() is None
