@@ -305,3 +305,21 @@ def test_outputs_plain_dicts_and_json_serializable_estimates() -> None:
 
     assert isinstance(first.actions[0], dict)
     json.dumps(done.detail["estimated_objects"])
+
+
+def test_yaw_mode_arm_heading_passes_yaw_to_action() -> None:
+    action = SurveyAreaAction()
+    action.start(
+        _params(
+            waypoints=[{"x": 1.0, "y": 2.0, "altitude_m": 5.0}],
+            yaw_mode="arm_heading",
+        )
+    )
+
+    result = action.update({
+        "local_position": {"x": 10.0, "y": 10.0, "z": -5.0},
+        "arm_heading_yaw_rad": 1.23,
+    })
+
+    assert result.reason == "survey_goto"
+    assert result.actions[0]["params"]["yaw"] == pytest.approx(1.23)

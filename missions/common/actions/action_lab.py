@@ -45,6 +45,7 @@ def action_lab_specs() -> list[dict[str, Any]]:
                     {"x": 1.0, "y": 2.0, "altitude_m": 5.0},
                     {"x": 3.0, "y": 4.0, "altitude_m": 5.0},
                 ],
+                "yaw_mode": "arm_heading",
                 "capture_updates_per_waypoint": 3,
                 "max_updates_per_waypoint": 200,
                 "detection_source": "scene",

@@ -107,7 +107,7 @@ const actionMissionPresets = {
           {x: 0.0, y: 0.0, altitude_m: 1.5},
           {x: 1.0, y: 0.0, altitude_m: 1.5},
         ],
-        yaw_mode: "hold",
+        yaw_mode: "arm_heading",
         capture_updates_per_waypoint: 1,
         max_updates_per_waypoint: 20,
         detection_source: "scene",
@@ -1108,7 +1108,7 @@ async function init() {
   if ($("missionSelect")) $("missionSelect").onchange = () => renderMissionSteps(state || {});
   $("sendCommand").onclick = () => {
     const input = $("commandInput");
-    execute(input.value, "CLI"); input.value = ""; historyIndex = -1;
+    execute(input.value, "CLI"); history.unshift(input.value); input.value = ""; historyIndex = -1;
   };
   $("commandInput").onkeydown = event => {
     if (event.key === "Enter") { event.preventDefault(); $("sendCommand").click(); }
@@ -1138,10 +1138,23 @@ async function init() {
       }).catch(error => {
         if (flightHint) flightHint.textContent = `命令失败: ${error.message}`;
       });
+      history.unshift(flightInput.value);
       flightInput.value = "";
+      historyIndex = -1;
     };
     flightInput.onkeydown = event => {
       if (event.key === "Enter") { event.preventDefault(); flightSend.click(); }
+      if (event.key === "Tab") {
+        event.preventDefault();
+        const match = completions.find(item => item.toLowerCase().startsWith(event.target.value.toLowerCase()));
+        if (match) { event.target.value = match; if (flightHint) flightHint.textContent = `补全: ${match}`; }
+      }
+      if (event.key === "ArrowUp" && history.length) {
+        event.preventDefault(); historyIndex = Math.min(historyIndex + 1, history.length - 1); event.target.value = history[historyIndex];
+      }
+      if (event.key === "ArrowDown" && historyIndex >= 0) {
+        event.preventDefault(); historyIndex -= 1; event.target.value = historyIndex < 0 ? "" : history[historyIndex];
+      }
     };
   }
 
