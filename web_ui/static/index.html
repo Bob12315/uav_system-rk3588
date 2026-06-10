@@ -272,6 +272,27 @@
         </div>
         <div class="hint">机体系单步移动；发送手动动作时会关闭自动控制发送。</div>
       </article>
+
+      <article class="panel safety-panel flight-command-panel">
+        <div class="panel-title">Manual Command</div>
+        <div class="hint flight-command-warning">
+          手动命令会直接进入后端命令解析；飞控实发仍受 SEND / 模式 / 解锁状态影响。危险命令请确认后再发送。
+        </div>
+        <div class="command-line flight-command-line">
+          <label>&gt;</label>
+          <input id="flightCommandInput" autocomplete="off" placeholder="例如 mode GUIDED、arm、land">
+          <button id="flightSendCommand">发送</button>
+        </div>
+        <div id="flightCompletionHint" class="hint">支持与主命令行相同的命令；复杂命令可在 Config / Logs 页使用完整命令行。</div>
+        <div class="flight-command-quick-hints">
+          <span>常用命令：</span>
+          <code>mode GUIDED</code>
+          <code>arm</code>
+          <code>land</code>
+          <code>mode RTL</code>
+          <code>controller all off</code>
+        </div>
+      </article>
     </section>
   </main>
 

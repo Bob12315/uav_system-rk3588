@@ -538,6 +538,35 @@ button.active-choice {
 .mission-detail-json {
   min-height: 280px;
 }
+.flight-command-panel {
+  grid-column: 1 / -1;
+}
+.flight-command-warning {
+  color: var(--warn);
+  margin-bottom: 8px;
+  line-height: 1.45;
+}
+.flight-command-line {
+  margin-bottom: 4px;
+}
+.flight-command-quick-hints {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  align-items: center;
+}
+.flight-command-quick-hints code {
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 7px;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  color: var(--accent);
+}
 .bottom-grid { display: grid; grid-template-columns: 1fr 1.55fr; gap: 12px; margin-top: 12px; }
 .logs-grid { grid-template-columns: minmax(320px, .85fr) minmax(420px, 1fr); }
 .scroll-list { max-height: 258px; min-height: 120px; overflow: auto; font-family: Consolas, monospace; font-size: 12px; }

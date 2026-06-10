@@ -1124,6 +1124,27 @@ async function init() {
       event.preventDefault(); historyIndex -= 1; event.target.value = historyIndex < 0 ? "" : history[historyIndex];
     }
   };
+
+  // Flight Safety command panel (PR F)
+  const flightInput = $("flightCommandInput");
+  const flightSend = $("flightSendCommand");
+  const flightHint = $("flightCompletionHint");
+  if (flightSend && flightInput) {
+    flightSend.onclick = () => {
+      const command = flightInput.value.trim();
+      if (!command) return;
+      execute(command, "FLIGHT_CLI").then(result => {
+        if (flightHint) flightHint.textContent = result.message || "command sent";
+      }).catch(error => {
+        if (flightHint) flightHint.textContent = `命令失败: ${error.message}`;
+      });
+      flightInput.value = "";
+    };
+    flightInput.onkeydown = event => {
+      if (event.key === "Enter") { event.preventDefault(); flightSend.click(); }
+    };
+  }
+
   document.querySelectorAll(".tab").forEach(tab => tab.onclick = () => {
     document.querySelectorAll(".tab").forEach(item => item.classList.toggle("active", item === tab));
     document.querySelectorAll(".page").forEach(page => page.classList.toggle("active", page.id === `${tab.dataset.page}Page`));
