@@ -55,20 +55,39 @@ button.active-choice {
 .badge.warning { color: var(--warn); }
 .badge.danger { color: var(--danger); }
 .badge.active { color: #8ebcff; border: 1px solid rgba(89, 143, 255, .45); }
-.page { display: none; padding: 14px; }
+.app-shell {
+  display: grid;
+  grid-template-columns: minmax(320px, 28vw) minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+}
+.global-video-sidebar {
+  position: sticky;
+  top: 72px;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.page-content {
+  min-width: 0;
+}
+.page { display: none; padding: 0; }
 .page.active { display: block; }
 .panel { border: 1px solid var(--line); background: var(--panel); border-radius: 7px; padding: 12px; }
 .panel-title { color: var(--accent); text-transform: uppercase; font-weight: 700; margin-bottom: 10px; }
 .panel-title span { float: right; text-transform: none; font-weight: 400; }
 .panel-title.minor { margin: 14px 0 8px; font-size: 12px; color: var(--accent); }
-.dashboard-grid { display: grid; grid-template-columns: minmax(400px, 1.18fr) minmax(340px, 1fr) minmax(320px, .88fr); gap: 12px; align-items: start; }
+.dashboard-grid { display: grid; grid-template-columns: minmax(420px, 1.35fr) minmax(300px, .75fr); gap: 12px; align-items: start; }
 .top-grid { display: grid; grid-template-columns: minmax(420px, 1.45fr) minmax(360px, 1.2fr) minmax(300px, 1fr); gap: 12px; align-items: start; }
 .video-wrap { position: relative; aspect-ratio: 4 / 3; background: #03060a; display: flex; justify-content: center; }
+.global-video-panel .video-wrap { max-height: 38vh; }
 #video { max-height: 100%; max-width: 100%; width: 100%; object-fit: contain; }
 #hitCanvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
 .overlay-note { position: absolute; left: 15px; bottom: 15px; color: var(--muted); }
 .detections { min-height: 245px; max-height: 350px; overflow: auto; }
-.detections.compact { min-height: 112px; max-height: 150px; }
+.detections.compact { min-height: 112px; max-height: 190px; }
 .detection { display: flex; justify-content: space-between; width: 100%; margin-bottom: 6px; text-align: left; }
 .detection.locked { border-color: var(--accent); color: var(--accent); }
 .aircraft-info {
@@ -110,6 +129,7 @@ button.active-choice {
   text-align: right;
 }
 .current-target { padding: 9px; margin-bottom: 10px; background: var(--panel2); }
+.compact-target-panel .button-row button { flex: 1 1 auto; }
 .button-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
 .mini-state { display: flex; gap: 24px; margin-top: 15px; color: var(--muted); }
 .field-map-wrap {
@@ -221,13 +241,31 @@ button.active-choice {
   margin-top: 12px;
 }
 .payload-release-zone {
-  border-top: 1px solid var(--line);
-  margin-top: 14px;
-  padding-top: 4px;
+  margin-top: 4px;
 }
 .payload-release-zone button {
   margin-right: 7px;
   margin-top: 4px;
+}
+.legacy-controller-switches {
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #0d1622;
+  margin-top: 14px;
+  padding: 9px 10px;
+}
+.legacy-controller-switches summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 700;
+  outline: none;
+}
+.legacy-controller-switches summary:hover {
+  color: var(--accent);
+}
+.legacy-controller-switches[open] summary {
+  color: var(--accent);
+  margin-bottom: 8px;
 }
 .switch-row {
   display: grid;
@@ -535,4 +573,15 @@ button.active-choice {
   .panel { margin-bottom: 12px; }
   .field-map-wrap { height: 520px; }
   .action-gate-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+  .global-video-sidebar {
+    position: static;
+  }
+  .global-video-panel .video-wrap {
+    max-height: none;
+  }
 }

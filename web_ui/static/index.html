@@ -29,9 +29,9 @@
     </div>
   </header>
 
-  <main id="dashboardPage" class="page active">
-    <section class="dashboard-grid">
-      <article class="panel video-panel">
+  <main class="app-shell">
+    <aside class="global-video-sidebar">
+      <article class="panel video-panel global-video-panel">
         <div class="panel-title">YOLO 视频 <span id="videoHint">点击目标框锁定</span></div>
         <div class="video-wrap">
           <img id="video" alt="YOLO 视频流">
@@ -40,21 +40,8 @@
         </div>
       </article>
 
-      <article class="panel field-map-panel">
-        <div class="panel-title">场地图</div>
-        <div class="field-map-wrap">
-          <canvas id="fieldMap"></canvas>
-          <div id="fieldMapEmpty" class="field-map-empty">等待 mission 坐标</div>
-        </div>
-        <div id="fieldMapLegend" class="field-map-legend"></div>
-      </article>
-
-      <article class="panel target-panel">
-        <div class="panel-title">目标 / Action / Mission</div>
-        <section class="aircraft-info">
-          <div class="aircraft-info-title">飞机信息</div>
-          <div id="aircraftInfo" class="aircraft-info-grid"></div>
-        </section>
+      <article class="panel target-panel compact-target-panel">
+        <div class="panel-title">目标摘要</div>
         <section class="target-info">
           <div class="aircraft-info-title">目标信息</div>
           <div id="targetInfo" class="aircraft-info-grid"></div>
@@ -70,30 +57,51 @@
           <div>Frame <strong id="frameId">--</strong></div>
           <div>检测数 <strong id="detCount">0</strong></div>
         </div>
-        <div class="summary-stack">
-          <div class="panel-title minor">当前 Action</div>
-          <div id="dashboardActionSummary" class="summary-box"></div>
-          <div class="panel-title minor">Action Mission</div>
-          <div id="dashboardMissionSummary" class="summary-box"></div>
-          <div class="panel-title minor">最新 Dispatch</div>
-          <div id="dashboardDispatchSummary" class="summary-box"></div>
-        </div>
       </article>
-    </section>
+    </aside>
 
-    <section class="bottom-grid">
-      <article class="panel output-panel">
-        <div class="panel-title">系统状态</div>
-        <div id="statusCards" class="status-cards"></div>
-      </article>
-      <article class="panel output-panel">
-        <div class="panel-title">最新控制输出</div>
-        <div id="commandCards" class="command-cards"></div>
-        <div class="panel-title minor">重要事件</div>
-        <div id="events" class="scroll-list events"></div>
-      </article>
-    </section>
-  </main>
+    <section class="page-content">
+      <main id="dashboardPage" class="page active">
+        <section class="dashboard-grid">
+          <article class="panel field-map-panel">
+            <div class="panel-title">场地图</div>
+            <div class="field-map-wrap">
+              <canvas id="fieldMap"></canvas>
+              <div id="fieldMapEmpty" class="field-map-empty">等待 mission 坐标</div>
+            </div>
+            <div id="fieldMapLegend" class="field-map-legend"></div>
+          </article>
+
+          <article class="panel dashboard-summary-panel">
+            <div class="panel-title">飞机 / Action / Mission</div>
+            <section class="aircraft-info">
+              <div class="aircraft-info-title">飞机信息</div>
+              <div id="aircraftInfo" class="aircraft-info-grid"></div>
+            </section>
+            <div class="summary-stack">
+              <div class="panel-title minor">当前 Action</div>
+              <div id="dashboardActionSummary" class="summary-box"></div>
+              <div class="panel-title minor">Action Mission</div>
+              <div id="dashboardMissionSummary" class="summary-box"></div>
+              <div class="panel-title minor">最新 Dispatch</div>
+              <div id="dashboardDispatchSummary" class="summary-box"></div>
+            </div>
+          </article>
+        </section>
+
+        <section class="bottom-grid">
+          <article class="panel output-panel">
+            <div class="panel-title">系统状态</div>
+            <div id="statusCards" class="status-cards"></div>
+          </article>
+          <article class="panel output-panel">
+            <div class="panel-title">最新控制输出</div>
+            <div id="commandCards" class="command-cards"></div>
+            <div class="panel-title minor">重要事件</div>
+            <div id="events" class="scroll-list events"></div>
+          </article>
+        </section>
+      </main>
 
   <main id="actionsPage" class="page">
     <section class="panel action-lab">
@@ -219,19 +227,22 @@
       </article>
 
       <article class="panel safety-panel">
-        <div class="panel-title">Controller Switches</div>
-        <div class="controller-switches">
-          <div class="switch-row" data-controller-row="gimbal"><span>Gimbal</span><button data-command="controller gimbal on">ON</button><button data-command="controller gimbal off">OFF</button><button data-command="controller gimbal toggle">TOGGLE</button></div>
-          <div class="switch-row" data-controller-row="body"><span>Body</span><button data-command="controller body on">ON</button><button data-command="controller body off">OFF</button><button data-command="controller body toggle">TOGGLE</button></div>
-          <div class="switch-row" data-controller-row="approach"><span>Approach</span><button data-command="controller approach on">ON</button><button data-command="controller approach off">OFF</button><button data-command="controller approach toggle">TOGGLE</button></div>
-          <div class="switch-row" data-controller-row="all"><span>All</span><button data-command="controller all on">ON</button><button data-command="controller all off">OFF</button><button data-command="controller all toggle">TOGGLE</button></div>
-        </div>
+        <div class="panel-title">Payload Release Action</div>
         <div class="payload-release-zone">
-          <div class="panel-title minor">Payload Release Action</div>
           <button id="payloadReleaseSelect" class="danger">选择 payload_release</button>
           <button id="payloadReleaseRun" class="danger">执行 payload_release</button>
           <div class="hint">高风险投放动作集中在安全页；参数仍在 Actions 页编辑。</div>
         </div>
+        <details class="legacy-controller-switches">
+          <summary>Advanced / Legacy Controller Switches</summary>
+          <div class="hint">这些开关主要用于旧 Mission/Stage controller 链路或调试。Action-first dispatch 主要受 Action send_actions 和系统 SEND 门控控制。</div>
+          <div class="controller-switches">
+            <div class="switch-row" data-controller-row="gimbal"><span>Gimbal</span><button data-command="controller gimbal on">ON</button><button data-command="controller gimbal off">OFF</button><button data-command="controller gimbal toggle">TOGGLE</button></div>
+            <div class="switch-row" data-controller-row="body"><span>Body</span><button data-command="controller body on">ON</button><button data-command="controller body off">OFF</button><button data-command="controller body toggle">TOGGLE</button></div>
+            <div class="switch-row" data-controller-row="approach"><span>Approach</span><button data-command="controller approach on">ON</button><button data-command="controller approach off">OFF</button><button data-command="controller approach toggle">TOGGLE</button></div>
+            <div class="switch-row" data-controller-row="all"><span>All</span><button data-command="controller all on">ON</button><button data-command="controller all off">OFF</button><button data-command="controller all toggle">TOGGLE</button></div>
+          </div>
+        </details>
       </article>
 
       <article class="panel manual-move safety-panel">
@@ -306,6 +317,8 @@
         </div>
         <div id="completionHint" class="hint">Tab 补全 / ↑ ↓ 查看输入记录</div>
       </article>
+    </section>
+  </main>
     </section>
   </main>
 
