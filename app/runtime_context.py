@@ -30,6 +30,11 @@ class RuntimeContextBuilder:
             "drone": snapshot.get("drone", {}),
             "scene": snapshot.get("scene", {}),
             "perception": snapshot.get("perception", {}),
+            "gimbal": snapshot.get("gimbal", {}),
+            "link": snapshot.get("link", {}),
+            "health": snapshot.get("health", {}),
+            "command": snapshot.get("command", {}),
+            "mission_detail": snapshot.get("mission_detail", {}),
         }
 
         drone = context["drone"]

@@ -637,6 +637,10 @@ class LinkManager:
             )
         )
 
+    def stop_body_velocity(self) -> None:
+        """Stop BODY_NED velocity control by sending zero body-frame velocity."""
+        self.stop_control(frame=BODY_NED)
+
     # ------------------------------------------------------------------
     # semantic wrappers (added T1 — zero behavioural change)
     # ------------------------------------------------------------------

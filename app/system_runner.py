@@ -24,7 +24,8 @@ from app.runtime_context import RuntimeContextBuilder
 from app.debug_runtime import DebugRuntime
 from app.health_monitor import HealthMonitor
 from app.service_manager import ServiceManager
-from missions.common.actions.action_lab import action_lab_specs
+from missions.common.actions.action_lab import action_lab_specs, create_action_lab_registry
+from missions.common.actions.runner import ActionRunner
 from uav_ui.control_switches import ControlRuntimeSwitches
 from uav_ui.terminal_ui import run_terminal_ui
 from uav_ui.ui_commands import CommandResult, build_ui_command_handler, format_controller_snapshot
@@ -147,7 +148,11 @@ class SystemRunner:
         self.action_lab_specs = action_lab_specs()
         self.action_lab_enabled = True
         self.action_runtime = ActionRuntimeService(
-            dispatcher=ActionDispatcher(logger=self.logger)
+            runner=ActionRunner(create_action_lab_registry()),
+            dispatcher=ActionDispatcher(
+                logger=self.logger,
+                yolo_client=YoloCommandClient(self.config.yolo_command),
+            )
         )
         self.runtime_context_builder = RuntimeContextBuilder(logger=self.logger)
 

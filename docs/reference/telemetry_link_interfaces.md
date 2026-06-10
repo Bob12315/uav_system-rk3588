@@ -47,7 +47,7 @@ the Action-first main flow.
 
 | Method | Semantics |
 |---|---|
-| `global_goto(lat, lon, alt, priority=4)` | Global-position waypoint |
+| `global_goto(lat, lon, alt, frame, priority=4)` | Global-position waypoint |
 | `reposition(lat, lon, alt, ground_speed_mps, yaw_deg, priority=4)` | `MAV_CMD_DO_REPOSITION` |
 | `condition_yaw(yaw_deg, direction, relative, priority=4)` | Yaw condition (`MAV_CMD_CONDITION_YAW`) |
 | `change_speed(speed_mps, speed_type, priority=4)` | Speed override |

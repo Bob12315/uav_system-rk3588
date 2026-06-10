@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from missions.common.actions.action_lab import create_action_lab_registry
 from missions.common.actions.runner import ActionRunner
 from app.action_dispatcher import ActionDispatcher
 
@@ -14,8 +13,8 @@ class ActionRuntimeService:
     the runner lifecycle and dispatch plumbing stay in one place.
     """
 
-    def __init__(self, *, dispatcher: ActionDispatcher | None = None) -> None:
-        self.runner = ActionRunner(create_action_lab_registry())
+    def __init__(self, *, runner: ActionRunner, dispatcher: ActionDispatcher | None = None) -> None:
+        self.runner = runner
         self.dispatcher = dispatcher or ActionDispatcher()
 
     # ------------------------------------------------------------------

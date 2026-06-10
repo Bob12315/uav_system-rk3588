@@ -303,6 +303,8 @@ def test_target_lock_still_not_dispatched() -> None:
     assert runner.services.link_manager.calls == []
     assert payload["dry_run_only"] is True
     assert payload["dispatch"]["sent"] == []
+    # note: target_lock now dispatches yolo_lock_target when yolo_client is available;
+    # see PR B yolo tests below.
 
 
 def test_goto_waypoint_status_route_includes_dispatch_keys() -> None:
@@ -920,3 +922,261 @@ def test_fallback_set_servo_still_dispatches_when_wrappers_absent() -> None:
     assert runner.services.link_manager.calls == [
         ("set_servo", (8, 1200), 3)
     ]
+
+
+# ======================================================================
+# PR A — policy-driven gate + body_velocity + servo_output compat
+# ======================================================================
+
+
+def _body_velocity_params(**overrides: object) -> dict[str, object]:
+    data: dict[str, object] = {
+        "action_type": "body_velocity",
+        "params": {
+            "vx_body_mps": 0.4,
+            "vy_body_mps": -0.329,
+            "vz_body_mps": 0.0,
+            "active": True,
+            "valid": True,
+        },
+        "key": "align_descend_body_velocity",
+        "once": False,
+        "priority": 5,
+    }
+    # merge param-level overrides instead of replacing the whole dict
+    for key, value in overrides.items():
+        if key == "params" and isinstance(value, dict):
+            data["params"].update(value)
+        else:
+            data[key] = value
+    return data
+
+
+def test_body_velocity_dispatches_from_align_descend() -> None:
+    runner = _runner()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_start_action("align_descend", {}, send_actions=True)
+    dispatch = runner._dispatch_action_lab_actions([_body_velocity_params()])
+
+    assert runner.services.link_manager.calls == [
+        ("send_body_velocity", (0.4, -0.329, 0.0), 0)
+    ]
+    assert dispatch["sent"][0]["action_type"] == "body_velocity"
+
+
+def test_body_velocity_continuous_ignores_once() -> None:
+    runner = _runner()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_start_action("align_descend", {}, send_actions=True)
+    action = _body_velocity_params(once=True)
+
+    runner._dispatch_action_lab_actions([action])
+    runner._dispatch_action_lab_actions([action])
+
+    assert runner.services.link_manager.calls == [
+        ("send_body_velocity", (0.4, -0.329, 0.0), 0),
+        ("send_body_velocity", (0.4, -0.329, 0.0), 0),
+    ]
+    assert runner.action_lab_dispatched_keys == set()
+
+
+def test_body_velocity_valid_false_is_skipped() -> None:
+    runner = _runner()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_start_action("align_descend", {}, send_actions=True)
+    dispatch = runner._dispatch_action_lab_actions(
+        [_body_velocity_params(params={"vx_body_mps": 0.4, "valid": False})]
+    )
+
+    assert runner.services.link_manager.calls == []
+    assert dispatch["sent"] == []
+    assert dispatch["skipped"][0]["action_type"] == "body_velocity"
+    assert dispatch["skipped"][0]["reason"] == "flight_command_inactive"
+
+
+def test_body_velocity_active_false_sends_zero_stop() -> None:
+    runner = _runner()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_start_action("align_descend", {}, send_actions=True)
+    dispatch = runner._dispatch_action_lab_actions(
+        [_body_velocity_params(params={"vx_body_mps": 0.4, "active": False, "valid": True})]
+    )
+
+    assert runner.services.link_manager.calls == [
+        ("send_body_velocity", (0.0, 0.0, 0.0), 0)
+    ]
+    assert dispatch["sent"][0]["active"] is False
+    assert dispatch["sent"][0]["valid"] is True
+    assert dispatch["sent"][0]["vx_cmd"] == 0.0
+
+
+def test_body_velocity_requires_align_descend_in_allowed_actions() -> None:
+    """body_velocity dispatch must only allow align_descend (not e.g. goto_waypoint)."""
+    runner = _runner()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_start_action("goto_waypoint", _goto_params(), send_actions=True)
+    action = _body_velocity_params(key="goto_body_velocity")
+    dispatch = runner._dispatch_action_lab_actions([action])
+
+    assert runner.services.link_manager.calls == []
+    assert dispatch["sent"] == []
+    assert dispatch["skipped"][0]["reason"] == "action_dispatch_not_enabled"
+
+
+def test_set_servo_accepts_servo_output_param() -> None:
+    runner = _runner()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_send_actions = True
+    action = {
+        "action_type": "set_servo",
+        "params": {"servo_output": 9, "pwm": 1900},
+        "key": "servo_output_test",
+        "once": True,
+        "priority": 3,
+    }
+    dispatch = runner._dispatch_action_lab_actions([action])
+
+    assert runner.services.link_manager.calls == [
+        ("set_servo_output_pwm", (9, 1900), 3)
+    ]
+    assert dispatch["sent"][0]["channel"] == 9
+
+
+# ======================================================================
+# PR B — yolo_lock_target dispatch
+# ======================================================================
+
+
+@dataclass(slots=True)
+class FakeYoloClient:
+    calls: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
+    fail: bool = False
+
+    def lock_target(self, track_id: int) -> None:
+        if self.fail:
+            raise RuntimeError("yolo failed")
+        self.calls.append(("lock_target", (track_id,)))
+
+
+def _runner_with_yolo() -> SystemRunner:
+    args = build_arg_parser().parse_args(["--run-seconds", "0.1", "--no-yolo-udp"])
+    config = load_app_config(args)
+    runner = SystemRunner(config)
+    runner.services.link_manager = FakeLink()
+    runner.action_runtime.dispatcher.yolo_client = FakeYoloClient()
+    return runner
+
+
+def test_yolo_lock_target_dispatches_when_send_actions_true() -> None:
+    runner = _runner_with_yolo()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_send_actions = True
+    action = {
+        "action_type": "yolo_lock_target",
+        "params": {"track_id": 42},
+        "key": "target_lock",
+        "once": True,
+        "priority": 5,
+    }
+    dispatch = runner._dispatch_action_lab_actions([action])
+
+    yolo = runner.action_runtime.dispatcher.yolo_client
+    assert yolo.calls == [("lock_target", (42,))]
+    assert dispatch["sent"][0]["action_type"] == "yolo_lock_target"
+    assert dispatch["sent"][0]["track_id"] == 42
+
+
+def test_yolo_lock_target_dispatches_when_send_commands_false() -> None:
+    """key PR B test: requires_send_commands=False means yolo_lock_target
+    still dispatches even when SEND=false."""
+    runner = _runner_with_yolo()
+    runner.controller_switches.set_send_commands(False)
+    runner.action_lab_send_actions = True
+    action = {
+        "action_type": "yolo_lock_target",
+        "params": {"track_id": 42},
+        "key": "target_lock",
+        "once": True,
+        "priority": 5,
+    }
+    dispatch = runner._dispatch_action_lab_actions([action])
+
+    yolo = runner.action_runtime.dispatcher.yolo_client
+    assert yolo.calls == [("lock_target", (42,))]
+    assert dispatch["sent"][0]["action_type"] == "yolo_lock_target"
+
+
+def test_yolo_lock_target_send_actions_false_is_dry_run_only() -> None:
+    """send_actions=false still blocks yolo_lock_target."""
+    runner = _runner_with_yolo()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_send_actions = False
+    action = {
+        "action_type": "yolo_lock_target",
+        "params": {"track_id": 42},
+        "key": "target_lock",
+        "once": True,
+        "priority": 5,
+    }
+    dispatch = runner._dispatch_action_lab_actions([action])
+
+    yolo = runner.action_runtime.dispatcher.yolo_client
+    assert yolo.calls == []
+    assert dispatch["sent"] == []
+    assert dispatch["skipped"][0]["reason"] == "dry_run_only"
+
+
+def test_yolo_lock_target_once_key_dispatches_only_once() -> None:
+    runner = _runner_with_yolo()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_send_actions = True
+    action = {
+        "action_type": "yolo_lock_target",
+        "params": {"track_id": 42},
+        "key": "target_lock",
+        "once": True,
+        "priority": 5,
+    }
+    first = runner._dispatch_action_lab_actions([action])
+    second = runner._dispatch_action_lab_actions([action])
+
+    yolo = runner.action_runtime.dispatcher.yolo_client
+    assert yolo.calls == [("lock_target", (42,))]
+    assert len(first["sent"]) == 1
+    assert second["skipped"][0]["reason"] == "once_already_dispatched"
+
+
+def test_yolo_lock_target_client_unavailable_is_skipped() -> None:
+    runner = _runner()
+    runner.action_runtime.dispatcher.yolo_client = None  # simulate no client
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_send_actions = True
+    action = {
+        "action_type": "yolo_lock_target",
+        "params": {"track_id": 42},
+        "key": "target_lock",
+        "once": True,
+        "priority": 5,
+    }
+    dispatch = runner._dispatch_action_lab_actions([action])
+
+    assert dispatch["sent"] == []
+    assert dispatch["skipped"][0]["reason"] == "yolo_client_not_available"
+
+
+def test_yolo_lock_target_exception_goes_to_errors() -> None:
+    runner = _runner_with_yolo()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_send_actions = True
+    runner.action_runtime.dispatcher.yolo_client.fail = True
+    action = {
+        "action_type": "yolo_lock_target",
+        "params": {"track_id": 42},
+        "key": "target_lock",
+        "once": True,
+        "priority": 5,
+    }
+    dispatch = runner._dispatch_action_lab_actions([action])
+
+    assert dispatch["sent"] == []
+    assert "yolo failed" in dispatch["errors"][0]["error"]

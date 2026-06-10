@@ -27,9 +27,21 @@ ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
         continuous=True,
         once_respected=False,
     ),
+    "body_velocity": DispatchRule(
+        allowed_actions={"align_descend"},
+        requires_send_actions=True,
+        requires_send_commands=True,
+        continuous=True,
+        once_respected=False,
+    ),
     "set_servo": DispatchRule(
         allowed_actions={"payload_release"},
         requires_send_actions=True,
         requires_send_commands=True,
+    ),
+    "yolo_lock_target": DispatchRule(
+        allowed_actions={"target_lock"},
+        requires_send_actions=True,
+        requires_send_commands=False,
     ),
 }

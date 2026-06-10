@@ -23,17 +23,29 @@ class ActionDispatcher:
         *,
         policy: dict[str, DispatchRule] | None = None,
         logger: logging.Logger | None = None,
+        yolo_client: object | None = None,
     ) -> None:
         self._policy = policy or ACTION_DISPATCH_POLICY
         self._logger = logger or logging.getLogger(self.__class__.__name__)
+        self.yolo_client = yolo_client
         self.send_actions: bool = False
         self.dispatched_keys: set[str] = set()
         self.last_dispatch: dict[str, list[dict[str, object]]] = self.empty_dispatch()
         self.last_servo_command: dict[str, object] | None = None
 
     # ------------------------------------------------------------------
-    # gate — mirrors _action_lab_dispatch_gate + _action_lab_dispatch_decision
+    # gate — fully policy-driven (PR A)
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _compat_note_for_action_type(action_type: str) -> str:
+        if action_type == "set_servo":
+            return "payload_set_servo_dispatch_enabled"
+        if action_type == "local_position":
+            return "local_position_dispatch_enabled"
+        if action_type in ("flight_command", "body_velocity"):
+            return "action_dispatch_enabled"
+        return "action_dispatch_enabled"
 
     def gate(
         self,
@@ -42,48 +54,36 @@ class ActionDispatcher:
         action_type: str | None = None,
         action_name: str | None = None,
     ) -> tuple[bool, str]:
-        ok, note = SafetyGate.check(
-            send_actions=self.send_actions,
-            send_commands=send_commands,
-        )
-        if not ok:
-            return ok, note
-
+        # When called with action_type, use the policy rule for that type.
         if action_type is not None:
-            return self._gate_action_type(action_type, action_name=action_name)
-        return self._gate_action_name(action_name)
-
-    def _gate_action_type(
-        self, action_type: str, *, action_name: str | None = None
-    ) -> tuple[bool, str]:
-        allowed, note = self._basic_gate_action_type(action_type)
-        if not allowed:
-            return allowed, note
-        if action_name is not None:
             rule = self._policy.get(action_type)
-            if rule is not None and action_name not in rule.allowed_actions:
+            if rule is None:
+                return False, "unsupported_action_type"
+            if action_name is not None and action_name not in rule.allowed_actions:
                 return False, "action_dispatch_not_enabled"
-        return allowed, note
+            ok, note = SafetyGate.check(
+                send_actions=self.send_actions,
+                send_commands=send_commands,
+                requires_send_actions=rule.requires_send_actions,
+                requires_send_commands=rule.requires_send_commands,
+            )
+            if not ok:
+                return ok, note
+            return True, self._compat_note_for_action_type(action_type)
 
-    @staticmethod
-    def _basic_gate_action_type(action_type: str) -> tuple[bool, str]:
-        if action_type == "set_servo":
-            return True, "payload_set_servo_dispatch_enabled"
-        if action_type == "local_position":
-            return True, "local_position_dispatch_enabled"
-        if action_type == "flight_command":
-            return True, "action_dispatch_enabled"
-        return False, "unsupported_action_type"
-
-    def _gate_action_name(self, action_name: str | None) -> tuple[bool, str]:
-        if action_name == "payload_release":
-            return True, "payload_set_servo_dispatch_enabled"
-        if action_name == "goto_waypoint":
-            return True, "local_position_dispatch_enabled"
-        if action_name == "survey_area":
-            return True, "local_position_dispatch_enabled"
-        if action_name == "align_descend":
-            return True, "action_dispatch_enabled"
+        # Without action_type, find *any* rule that allows this action_name.
+        if action_name is not None:
+            for atype, rule in self._policy.items():
+                if action_name in rule.allowed_actions:
+                    ok, note = SafetyGate.check(
+                        send_actions=self.send_actions,
+                        send_commands=send_commands,
+                        requires_send_actions=rule.requires_send_actions,
+                        requires_send_commands=rule.requires_send_commands,
+                    )
+                    if not ok:
+                        return ok, note
+                    return True, self._compat_note_for_action_type(atype)
         return False, "action_dispatch_not_enabled"
 
     # ------------------------------------------------------------------
@@ -178,7 +178,9 @@ class ActionDispatcher:
                 )
                 continue
             key = str(action.get("key") or "")
-            once_enabled = bool(action.get("once", False)) and action_type != "flight_command"
+            rule = self._policy.get(action_type)
+            once_respected = rule.once_respected if rule is not None else True
+            once_enabled = bool(action.get("once", False)) and once_respected
             if once_enabled and key and key in self.dispatched_keys:
                 dispatch["skipped"].append(
                     {"action": action, "action_type": action_type, "reason": "once_already_dispatched"}
@@ -243,8 +245,10 @@ class ActionDispatcher:
             return self._dispatch_set_servo(action, link_manager=link_manager)
         if action_type == "local_position":
             return self._dispatch_local_position(action, link_manager=link_manager)
-        if action_type == "flight_command":
+        if action_type in ("flight_command", "body_velocity"):
             return self._dispatch_flight_command(action, link_manager=link_manager)
+        if action_type == "yolo_lock_target":
+            return self._dispatch_yolo_lock_target(action, link_manager=link_manager)
         return {"status": "skipped", "reason": "unsupported_action_type"}
 
     # ------------------------------------------------------------------
@@ -277,7 +281,7 @@ class ActionDispatcher:
             }
             return {"status": "error", "reason": "telemetry_not_connected"}
         params = self._action_params(action)
-        channel = int(params["channel"])
+        channel = int(params.get("servo_output", params.get("channel")))
         pwm = int(params["pwm"])
         priority = int(action.get("priority", 3))
         self._logger.info(
@@ -394,17 +398,18 @@ class ActionDispatcher:
         command = self._action_params(action)
         valid = bool(command.get("valid", False))
         active = bool(command.get("active", False))
-        vx = float(command.get("vx_cmd", 0.0))
-        vy = float(command.get("vy_cmd", 0.0))
-        vz = float(command.get("vz_cmd", 0.0))
+        vx = float(command.get("vx_body_mps", command.get("vx_cmd", 0.0)))
+        vy = float(command.get("vy_body_mps", command.get("vy_cmd", 0.0)))
+        vz = float(command.get("vz_body_mps", command.get("vz_cmd", 0.0)))
         yaw_rate = float(command.get("yaw_rate_cmd", 0.0))
         priority = int(action.get("priority", command.get("priority", 5)))
         send_vx = vx if active else 0.0
         send_vy = vy if active else 0.0
         send_vz = vz if active else 0.0
         send_yaw_rate = yaw_rate if active else 0.0
+        detail_action_type = str(action.get("action_type") or "flight_command")
         detail = {
-            "action_type": "flight_command",
+            "action_type": detail_action_type,
             "vx_cmd": send_vx,
             "vy_cmd": send_vy,
             "vz_cmd": send_vz,
@@ -459,6 +464,31 @@ class ActionDispatcher:
         )
         sender(send_vx, send_vy, send_vz, frame=frame)
         detail["frame"] = frame
+        return {"status": "sent", "detail": detail}
+
+    def _dispatch_yolo_lock_target(
+        self,
+        action: dict[str, object],
+        *,
+        link_manager: object | None,
+    ) -> dict[str, object]:
+        params = self._action_params(action)
+        track_id = int(params["track_id"])
+        detail: dict[str, object] = {
+            "action_type": "yolo_lock_target",
+            "track_id": track_id,
+            "key": str(action.get("key") or ""),
+        }
+        if self.yolo_client is None:
+            return {"status": "skipped", "reason": "yolo_client_not_available", "detail": detail}
+        try:
+            lock_target = getattr(self.yolo_client, "lock_target", None)
+            if not callable(lock_target):
+                return {"status": "skipped", "reason": "yolo_client_not_callable", "detail": detail}
+            lock_target(track_id)
+        except Exception as exc:
+            self._logger.exception("yolo_lock_target dispatch failed")
+            return {"status": "error", "reason": str(exc), "detail": detail}
         return {"status": "sent", "detail": detail}
 
     # ------------------------------------------------------------------

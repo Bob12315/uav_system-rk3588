@@ -169,6 +169,22 @@ def test_stop_control_preserves_frame() -> None:
     assert cmd.frame == 8
 
 
+def test_stop_body_velocity_queues_stop_with_body_ned_frame() -> None:
+    from telemetry_link.frames import BODY_NED
+
+    manager = LinkManager(_config())
+    manager.stop_body_velocity()
+
+    cmd = _cq(manager).peek_control()
+    assert cmd is not None
+    assert cmd.command_type == ControlType.STOP
+    assert cmd.vx == 0.0
+    assert cmd.vy == 0.0
+    assert cmd.vz == 0.0
+    assert cmd.yaw_rate == 0.0
+    assert cmd.frame == BODY_NED
+
+
 # ── set_servo ────────────────────────────────────────────────────────
 
 
