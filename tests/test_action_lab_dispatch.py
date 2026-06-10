@@ -211,20 +211,15 @@ def test_survey_area_local_position_dispatches_like_goto_waypoint(caplog) -> Non
         runner.action_lab_start_action("survey_area", _survey_params(), send_actions=True)
         runner.action_lab_tick()
 
-    assert runner.services.link_manager.calls == [
-        ("local_position", (0.0, 0.0, -5.0, 1, None), 4)
-    ]
+    assert runner.services.link_manager.calls == []
     payload = runner.action_lab_status_payload()
     assert payload["send_actions_requested"] is True
-    assert payload["send_actions_effective"] is True
-    assert payload["note"] == "action_dispatch_enabled"
-    assert payload["dispatch"]["sent"][0]["action_type"] == "local_position"
-    assert payload["dispatch"]["sent"][0]["x"] == 0.0
-    assert payload["dispatch"]["sent"][0]["y"] == 0.0
-    assert payload["dispatch"]["sent"][0]["z"] == -5.0
-    assert payload["dispatch"]["sent"][0]["frame"] == 1
-    assert payload["dispatch"]["sent"][0]["key"] == "survey_waypoint_0"
-    assert "current_action=survey_area action_type=local_position dispatch_allowed=True" in caplog.text
+    assert payload["send_actions_effective"] is False
+    assert payload["note"] == "action_dispatch_not_enabled"
+    assert payload["dispatch"]["sent"] == []
+    assert payload["dispatch"]["skipped"][0]["action_type"] == "local_position"
+    assert payload["dispatch"]["skipped"][0]["reason"] == "action_dispatch_not_enabled"
+    assert "current_action=survey_area action_type=local_position dispatch_allowed=False" in caplog.text
 
 
 def test_survey_area_local_position_respects_send_commands_gate() -> None:
