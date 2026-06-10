@@ -285,6 +285,32 @@ class LinkManager:
         """Remove all queued LOCAL_POSITION commands so stale targets don't linger."""
         self._active_runtime().command_queue.clear_actions(ActionType.LOCAL_POSITION)
 
+    def hold_current_local_position(self, priority: int = 0) -> bool:
+        """Send a LOCAL_POSITION hold at the current drone position.
+
+        This overrides any stale LOCAL_POSITION target the flight controller
+        may still be navigating toward.  Returns True if a hold was sent.
+        """
+        state = self.get_latest_drone_state()
+        if not state.local_position_valid:
+            self.logger.warning("hold_current_local_position skipped — no valid local position")
+            return False
+        yaw = state.yaw if state.attitude_valid else None
+        self.local_position(
+            x=state.local_x,
+            y=state.local_y,
+            z=state.local_z,
+            frame=LOCAL_NED,
+            yaw=yaw,
+            priority=priority,
+        )
+        self.logger.info(
+            "hold_current_local_position x=%.2f y=%.2f z=%.2f yaw=%s priority=%d",
+            state.local_x, state.local_y, state.local_z,
+            yaw, priority,
+        )
+        return True
+
     def clear_continuous_commands(self) -> None:
         runtime = self._active_runtime()
         runtime.command_queue.clear_control()

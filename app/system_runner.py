@@ -148,6 +148,7 @@ class SystemRunner:
         self.external_processes: dict[str, subprocess.Popen] = {}
         self.action_lab_specs = action_lab_specs()
         self.action_lab_enabled = True
+        self.action_runtime_lock = threading.RLock()
         self.action_runtime = ActionRuntimeService(
             runner=ActionRunner(create_action_lab_registry()),
             dispatcher=ActionDispatcher(
@@ -535,17 +536,18 @@ class SystemRunner:
     def action_lab_tick(self) -> dict[str, object]:
         if not getattr(self, "action_runtime", None):
             return {}
-        status = self.action_runtime.tick(
-            self.action_lab_context(),
-            link_manager=self.services.link_manager,
-            send_commands=bool(self.controller_switches.snapshot().send_commands),
-        )
-        self.logger.info(
-            "action_lab_tick called current_action=%s dispatch=%s",
-            self.action_runtime.action_name,
-            self.action_runtime.dispatcher.last_dispatch,
-        )
-        return status
+        with self.action_runtime_lock:
+            status = self.action_runtime.tick(
+                self.action_lab_context(),
+                link_manager=self.services.link_manager,
+                send_commands=bool(self.controller_switches.snapshot().send_commands),
+            )
+            self.logger.info(
+                "action_lab_tick called current_action=%s dispatch=%s",
+                self.action_runtime.action_name,
+                self.action_runtime.dispatcher.last_dispatch,
+            )
+            return status
 
     def action_lab_status_payload(self) -> dict[str, object]:
         return self.action_runtime.status_payload(
@@ -559,36 +561,38 @@ class SystemRunner:
         *,
         send_actions: bool | None = None,
     ):
-        ActionRuntimeService.clear_navigation_queue(self.services.link_manager)
-        if (
-            self.action_runtime.runner.state == "running"
-            and self.action_runtime.action_name
-            and self.action_runtime.action_name != action_name
-        ):
-            self.logger.info(
-                "action_lab switching action old=%s new=%s",
-                self.action_runtime.action_name,
+        with self.action_runtime_lock:
+            return self.action_runtime.start(
                 action_name,
+                params,
+                send_actions=send_actions,
+                link_manager=self.services.link_manager,
             )
-        return self.action_runtime.start(action_name, params, send_actions=send_actions)
 
     def action_lab_stop_action(self):
-        ActionRuntimeService.clear_navigation_queue(self.services.link_manager)
-        return self.action_runtime.stop()
+        with self.action_runtime_lock:
+            return self.action_runtime.stop(
+                link_manager=self.services.link_manager,
+                hold_current=True,
+            )
 
     def action_lab_reset_action(self):
-        ActionRuntimeService.clear_navigation_queue(self.services.link_manager)
-        return self.action_runtime.reset()
+        with self.action_runtime_lock:
+            return self.action_runtime.reset(
+                link_manager=self.services.link_manager,
+                hold_current=True,
+            )
 
     # ------------------------------------------------------------------
     # action-mission orchestrator (PR F — lightweight, opt-in)
     # ------------------------------------------------------------------
 
     def configure_action_mission(self, steps: list[MissionActionStep]) -> None:
-        self.action_mission_orchestrator = MissionOrchestrator(
-            runtime=self.action_runtime,
-            steps=steps,
-        )
+        with self.action_runtime_lock:
+            self.action_mission_orchestrator = MissionOrchestrator(
+                runtime=self.action_runtime,
+                steps=steps,
+            )
 
     def action_mission_status_payload(self) -> dict[str, object]:
         if self.action_mission_orchestrator is None:
@@ -617,34 +621,42 @@ class SystemRunner:
     def action_mission_start(self) -> dict[str, object]:
         if self.action_mission_orchestrator is None:
             return self.action_mission_status_payload()
-        ActionRuntimeService.clear_navigation_queue(self.services.link_manager)
-        self.action_mission_orchestrator.start()
-        return self.action_mission_status_payload()
+        with self.action_runtime_lock:
+            self.action_mission_orchestrator.start(
+                link_manager=self.services.link_manager,
+            )
+            return self.action_mission_status_payload()
 
     def action_mission_stop(self) -> dict[str, object]:
         if self.action_mission_orchestrator is None:
             return self.action_mission_status_payload()
-        ActionRuntimeService.clear_navigation_queue(self.services.link_manager)
-        self.action_mission_orchestrator.stop()
-        return self.action_mission_status_payload()
+        with self.action_runtime_lock:
+            self.action_mission_orchestrator.stop(
+                link_manager=self.services.link_manager,
+                hold_current=True,
+            )
+            return self.action_mission_status_payload()
 
     def action_mission_reset(self) -> dict[str, object]:
         if self.action_mission_orchestrator is None:
             return self.action_mission_status_payload()
-        ActionRuntimeService.clear_navigation_queue(self.services.link_manager)
-        self.action_mission_orchestrator.reset()
-        return self.action_mission_status_payload()
+        with self.action_runtime_lock:
+            self.action_mission_orchestrator.reset(
+                link_manager=self.services.link_manager,
+                hold_current=True,
+            )
+            return self.action_mission_status_payload()
 
     def action_mission_tick(self) -> dict[str, object]:
         if self.action_mission_orchestrator is None:
             return self.action_mission_status_payload()
-
-        self.action_mission_orchestrator.tick(
-            self.action_lab_context(),
-            link_manager=self.services.link_manager,
-            send_commands=bool(self.controller_switches.snapshot().send_commands),
-        )
-        return self.action_mission_status_payload()
+        with self.action_runtime_lock:
+            self.action_mission_orchestrator.tick(
+                self.action_lab_context(),
+                link_manager=self.services.link_manager,
+                send_commands=bool(self.controller_switches.snapshot().send_commands),
+            )
+            return self.action_mission_status_payload()
 
     def _action_lab_snapshot(self) -> dict[str, object]:
         return self.action_runtime.status_payload(

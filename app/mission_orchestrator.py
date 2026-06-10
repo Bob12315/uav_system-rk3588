@@ -45,14 +45,14 @@ class MissionOrchestrator:
     # lifecycle
     # ------------------------------------------------------------------
 
-    def start(self) -> None:
+    def start(self, *, link_manager: object | None = None) -> None:
         self.running = True
         self.done = False
         self.failed = False
         self.current_index = 0
         self.reason = "started"
         self.detail = {}
-        self._start_current_step()
+        self._start_current_step(link_manager=link_manager)
 
     def tick(
         self,
@@ -98,17 +98,25 @@ class MissionOrchestrator:
             self.current_index += 1
             self.reason = "next_step"
             self.detail = {"previous_action_result": result}
-            self._start_current_step()
+            # Clear any stale LOCAL_POSITION before starting the next step
+            clear_nav = getattr(self.runtime, "clear_navigation_queue", None)
+            if callable(clear_nav):
+                clear_nav(link_manager)
+            self._start_current_step(link_manager=link_manager)
 
         return self.status()
 
-    def stop(self) -> None:
-        self.runtime.stop()
+    def stop(self, *, link_manager: object | None = None, hold_current: bool = False) -> None:
+        stop = getattr(self.runtime, "stop", None)
+        if callable(stop):
+            stop(link_manager, hold_current=hold_current)
         self.running = False
         self.reason = "stopped"
 
-    def reset(self) -> None:
-        self.runtime.reset()
+    def reset(self, *, link_manager: object | None = None, hold_current: bool = False) -> None:
+        reset = getattr(self.runtime, "reset", None)
+        if callable(reset):
+            reset(link_manager, hold_current=hold_current)
         self.running = False
         self.done = False
         self.failed = False
@@ -134,6 +142,8 @@ class MissionOrchestrator:
             detail=dict(self.detail),
         )
 
-    def _start_current_step(self) -> None:
+    def _start_current_step(self, *, link_manager: object | None = None) -> None:
         step = self.steps[self.current_index]
-        self.runtime.start(step.name, dict(step.params), send_actions=True)
+        start = getattr(self.runtime, "start", None)
+        if callable(start):
+            start(step.name, dict(step.params), send_actions=True, link_manager=link_manager)

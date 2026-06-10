@@ -51,20 +51,24 @@ class FakeRuntime:
     def __init__(self, results):
         self.runner = FakeRunner(results)
         self.last_result = None
+        self.clear_nav_calls = 0
 
-    def start(self, name, params=None, *, send_actions=None):
+    def start(self, name, params=None, *, send_actions=None, link_manager=None):
         self.runner.start(name, params)
 
     def tick(self, context, *, link_manager=None, send_commands=False):
         self.last_result = self.runner.update(context)
         return self.runner.status()
 
-    def stop(self):
+    def stop(self, link_manager=None, *, hold_current=False):
         self.runner.stop()
 
-    def reset(self):
+    def reset(self, link_manager=None, *, hold_current=False):
         self.runner.reset()
         self.last_result = None
+
+    def clear_navigation_queue(self, link_manager=None, *, hold_current=False):
+        self.clear_nav_calls += 1
 
 
 # ── helpers ──────────────────────────────────────────────────────────
@@ -172,3 +176,29 @@ def test_empty_steps_raises_value_error() -> None:
     runtime = FakeRuntime([])
     with pytest.raises(ValueError, match="non-empty"):
         MissionOrchestrator(runtime, [])
+
+
+def test_step_transition_clears_navigation_queue() -> None:
+    """When a step completes and the next begins, clear_navigation_queue is called."""
+    runtime = FakeRuntime([FakeActionResult(done=True, reason="step1_done")])
+    orch = MissionOrchestrator(runtime, _steps())
+    assert runtime.clear_nav_calls == 0
+
+    fake_link = object()
+    orch.start(link_manager=fake_link)
+    # first tick — step1 completes, advances to step2
+    status = orch.tick({}, link_manager=fake_link)
+
+    assert status.current_action == "payload_release"
+    assert status.reason == "next_step"
+    assert runtime.clear_nav_calls == 1
+    assert len(runtime.runner.sent_actions) == 2  # step1 started + step2 started
+
+
+def test_stop_with_hold_passes_hold_current() -> None:
+    """stop() with hold_current=True is accepted without error."""
+    runtime = FakeRuntime([])
+    orch = MissionOrchestrator(runtime, _steps())
+    orch.start()
+    orch.stop(link_manager=object(), hold_current=True)
+    assert orch.status().running is False

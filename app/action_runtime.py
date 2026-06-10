@@ -44,7 +44,9 @@ class ActionRuntimeService:
         params: dict[str, object] | None = None,
         *,
         send_actions: bool | None = None,
+        link_manager: object | None = None,
     ):
+        self.clear_navigation_queue(link_manager)
         if send_actions is not None:
             self.dispatcher.send_actions = bool(send_actions)
         # Switch-running action: stop the current one first.
@@ -79,11 +81,15 @@ class ActionRuntimeService:
         )
         return self.runner.status()
 
-    def stop(self):
+    def stop(self, link_manager: object | None = None, *, hold_current: bool = False):
+        """Stop the running action and optionally hold current position."""
+        self.clear_navigation_queue(link_manager, hold_current=hold_current)
         self.dispatcher.last_dispatch = self.dispatcher.empty_dispatch()
         return self.runner.stop()
 
-    def reset(self):
+    def reset(self, link_manager: object | None = None, *, hold_current: bool = False):
+        """Reset the runtime and optionally hold current position."""
+        self.clear_navigation_queue(link_manager, hold_current=hold_current)
         if self.runner.current_action is not None and self.runner.state == "running":
             self.runner.stop()
         self.dispatcher.reset_keys()
@@ -96,13 +102,17 @@ class ActionRuntimeService:
         return self.runner.status()
 
     @staticmethod
-    def clear_navigation_queue(link_manager: object | None) -> None:
-        """Clear pending LOCAL_POSITION actions so stale targets don't linger."""
+    def clear_navigation_queue(link_manager: object | None, *, hold_current: bool = False) -> None:
+        """Clear pending LOCAL_POSITION actions; optionally send a hold at current position."""
         if link_manager is None:
             return
         clear = getattr(link_manager, "clear_pending_local_position_actions", None)
         if callable(clear):
             clear()
+        if hold_current:
+            hold = getattr(link_manager, "hold_current_local_position", None)
+            if callable(hold):
+                hold()
 
     def status_payload(self, *, send_commands: bool) -> dict[str, object]:
         return self.dispatcher.payload(

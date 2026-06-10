@@ -10,6 +10,8 @@ the CommandQueue entries that LinkManager produces.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from telemetry_link.config import TelemetryConfig
@@ -452,3 +454,62 @@ def test_local_position_latest_only_prevents_pileup() -> None:
 
     # only one entry remains
     assert queue.get_next_action() is None
+
+
+def test_hold_current_local_position_sends_hold_command() -> None:
+    """hold_current_local_position sends a LOCAL_POSITION at the current drone state."""
+    from telemetry_link.frames import LOCAL_NED
+
+    manager = LinkManager(_config())
+    runtime = manager.runtimes[manager.active_source]
+    # set link as connected so state is not marked disconnected/stale
+    runtime.state_cache.update_link(connected=True, last_rx_time=time.time())
+    # inject a valid local position into the state cache
+    runtime.state_cache.update_drone_state(
+        local_position_valid=True,
+        attitude_valid=True,
+        local_x=12.0,
+        local_y=34.0,
+        local_z=-5.0,
+        yaw=1.0,
+        last_local_position_time=time.time(),
+        last_attitude_time=time.time(),
+    )
+
+    result = manager.hold_current_local_position(priority=0)
+    assert result is True
+
+    cmd = _cq(manager).get_next_action()
+    assert cmd is not None
+    assert cmd.action_type == ActionType.LOCAL_POSITION
+    assert cmd.params["x"] == pytest.approx(12.0)
+    assert cmd.params["y"] == pytest.approx(34.0)
+    assert cmd.params["z"] == pytest.approx(-5.0)
+    assert cmd.params["frame"] == LOCAL_NED
+    assert cmd.params["yaw"] == pytest.approx(1.0)
+
+
+def test_hold_current_local_position_returns_false_when_position_invalid() -> None:
+    """Without a valid local position, hold_current returns False."""
+    manager = LinkManager(_config())
+    result = manager.hold_current_local_position(priority=0)
+    assert result is False
+
+
+def test_clear_navigation_queue_with_hold_calls_both() -> None:
+    """ActionRuntimeService.clear_navigation_queue with hold_current=True
+    clears pending AND sends a hold."""
+    from app.action_runtime import ActionRuntimeService
+
+    calls = {"clear": 0, "hold": 0}
+
+    class FakeLink:
+        def clear_pending_local_position_actions(self) -> None:
+            calls["clear"] += 1
+        def hold_current_local_position(self, priority: int = 0) -> bool:
+            calls["hold"] += 1
+            return True
+
+    ActionRuntimeService.clear_navigation_queue(FakeLink(), hold_current=True)
+    assert calls["clear"] == 1
+    assert calls["hold"] == 1
