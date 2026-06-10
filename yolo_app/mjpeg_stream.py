@@ -14,11 +14,21 @@ class _ThreadingHttpServer(ThreadingMixIn, server.HTTPServer):
 
 
 class MjpegStream:
-    def __init__(self, host: str, port: int, jpeg_quality: int, max_fps: float) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        jpeg_quality: int,
+        max_fps: float,
+        width: int = 0,
+        height: int = 0,
+    ) -> None:
         self.host = host
         self.port = int(port)
         self.jpeg_quality = max(10, min(100, int(jpeg_quality)))
         self.frame_interval = 0.0 if max_fps <= 0 else 1.0 / float(max_fps)
+        self.width = max(0, int(width))
+        self.height = max(0, int(height))
         self._condition = threading.Condition()
         self._jpeg: bytes | None = None
         self._last_publish = 0.0
@@ -65,9 +75,12 @@ class MjpegStream:
         now = time.perf_counter()
         if self.frame_interval > 0 and now - self._last_publish < self.frame_interval:
             return
+        output_frame = frame
+        if self.width > 0 and self.height > 0:
+            output_frame = cv2.resize(frame, (self.width, self.height), interpolation=cv2.INTER_AREA)
         ok, encoded = cv2.imencode(
             ".jpg",
-            frame,
+            output_frame,
             [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality],
         )
         if not ok:

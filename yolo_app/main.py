@@ -60,6 +60,8 @@ def main() -> int:
             cfg.web_stream_port,
             cfg.web_stream_jpeg_quality,
             cfg.web_stream_max_fps,
+            cfg.web_stream_width,
+            cfg.web_stream_height,
         )
         if cfg.web_stream_enabled
         else None

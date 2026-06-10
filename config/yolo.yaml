@@ -1,4 +1,4 @@
-# RK3588 SITL YOLO 感知进程模板
+# RK3588 YOLO 感知进程模板
 # 说明：
 # - 本进程仅支持 RKNN INT8 模型，通过 RK3588 NPU 推理。
 # - bool 值只能使用 true / false，不要加引号。
@@ -84,8 +84,13 @@ web_stream:
   enabled: true
   host: "0.0.0.0"
   port: 8081
-  jpeg_quality: 75
+  # 弱 WiFi 推荐 480x360 / quality 35 / max_fps 20。
+  # 极低带宽推荐 320x240 / quality 25 / max_fps 20。
+  # width <= 0 或 height <= 0 表示保持原图输出，不影响 YOLO 推理输入。
+  jpeg_quality: 35
   max_fps: 20
+  width: 480
+  height: 360
 
 # true：保存带标注的视频。生成文件属于运行产物，不提交 Git。
 save_video: false

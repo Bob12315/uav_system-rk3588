@@ -58,6 +58,23 @@ def test_load_config_resolves_paths_relative_to_yaml(tmp_path: Path, monkeypatch
     assert cfg.save_path == str(tmp_path / "runtime" / "videos" / "output.mp4")
     assert cfg.latest_frame is True
     assert cfg.web_stream_enabled is True
+    assert cfg.web_stream_width == 0
+    assert cfg.web_stream_height == 0
+
+
+def test_load_config_reads_web_stream_dimensions(tmp_path: Path, monkeypatch) -> None:
+    data = _config()
+    web_stream = data["web_stream"]
+    assert isinstance(web_stream, dict)
+    web_stream["width"] = 480
+    web_stream["height"] = 360
+    path = _write_config(tmp_path, data)
+    monkeypatch.setattr("sys.argv", ["yolo", "--config", str(path)])
+
+    cfg = load_config()
+
+    assert cfg.web_stream_width == 480
+    assert cfg.web_stream_height == 360
 
 
 def test_load_config_rejects_quoted_false_bool(tmp_path: Path, monkeypatch) -> None:

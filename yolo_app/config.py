@@ -41,6 +41,8 @@ class AppConfig:
     web_stream_port: int
     web_stream_jpeg_quality: int
     web_stream_max_fps: float
+    web_stream_width: int
+    web_stream_height: int
 
 
 def _str_to_bool(value: str | bool) -> bool:
@@ -171,4 +173,6 @@ def load_config() -> AppConfig:
         web_stream_port=int(web_stream_config.get("port", 8081)),
         web_stream_jpeg_quality=int(web_stream_config.get("jpeg_quality", 75)),
         web_stream_max_fps=float(web_stream_config.get("max_fps", 20.0)),
+        web_stream_width=int(web_stream_config.get("width", 0)),
+        web_stream_height=int(web_stream_config.get("height", 0)),
     )
