@@ -498,18 +498,38 @@ def test_hold_current_local_position_returns_false_when_position_invalid() -> No
 
 def test_clear_navigation_queue_with_hold_calls_both() -> None:
     """ActionRuntimeService.clear_navigation_queue with hold_current=True
-    clears pending AND sends a hold."""
+    calls clear_continuous -> clear_local_position -> hold in order."""
     from app.action_runtime import ActionRuntimeService
 
-    calls = {"clear": 0, "hold": 0}
+    calls: list[str] = []
 
     class FakeLink:
+        def clear_continuous_commands(self) -> None:
+            calls.append("clear_continuous")
         def clear_pending_local_position_actions(self) -> None:
-            calls["clear"] += 1
+            calls.append("clear_local_position")
         def hold_current_local_position(self, priority: int = 0) -> bool:
-            calls["hold"] += 1
+            calls.append("hold_current")
             return True
 
     ActionRuntimeService.clear_navigation_queue(FakeLink(), hold_current=True)
-    assert calls["clear"] == 1
-    assert calls["hold"] == 1
+    assert calls == ["clear_continuous", "clear_local_position", "hold_current"]
+
+
+def test_clear_navigation_queue_without_hold_skips_hold() -> None:
+    """Without hold_current, only clear_continuous + clear_local_position."""
+    from app.action_runtime import ActionRuntimeService
+
+    calls: list[str] = []
+
+    class FakeLink:
+        def clear_continuous_commands(self) -> None:
+            calls.append("clear_continuous")
+        def clear_pending_local_position_actions(self) -> None:
+            calls.append("clear_local_position")
+        def hold_current_local_position(self, priority: int = 0) -> bool:
+            calls.append("hold_current")
+            return True
+
+    ActionRuntimeService.clear_navigation_queue(FakeLink(), hold_current=False)
+    assert calls == ["clear_continuous", "clear_local_position"]

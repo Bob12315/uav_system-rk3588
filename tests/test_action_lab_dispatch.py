@@ -14,6 +14,7 @@ class FakeLink:
     fail: bool = False
     clear_nav_calls: int = 0
     hold_calls: int = 0
+    clear_continuous_calls: int = 0
 
     # ── semantic wrappers (T4 preferred path) ─────────────────────
     def goto_local_ned(
@@ -73,6 +74,9 @@ class FakeLink:
         self.calls.append(("send_velocity_command", (vx, vy, vz, frame), 0))
 
     # ── navigation queue management (added T2) ────────────────────
+
+    def clear_continuous_commands(self) -> None:
+        self.clear_continuous_calls += 1
 
     def clear_pending_local_position_actions(self) -> None:
         self.clear_nav_calls += 1
@@ -1194,23 +1198,26 @@ def test_yolo_lock_target_exception_goes_to_errors() -> None:
 
 
 def test_action_lab_start_stop_reset_clear_navigation_queue_does_not_crash() -> None:
-    """SystemRunner action_lab_start/stop/reset calls clear_nav and hold_current."""
+    """SystemRunner action_lab_start/stop/reset calls clear_continuous, clear_nav and hold_current."""
     runner = _runner()
     fl: FakeLink = runner.services.link_manager  # type: ignore[assignment]
 
-    # start a goto_waypoint action — clears nav queue
+    # start a goto_waypoint action — clears continuous + nav queue
     runner.action_lab_start_action("goto_waypoint", {"x": 1.0, "y": 0.0, "altitude_m": 1.5})
     assert runner.action_runtime.runner.state == "running"
+    assert fl.clear_continuous_calls == 1  # start clears continuous
     assert fl.clear_nav_calls == 1  # start clears nav
 
     # stop with hold_current=True
     runner.action_lab_stop_action()
     assert runner.action_runtime.runner.state in ("idle", "stopped")
+    assert fl.clear_continuous_calls == 2  # stop clears continuous
     assert fl.clear_nav_calls == 2  # stop clears nav
     assert fl.hold_calls == 1  # stop holds current position
 
     # reset also clears and holds
     runner.action_lab_reset_action()
     assert runner.action_runtime.runner.state == "idle"
+    assert fl.clear_continuous_calls == 3
     assert fl.clear_nav_calls == 3
     assert fl.hold_calls == 2

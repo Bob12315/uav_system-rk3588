@@ -103,12 +103,24 @@ class ActionRuntimeService:
 
     @staticmethod
     def clear_navigation_queue(link_manager: object | None, *, hold_current: bool = False) -> None:
-        """Clear pending LOCAL_POSITION actions; optionally send a hold at current position."""
+        """Clear continuous commands and pending LOCAL_POSITION; optionally send a hold.
+
+        Order is important:
+        1. clear_continuous_commands() — stop any lingering BODY_NED velocity
+        2. clear_pending_local_position_actions() — remove stale position targets
+        3. hold_current_local_position() — overwrite FC's current target (if hold_current)
+        """
         if link_manager is None:
             return
-        clear = getattr(link_manager, "clear_pending_local_position_actions", None)
-        if callable(clear):
-            clear()
+
+        clear_continuous = getattr(link_manager, "clear_continuous_commands", None)
+        if callable(clear_continuous):
+            clear_continuous()
+
+        clear_nav = getattr(link_manager, "clear_pending_local_position_actions", None)
+        if callable(clear_nav):
+            clear_nav()
+
         if hold_current:
             hold = getattr(link_manager, "hold_current_local_position", None)
             if callable(hold):
