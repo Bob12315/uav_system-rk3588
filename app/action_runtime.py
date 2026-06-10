@@ -16,6 +16,7 @@ class ActionRuntimeService:
     def __init__(self, *, runner: ActionRunner, dispatcher: ActionDispatcher | None = None) -> None:
         self.runner = runner
         self.dispatcher = dispatcher or ActionDispatcher()
+        self.last_result: dict[str, object] | None = None
 
     # ------------------------------------------------------------------
     # convenience properties
@@ -68,6 +69,8 @@ class ActionRuntimeService:
         if self.runner.state != "running":
             return self.runner.status()
         result = self.runner.update(context)
+        result_dict = result.to_dict()
+        self.last_result = result_dict
         self.dispatcher.last_dispatch = self.dispatcher.dispatch_result(
             result.to_dict(),
             action_name=self.runner.action_name,
@@ -86,6 +89,7 @@ class ActionRuntimeService:
         self.dispatcher.reset_keys()
         self.dispatcher.last_dispatch = self.dispatcher.empty_dispatch()
         self.dispatcher.last_servo_command = None
+        self.last_result = None
         return self.runner.reset()
 
     def status(self) -> dict[str, object]:

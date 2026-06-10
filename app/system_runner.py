@@ -20,6 +20,7 @@ from app.app_config import AppConfig, ROOT_DIR, load_mission_stage_runtime_confi
 from app.action_dispatcher import ActionDispatcher
 from app.action_runtime import ActionRuntimeService
 from app.blackbox_recorder import BlackboxRecorder
+from app.mission_orchestrator import MissionActionStep, MissionOrchestrator
 from app.runtime_context import RuntimeContextBuilder
 from app.debug_runtime import DebugRuntime
 from app.health_monitor import HealthMonitor
@@ -155,6 +156,7 @@ class SystemRunner:
             )
         )
         self.runtime_context_builder = RuntimeContextBuilder(logger=self.logger)
+        self.action_mission_orchestrator: MissionOrchestrator | None = None
 
     def run(self) -> None:
         self.services.start()
@@ -511,6 +513,7 @@ class SystemRunner:
                     "events": list(self.system_events)[:40],
                     "actions": self._mission_action_log_lines()[:20],
                     "action_lab": self._action_lab_snapshot(),
+                    "action_mission": self.action_mission_status_payload(),
                 }
             )
         manager = self.services.link_manager
@@ -573,6 +576,69 @@ class SystemRunner:
 
     def action_lab_reset_action(self):
         return self.action_runtime.reset()
+
+    # ------------------------------------------------------------------
+    # action-mission orchestrator (PR F — lightweight, opt-in)
+    # ------------------------------------------------------------------
+
+    def configure_action_mission(self, steps: list[MissionActionStep]) -> None:
+        self.action_mission_orchestrator = MissionOrchestrator(
+            runtime=self.action_runtime,
+            steps=steps,
+        )
+
+    def action_mission_status_payload(self) -> dict[str, object]:
+        if self.action_mission_orchestrator is None:
+            return {
+                "enabled": False,
+                "running": False,
+                "done": False,
+                "failed": False,
+                "current_index": 0,
+                "current_action": None,
+                "reason": "not_configured",
+                "detail": {},
+            }
+        status = self.action_mission_orchestrator.status()
+        return {
+            "enabled": True,
+            "running": status.running,
+            "done": status.done,
+            "failed": status.failed,
+            "current_index": status.current_index,
+            "current_action": status.current_action,
+            "reason": status.reason,
+            "detail": status.detail,
+        }
+
+    def action_mission_start(self) -> dict[str, object]:
+        if self.action_mission_orchestrator is None:
+            return self.action_mission_status_payload()
+        self.action_mission_orchestrator.start()
+        return self.action_mission_status_payload()
+
+    def action_mission_stop(self) -> dict[str, object]:
+        if self.action_mission_orchestrator is None:
+            return self.action_mission_status_payload()
+        self.action_mission_orchestrator.stop()
+        return self.action_mission_status_payload()
+
+    def action_mission_reset(self) -> dict[str, object]:
+        if self.action_mission_orchestrator is None:
+            return self.action_mission_status_payload()
+        self.action_mission_orchestrator.reset()
+        return self.action_mission_status_payload()
+
+    def action_mission_tick(self) -> dict[str, object]:
+        if self.action_mission_orchestrator is None:
+            return self.action_mission_status_payload()
+
+        self.action_mission_orchestrator.tick(
+            self.action_lab_context(),
+            link_manager=self.services.link_manager,
+            send_commands=bool(self.controller_switches.snapshot().send_commands),
+        )
+        return self.action_mission_status_payload()
 
     def _action_lab_snapshot(self) -> dict[str, object]:
         return self.action_runtime.status_payload(

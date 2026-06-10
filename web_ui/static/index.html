@@ -3,43 +3,54 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>UAV Web Control</title>
-  <link rel="stylesheet" href="/static/style.css?v=field-map-large">
+  <title>UAV Action Console</title>
+  <link rel="stylesheet" href="/static/style.css?v=ui1-action-first">
 </head>
 <body>
   <header>
-    <div class="brand">UAV Control</div>
+    <div class="brand">UAV Action Console</div>
     <nav>
-      <button class="tab active" data-page="control">控制台</button>
-      <button class="tab" data-page="config">配置管理</button>
+      <button class="tab active" data-page="dashboard">Dashboard</button>
+      <button class="tab" data-page="actions">Actions</button>
+      <button class="tab" data-page="actionMission">Action Mission</button>
+      <button class="tab" data-page="flightSafety">Flight Safety</button>
+      <button class="tab" data-page="configLogs">Config / Logs</button>
     </nav>
     <div class="badges">
       <span id="sourceBadge" class="badge">SOURCE --</span>
       <span id="linkBadge" class="badge">LINK --</span>
       <span id="sendBadge" class="badge danger">SEND OFF</span>
+      <span id="armBadge" class="badge">ARM --</span>
+      <span id="modeBadge" class="badge">MODE --</span>
+      <span id="batteryBadge" class="badge">BAT --</span>
+      <span id="altitudeBadge" class="badge">ALT --</span>
+      <span id="actionBadge" class="badge">ACTION --</span>
+      <span id="missionBadge" class="badge">MISSION --</span>
     </div>
   </header>
 
-  <main id="controlPage" class="page active">
-    <section class="top-grid">
+  <main id="dashboardPage" class="page active">
+    <section class="dashboard-grid">
       <article class="panel video-panel">
-        <div class="panel-title">YOLO 标注实时视频 <span id="videoHint">点击目标框锁定</span></div>
+        <div class="panel-title">YOLO 视频 <span id="videoHint">点击目标框锁定</span></div>
         <div class="video-wrap">
           <img id="video" alt="YOLO 视频流">
           <canvas id="hitCanvas"></canvas>
           <div id="videoOffline" class="overlay-note">等待 YOLO Web 视频流</div>
         </div>
       </article>
+
       <article class="panel field-map-panel">
-        <div class="panel-title">场地态势图</div>
+        <div class="panel-title">场地图</div>
         <div class="field-map-wrap">
           <canvas id="fieldMap"></canvas>
           <div id="fieldMapEmpty" class="field-map-empty">等待 mission 坐标</div>
         </div>
         <div id="fieldMapLegend" class="field-map-legend"></div>
       </article>
+
       <article class="panel target-panel">
-        <div class="panel-title">目标列表</div>
+        <div class="panel-title">目标 / Action / Mission</div>
         <section class="aircraft-info">
           <div class="aircraft-info-title">飞机信息</div>
           <div id="aircraftInfo" class="aircraft-info-grid"></div>
@@ -49,7 +60,7 @@
           <div id="targetInfo" class="aircraft-info-grid"></div>
         </section>
         <div id="targetCurrent" class="current-target">当前锁定: --</div>
-        <div id="detections" class="detections"></div>
+        <div id="detections" class="detections compact"></div>
         <div class="button-row">
           <button data-command="target prev" data-origin="BUTTON">上一个</button>
           <button data-command="target next" data-origin="BUTTON">下一个</button>
@@ -59,106 +70,59 @@
           <div>Frame <strong id="frameId">--</strong></div>
           <div>检测数 <strong id="detCount">0</strong></div>
         </div>
+        <div class="summary-stack">
+          <div class="panel-title minor">当前 Action</div>
+          <div id="dashboardActionSummary" class="summary-box"></div>
+          <div class="panel-title minor">Action Mission</div>
+          <div id="dashboardMissionSummary" class="summary-box"></div>
+          <div class="panel-title minor">最新 Dispatch</div>
+          <div id="dashboardDispatchSummary" class="summary-box"></div>
+        </div>
       </article>
     </section>
 
-    <section class="controls-grid">
-      <article class="panel">
-        <div class="panel-title">飞行安全控制</div>
-        <div class="takeoff-row">
-          <label>起飞高度 <input id="takeoffAltitude" type="number" value="5" min="0" step="0.1"> m</label>
-          <button id="takeoffButton" class="warning">起飞</button>
-        </div>
-        <div class="button-row flight-buttons">
-          <button data-confirm="确认切换到 GUIDED？" data-command="mode GUIDED" data-mode="GUIDED">GUIDED</button>
-          <button data-confirm="确认解锁飞行器？" data-command="arm" data-arm-state="armed" class="warning">解锁</button>
-          <button id="sendToggle" class="switch-button" data-confirm="确认切换自动控制命令发送状态？请确认链路、模式和参数安全。" data-command="control send toggle" data-origin="BUTTON">
-            <span>自动发送</span><strong id="sendToggleState">OFF</strong>
-          </button>
-          <button data-confirm="确认返航 RTL？" data-command="mode RTL" data-mode="RTL" class="warning">RTL</button>
-          <button data-confirm="确认降落？" data-command="land" class="warning">降落</button>
-          <button data-confirm="强制 Disarm 可能导致坠落，确认发送？" data-command="disarm" data-arm-state="disarmed" class="danger">Disarm</button>
-        </div>
-        <div class="controller-switches">
-          <div class="switch-row" data-controller-row="gimbal"><span>Gimbal</span><button data-command="controller gimbal on">ON</button><button data-command="controller gimbal off">OFF</button><button data-command="controller gimbal toggle">TOGGLE</button></div>
-          <div class="switch-row" data-controller-row="body"><span>Body</span><button data-command="controller body on">ON</button><button data-command="controller body off">OFF</button><button data-command="controller body toggle">TOGGLE</button></div>
-          <div class="switch-row" data-controller-row="approach"><span>Approach</span><button data-command="controller approach on">ON</button><button data-command="controller approach off">OFF</button><button data-command="controller approach toggle">TOGGLE</button></div>
-          <div class="switch-row" data-controller-row="all"><span>All</span><button data-command="controller all on">ON</button><button data-command="controller all off">OFF</button><button data-command="controller all toggle">TOGGLE</button></div>
-        </div>
-        <div class="source-actions">
-          数据源:
-          <button data-confirm="切换到 SITL 将关闭自动发送，确认？" data-command="switch_source sitl" data-source="sitl">SITL</button>
-          <button data-confirm="切换到真实飞控将关闭自动发送，确认？" data-command="switch_source real" data-source="real" class="warning">REAL</button>
-        </div>
-        <section class="manual-move">
-          <div class="panel-title minor">手动步长移动</div>
-          <div class="manual-move-settings">
-            <label>移动步长 <input id="moveStep" type="number" value="1" min="0.1" step="0.1"> m</label>
-            <label>偏航角度 <input id="yawStep" type="number" value="15" min="1" max="180" step="1"> °</label>
-          </div>
-          <div class="manual-move-layout">
-            <div class="direction-pad">
-              <span></span>
-              <button data-manual-move="forward">前</button>
-              <span></span>
-              <button data-manual-move="left">左</button>
-              <span class="direction-center"></span>
-              <button data-manual-move="right">右</button>
-              <span></span>
-              <button data-manual-move="back">后</button>
-              <span></span>
-            </div>
-            <div class="manual-side-actions">
-              <button data-manual-move="up">上升</button>
-              <button data-manual-move="down">下降</button>
-              <button data-manual-yaw="left">左偏航</button>
-              <button data-manual-yaw="right">右偏航</button>
-            </div>
-          </div>
-          <div class="hint">机体系单步移动；发送手动动作时会关闭自动控制发送。</div>
-        </section>
+    <section class="bottom-grid">
+      <article class="panel output-panel">
+        <div class="panel-title">系统状态</div>
+        <div id="statusCards" class="status-cards"></div>
       </article>
-      <article class="panel">
-        <div class="panel-title">Mission 控制</div>
-        <div class="mission-row">
-          <select id="missionSelect"></select>
-          <button id="missionSwitch">切换</button>
-          <button data-command="mission start">开始</button>
-          <button data-confirm="重置任务会关闭自动发送，确认？" data-command="mission reset">重置</button>
-        </div>
-        <dl class="mission-status">
-          <dt>Mission</dt><dd id="missionName">--</dd>
-          <dt>Stage</dt><dd id="missionStage">--</dd>
-          <dt>Controller</dt><dd id="stageController">--</dd>
-          <dt>Selected</dt><dd id="stageOverride">AUTO</dd>
-          <dt>Hold</dt><dd id="holdReason">--</dd>
-        </dl>
-        <div id="missionSteps" class="mission-steps"></div>
+      <article class="panel output-panel">
+        <div class="panel-title">最新控制输出</div>
+        <div id="commandCards" class="command-cards"></div>
+        <div class="panel-title minor">重要事件</div>
+        <div id="events" class="scroll-list events"></div>
       </article>
     </section>
+  </main>
 
-    <section class="panel console">
-      <div class="command-line">
-        <label>命令行 &gt;</label>
-        <input id="commandInput" autocomplete="off" placeholder="输入命令，Tab 补全，↑ ↓ 历史">
-        <button id="sendCommand">发送</button>
-      </div>
-      <div id="completionHint" class="hint">Tab 补全 / ↑ ↓ 查看输入记录</div>
-    </section>
-
+  <main id="actionsPage" class="page">
     <section class="panel action-lab">
-      <div class="panel-title">Action Lab <span id="actionDryRun">Start 会二次确认；确认后向 vehicle/simulator 请求下发。系统级 send_commands=false 时仍不会实发。</span></div>
+      <div class="panel-title">Actions <span id="actionDryRun">等待 Action 状态</span></div>
       <div class="action-lab-layout">
         <div>
           <div id="actionButtons" class="action-buttons"></div>
-          <div class="hint" id="actionParamHint">Start 会二次确认；确认后向 vehicle/simulator 请求下发。系统级 send_commands=false 时仍不会实发。</div>
+          <div class="hint" id="actionParamHint">选择一个 Action 查看参数。</div>
         </div>
         <div>
           <textarea id="actionParams" spellcheck="false"></textarea>
-          <div class="button-row">
-            <button id="actionRunToggle">开始</button>
+          <div class="button-row action-run-row">
+            <button id="actionDryRunStart">Dry Run</button>
+            <button id="actionDispatchStart" class="warning">Dispatch</button>
+            <button id="actionStop" class="stop">Stop</button>
             <button id="actionReset">Reset</button>
             <button id="actionRefresh">Refresh Status</button>
+            <button id="actionRunToggle" class="hidden-compat" aria-hidden="true" tabindex="-1">开始</button>
+          </div>
+          <div id="actionSafetyHint" class="action-safety-hint">选择一个 Action 查看安全提示。</div>
+          <div class="action-gate-grid">
+            <div><span>Action requested</span><strong id="actionGateRequested">--</strong></div>
+            <div><span>Action effective</span><strong id="actionGateEffective">--</strong></div>
+            <div><span>System SEND</span><strong id="actionGateSystemSend">--</strong></div>
+            <div><span>Dry-run only</span><strong id="actionGateDryRun">--</strong></div>
+            <div><span>sent</span><strong id="actionGateSentCount">0</strong></div>
+            <div><span>skipped</span><strong id="actionGateSkippedCount">0</strong></div>
+            <div><span>errors</span><strong id="actionGateErrorCount">0</strong></div>
+            <div class="wide"><span>Gate note</span><strong id="actionGateNote">--</strong></div>
           </div>
         </div>
         <div class="action-status-panel">
@@ -177,24 +141,130 @@
       </div>
       <pre id="actionStatusJson" class="action-json"></pre>
     </section>
+  </main>
 
-    <section class="bottom-grid">
-      <article class="panel log-panel">
-        <div class="panel-title">用户输入记录</div>
-        <div id="auditLog" class="scroll-list"></div>
+  <main id="actionMissionPage" class="page">
+    <section class="panel mission-action-panel">
+      <div class="panel-title">Action Mission 控制</div>
+      <div class="action-mission-layout">
+        <div>
+          <div class="action-mission-presets-panel">
+            <div class="panel-title minor">Step Templates</div>
+            <div class="hint">
+              模板只填充 JSON，不会自动执行。Configure 只配置编排器，不会发送飞控命令。
+              Start / Tick 才会推进 Action。SEND=ON 时，local_position/body_velocity/set_servo 可能实发。
+            </div>
+            <div id="actionMissionPresets" class="action-mission-presets">
+              <button data-action-mission-preset="dry_goto">Dry-run Goto</button>
+              <button data-action-mission-preset="payload_release_test" class="warning">Payload Release Test</button>
+              <button data-action-mission-preset="goto_payload_release" class="warning">Goto + Payload Release</button>
+              <button data-action-mission-preset="survey_area_dry" class="warning">Survey Area Dry-run</button>
+              <button data-action-mission-preset="target_lock_test">Target Lock Test</button>
+            </div>
+          </div>
+          <textarea id="actionMissionSteps" spellcheck="false"></textarea>
+          <div class="button-row">
+            <button id="actionMissionConfigure">Configure</button>
+            <button id="actionMissionStart" class="warning">Start</button>
+            <button id="actionMissionStop" class="stop">Stop</button>
+            <button id="actionMissionReset">Reset</button>
+            <button id="actionMissionTick">Tick once</button>
+            <button id="actionMissionRefresh">Refresh</button>
+          </div>
+          <div id="actionMissionSendWarning" class="action-mission-send-warning">System SEND=OFF</div>
+        </div>
+        <div>
+          <dl class="mission-status action-mission-status">
+            <dt>System SEND</dt><dd id="actionMissionSystemSend">--</dd>
+            <dt>Enabled</dt><dd id="actionMissionEnabled">--</dd>
+            <dt>Running</dt><dd id="actionMissionRunning">--</dd>
+            <dt>Done</dt><dd id="actionMissionDone">--</dd>
+            <dt>Failed</dt><dd id="actionMissionFailed">--</dd>
+            <dt>Current Index</dt><dd id="actionMissionIndex">--</dd>
+            <dt>Current Action</dt><dd id="actionMissionCurrent">--</dd>
+            <dt>Reason</dt><dd id="actionMissionReason">--</dd>
+          </dl>
+          <pre id="actionMissionDetail" class="action-json mission-detail-json"></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <main id="flightSafetyPage" class="page">
+    <section class="safety-grid">
+      <article class="panel safety-panel">
+        <div class="panel-title">飞行安全控制</div>
+        <div class="takeoff-row">
+          <label>起飞高度 <input id="takeoffAltitude" type="number" value="5" min="0" step="0.1"> m</label>
+          <button id="takeoffButton" class="warning">起飞</button>
+        </div>
+        <div class="button-row flight-buttons">
+          <button data-confirm="确认切换到 GUIDED？" data-command="mode GUIDED" data-mode="GUIDED">GUIDED</button>
+          <button data-confirm="确认解锁飞行器？" data-command="arm" data-arm-state="armed" class="warning">解锁</button>
+          <button data-confirm="确认返航 RTL？" data-command="mode RTL" data-mode="RTL" class="warning">RTL</button>
+          <button data-confirm="确认降落？" data-command="land" class="warning">降落</button>
+          <button data-confirm="强制 Disarm 可能导致坠落，确认发送？" data-command="disarm" data-arm-state="disarmed" class="danger">Disarm</button>
+        </div>
+        <div class="send-gate">
+          <button id="sendToggle" class="switch-button danger-gate" data-confirm="确认切换自动控制命令发送状态？请确认链路、模式和参数安全。" data-command="control send toggle" data-origin="BUTTON">
+            <span>SEND</span><strong id="sendToggleState">OFF</strong>
+          </button>
+          <div class="hint">SEND 是系统级连续控制发送门。Action send_actions 只是 Action 请求下发。</div>
+        </div>
+        <div class="source-actions">
+          数据源:
+          <button data-confirm="切换到 SITL 将关闭自动发送，确认？" data-command="switch_source sitl" data-source="sitl">SITL</button>
+          <button data-confirm="切换到真实飞控将关闭自动发送，确认？" data-command="switch_source real" data-source="real" class="warning">REAL</button>
+        </div>
       </article>
-      <article class="panel output-panel">
-        <div class="panel-title">系统输出</div>
-        <div id="statusCards" class="status-cards"></div>
-        <div class="panel-title minor">最新控制输出</div>
-        <div id="commandCards" class="command-cards"></div>
-        <div class="panel-title minor">重要事件</div>
-        <div id="events" class="scroll-list events"></div>
+
+      <article class="panel safety-panel">
+        <div class="panel-title">Controller Switches</div>
+        <div class="controller-switches">
+          <div class="switch-row" data-controller-row="gimbal"><span>Gimbal</span><button data-command="controller gimbal on">ON</button><button data-command="controller gimbal off">OFF</button><button data-command="controller gimbal toggle">TOGGLE</button></div>
+          <div class="switch-row" data-controller-row="body"><span>Body</span><button data-command="controller body on">ON</button><button data-command="controller body off">OFF</button><button data-command="controller body toggle">TOGGLE</button></div>
+          <div class="switch-row" data-controller-row="approach"><span>Approach</span><button data-command="controller approach on">ON</button><button data-command="controller approach off">OFF</button><button data-command="controller approach toggle">TOGGLE</button></div>
+          <div class="switch-row" data-controller-row="all"><span>All</span><button data-command="controller all on">ON</button><button data-command="controller all off">OFF</button><button data-command="controller all toggle">TOGGLE</button></div>
+        </div>
+        <div class="payload-release-zone">
+          <div class="panel-title minor">Payload Release Action</div>
+          <button id="payloadReleaseSelect" class="danger">选择 payload_release</button>
+          <button id="payloadReleaseRun" class="danger">执行 payload_release</button>
+          <div class="hint">高风险投放动作集中在安全页；参数仍在 Actions 页编辑。</div>
+        </div>
+      </article>
+
+      <article class="panel manual-move safety-panel">
+        <div class="panel-title">手动步长移动</div>
+        <div class="manual-move-settings">
+          <label>移动步长 <input id="moveStep" type="number" value="1" min="0.1" step="0.1"> m</label>
+          <label>偏航角度 <input id="yawStep" type="number" value="15" min="1" max="180" step="1"> °</label>
+        </div>
+        <div class="manual-move-layout">
+          <div class="direction-pad">
+            <span></span>
+            <button data-manual-move="forward">前</button>
+            <span></span>
+            <button data-manual-move="left">左</button>
+            <span class="direction-center"></span>
+            <button data-manual-move="right">右</button>
+            <span></span>
+            <button data-manual-move="back">后</button>
+            <span></span>
+          </div>
+          <div class="manual-side-actions">
+            <button data-manual-move="up">上升</button>
+            <button data-manual-move="down">下降</button>
+            <button data-manual-yaw="left">左偏航</button>
+            <button data-manual-yaw="right">右偏航</button>
+          </div>
+        </div>
+        <div class="hint">机体系单步移动；发送手动动作时会关闭自动控制发送。</div>
       </article>
     </section>
   </main>
 
-  <main id="configPage" class="page">
+  <main id="configLogsPage" class="page">
     <section class="config-grid">
       <article class="panel file-list">
         <div class="panel-title">配置文件</div>
@@ -221,7 +291,24 @@
         <button id="restartApp" class="warning">重启 App 服务</button>
       </article>
     </section>
+
+    <section class="bottom-grid logs-grid">
+      <article class="panel log-panel">
+        <div class="panel-title">用户输入记录</div>
+        <div id="auditLog" class="scroll-list"></div>
+      </article>
+      <article class="panel console">
+        <div class="panel-title">命令行</div>
+        <div class="command-line">
+          <label>&gt;</label>
+          <input id="commandInput" autocomplete="off" placeholder="输入命令，Tab 补全，↑ ↓ 历史">
+          <button id="sendCommand">发送</button>
+        </div>
+        <div id="completionHint" class="hint">Tab 补全 / ↑ ↓ 查看输入记录</div>
+      </article>
+    </section>
   </main>
-  <script src="/static/app.js?v=action-lab-run-toggle"></script>
+
+  <script src="/static/app.js?v=ui1-action-first"></script>
 </body>
 </html>

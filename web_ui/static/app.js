@@ -11,6 +11,124 @@ let selectedActionName = "";
 let actionParamCache = {};
 let latestActionLab = null;
 const fallbackStageModes = ["AUTO", "IDLE", "APPROACH_TRACK", "OVERHEAD_HOLD", "CORRIDOR_FOLLOW"];
+const ACTION_SAFETY_HINTS = {
+  goto_waypoint: "飞控移动命令：local_position / goto_local_ned，需要 SEND=ON 才实发。",
+  survey_area: "会连续发送 local_position / goto_local_ned，需要 SEND=ON 才实发。",
+  target_lock: "YOLO 锁定命令，不需要 SEND=ON，但需要 Dispatch。",
+  align_descend: "BODY_NED 速度控制，需要 SEND=ON 才实发。",
+  payload_release: "舵机 PWM 输出，需要 SEND=ON 才实发；确认 SERVO 输出通道和 PWM。",
+};
+const DEFAULT_ACTION_MISSION_STEPS = [
+  {
+    name: "goto_waypoint",
+    params: {
+      x: 0.0,
+      y: 0.0,
+      altitude_m: 1.5,
+      yaw_mode: "hold",
+    },
+  },
+  {
+    name: "payload_release",
+    params: {
+      servo_outputs: [
+        {
+          servo_output: 8,
+          release_pwm: 1200,
+          hold_pwm: 1700,
+        },
+      ],
+      payload_id: "p1",
+      target_id: "t1",
+      release_wait_updates: 1,
+    },
+  },
+];
+const actionMissionPresets = {
+  dry_goto: [
+    {
+      name: "goto_waypoint",
+      params: {
+        x: 0.0,
+        y: 0.0,
+        altitude_m: 1.5,
+        yaw_mode: "hold",
+      },
+    },
+  ],
+  payload_release_test: [
+    {
+      name: "payload_release",
+      params: {
+        servo_outputs: [
+          {
+            servo_output: 8,
+            release_pwm: 1200,
+            hold_pwm: 1700,
+          },
+        ],
+        payload_id: "p1",
+        target_id: "t1",
+        release_wait_updates: 1,
+      },
+    },
+  ],
+  goto_payload_release: [
+    {
+      name: "goto_waypoint",
+      params: {
+        x: 0.0,
+        y: 0.0,
+        altitude_m: 1.5,
+        yaw_mode: "hold",
+      },
+    },
+    {
+      name: "payload_release",
+      params: {
+        servo_outputs: [
+          {
+            servo_output: 8,
+            release_pwm: 1200,
+            hold_pwm: 1700,
+          },
+        ],
+        payload_id: "p1",
+        target_id: "t1",
+        release_wait_updates: 1,
+      },
+    },
+  ],
+  survey_area_dry: [
+    {
+      name: "survey_area",
+      params: {
+        waypoints: [
+          {x: 0.0, y: 0.0, altitude_m: 1.5},
+          {x: 1.0, y: 0.0, altitude_m: 1.5},
+        ],
+        yaw_mode: "hold",
+        capture_updates_per_waypoint: 1,
+        max_updates_per_waypoint: 20,
+        detection_source: "scene",
+        class_names: ["bucket", "cylinder"],
+      },
+    },
+  ],
+  target_lock_test: [
+    {
+      name: "target_lock",
+      params: {
+        target: {x: 0.0, y: 0.0},
+        max_match_distance_m: 1.0,
+        detection_source: "scene",
+        class_names: ["bucket", "cylinder"],
+        max_updates: 30,
+        key: "target_lock_test",
+      },
+    },
+  ],
+};
 const FIELD_DEFAULTS = {
   bounds: {xMin: -8, xMax: 62, yMin: -6, yMax: 6},
   takeoff: {x: 0, y: 0, xLen: 8, yLen: 8, label: "起降区"},
@@ -158,6 +276,7 @@ function updateControlHighlights(next, drone, controls) {
   }
 }
 function renderMissionSteps(next) {
+  if (!$("missionSelect") || !$("stageOverride") || !$("missionSteps")) return;
   const selectedMission = $("missionSelect")?.value || next.mission || "";
   const mission = missionCatalog.find(item => item.name === selectedMission);
   const viewingActiveMission = selectedMission === next.mission;
@@ -179,6 +298,76 @@ function renderMissionSteps(next) {
   }).join("");
   $("missionSteps").querySelectorAll("[data-stage-mode]").forEach(button => button.onclick = () =>
     execute(button.dataset.command, "STAGE"));
+}
+function setOptionalText(id, value) {
+  const element = $(id);
+  if (element) element.textContent = value;
+}
+function renderSummaryRows(id, rows) {
+  const element = $(id);
+  if (!element) return;
+  element.innerHTML = rows.map(([label, value, tone]) =>
+    `<div class="summary-row ${tone || ""}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`
+  ).join("");
+}
+function dispatchFromActionLab(actionLab) {
+  const payload = actionLab || latestActionLab || {};
+  const status = payload?.status || payload || {};
+  const last = status?.last_result || {};
+  const detail = last.detail || {};
+  return payload.dispatch || detail.dispatch || detail.last_dispatch || payload.last_dispatch || last.dispatch || {};
+}
+function countDispatchItems(value) {
+  if (Array.isArray(value)) return value.length;
+  if (value && typeof value === "object") return Object.keys(value).length;
+  return value ? 1 : 0;
+}
+function renderActionMissionStatus(actionMission) {
+  const payload = actionMission || {};
+  const detail = payload.detail || {};
+  const sendEnabled = Boolean(state?.controllers?.send_commands);
+  setOptionalText("actionMissionSystemSend", sendEnabled ? "ON" : "OFF");
+  setOptionalText("actionMissionEnabled", String(Boolean(payload.enabled)));
+  setOptionalText("actionMissionRunning", String(Boolean(payload.running)));
+  setOptionalText("actionMissionDone", String(Boolean(payload.done)));
+  setOptionalText("actionMissionFailed", String(Boolean(payload.failed)));
+  setOptionalText("actionMissionIndex", payload.current_index ?? "--");
+  setOptionalText("actionMissionCurrent", payload.current_action || "--");
+  setOptionalText("actionMissionReason", payload.reason || "--");
+  const warning = $("actionMissionSendWarning");
+  if (warning) {
+    warning.textContent = sendEnabled
+      ? "WARNING: System SEND=ON. Tick once may dispatch vehicle/simulator commands."
+      : "System SEND=OFF. Action dispatch requests remain gated.";
+    warning.classList.toggle("send-on", sendEnabled);
+  }
+  const detailElement = $("actionMissionDetail");
+  if (detailElement) detailElement.textContent = JSON.stringify(detail, null, 2);
+}
+function renderDashboardSummaries(next) {
+  const actionLab = next.action_lab || latestActionLab || {};
+  const actionStatus = actionLab?.status || actionLab || {};
+  const actionLast = actionStatus?.last_result || {};
+  const dispatch = dispatchFromActionLab(actionLab);
+  const mission = next.action_mission || {};
+  renderSummaryRows("dashboardActionSummary", [
+    ["Action", actionStatus.action_name || "--", actionStatus.running ? "active" : ""],
+    ["State", actionStatus.state || "--"],
+    ["Reason", actionLast.reason || "--"],
+    ["Done / Failed", `${Boolean(actionLast.done)} / ${Boolean(actionLast.failed)}`, actionLast.failed ? "danger" : ""],
+  ]);
+  renderSummaryRows("dashboardMissionSummary", [
+    ["Enabled", String(Boolean(mission.enabled))],
+    ["Running", String(Boolean(mission.running)), mission.running ? "active" : ""],
+    ["Current", mission.current_action || "--"],
+    ["Reason", mission.reason || "--"],
+  ]);
+  renderSummaryRows("dashboardDispatchSummary", [
+    ["sent", JSON.stringify(dispatch.sent ?? "--"), dispatch.sent ? "ok" : ""],
+    ["skipped", JSON.stringify(dispatch.skipped ?? "--")],
+    ["errors", JSON.stringify(dispatch.errors ?? "--"), dispatch.errors ? "danger" : ""],
+    ["note", actionLab.note || dispatch.note || "--"],
+  ]);
 }
 function pointList(items, fallback, prefix) {
   return Array.isArray(items) && items.length
@@ -449,10 +638,17 @@ function renderStatus(next) {
   setBadge($("sourceBadge"), `SOURCE ${String(next.active_source || "--").toUpperCase()}`, next.active_source === "real" ? "warning" : "");
   setBadge($("linkBadge"), `LINK ${link.connected ? "OK" : "DOWN"}`, link.connected ? "ok" : "danger");
   setBadge($("sendBadge"), `SEND ${controls.send_commands ? "ON" : "OFF"}`, controls.send_commands ? "danger" : "ok");
-  $("missionName").textContent = next.mission || "--";
-  $("missionStage").textContent = next.stage || "--";
-  $("stageController").textContent = next.stage_controller || "--";
-  $("holdReason").textContent = next.hold_reason || "none";
+  setBadge($("armBadge"), `ARM ${drone.armed ? "ON" : "OFF"}`, drone.armed ? "warning" : "");
+  setBadge($("modeBadge"), `MODE ${drone.mode || "--"}`, drone.mode === "GUIDED" ? "warning" : "");
+  setBadge($("batteryBadge"), `BAT ${drone.battery_valid ? `${drone.battery_remaining}%` : "--"}`, "");
+  setBadge($("altitudeBadge"), `ALT ${num(drone.relative_altitude, 1, "m")}`, "");
+  const actionStatus = (next.action_lab?.status || next.action_lab || {});
+  setBadge($("actionBadge"), `ACTION ${actionStatus.running ? (actionStatus.action_name || "RUN") : "--"}`, actionStatus.running ? "active" : "");
+  setBadge($("missionBadge"), `MISSION ${next.action_mission?.running ? (next.action_mission.current_action || "RUN") : "--"}`, next.action_mission?.running ? "active" : "");
+  setOptionalText("missionName", next.mission || "--");
+  setOptionalText("missionStage", next.stage || "--");
+  setOptionalText("stageController", next.stage_controller || "--");
+  setOptionalText("holdReason", next.hold_reason || "none");
   updateControlHighlights(next, drone, controls);
   renderMissionSteps(next);
   $("targetCurrent").textContent = target.target_valid
@@ -514,6 +710,8 @@ function renderStatus(next) {
     `<div class="log-line">${stamp(item.timestamp)} ${escapeHtml(item.level)} &nbsp; ${escapeHtml(item.message)}</div>`).join("");
   renderFieldMap(next);
   renderActionLabStatus(next.action_lab || null);
+  renderActionMissionStatus(next.action_mission || null);
+  renderDashboardSummaries(next);
 }
 function renderDetections(scene, target) {
   $("frameId").textContent = scene.frame_id ?? "--";
@@ -559,6 +757,7 @@ async function loadAudit() {
 }
 async function loadMissions() {
   missionCatalog = await json("/api/missions");
+  if (!$("missionSelect")) return;
   $("missionSelect").innerHTML = missionCatalog.map(item =>
     `<option value="${item.name}" ${item.active ? "selected" : ""}>${item.name}</option>`).join("");
   renderMissionSteps(state || {});
@@ -566,13 +765,16 @@ async function loadMissions() {
 async function loadActionLab() {
   const result = await json("/api/actions/list");
   actionSpecs = result.actions || [];
-  $("actionButtons").innerHTML = actionSpecs.map(spec =>
+  $("actionButtons").innerHTML = actionSpecs.filter(spec => spec.name !== "payload_release").map(spec =>
     `<button data-action-name="${escapeHtml(spec.name)}">${escapeHtml(spec.label || spec.name)}</button>`
   ).join("");
   $("actionButtons").querySelectorAll("[data-action-name]").forEach(button => {
     button.onclick = () => selectAction(button.dataset.actionName);
   });
-  if (actionSpecs.length) selectAction(actionSpecs[0].name);
+  if (actionSpecs.length) {
+    const firstRegularAction = actionSpecs.find(spec => spec.name !== "payload_release") || actionSpecs[0];
+    selectAction(firstRegularAction.name);
+  }
 }
 function cacheSelectedActionParams() {
   if (!selectedActionName || !$("actionParams")) return;
@@ -595,6 +797,7 @@ function selectAction(name) {
   }
   $("completionHint").textContent = hint;
   if ($("actionParamHint")) $("actionParamHint").textContent = hint;
+  if ($("actionSafetyHint")) $("actionSafetyHint").textContent = ACTION_SAFETY_HINTS[spec.name] || "普通 Action；Dispatch 请求下发，实际发送仍受系统 SEND 和 dispatch 结果约束。";
   document.querySelectorAll("[data-action-name]").forEach(button =>
     button.classList.toggle("active-choice", button.dataset.actionName === selectedActionName));
   renderActionLabStatus(latestActionLab);
@@ -613,6 +816,10 @@ function renderActionLabStatus(actionLab) {
   const last = status?.last_result || {};
   const detail = last.detail || {};
   const note = payload?.note || "";
+  const dispatch = dispatchFromActionLab(payload);
+  const sentCount = countDispatchItems(dispatch.sent);
+  const skippedCount = countDispatchItems(dispatch.skipped);
+  const errorCount = countDispatchItems(dispatch.errors);
   const runningAction = status?.running ? status?.action_name || "" : "";
   const selectedIsRunning = Boolean(runningAction && runningAction === selectedActionName);
   if ($("actionDryRun")) {
@@ -631,12 +838,26 @@ function renderActionLabStatus(actionLab) {
     $("actionRunToggle").textContent = selectedIsRunning ? "停止" : "开始";
     $("actionRunToggle").classList.toggle("stop", selectedIsRunning);
   }
+  if ($("actionStop")) $("actionStop").disabled = !Boolean(status?.running);
+  setOptionalText("actionGateRequested", String(Boolean(payload?.send_actions_requested)));
+  setOptionalText("actionGateEffective", String(Boolean(payload?.send_actions_effective)));
+  setOptionalText("actionGateSystemSend", String(Boolean(state?.controllers?.send_commands)));
+  setOptionalText("actionGateDryRun", String(Boolean(payload?.dry_run_only)));
+  setOptionalText("actionGateSentCount", String(sentCount));
+  setOptionalText("actionGateSkippedCount", String(skippedCount));
+  setOptionalText("actionGateErrorCount", String(errorCount));
+  setOptionalText("actionGateNote", note || dispatch.note || "--");
   if ($("actionSwitchHint")) {
     $("actionSwitchHint").textContent = runningAction && runningAction !== selectedActionName
       ? `当前运行：${runningAction}；当前选中：${selectedActionName || "--"}。点击“开始”将停止 ${runningAction} 并启动 ${selectedActionName || "--"}。`
       : "";
   }
   const highlights = {
+    dispatch_state: errorCount > 0 ? "errors" : sentCount > 0 ? "已发送" : skippedCount > 0 ? "skipped" : undefined,
+    sent: dispatch.sent,
+    skipped: dispatch.skipped,
+    errors: dispatch.errors,
+    last_servo_command: payload.last_servo_command || detail.last_servo_command,
     command: detail.command,
     estimated_objects: detail.estimated_objects,
     channels: detail.channels,
@@ -647,6 +868,9 @@ function renderActionLabStatus(actionLab) {
     hold_sent: detail.hold_sent,
     release_time: detail.release_time,
   };
+  $("actionHighlights").classList.toggle("has-errors", errorCount > 0);
+  $("actionHighlights").classList.toggle("has-sent", sentCount > 0 && errorCount === 0);
+  $("actionHighlights").classList.toggle("has-skipped", skippedCount > 0 && sentCount === 0 && errorCount === 0);
   $("actionHighlights").innerHTML = Object.entries(highlights)
     .filter(([, value]) => value !== undefined)
     .map(([key, value]) => `<div><span>${escapeHtml(key)}</span><code>${escapeHtml(JSON.stringify(value))}</code></div>`)
@@ -663,6 +887,83 @@ function parseActionParams() {
     return null;
   }
 }
+function parseActionMissionSteps() {
+  try {
+    const value = $("actionMissionSteps").value.trim();
+    const steps = value ? JSON.parse(value) : [];
+    if (!Array.isArray(steps)) throw new Error("steps must be a JSON array");
+    for (const [index, step] of steps.entries()) {
+      if (!step || typeof step !== "object" || typeof step.name !== "string" || !step.name.trim()) {
+        throw new Error(`step ${index + 1} must include name`);
+      }
+      if (step.params !== undefined && (step.params === null || Array.isArray(step.params) || typeof step.params !== "object")) {
+        throw new Error(`step ${index + 1} params must be an object`);
+      }
+    }
+    return steps.map(step => ({name: step.name, params: step.params || {}}));
+  } catch (error) {
+    $("completionHint").textContent = `Action Mission JSON 错误: ${error.message}`;
+    return null;
+  }
+}
+async function refreshActionMission() {
+  const result = await json("/api/action-mission/status");
+  if (!result.ok) throw new Error(result.error || "action mission status failed");
+  renderActionMissionStatus(result.action_mission || null);
+  return result;
+}
+async function configureActionMission() {
+  const steps = parseActionMissionSteps();
+  if (steps === null) return;
+  const result = await json("/api/action-mission/configure", {
+    method: "POST",
+    body: JSON.stringify({steps}),
+  });
+  if (!result.ok) throw new Error(result.error || "action mission configure failed");
+  $("completionHint").textContent = "Action Mission configured";
+  renderActionMissionStatus(result.action_mission || null);
+}
+async function startActionMission() {
+  const confirmed = window.confirm(
+    "确认启动 Action Mission？\n"
+    + "它会按 step 顺序运行 Action。Action 是否实发仍受 send_actions 和系统 SEND 门控控制。"
+  );
+  if (!confirmed) return;
+  const result = await json("/api/action-mission/start", {method: "POST", body: "{}"});
+  if (!result.ok) throw new Error(result.error || "action mission start failed");
+  $("completionHint").textContent = "Action Mission started";
+  renderActionMissionStatus(result.action_mission || null);
+}
+async function stopActionMission() {
+  const result = await json("/api/action-mission/stop", {method: "POST", body: "{}"});
+  if (!result.ok) throw new Error(result.error || "action mission stop failed");
+  $("completionHint").textContent = "Action Mission stopped";
+  renderActionMissionStatus(result.action_mission || null);
+}
+async function resetActionMission() {
+  const result = await json("/api/action-mission/reset", {method: "POST", body: "{}"});
+  if (!result.ok) throw new Error(result.error || "action mission reset failed");
+  $("completionHint").textContent = "Action Mission reset";
+  renderActionMissionStatus(result.action_mission || null);
+}
+async function tickActionMission() {
+  const result = await json("/api/action-mission/tick", {method: "POST", body: "{}"});
+  if (!result.ok) throw new Error(result.error || "action mission tick failed");
+  $("completionHint").textContent = "Action Mission tick complete";
+  renderActionMissionStatus(result.action_mission || null);
+}
+function loadActionMissionPreset(name) {
+  const preset = actionMissionPresets[name];
+  const editor = $("actionMissionSteps");
+  if (!preset || !editor) return;
+  const current = editor.value.trim();
+  const defaultText = JSON.stringify(DEFAULT_ACTION_MISSION_STEPS, null, 2).trim();
+  if (current && current !== defaultText && !window.confirm("当前 Step JSON 将被覆盖，确认？")) {
+    return;
+  }
+  editor.value = JSON.stringify(preset, null, 2);
+  $("completionHint").textContent = "已加载模板，请检查参数后 Configure";
+}
 function selectedActionIsRunning() {
   const status = latestActionLab?.status || {};
   return Boolean(status?.running && status?.action_name === selectedActionName);
@@ -671,19 +972,26 @@ async function toggleActionLabRun() {
   if (selectedActionIsRunning()) {
     await stopActionLabAction();
   } else {
-    await startActionLabAction();
+    await startActionLabAction(true);
   }
 }
-async function startActionLabAction() {
+async function startActionLabAction(sendActions) {
   if (!selectedActionName) return;
   const params = parseActionParams();
   if (params === null) return;
-  const confirmed = window.confirm("即将启动 Action，并向 vehicle/simulator 下发控制指令。\n确认继续？");
-  if (!confirmed) return;
+  if (sendActions) {
+    const confirmed = window.confirm(
+      "这会请求 Action 实发。\n"
+      + "如果系统 SEND=OFF，飞控命令仍不会发送。\n"
+      + "如果系统 SEND=ON，local_position/body_velocity/set_servo 会实际发送到 vehicle/simulator。\n"
+      + "确认继续？"
+    );
+    if (!confirmed) return;
+  }
   const requestBody = {
     name: selectedActionName,
     params,
-    send_actions: true,
+    send_actions: Boolean(sendActions),
   };
   console.log("Action Lab start request body", requestBody);
   const result = await json("/api/actions/start", {
@@ -691,7 +999,7 @@ async function startActionLabAction() {
     body: JSON.stringify(requestBody),
   });
   if (!result.ok) throw new Error(result.error || "action start failed");
-  $("completionHint").textContent = result.note || "action started";
+  $("completionHint").textContent = result.note || (sendActions ? "action dispatch requested" : "action dry-run started");
   renderActionLabStatus(result.action_lab || result.status);
 }
 async function stopActionLabAction() {
@@ -796,8 +1104,8 @@ async function init() {
     const altitude = $("takeoffAltitude").value;
     if (confirm(`确认起飞至 ${altitude} m？`)) execute(`takeoff ${altitude}`, "BUTTON");
   };
-  $("missionSwitch").onclick = () => execute(`mission switch ${$("missionSelect").value}`, "BUTTON").then(loadMissions);
-  $("missionSelect").onchange = () => renderMissionSteps(state || {});
+  if ($("missionSwitch")) $("missionSwitch").onclick = () => execute(`mission switch ${$("missionSelect").value}`, "BUTTON").then(loadMissions);
+  if ($("missionSelect")) $("missionSelect").onchange = () => renderMissionSteps(state || {});
   $("sendCommand").onclick = () => {
     const input = $("commandInput");
     execute(input.value, "CLI"); input.value = ""; historyIndex = -1;
@@ -833,9 +1141,31 @@ async function init() {
   $("restartYolo").onclick = () => confirm("确认重启 YOLO 服务？") && json("/api/services/yolo/restart", {method: "POST"}).then(loadAudit);
   $("restartApp").onclick = () => confirm("重启 App 将关闭自动发送并暂时断开网页，确认？") && json("/api/services/app/restart", {method: "POST"}).then(loadAudit);
   $("actionParams").oninput = () => cacheSelectedActionParams();
-  $("actionRunToggle").onclick = () => toggleActionLabRun().catch(error => { $("completionHint").textContent = error.message; });
+  if ($("actionRunToggle")) $("actionRunToggle").onclick = () => toggleActionLabRun().catch(error => { $("completionHint").textContent = error.message; });
+  if ($("actionDryRunStart")) $("actionDryRunStart").onclick = () => startActionLabAction(false).catch(error => { $("completionHint").textContent = error.message; });
+  if ($("actionDispatchStart")) $("actionDispatchStart").onclick = () => startActionLabAction(true).catch(error => { $("completionHint").textContent = error.message; });
+  if ($("actionStop")) $("actionStop").onclick = () => stopActionLabAction().catch(error => { $("completionHint").textContent = error.message; });
   $("actionReset").onclick = () => resetActionLabAction().catch(error => { $("completionHint").textContent = error.message; });
   $("actionRefresh").onclick = () => refreshActionStatus().catch(error => { $("completionHint").textContent = error.message; });
+  if ($("actionMissionSteps")) $("actionMissionSteps").value = JSON.stringify(DEFAULT_ACTION_MISSION_STEPS, null, 2);
+  if ($("actionMissionConfigure")) $("actionMissionConfigure").onclick = () => configureActionMission().catch(error => { $("completionHint").textContent = error.message; });
+  if ($("actionMissionStart")) $("actionMissionStart").onclick = () => startActionMission().catch(error => { $("completionHint").textContent = error.message; });
+  if ($("actionMissionStop")) $("actionMissionStop").onclick = () => stopActionMission().catch(error => { $("completionHint").textContent = error.message; });
+  if ($("actionMissionReset")) $("actionMissionReset").onclick = () => resetActionMission().catch(error => { $("completionHint").textContent = error.message; });
+  if ($("actionMissionTick")) $("actionMissionTick").onclick = () => tickActionMission().catch(error => { $("completionHint").textContent = error.message; });
+  if ($("actionMissionRefresh")) $("actionMissionRefresh").onclick = () => refreshActionMission().catch(error => { $("completionHint").textContent = error.message; });
+  document.querySelectorAll("[data-action-mission-preset]").forEach(button => {
+    button.onclick = () => loadActionMissionPreset(button.dataset.actionMissionPreset);
+  });
+  if ($("payloadReleaseSelect")) $("payloadReleaseSelect").onclick = () => {
+    selectAction("payload_release");
+    document.querySelectorAll(".tab").forEach(tab => tab.classList.toggle("active", tab.dataset.page === "actions"));
+    document.querySelectorAll(".page").forEach(page => page.classList.toggle("active", page.id === "actionsPage"));
+  };
+  if ($("payloadReleaseRun")) $("payloadReleaseRun").onclick = () => {
+    selectAction("payload_release");
+    startActionLabAction(true).catch(error => { $("completionHint").textContent = error.message; });
+  };
   completions = (await json("/api/commands/completions")).commands;
   await Promise.all([loadAudit(), loadMissions(), loadConfigFiles(), loadActionLab()]);
   startStatusUpdates();

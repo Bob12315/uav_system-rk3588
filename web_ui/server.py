@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from app.mission_orchestrator import MissionActionStep
 from app.app_config import ROOT_DIR, UiConfig
 from uav_ui.completion_catalog import COMMAND_COMPLETIONS
 from web_ui.audit import AuditLog
@@ -32,6 +33,15 @@ class ActionStartRequest(BaseModel):
     name: str
     params: dict = Field(default_factory=dict)
     send_actions: bool | None = None
+
+
+class ActionMissionStepRequest(BaseModel):
+    name: str
+    params: dict = Field(default_factory=dict)
+
+
+class ActionMissionConfigureRequest(BaseModel):
+    steps: list[ActionMissionStepRequest]
 
 
 class WebUiServer:
@@ -178,6 +188,52 @@ def create_app(runner, config: UiConfig) -> FastAPI:
                 "send_actions_effective": action_lab["send_actions_effective"],
                 "note": action_lab["note"],
             }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.get("/api/action-mission/status")
+    def action_mission_status():
+        try:
+            return {"ok": True, "action_mission": runner.action_mission_status_payload()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/action-mission/configure")
+    def action_mission_configure(request: ActionMissionConfigureRequest):
+        try:
+            runner.configure_action_mission([
+                MissionActionStep(step.name, dict(step.params or {}))
+                for step in request.steps
+            ])
+            return {"ok": True, "action_mission": runner.action_mission_status_payload()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/action-mission/start")
+    def action_mission_start():
+        try:
+            return {"ok": True, "action_mission": runner.action_mission_start()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/action-mission/stop")
+    def action_mission_stop():
+        try:
+            return {"ok": True, "action_mission": runner.action_mission_stop()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/action-mission/reset")
+    def action_mission_reset():
+        try:
+            return {"ok": True, "action_mission": runner.action_mission_reset()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/action-mission/tick")
+    def action_mission_tick():
+        try:
+            return {"ok": True, "action_mission": runner.action_mission_tick()}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
