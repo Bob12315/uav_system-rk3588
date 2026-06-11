@@ -7,6 +7,7 @@ from .goto_waypoint import GotoWaypointAction
 from .multi_view_localize import MultiViewLocalizeAction
 from .payload_release import PayloadReleaseAction
 from .registry import ActionRegistry
+from .single_view_localize import SingleViewLocalizeAction
 from .survey_area import SurveyAreaAction
 from .target_lock import TargetLockAction
 
@@ -15,6 +16,7 @@ def create_action_lab_registry() -> ActionRegistry:
     registry = ActionRegistry()
     registry.register("goto_waypoint", GotoWaypointAction)
     registry.register("survey_area", SurveyAreaAction)
+    registry.register("single_view_localize", SingleViewLocalizeAction)
     registry.register("multi_view_localize", MultiViewLocalizeAction)
     registry.register("target_lock", TargetLockAction)
     registry.register("align_descend", AlignDescendAction)
@@ -52,6 +54,23 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "max_updates_per_waypoint": 200,
                 "detection_source": "scene",
                 "class_names": ["cylinder"],
+            },
+        },
+        {
+            "name": "single_view_localize",
+            "label": "Single View Localize",
+            "description": "Single-frame YOLO detection to local NED coordinate debug action.",
+            "default_params": {
+                "detection_source": "scene",
+                "class_names": ["bucket"],
+                "min_confidence": 0.35,
+                "camera": {
+                    "horizontal_fov_deg": 70.0,
+                    "vertical_fov_deg": 43.0,
+                    "image_x_sign": 1,
+                    "image_y_sign": 1,
+                    "model": "pinhole",
+                },
             },
         },
         {

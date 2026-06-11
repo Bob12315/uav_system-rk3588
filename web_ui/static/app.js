@@ -17,6 +17,7 @@ const ACTION_SAFETY_HINTS = {
   target_lock: "YOLO 锁定命令，不需要 SEND=ON，但需要 Dispatch。",
   align_descend: "BODY_NED 速度控制，需要 SEND=ON 才实发。",
   payload_release: "舵机 PWM 输出，需要 SEND=ON 才实发；确认 SERVO 输出通道和 PWM。",
+  single_view_localize: "单帧定位调试 Action：只读取当前 YOLO 检测和飞行状态，计算目标 local 坐标，不发送飞控命令。",
   multi_view_localize: "四点移动采样并融合定位所有筒；会发送 local_position，需要 SEND=ON 才实发。",
 };
 const DEFAULT_ACTION_MISSION_STEPS = [

@@ -12,7 +12,9 @@ def test_create_action_lab_registry_lists_supported_actions() -> None:
     assert registry.list() == [
         "align_descend",
         "goto_waypoint",
+        "multi_view_localize",
         "payload_release",
+        "single_view_localize",
         "survey_area",
         "target_lock",
     ]
@@ -32,9 +34,11 @@ def test_action_lab_specs_are_json_serializable() -> None:
     assert [item["name"] for item in specs] == [
         "goto_waypoint",
         "survey_area",
+        "single_view_localize",
         "target_lock",
         "align_descend",
         "payload_release",
+        "multi_view_localize",
     ]
 
 
@@ -51,5 +55,13 @@ def test_payload_release_spec_defaults_to_servo_output_8() -> None:
 def test_action_lab_does_not_auto_register_default_registry() -> None:
     create_action_lab_registry()
 
-    for name in ("goto_waypoint", "survey_area", "target_lock", "align_descend", "payload_release"):
+    for name in (
+        "goto_waypoint",
+        "survey_area",
+        "single_view_localize",
+        "target_lock",
+        "align_descend",
+        "payload_release",
+        "multi_view_localize",
+    ):
         assert name not in default_registry.list()
