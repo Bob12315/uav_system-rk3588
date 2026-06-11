@@ -445,16 +445,16 @@ function worldToCanvas(x, y, bounds, rect) {
   const usableW = Math.max(1, rect.width - pad * 2);
   const usableH = Math.max(1, rect.height - pad * 2);
   const scale = Math.min(
-    usableW / (bounds.yMax - bounds.yMin),
-    usableH / (bounds.xMax - bounds.xMin),
+    usableW / (bounds.xMax - bounds.xMin),
+    usableH / (bounds.yMax - bounds.yMin),
   );
-  const plotW = (bounds.yMax - bounds.yMin) * scale;
-  const plotH = (bounds.xMax - bounds.xMin) * scale;
+  const plotW = (bounds.xMax - bounds.xMin) * scale;
+  const plotH = (bounds.yMax - bounds.yMin) * scale;
   const left = (rect.width - plotW) / 2;
   const top = (rect.height - plotH) / 2;
   return [
-    left + (Number(y) - bounds.yMin) * scale,
-    top + (bounds.xMax - Number(x)) * scale,
+    left + (Number(x) - bounds.xMin) * scale,
+    top + (bounds.yMax - Number(y)) * scale,
   ];
 }
 function drawFieldLabel(ctx, text, x, y, options = {}) {
@@ -484,31 +484,30 @@ function drawCoordinateTicks(ctx, model) {
   ctx.fillStyle = "#93a8bf";
   ctx.lineWidth = 1;
   ctx.font = "11px Consolas, monospace";
-  ctx.textBaseline = "middle";
-  for (let x = 0; x <= bounds.xMax; x += 10) {
-    const [leftX, leftY] = worldToCanvas(x, bounds.yMin, bounds, model.rect);
-    const [rightX, rightY] = worldToCanvas(x, bounds.yMax, bounds, model.rect);
-    ctx.beginPath();
-    ctx.moveTo(leftX - 5, leftY);
-    ctx.lineTo(leftX, leftY);
-    ctx.moveTo(rightX, rightY);
-    ctx.lineTo(rightX + 5, rightY);
-    ctx.stroke();
-    ctx.textAlign = "right";
-    ctx.fillText(`x=${x}`, leftX - 8, leftY);
-  }
+  // x ticks on bottom edge
   ctx.textBaseline = "top";
-  for (let y = bounds.yMin; y <= bounds.yMax; y += 2) {
-    const [tickX, tickY] = worldToCanvas(bounds.xMin, y, bounds, model.rect);
+  for (let x = 0; x <= bounds.xMax; x += 10) {
+    const [tickX, tickY] = worldToCanvas(x, bounds.yMin, bounds, model.rect);
     ctx.beginPath();
     ctx.moveTo(tickX, tickY);
     ctx.lineTo(tickX, tickY + 5);
     ctx.stroke();
     ctx.textAlign = "center";
-    ctx.fillText(`${y}`, tickX, tickY + 8);
+    ctx.fillText(`${x}`, tickX, tickY + 8);
   }
-  drawFieldLabel(ctx, "x/m", 24, model.rect.height / 2, {color: "#93a8bf", align: "left"});
-  drawFieldLabel(ctx, "y/m", model.rect.width / 2, model.rect.height - 16, {color: "#93a8bf"});
+  // y ticks on left edge
+  ctx.textBaseline = "middle";
+  for (let y = bounds.yMin; y <= bounds.yMax; y += 2) {
+    const [tickX, tickY] = worldToCanvas(bounds.xMin, y, bounds, model.rect);
+    ctx.beginPath();
+    ctx.moveTo(tickX - 5, tickY);
+    ctx.lineTo(tickX, tickY);
+    ctx.stroke();
+    ctx.textAlign = "right";
+    ctx.fillText(`${y}`, tickX - 8, tickY);
+  }
+  drawFieldLabel(ctx, "x/m", model.rect.width / 2, model.rect.height - 16, {color: "#93a8bf"});
+  drawFieldLabel(ctx, "y/m", 24, model.rect.height / 2, {color: "#93a8bf", align: "left"});
 }
 function drawField(ctx, model) {
   ctx.clearRect(0, 0, model.rect.width, model.rect.height);
@@ -525,8 +524,8 @@ function drawField(ctx, model) {
   ctx.stroke();
   ctx.setLineDash([]);
   drawCoordinateTicks(ctx, model);
-  drawFieldLabel(ctx, "+x 前方", model.rect.width - 56, 22, {color: "#93a8bf"});
-  drawFieldLabel(ctx, "+y 右方", model.rect.width - 56, 40, {color: "#93a8bf"});
+  drawFieldLabel(ctx, "+x", model.rect.width - 56, 22, {color: "#93a8bf"});
+  drawFieldLabel(ctx, "+y", model.rect.width - 56, 40, {color: "#93a8bf"});
 }
 function drawSurveyPoints(ctx, model) {
   const drawPoint = (point, index, activeIndex, color) => {
