@@ -4,6 +4,7 @@ from typing import Any
 
 from .align_descend import AlignDescendAction
 from .goto_waypoint import GotoWaypointAction
+from .multi_view_localize import MultiViewLocalizeAction
 from .payload_release import PayloadReleaseAction
 from .registry import ActionRegistry
 from .survey_area import SurveyAreaAction
@@ -14,6 +15,7 @@ def create_action_lab_registry() -> ActionRegistry:
     registry = ActionRegistry()
     registry.register("goto_waypoint", GotoWaypointAction)
     registry.register("survey_area", SurveyAreaAction)
+    registry.register("multi_view_localize", MultiViewLocalizeAction)
     registry.register("target_lock", TargetLockAction)
     registry.register("align_descend", AlignDescendAction)
     registry.register("payload_release", PayloadReleaseAction)
@@ -102,6 +104,45 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "target_id": "target_a",
                 "release_wait_updates": 5,
                 "priority": 3,
+            },
+        },
+        {
+            "name": "multi_view_localize",
+            "label": "Multi-View Localize",
+            "description": (
+                "Fly to four observation points, collect YOLO detections, fuse into "
+                "localized object coordinates. Outputs localized_objects only — "
+                "no best_target selection, no auto-lock, no payload release."
+            ),
+            "default_params": {
+                "waypoint_mode": "relative_to_start",
+                "radius_m": 0.8,
+                "altitude_m": 3.0,
+                "yaw_mode": "arm_heading",
+                "waypoints": None,
+                "capture_updates_per_waypoint": 3,
+                "settle_updates_per_waypoint": 3,
+                "max_updates_per_waypoint": 100,
+                "tolerance_xy_m": 0.3,
+                "tolerance_z_m": 0.3,
+                "min_hold_updates": 1,
+                "detection_source": "scene",
+                "class_names": ["bucket"],
+                "min_confidence": 0.25,
+                "camera": {
+                    "fov_x_deg": 75.0,
+                    "fov_y_deg": 75.0,
+                    "image_x_sign": 1.0,
+                    "image_y_sign": 1.0,
+                },
+                "fusion": {
+                    "cluster_radius_m": 0.8,
+                    "outlier_radius_m": 0.8,
+                    "min_cluster_size": 2,
+                    "center_weight_power": 1.0,
+                },
+                "save_result": True,
+                "priority": 5,
             },
         },
     ]

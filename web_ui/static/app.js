@@ -17,6 +17,7 @@ const ACTION_SAFETY_HINTS = {
   target_lock: "YOLO 锁定命令，不需要 SEND=ON，但需要 Dispatch。",
   align_descend: "BODY_NED 速度控制，需要 SEND=ON 才实发。",
   payload_release: "舵机 PWM 输出，需要 SEND=ON 才实发；确认 SERVO 输出通道和 PWM。",
+  multi_view_localize: "四点移动采样并融合定位所有筒；会发送 local_position，需要 SEND=ON 才实发。",
 };
 const DEFAULT_ACTION_MISSION_STEPS = [
   {
@@ -395,6 +396,8 @@ function fieldMapModel(next) {
   const recceTargets = Array.isArray(detail.recce_targets) ? detail.recce_targets : [];
   const recceResults = Array.isArray(detail.recce_results) ? detail.recce_results : [];
   const recceStatus = new Map(recceResults.map(item => [Number(item.target_id), item.status || "blank"]));
+  const localization = next.localization || {};
+  const localizationObjects = Array.isArray(localization.objects) ? localization.objects : [];
   return {
     bounds: FIELD_DEFAULTS.bounds,
     areas: {
@@ -418,6 +421,10 @@ function fieldMapModel(next) {
     confirmedCount: recceResults.filter(item => item.status === "confirmed").length,
     requiredConfirmed: Math.max(1, Number(detail.recce_required_confirmed_count || 3)),
     hasMissionPosition: Boolean(missionPosition),
+    localizationTargets: localizationObjects.filter(item =>
+      Number.isFinite(Number(item.x)) &&
+      Number.isFinite(Number(item.y))
+    ),
   };
 }
 function resizeFieldCanvas(canvas) {
@@ -578,10 +585,37 @@ function drawTargets(ctx, model) {
   model.dropTargets.forEach((target, index) => drawTarget(target, "drop", index));
   model.recceTargets.forEach((target, index) => drawTarget(target, "recce", index));
 }
+function drawLocalizationTargets(ctx, model) {
+  model.localizationTargets.forEach((target, index) => {
+    const tx = Number(target.x);
+    const ty = Number(target.y);
+    if (!Number.isFinite(tx) || !Number.isFinite(ty)) return;
+    const [x, y] = worldToCanvas(tx, ty, model.bounds, model.rect);
+    const id = target.id ?? target.target_id ?? index;
+    const count = target.count ?? target.seen_count ?? 0;
+    ctx.beginPath();
+    ctx.arc(x, y, 7, 0, Math.PI * 2);
+    ctx.fillStyle = "#2bc277";
+    ctx.strokeStyle = "#e6edf6";
+    ctx.lineWidth = 2;
+    ctx.fill();
+    ctx.stroke();
+    drawFieldLabel(ctx, `L${id} ${target.class_name || "obj"}`, x + 10, y - 12, {
+      align: "left",
+      color: "#2bc277",
+    });
+    drawFieldLabel(ctx, `x=${num(tx, 2)} y=${num(ty, 2)} n=${count}`, x + 10, y + 5, {
+      align: "left",
+      color: "#93a8bf",
+      font: "11px Consolas, monospace",
+    });
+  });
+}
 function drawTargetCoordinateList(ctx, model) {
   const targets = [
     ...model.dropTargets.map(target => ({...target, prefix: "D"})),
     ...model.recceTargets.map(target => ({...target, prefix: "R"})),
+    ...model.localizationTargets.map(target => ({...target, prefix: "L"})),
   ];
   if (!targets.length) return;
   const maxRows = 8;
@@ -617,6 +651,7 @@ function renderFieldMap(next) {
   drawField(ctx, model);
   drawSurveyPoints(ctx, model);
   drawTargets(ctx, model);
+  drawLocalizationTargets(ctx, model);
   drawDrone(ctx, model);
   drawTargetCoordinateList(ctx, model);
   $("fieldMapEmpty").style.display = model.hasMissionPosition ? "none" : "block";
@@ -625,6 +660,7 @@ function renderFieldMap(next) {
     `Drop: ${model.dropCount}/${model.requiredDrops}`,
     `Drop targets: ${model.dropTargets.length}`,
     `Recce confirmed: ${model.confirmedCount}/${model.requiredConfirmed}`,
+    `Localization: ${model.localizationTargets.length}`,
     model.hasMissionPosition ? "Coord: mission" : "Coord: local fallback",
   ].map(item => `<span>${item}</span>`).join("");
 }

@@ -145,6 +145,7 @@ class SystemRunner:
         self.web_server = None
         self.system_events: deque[dict[str, object]] = deque(maxlen=160)
         self.latest_snapshot: dict[str, object] = {}
+        self.latest_localization_result: dict[str, object] = {}
         self.external_processes: dict[str, subprocess.Popen] = {}
         self.action_lab_specs = action_lab_specs()
         self.action_lab_enabled = True
@@ -515,6 +516,7 @@ class SystemRunner:
                     "actions": self._mission_action_log_lines()[:20],
                     "action_lab": self._action_lab_snapshot(),
                     "action_mission": self.action_mission_status_payload(),
+                    "localization": self.latest_localization_result,
                 }
             )
         manager = self.services.link_manager
@@ -542,12 +544,44 @@ class SystemRunner:
                 link_manager=self.services.link_manager,
                 send_commands=bool(self.controller_switches.snapshot().send_commands),
             )
+            self._maybe_save_localization_result()
             self.logger.info(
                 "action_lab_tick called current_action=%s dispatch=%s",
                 self.action_runtime.action_name,
                 self.action_runtime.dispatcher.last_dispatch,
             )
             return status
+
+    def _maybe_save_localization_result(self) -> None:
+        """If multi_view_localize just completed, persist its result for Web UI display."""
+        name = getattr(self.action_runtime, "action_name", None)
+        if name != "multi_view_localize":
+            return
+        last = getattr(self.action_runtime, "last_result", None)
+        if last is None:
+            return
+        detail = last.get("detail") if isinstance(last, dict) else getattr(last, "detail", None)
+        if isinstance(detail, dict):
+            detail = detail  # it's a dict
+        elif hasattr(detail, "__dict__"):
+            detail = detail.__dict__  # type: ignore[union-attr]
+        else:
+            detail = {}
+        done = last.get("done") if isinstance(last, dict) else getattr(last, "done", False)
+        if not done:
+            return
+        localized = detail.get("localized_objects")
+        if not isinstance(localized, list):
+            return
+        self.latest_localization_result = {
+            "source": "multi_view_localize",
+            "updated_at": time.time(),
+            "run_id": detail.get("run_id", ""),
+            "objects": localized,
+            "object_count": detail.get("object_count", len(localized)),
+            "raw_estimates_count": detail.get("raw_estimates_count", 0),
+            "captures_count": detail.get("captures_count", 0),
+        }
 
     def action_lab_status_payload(self) -> dict[str, object]:
         return self.action_runtime.status_payload(
@@ -656,6 +690,7 @@ class SystemRunner:
                 link_manager=self.services.link_manager,
                 send_commands=bool(self.controller_switches.snapshot().send_commands),
             )
+            self._maybe_save_localization_result()
             return self.action_mission_status_payload()
 
     def _action_lab_snapshot(self) -> dict[str, object]:
