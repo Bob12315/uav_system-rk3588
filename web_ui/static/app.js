@@ -379,6 +379,17 @@ function pointList(items, fallback, prefix) {
       }))
     : fallback;
 }
+function mapDisplayPoint(point) {
+  if (!point) return point;
+  return {...point, x: Number(point.y), y: Number(point.x)};
+}
+function mapDisplayArea(area) {
+  if (!area) return area;
+  return {...area, x: Number(area.y), y: Number(area.x), xLen: Number(area.yLen), yLen: Number(area.xLen)};
+}
+function mapDisplayBounds(bounds) {
+  return {xMin: Number(bounds.yMin), xMax: Number(bounds.yMax), yMin: Number(bounds.xMin), yMax: Number(bounds.xMax)};
+}
 function fieldMapModel(next) {
   const detail = next.mission_detail || {};
   const route = detail.route || {};
@@ -399,18 +410,18 @@ function fieldMapModel(next) {
   const localization = next.localization || {};
   const localizationObjects = Array.isArray(localization.objects) ? localization.objects : [];
   return {
-    bounds: FIELD_DEFAULTS.bounds,
+    bounds: mapDisplayBounds(FIELD_DEFAULTS.bounds),
     areas: {
-      takeoff: {...FIELD_DEFAULTS.takeoff, x: Number(home.x ?? FIELD_DEFAULTS.takeoff.x), y: Number(home.y ?? FIELD_DEFAULTS.takeoff.y)},
-      drop: {...FIELD_DEFAULTS.drop, x: Number(dropCenter.x ?? FIELD_DEFAULTS.drop.x), y: Number(dropCenter.y ?? FIELD_DEFAULTS.drop.y)},
-      recce: {...FIELD_DEFAULTS.recce, x: Number(recceCenter.x ?? FIELD_DEFAULTS.recce.x), y: Number(recceCenter.y ?? FIELD_DEFAULTS.recce.y)},
+      takeoff: mapDisplayArea({...FIELD_DEFAULTS.takeoff, x: Number(home.x ?? FIELD_DEFAULTS.takeoff.x), y: Number(home.y ?? FIELD_DEFAULTS.takeoff.y)}),
+      drop: mapDisplayArea({...FIELD_DEFAULTS.drop, x: Number(dropCenter.x ?? FIELD_DEFAULTS.drop.x), y: Number(dropCenter.y ?? FIELD_DEFAULTS.drop.y)}),
+      recce: mapDisplayArea({...FIELD_DEFAULTS.recce, x: Number(recceCenter.x ?? FIELD_DEFAULTS.recce.x), y: Number(recceCenter.y ?? FIELD_DEFAULTS.recce.y)}),
     },
-    dropSurvey: pointList(detail.drop_survey_points, FIELD_DEFAULTS.dropSurvey, "D"),
-    recceSurvey: pointList(detail.recce_survey_points, FIELD_DEFAULTS.recceSurvey, "R"),
-    dropTargets: dropTargets.filter(item => Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y)) && Number(item.seen_count || 0) > 0),
-    recceTargets: recceTargets.filter(item => Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y)) && Number(item.seen_count || 0) > 0),
+    dropSurvey: pointList(detail.drop_survey_points, FIELD_DEFAULTS.dropSurvey, "D").map(mapDisplayPoint),
+    recceSurvey: pointList(detail.recce_survey_points, FIELD_DEFAULTS.recceSurvey, "R").map(mapDisplayPoint),
+    dropTargets: dropTargets.filter(item => Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y)) && Number(item.seen_count || 0) > 0).map(mapDisplayPoint),
+    recceTargets: recceTargets.filter(item => Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y)) && Number(item.seen_count || 0) > 0).map(mapDisplayPoint),
     recceStatus,
-    drone: dronePosition,
+    drone: dronePosition ? mapDisplayPoint(dronePosition) : null,
     stage: next.stage || "--",
     dropCount: Number(detail.drop_count || 0),
     requiredDrops: Math.max(1, Number(detail.drop_required_count || 0) || (detail.payload_slots || []).length || 2),
@@ -424,7 +435,7 @@ function fieldMapModel(next) {
     localizationTargets: localizationObjects.filter(item =>
       Number.isFinite(Number(item.x)) &&
       Number.isFinite(Number(item.y))
-    ),
+    ).map(mapDisplayPoint),
   };
 }
 function resizeFieldCanvas(canvas) {
