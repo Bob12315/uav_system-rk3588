@@ -379,6 +379,7 @@ function pointList(items, fallback, prefix) {
       }))
     : fallback;
 }
+const swapPoint = p => ({...p, x: p.y, y: p.x});
 const fieldMapView = {
   centerX: 27,
   centerY: 0,
@@ -394,13 +395,13 @@ const fieldMapView = {
 };
 function worldToCanvas(x, y, rect, view = fieldMapView) {
   return [
-    rect.width / 2 + (Number(x) - view.centerX) * view.scale,
+    rect.width / 2 - (Number(x) - view.centerX) * view.scale,
     rect.height / 2 - (Number(y) - view.centerY) * view.scale,
   ];
 }
 function canvasToWorld(screenX, screenY, rect, view = fieldMapView) {
   return {
-    x: view.centerX + (screenX - rect.width / 2) / view.scale,
+    x: view.centerX - (screenX - rect.width / 2) / view.scale,
     y: view.centerY - (screenY - rect.height / 2) / view.scale,
   };
 }
@@ -440,8 +441,8 @@ function fieldMapModel(next) {
       drop: {...FIELD_DEFAULTS.drop, x: Number(dropCenter.y ?? FIELD_DEFAULTS.drop.x), y: Number(dropCenter.x ?? FIELD_DEFAULTS.drop.y)},
       recce: {...FIELD_DEFAULTS.recce, x: Number(recceCenter.y ?? FIELD_DEFAULTS.recce.x), y: Number(recceCenter.x ?? FIELD_DEFAULTS.recce.y)},
     },
-    dropSurvey: pointList(detail.drop_survey_points, FIELD_DEFAULTS.dropSurvey, "D"),
-    recceSurvey: pointList(detail.recce_survey_points, FIELD_DEFAULTS.recceSurvey, "R"),
+    dropSurvey: pointList(detail.drop_survey_points, FIELD_DEFAULTS.dropSurvey, "D").map(swapPoint),
+    recceSurvey: pointList(detail.recce_survey_points, FIELD_DEFAULTS.recceSurvey, "R").map(swapPoint),
     dropTargets: dropTargets.filter(item => Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y)) && Number(item.seen_count || 0) > 0),
     recceTargets: recceTargets.filter(item => Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y)) && Number(item.seen_count || 0) > 0),
     recceStatus,
@@ -754,7 +755,7 @@ function setupFieldMapInteractions() {
     if (!fieldMapView.isDragging) return;
     const dx = event.clientX - fieldMapView.dragStartX;
     const dy = event.clientY - fieldMapView.dragStartY;
-    fieldMapView.centerX = fieldMapView.dragStartCenterX - dx / fieldMapView.scale;
+    fieldMapView.centerX = fieldMapView.dragStartCenterX + dx / fieldMapView.scale;
     fieldMapView.centerY = fieldMapView.dragStartCenterY + dy / fieldMapView.scale;
     renderFieldMap(state);
   });
