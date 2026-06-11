@@ -65,11 +65,10 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "class_names": ["bucket"],
                 "min_confidence": 0.35,
                 "camera": {
-                    "horizontal_fov_deg": 113.0,
-                    "vertical_fov_deg": 93.0,
+                    "fov_x_deg": 113.0,
+                    "fov_y_deg": 93.0,
                     "image_x_sign": 1,
                     "image_y_sign": -1,
-                    "model": "pinhole",
                 },
             },
         },

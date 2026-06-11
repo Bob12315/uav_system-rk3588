@@ -92,15 +92,16 @@ class SingleViewLocalizeAction(ActionModule):
 
     def _camera_config(self, raw_camera: Any) -> CameraProjectionConfig:
         camera = dict(raw_camera or {})
-        if "model" in camera and str(camera["model"]).strip().lower() != "pinhole":
-            raise ValueError("camera.model must be pinhole")
-        return CameraProjectionConfig(
-            fov_x_deg=float(camera.get("horizontal_fov_deg", camera.get("fov_x_deg", 113.0))),
-            fov_y_deg=float(camera.get("vertical_fov_deg", camera.get("fov_y_deg", 93.0))),
-            image_x_sign=float(camera.get("image_x_sign", 1.0)),
-            image_y_sign=float(camera.get("image_y_sign", -1.0)),
-            min_altitude_m=float(camera.get("min_altitude_m", 0.1)),
-        )
+        return CameraProjectionConfig(**self._normalized_camera_params(camera))
+
+    def _normalized_camera_params(self, camera: dict[str, Any]) -> dict[str, Any]:
+        if "horizontal_fov_deg" in camera and "fov_x_deg" not in camera:
+            camera["fov_x_deg"] = camera["horizontal_fov_deg"]
+        if "vertical_fov_deg" in camera and "fov_y_deg" not in camera:
+            camera["fov_y_deg"] = camera["vertical_fov_deg"]
+        for name in ("horizontal_fov_deg", "vertical_fov_deg", "model"):
+            camera.pop(name, None)
+        return camera
 
     def _detections(
         self,

@@ -145,6 +145,45 @@ def test_single_view_localize_non_center_detection_with_calibrated_camera() -> N
     assert estimate["projection"]["image_y_sign"] == pytest.approx(-1.0)
 
 
+def test_single_view_localize_accepts_fov_field_names() -> None:
+    action = SingleViewLocalizeAction()
+
+    action.start(
+        {
+            "camera": {
+                "fov_x_deg": 113.0,
+                "fov_y_deg": 93.0,
+                "image_x_sign": 1,
+                "image_y_sign": -1,
+            },
+        }
+    )
+
+    assert action.localizer.camera.fov_x_deg == pytest.approx(113.0)
+    assert action.localizer.camera.fov_y_deg == pytest.approx(93.0)
+
+
+def test_single_view_localize_accepts_fov_aliases_and_ignores_model() -> None:
+    action = SingleViewLocalizeAction()
+
+    action.start(
+        {
+            "camera": {
+                "horizontal_fov_deg": 113.0,
+                "vertical_fov_deg": 93.0,
+                "image_x_sign": 1,
+                "image_y_sign": -1,
+                "model": "pinhole",
+            },
+        }
+    )
+
+    assert action.localizer.camera.fov_x_deg == pytest.approx(113.0)
+    assert action.localizer.camera.fov_y_deg == pytest.approx(93.0)
+    assert action.localizer.camera.image_x_sign == pytest.approx(1.0)
+    assert action.localizer.camera.image_y_sign == pytest.approx(-1.0)
+
+
 def test_single_view_localize_no_detections_is_done_not_failed() -> None:
     action = SingleViewLocalizeAction()
     action.start()

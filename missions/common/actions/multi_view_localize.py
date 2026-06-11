@@ -70,7 +70,9 @@ class MultiViewLocalizeAction(ActionModule):
 
         class_names = data.get("class_names")
         self.class_names = {str(name) for name in class_names} if class_names is not None else None
-        camera_config = CameraProjectionConfig(**dict(data.get("camera") or {}))
+        camera_config = CameraProjectionConfig(
+            **self._normalized_camera_params(dict(data.get("camera") or {}))
+        )
         fusion_config = MultiPhotoFusionConfig(**dict(data.get("fusion") or {}))
         self.localizer = TargetLocalization(
             camera_config,
@@ -436,6 +438,15 @@ class MultiViewLocalizeAction(ActionModule):
         if altitude_m <= 0.0:
             raise ValueError("altitude_m must be positive")
         return {"x": x, "y": y, "altitude_m": altitude_m}
+
+    def _normalized_camera_params(self, camera: dict[str, Any]) -> dict[str, Any]:
+        if "horizontal_fov_deg" in camera and "fov_x_deg" not in camera:
+            camera["fov_x_deg"] = camera["horizontal_fov_deg"]
+        if "vertical_fov_deg" in camera and "fov_y_deg" not in camera:
+            camera["fov_y_deg"] = camera["vertical_fov_deg"]
+        for name in ("horizontal_fov_deg", "vertical_fov_deg", "model"):
+            camera.pop(name, None)
+        return camera
 
     def _required_float(self, params: dict[str, Any], name: str) -> float:
         if name not in params:
