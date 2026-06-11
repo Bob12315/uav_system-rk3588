@@ -583,6 +583,97 @@ class SystemRunner:
             "captures_count": detail.get("captures_count", 0),
         }
 
+    def manual_step_move(self, direction: str, step_m: float) -> CommandResult:
+        """Move the drone by step_m in the given body-frame direction.
+
+        Allowed directions: forward, back, left, right, up, down.
+        The backend reads current LOCAL_NED position and yaw, computes a
+        LOCAL_NED absolute target, and sends it with the current yaw as
+        a hold value.  Before sending, any running Action is stopped and
+        continuous/position queues are cleared.
+        """
+        allowed = {"forward", "back", "left", "right", "up", "down"}
+        if direction not in allowed:
+            return CommandResult(False, f"invalid direction: {direction}")
+        if not step_m > 0:
+            return CommandResult(False, "step_m must be positive")
+
+        manager = self.services.link_manager
+        if manager is None:
+            return CommandResult(False, "telemetry is not connected")
+
+        with self.control_command_log_lock:
+            drone = dict(self.latest_snapshot.get("drone") or {})
+
+        if not drone.get("local_position_valid"):
+            return CommandResult(False, "no valid local position — cannot compute manual step target")
+        try:
+            x = float(drone["local_x"])
+            y = float(drone["local_y"])
+            z = float(drone["local_z"])
+            yaw = float(drone["yaw"])
+        except (KeyError, ValueError):
+            return CommandResult(False, "current local position or yaw unavailable")
+        if not math.isfinite(x) or not math.isfinite(y) or not math.isfinite(z) or not math.isfinite(yaw):
+            return CommandResult(False, "current position or yaw is not finite")
+
+        # body-frame offset
+        forward_m = 0.0
+        right_m = 0.0
+        down_m = 0.0
+        if direction == "forward":
+            forward_m = step_m
+        elif direction == "back":
+            forward_m = -step_m
+        elif direction == "right":
+            right_m = step_m
+        elif direction == "left":
+            right_m = -step_m
+        elif direction == "down":
+            down_m = step_m
+        elif direction == "up":
+            down_m = -step_m
+
+        cos_yaw = math.cos(yaw)
+        sin_yaw = math.sin(yaw)
+        dx = forward_m * cos_yaw - right_m * sin_yaw
+        dy = forward_m * sin_yaw + right_m * cos_yaw
+        target_x = x + dx
+        target_y = y + dy
+        target_z = z + down_m
+
+        # stop any running action and clear queues
+        with self.action_runtime_lock:
+            if self.action_runtime.runner.state == "running":
+                self.action_runtime.stop(link_manager=manager, hold_current=False)
+            if self.action_mission_orchestrator is not None and self.action_mission_orchestrator.running:
+                self.action_mission_orchestrator.stop(link_manager=manager, hold_current=False)
+
+        clear_continuous = getattr(manager, "clear_continuous_commands", None)
+        if callable(clear_continuous):
+            clear_continuous()
+        clear_pending = getattr(manager, "clear_pending_local_position_actions", None)
+        if callable(clear_pending):
+            clear_pending()
+
+        from pymavlink import mavutil
+        manager.local_position(target_x, target_y, target_z,
+                               frame=mavutil.mavlink.MAV_FRAME_LOCAL_NED,
+                               yaw=yaw, priority=2)
+
+        with self.control_command_log_lock:
+            self.system_events.appendleft({
+                "timestamp": time.time(),
+                "level": "INFO",
+                "message": (f"MANUAL_STEP {direction}={step_m:.2f} "
+                            f"from=({x:.2f},{y:.2f},{z:.2f},yaw={yaw:.2f}) "
+                            f"to=({target_x:.2f},{target_y:.2f},{target_z:.2f})"),
+            })
+
+        return CommandResult(True,
+                             f"manual_step {direction} queued "
+                             f"target x={target_x:.2f} y={target_y:.2f} z={target_z:.2f} yaw={yaw:.2f}")
+
     def action_lab_status_payload(self) -> dict[str, object]:
         return self.action_runtime.status_payload(
             send_commands=bool(self.controller_switches.snapshot().send_commands),

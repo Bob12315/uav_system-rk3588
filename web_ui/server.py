@@ -44,6 +44,11 @@ class ActionMissionConfigureRequest(BaseModel):
     steps: list[ActionMissionStepRequest]
 
 
+class ManualStepMoveRequest(BaseModel):
+    direction: str
+    step_m: float = Field(gt=0, le=5.0)
+
+
 class WebUiServer:
     def __init__(self, runner, config: UiConfig) -> None:
         self.runner = runner
@@ -236,6 +241,15 @@ def create_app(runner, config: UiConfig) -> FastAPI:
             return {"ok": True, "action_mission": runner.action_mission_tick()}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/manual-step-move")
+    def manual_step_move(request: ManualStepMoveRequest):
+        try:
+            result = runner.manual_step_move(request.direction, request.step_m)
+            audit.append("MANUAL_STEP", f"{request.direction} {request.step_m}", result.ok, result.message)
+            return {"ok": result.ok, "message": result.message}
+        except Exception as exc:
+            return {"ok": False, "message": str(exc)}
 
     @app.get("/api/yolo/stream")
     def yolo_stream():

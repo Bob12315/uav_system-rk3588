@@ -276,7 +276,7 @@
             <button data-manual-yaw="right">右偏航</button>
           </div>
         </div>
-        <div class="hint">机体系单步移动；发送手动动作时会关闭自动控制发送。</div>
+        <div class="hint">机体系单步移动；后端读取当前 LOCAL_NED 和 yaw，换算为 LOCAL_NED 绝对位置目标，并保持当前 yaw。执行前会停止当前 Action 并清理连续控制。</div>
       </article>
 
       <article class="panel safety-panel flight-command-panel">

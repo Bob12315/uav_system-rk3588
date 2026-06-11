@@ -214,23 +214,19 @@ function bodyOffsetToLocalOffset(offset, yaw) {
 function executeManualMove(direction) {
   const step = positiveStep("moveStep", "移动步长");
   if (step === null) return;
-  const offsets = {
-    forward: [step, 0, 0],
-    back: [-step, 0, 0],
-    left: [0, -step, 0],
-    right: [0, step, 0],
-    up: [0, 0, -step],
-    down: [0, 0, step],
-  };
-  const offset = offsets[direction];
-  if (!offset) return;
-  const yaw = Number(state?.drone?.yaw);
-  if (!Number.isFinite(yaw) && (offset[0] !== 0 || offset[1] !== 0)) {
-    $("completionHint").textContent = "缺少当前偏航姿态，无法换算机体系水平步长";
-    return;
-  }
-  const yawArg = Number.isFinite(yaw) ? ` ${commandNumber(yaw)}` : "";
-  execute(`local_pos ${offset.map(commandNumber).join(" ")} body_offset${yawArg}`, "MANUAL_MOVE");
+  const confirmed = window.confirm(
+    `确认手动${direction}移动 ${step} m？\n` +
+    "该操作会停止当前 Action/Action Mission，并发送 LOCAL_NED 绝对位置目标，yaw 保持当前值。"
+  );
+  if (!confirmed) return;
+  json("/api/manual-step-move", {
+    method: "POST",
+    body: JSON.stringify({direction, step_m: step}),
+  }).then(result => {
+    $("completionHint").textContent = result.message || (result.ok ? "manual step queued" : "manual step failed");
+  }).catch(() => {
+    $("completionHint").textContent = "manual step move failed";
+  });
 }
 function executeManualYaw(direction) {
   const angle = positiveStep("yawStep", "偏航角度");
