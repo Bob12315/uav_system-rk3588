@@ -7,10 +7,10 @@ from typing import Any
 
 @dataclass(frozen=True)
 class CameraProjectionConfig:
-    fov_x_deg: float = 75.0
-    fov_y_deg: float = 75.0
+    fov_x_deg: float = 113.0
+    fov_y_deg: float = 93.0
     image_x_sign: float = 1.0
-    image_y_sign: float = 1.0
+    image_y_sign: float = -1.0
     min_altitude_m: float = 0.1
 
     def __post_init__(self) -> None:

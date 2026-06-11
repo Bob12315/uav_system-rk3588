@@ -419,6 +419,8 @@ class MultiViewLocalizeAction(ActionModule):
             detail["object_count"] = len(localized_objects)
             detail["captures"] = self.captures
             detail["waypoints"] = self.waypoints
+            if self.fusion is not None:
+                detail["fusion_debug"] = self.fusion.last_debug
         if extra:
             detail.update(extra)
         return detail

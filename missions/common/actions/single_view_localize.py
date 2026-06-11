@@ -83,7 +83,7 @@ class SingleViewLocalizeAction(ActionModule):
         self.class_names: set[str] | None = {"bucket"}
         self.min_confidence = 0.35
         self.localizer = TargetLocalization(
-            CameraProjectionConfig(fov_x_deg=70.0, fov_y_deg=43.0),
+            CameraProjectionConfig(),
             min_confidence=self.min_confidence,
             class_names=self.class_names,
         )
@@ -95,10 +95,10 @@ class SingleViewLocalizeAction(ActionModule):
         if "model" in camera and str(camera["model"]).strip().lower() != "pinhole":
             raise ValueError("camera.model must be pinhole")
         return CameraProjectionConfig(
-            fov_x_deg=float(camera.get("horizontal_fov_deg", camera.get("fov_x_deg", 70.0))),
-            fov_y_deg=float(camera.get("vertical_fov_deg", camera.get("fov_y_deg", 43.0))),
+            fov_x_deg=float(camera.get("horizontal_fov_deg", camera.get("fov_x_deg", 113.0))),
+            fov_y_deg=float(camera.get("vertical_fov_deg", camera.get("fov_y_deg", 93.0))),
             image_x_sign=float(camera.get("image_x_sign", 1.0)),
-            image_y_sign=float(camera.get("image_y_sign", 1.0)),
+            image_y_sign=float(camera.get("image_y_sign", -1.0)),
             min_altitude_m=float(camera.get("min_altitude_m", 0.1)),
         )
 
