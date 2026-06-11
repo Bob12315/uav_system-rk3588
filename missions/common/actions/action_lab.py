@@ -133,11 +133,15 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "no best_target selection, no auto-lock, no payload release."
             ),
             "default_params": {
-                "waypoint_mode": "relative_to_start",
-                "radius_m": 0.8,
-                "altitude_m": 3.0,
-                "yaw_mode": "arm_heading",
-                "waypoints": None,
+                "waypoint_mode": "absolute",
+                "altitude_m": 3.5,
+                "yaw_mode": "hold",
+                "waypoints": [
+                    {"x": -1.2, "y": 28, "altitude_m": 3},
+                    {"x": 1.2, "y": 28, "altitude_m": 3},
+                    {"x": 1.2, "y": 32, "altitude_m": 3},
+                    {"x": -1.2, "y": 32, "altitude_m": 3},
+                ],
                 "capture_updates_per_waypoint": 3,
                 "settle_updates_per_waypoint": 3,
                 "max_updates_per_waypoint": 100,
@@ -154,9 +158,9 @@ def action_lab_specs() -> list[dict[str, Any]]:
                     "image_y_sign": -1.0,
                 },
                 "fusion": {
-                    "cluster_radius_m": 0.8,
+                    "cluster_radius_m": 1.0,
                     "outlier_radius_m": 0.8,
-                    "min_cluster_size": 2,
+                    "min_cluster_size": 3,
                     "center_weight_power": 1.0,
                 },
                 "save_result": True,
