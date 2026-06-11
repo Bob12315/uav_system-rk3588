@@ -229,8 +229,8 @@ function executeManualMove(direction) {
     $("completionHint").textContent = "缺少当前偏航姿态，无法换算机体系水平步长";
     return;
   }
-  const localOffset = Number.isFinite(yaw) ? bodyOffsetToLocalOffset(offset, yaw) : offset;
-  execute(`local_pos ${localOffset.map(commandNumber).join(" ")} offset`, "MANUAL_MOVE");
+  const yawArg = Number.isFinite(yaw) ? ` ${commandNumber(yaw)}` : "";
+  execute(`local_pos ${offset.map(commandNumber).join(" ")} body_offset${yawArg}`, "MANUAL_MOVE");
 }
 function executeManualYaw(direction) {
   const angle = positiveStep("yawStep", "偏航角度");

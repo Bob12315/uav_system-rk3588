@@ -8,7 +8,7 @@ from uav_ui.control_switches import ControlRuntimeSwitches, ControlSwitchSnapsho
 from uav_ui.yolo_command_client import YoloCommandClient
 
 
-_CONTINUOUS_MANUAL_COMMANDS = {"body_vel", "yaw_rate", "stop", "gimbal_rate"}
+_CONTINUOUS_MANUAL_COMMANDS = {"body_vel", "yaw_rate", "stop", "gimbal_rate", "local_pos"}
 
 
 def build_ui_command_handler(

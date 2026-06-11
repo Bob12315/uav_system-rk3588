@@ -10,6 +10,7 @@ class _FakeManager:
         self.clear_calls = 0
         self.velocity_commands: list[tuple[float, float, float, int]] = []
         self.modes: list[str] = []
+        self.local_positions: list[dict[str, object]] = []
 
     def clear_continuous_commands(self) -> None:
         self.clear_calls += 1
@@ -19,6 +20,9 @@ class _FakeManager:
 
     def set_mode(self, mode: str) -> None:
         self.modes.append(mode)
+
+    def local_position(self, x: float, y: float, z: float, frame: int, yaw: float | None = None, priority: int = 4) -> None:
+        self.local_positions.append({"x": x, "y": y, "z": z, "frame": frame, "yaw": yaw})
 
 
 class _FakeYoloClient:
@@ -117,3 +121,20 @@ def test_stage_override_is_forwarded_to_app_handler() -> None:
 
     assert result == CommandResult(True, "stage updated")
     assert received == ["OVERHEAD_HOLD"]
+
+
+def test_local_pos_clears_continuous_and_disables_sending() -> None:
+    """local_pos is in _CONTINUOUS_MANUAL_COMMANDS — disables auto-send and clears continuous."""
+    manager = _FakeManager()
+    switches = _switches()
+    handler = build_ui_command_handler(manager, controller_switches=switches)
+
+    result = handler("local_pos 0 1 0 body_offset 1.23")
+
+    assert result.ok is True
+    assert switches.snapshot().send_commands is False
+    assert manager.clear_calls == 1
+    assert len(manager.local_positions) == 1
+    assert manager.local_positions[0]["x"] == 0.0
+    assert manager.local_positions[0]["y"] == 1.0
+    assert manager.local_positions[0]["yaw"] == 1.23

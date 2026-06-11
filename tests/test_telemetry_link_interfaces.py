@@ -533,3 +533,41 @@ def test_clear_navigation_queue_without_hold_skips_hold() -> None:
 
     ActionRuntimeService.clear_navigation_queue(FakeLink(), hold_current=False)
     assert calls == ["clear_continuous", "clear_local_position"]
+
+
+def test_local_pos_command_parses_yaw_rad() -> None:
+    """dispatch_text_command local_pos with 6 args includes yaw."""
+    from telemetry_link.command_dispatcher import dispatch_text_command
+
+    calls: list[dict[str, object]] = []
+
+    class FakeManager:
+        def local_position(self, x: float, y: float, z: float, frame: int, yaw: float | None = None, priority: int = 4) -> None:
+            calls.append({"x": x, "y": y, "z": z, "frame": frame, "yaw": yaw})
+
+    manager = FakeManager()
+    result = dispatch_text_command(manager, "local_pos 0 1 0 body_offset 1.23")
+    assert result.ok is True
+    assert len(calls) == 1
+    assert calls[0]["x"] == 0.0
+    assert calls[0]["y"] == 1.0
+    assert calls[0]["z"] == 0.0
+    assert calls[0]["frame"] == 9  # MAV_FRAME_BODY_OFFSET_NED
+    assert calls[0]["yaw"] == 1.23
+
+
+def test_local_pos_command_no_yaw_compatible() -> None:
+    """dispatch_text_command local_pos with 5 args (old format) still works."""
+    from telemetry_link.command_dispatcher import dispatch_text_command
+
+    calls: list[dict[str, object]] = []
+
+    class FakeManager:
+        def local_position(self, x: float, y: float, z: float, frame: int, yaw: float | None = None, priority: int = 4) -> None:
+            calls.append({"x": x, "y": y, "z": z, "frame": frame, "yaw": yaw})
+
+    manager = FakeManager()
+    result = dispatch_text_command(manager, "local_pos 0 1 0 offset")
+    assert result.ok is True
+    assert len(calls) == 1
+    assert calls[0]["yaw"] is None

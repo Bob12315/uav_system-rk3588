@@ -217,8 +217,8 @@ def dispatch_text_command(manager: LinkManager, command: str, logger: logging.Lo
 
     if command.startswith("local_pos "):
         parts = command.split()
-        if len(parts) not in {4, 5}:
-            return CommandResult(False, "format: local_pos <x_m> <y_m> <z_m> [local|offset|body|body_offset]")
+        if len(parts) not in {4, 5, 6}:
+            return CommandResult(False, "format: local_pos <x_m> <y_m> <z_m> [local|offset|body|body_offset] [yaw_rad]")
         x = _parse_float(parts[1], command)
         y = _parse_float(parts[2], command)
         z = _parse_float(parts[3], command)
@@ -229,14 +229,21 @@ def dispatch_text_command(manager: LinkManager, command: str, logger: logging.Lo
         if isinstance(z, CommandResult):
             return z
         frame = mavutil.mavlink.MAV_FRAME_BODY_OFFSET_NED
-        if len(parts) == 5:
+        yaw = None
+        if len(parts) >= 5:
             parsed_frame = _local_frame(parts[4])
-            if parsed_frame is None:
+            if parsed_frame is not None:
+                frame = parsed_frame
+            else:
                 return CommandResult(False, "local_pos frame must be local, offset, body, or body_offset")
-            frame = parsed_frame
-        manager.local_position(x, y, z, frame)
-        _log_info("local_pos command queued x=%.2f y=%.2f z=%.2f frame=%s", x, y, z, frame)
-        return CommandResult(True, f"local_pos queued x={x:.2f} y={y:.2f} z={z:.2f}")
+        if len(parts) == 6:
+            yaw = _parse_float(parts[5], command)
+            if isinstance(yaw, CommandResult):
+                return yaw
+        manager.local_position(x, y, z, frame, yaw=yaw)
+        yaw_text = f" yaw={yaw:.2f}" if yaw is not None else ""
+        _log_info("local_pos command queued x=%.2f y=%.2f z=%.2f frame=%s%s", x, y, z, frame, yaw_text)
+        return CommandResult(True, f"local_pos queued x={x:.2f} y={y:.2f} z={z:.2f}{yaw_text}")
 
     if command.startswith("reposition "):
         parts = command.split()
