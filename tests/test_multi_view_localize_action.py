@@ -171,7 +171,10 @@ def test_goto_phase_returns_local_position_action() -> None:
     action.start(_params())
     assert action.phase == "goto"
 
-    result = action.update({"local_position": {"x": 0.0, "y": 0.0, "z": -3.0}})
+    result = action.update({
+        "local_position": {"x": 0.0, "y": 0.0, "z": -3.0},
+        "drone": {"yaw": 0.5},
+    })
     assert result.reason == "multi_view_goto"
     assert result.done is False
     assert len(result.actions) >= 1
@@ -273,6 +276,46 @@ def test_no_detection_results_in_no_target_fused() -> None:
 # ── yaw_mode arm_heading ────────────────────────────────────────────
 
 
+def test_absolute_hold_yaw_sends_start_yaw_to_goto() -> None:
+    action = MultiViewLocalizeAction()
+    action.start(_params(yaw_mode="hold"))
+
+    result = action.update({
+        "local_position": {"x": 10.0, "y": 10.0, "z": -3.0},
+        "drone": {"yaw": 0.75},
+    })
+
+    assert result.reason == "multi_view_goto"
+    assert result.actions[0]["params"]["yaw"] == pytest.approx(0.75)
+    assert result.detail["start_yaw_rad"] == pytest.approx(0.75)
+    assert result.detail["start_yaw_source"] == "drone.yaw"
+
+
+def test_relative_hold_yaw_sends_start_yaw_to_goto() -> None:
+    action = MultiViewLocalizeAction()
+    action.start(_params(
+        waypoint_mode="relative_to_start",
+        waypoints=None,
+        radius_m=2.0,
+        altitude_m=5.0,
+        yaw_mode="hold",
+    ))
+
+    result = action.update({
+        "local_position": {"x": 10.0, "y": 20.0, "z": -5.0},
+        "drone": {
+            "local_x": 10.0,
+            "local_y": 20.0,
+            "local_z": -5.0,
+            "yaw": -0.4,
+        },
+    })
+
+    assert result.reason == "multi_view_goto"
+    assert result.actions[0]["params"]["yaw"] == pytest.approx(-0.4)
+    assert result.detail["start_yaw_rad"] == pytest.approx(-0.4)
+
+
 def test_yaw_mode_arm_heading_passes_yaw_to_goto() -> None:
     action = MultiViewLocalizeAction()
     action.start(_params(
@@ -287,6 +330,20 @@ def test_yaw_mode_arm_heading_passes_yaw_to_goto() -> None:
 
     assert result.reason == "multi_view_goto"
     assert result.actions[0]["params"]["yaw"] == pytest.approx(1.23)
+
+
+def test_yaw_mode_arm_heading_without_start_yaw_fails_clearly() -> None:
+    action = MultiViewLocalizeAction()
+    action.start(_params(
+        waypoints=[{"x": 1.0, "y": 2.0, "altitude_m": 3.0}],
+        yaw_mode="arm_heading",
+    ))
+
+    result = action.update({"local_position": {"x": 10.0, "y": 10.0, "z": -3.0}})
+
+    assert result.failed is True
+    assert result.reason == "missing_start_yaw"
+    assert "requires arm_heading_yaw_rad or drone.yaw" in result.detail["note"]
 
 
 # ── detail format ───────────────────────────────────────────────────
@@ -369,9 +426,13 @@ def test_waypoint_timeout_stops_action() -> None:
         max_updates_per_waypoint=2,
     ))
 
-    action.update({"local_position": {"x": 10.0, "y": 10.0, "z": -3.0}})  # update 1
-    action.update({"local_position": {"x": 10.0, "y": 10.0, "z": -3.0}})  # update 2
-    result = action.update({"local_position": {"x": 10.0, "y": 10.0, "z": -3.0}})  # timeout
+    context = {
+        "local_position": {"x": 10.0, "y": 10.0, "z": -3.0},
+        "drone": {"yaw": 0.0},
+    }
+    action.update(context)  # update 1
+    action.update(context)  # update 2
+    result = action.update(context)  # timeout
 
     assert result.failed is True
     assert result.reason == "waypoint_timeout"

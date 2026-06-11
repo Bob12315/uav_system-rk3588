@@ -94,11 +94,11 @@ class MultiViewLocalizeAction(ActionModule):
         self.fused_objects: list[dict[str, Any]] = []
         self.failure_reason = ""
         self.yaw_defaulted = False
+        self.start_yaw_rad: float | None = None
+        self.start_yaw_source = ""
         self.started = True
         self.stopped = False
         self.goto_action: GotoWaypointAction | None = None
-        if self.waypoints is not None:
-            self.goto_action = self._new_goto_action()
 
     def update(self, context: dict[str, Any] | None = None) -> ActionResult:
         if not self.started:
@@ -172,6 +172,8 @@ class MultiViewLocalizeAction(ActionModule):
         self.save_result = True
         self.run_id = ""
         self.yaw_defaulted = False
+        self.start_yaw_rad = None
+        self.start_yaw_source = ""
         self.failure_reason = ""
         self.started = False
         self.stopped = False
@@ -192,12 +194,16 @@ class MultiViewLocalizeAction(ActionModule):
         self.phase = "goto"
         self.waypoint_index = 0
         self.update_count_at_waypoint = 0
-        self.goto_action = self._new_goto_action()
+        failed = self._prepare_goto_action(context)
+        if failed is not None:
+            return failed
         return self._update_goto(context)
 
     def _update_goto(self, context: dict[str, Any]) -> ActionResult:
         if self.goto_action is None:
-            return ActionResult(failed=True, reason="goto_failed", detail=self._detail())
+            failed = self._prepare_goto_action(context)
+            if failed is not None:
+                return failed
         result = self.goto_action.update(context)
         if result.failed:
             self.phase = "failed"
@@ -287,11 +293,16 @@ class MultiViewLocalizeAction(ActionModule):
 
     def _new_goto_action(self) -> GotoWaypointAction:
         wp = self.waypoints[self.waypoint_index]  # type: ignore[index]
+        yaw_mode = self.yaw_mode
+        yaw_rad = self.yaw_rad
+        if self.yaw_mode in {"hold", "arm_heading"}:
+            yaw_mode = "fixed"
+            yaw_rad = self.start_yaw_rad
         gp: dict[str, Any] = {
             "x": wp["x"],
             "y": wp["y"],
             "altitude_m": wp["altitude_m"],
-            "yaw_mode": self.yaw_mode,
+            "yaw_mode": yaw_mode,
             "frame": self.frame,
             "tolerance_xy_m": self.goto_tolerance_xy_m,
             "tolerance_z_m": self.goto_tolerance_z_m,
@@ -299,11 +310,45 @@ class MultiViewLocalizeAction(ActionModule):
             "priority": self.priority,
             "key": f"mvl_waypoint_{self.waypoint_index}",
         }
-        if self.yaw_mode == "fixed":
-            gp["yaw_rad"] = self.yaw_rad
+        if yaw_mode == "fixed":
+            gp["yaw_rad"] = yaw_rad
         action = GotoWaypointAction()
         action.start(gp)
         return action
+
+    def _prepare_goto_action(self, context: dict[str, Any]) -> ActionResult | None:
+        if self.yaw_mode in {"hold", "arm_heading"} and not self._record_start_yaw(context):
+            self.phase = "failed"
+            self.failure_reason = "missing_start_yaw"
+            detail = self._detail(extra={
+                "note": (
+                    "yaw_mode hold/arm_heading requires arm_heading_yaw_rad "
+                    "or drone.yaw at multi-view start"
+                )
+            })
+            return ActionResult(failed=True, reason="missing_start_yaw", detail=detail)
+        self.goto_action = self._new_goto_action()
+        return None
+
+    def _record_start_yaw(self, context: dict[str, Any]) -> bool:
+        if self.start_yaw_rad is not None:
+            return True
+
+        value = context.get("arm_heading_yaw_rad")
+        yaw = self._optional_float(value)
+        if yaw is not None:
+            self.start_yaw_rad = yaw
+            self.start_yaw_source = "arm_heading_yaw_rad"
+            return True
+
+        drone = context.get("drone")
+        if isinstance(drone, dict):
+            yaw = self._optional_float(drone.get("yaw"))
+            if yaw is not None:
+                self.start_yaw_rad = yaw
+                self.start_yaw_source = "drone.yaw"
+                return True
+        return False
 
     def _current_position(self, context: dict[str, Any]) -> tuple[float, float]:
         drone = context.get("drone")
@@ -394,7 +439,11 @@ class MultiViewLocalizeAction(ActionModule):
             "raw_estimates_count": len(self.raw_estimates),
             "update_count_at_waypoint": self.update_count_at_waypoint,
             "coordinate_frame": "LOCAL_NED",
+            "yaw_mode": self.yaw_mode,
         }
+        if self.start_yaw_rad is not None:
+            detail["start_yaw_rad"] = self.start_yaw_rad
+            detail["start_yaw_source"] = self.start_yaw_source
         if self.yaw_defaulted:
             detail["yaw_defaulted"] = True
         if done:
@@ -455,3 +504,11 @@ class MultiViewLocalizeAction(ActionModule):
             return float(params[name])
         except (TypeError, ValueError) as exc:
             raise ValueError(f"{name} must be a float") from exc
+
+    def _optional_float(self, value: Any) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
