@@ -391,15 +391,19 @@ const fieldMapView = {
   initialized: false,
 };
 function worldToCanvas(x, y, rect, view = fieldMapView) {
+  const originX = rect.width / 2 + view.centerX * view.scale;
+  const originY = rect.height / 2 + view.centerY * view.scale;
   return [
-    rect.width / 2 - (Number(x) - view.centerX) * view.scale,
-    rect.height / 2 - (Number(y) - view.centerY) * view.scale,
+    originX - Number(x) * view.scale,
+    originY - Number(y) * view.scale,
   ];
 }
 function canvasToWorld(screenX, screenY, rect, view = fieldMapView) {
+  const originX = rect.width / 2 + view.centerX * view.scale;
+  const originY = rect.height / 2 + view.centerY * view.scale;
   return {
-    x: view.centerX - (screenX - rect.width / 2) / view.scale,
-    y: view.centerY - (screenY - rect.height / 2) / view.scale,
+    x: (originX - screenX) / view.scale,
+    y: (originY - screenY) / view.scale,
   };
 }
 function finiteNumber(value) {
@@ -644,7 +648,7 @@ function drawField(ctx, model) {
   drawArea(ctx, model, model.areas.takeoff, "rgba(147,168,191,.10)", "rgba(147,168,191,.75)");
   drawArea(ctx, model, model.areas.drop, "rgba(57,200,191,.12)", "rgba(57,200,191,.82)");
   drawArea(ctx, model, model.areas.recce, "rgba(237,169,61,.14)", "rgba(237,169,61,.85)");
-  drawFieldLabel(ctx, "+x →", model.rect.width - 50, 22, {color: "#93a8bf"});
+  drawFieldLabel(ctx, "+x ←", model.rect.width - 50, 22, {color: "#93a8bf"});
   drawFieldLabel(ctx, "+y ↑", model.rect.width - 50, 40, {color: "#93a8bf"});
 }
 function drawSurveyPoints(ctx, model) {

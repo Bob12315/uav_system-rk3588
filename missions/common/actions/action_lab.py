@@ -68,7 +68,7 @@ def action_lab_specs() -> list[dict[str, Any]]:
                     "horizontal_fov_deg": 70.0,
                     "vertical_fov_deg": 43.0,
                     "image_x_sign": 1,
-                    "image_y_sign": 1,
+                    "image_y_sign": -1,
                     "model": "pinhole",
                 },
             },
@@ -152,7 +152,7 @@ def action_lab_specs() -> list[dict[str, Any]]:
                     "fov_x_deg": 75.0,
                     "fov_y_deg": 75.0,
                     "image_x_sign": 1.0,
-                    "image_y_sign": 1.0,
+                    "image_y_sign": -1.0,
                 },
                 "fusion": {
                     "cluster_radius_m": 0.8,

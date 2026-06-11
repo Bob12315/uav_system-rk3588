@@ -52,6 +52,15 @@ def test_payload_release_spec_defaults_to_servo_output_8() -> None:
     assert "SERVO output" in payload_spec["description"]
 
 
+def test_localize_specs_default_to_flipped_image_y() -> None:
+    specs = {item["name"]: item for item in action_lab_specs()}
+
+    assert specs["single_view_localize"]["default_params"]["camera"]["image_x_sign"] == 1
+    assert specs["single_view_localize"]["default_params"]["camera"]["image_y_sign"] == -1
+    assert specs["multi_view_localize"]["default_params"]["camera"]["image_x_sign"] == 1.0
+    assert specs["multi_view_localize"]["default_params"]["camera"]["image_y_sign"] == -1.0
+
+
 def test_action_lab_does_not_auto_register_default_registry() -> None:
     create_action_lab_registry()
 

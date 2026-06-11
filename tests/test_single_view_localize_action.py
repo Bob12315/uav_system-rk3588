@@ -18,7 +18,7 @@ def test_single_view_localize_center_detection_returns_drone_xy() -> None:
                 "horizontal_fov_deg": 70.0,
                 "vertical_fov_deg": 43.0,
                 "image_x_sign": 1,
-                "image_y_sign": 1,
+                "image_y_sign": -1,
                 "model": "pinhole",
             },
         }
