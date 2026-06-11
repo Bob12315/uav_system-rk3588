@@ -133,8 +133,8 @@ const actionMissionPresets = {
 const FIELD_DEFAULTS = {
   bounds: {xMin: -8, xMax: 62, yMin: -8, yMax: 8},
   takeoff: {x: 0, y: 0, xLen: 8, yLen: 8, label: "起降区"},
-  drop: {x: 30, y: 0, xLen: 5, yLen: 8, label: "投放区"},
-  recce: {x: 55, y: 0, xLen: 5, yLen: 8, label: "侦察区"},
+  drop: {x: 0, y: 30, xLen: 8, yLen: 5, label: "投放区"},
+  recce: {x: 0, y: 55, xLen: 8, yLen: 5, label: "侦察区"},
   dropSurvey: [
     {name: "D1", x: 28, y: -1.2},
     {name: "D2", x: 28, y: 1.2},
@@ -436,9 +436,9 @@ function fieldMapModel(next) {
   return {
     bounds: FIELD_DEFAULTS.bounds,
     areas: {
-      takeoff: {...FIELD_DEFAULTS.takeoff, x: Number(home.x ?? FIELD_DEFAULTS.takeoff.x), y: Number(home.y ?? FIELD_DEFAULTS.takeoff.y)},
-      drop: {...FIELD_DEFAULTS.drop, x: Number(dropCenter.x ?? FIELD_DEFAULTS.drop.x), y: Number(dropCenter.y ?? FIELD_DEFAULTS.drop.y)},
-      recce: {...FIELD_DEFAULTS.recce, x: Number(recceCenter.x ?? FIELD_DEFAULTS.recce.x), y: Number(recceCenter.y ?? FIELD_DEFAULTS.recce.y)},
+      takeoff: {...FIELD_DEFAULTS.takeoff, x: Number(home.y ?? FIELD_DEFAULTS.takeoff.x), y: Number(home.x ?? FIELD_DEFAULTS.takeoff.y)},
+      drop: {...FIELD_DEFAULTS.drop, x: Number(dropCenter.y ?? FIELD_DEFAULTS.drop.x), y: Number(dropCenter.x ?? FIELD_DEFAULTS.drop.y)},
+      recce: {...FIELD_DEFAULTS.recce, x: Number(recceCenter.y ?? FIELD_DEFAULTS.recce.x), y: Number(recceCenter.x ?? FIELD_DEFAULTS.recce.y)},
     },
     dropSurvey: pointList(detail.drop_survey_points, FIELD_DEFAULTS.dropSurvey, "D"),
     recceSurvey: pointList(detail.recce_survey_points, FIELD_DEFAULTS.recceSurvey, "R"),
