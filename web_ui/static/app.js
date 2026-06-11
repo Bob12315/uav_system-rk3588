@@ -131,7 +131,7 @@ const actionMissionPresets = {
   ],
 };
 const FIELD_DEFAULTS = {
-  bounds: {xMin: -8, xMax: 62, yMin: -6, yMax: 6},
+  bounds: {xMin: -8, xMax: 62, yMin: -8, yMax: 8},
   takeoff: {x: 0, y: 0, xLen: 8, yLen: 8, label: "起降区"},
   drop: {x: 30, y: 0, xLen: 5, yLen: 8, label: "投放区"},
   recce: {x: 55, y: 0, xLen: 5, yLen: 8, label: "侦察区"},
@@ -379,16 +379,40 @@ function pointList(items, fallback, prefix) {
       }))
     : fallback;
 }
-function mapDisplayPoint(point) {
-  if (!point) return point;
-  return {...point, x: Number(point.y), y: Number(point.x)};
+const fieldMapView = {
+  centerX: 27,
+  centerY: 0,
+  scale: 18,
+  minScale: 4,
+  maxScale: 120,
+  isDragging: false,
+  dragStartX: 0,
+  dragStartY: 0,
+  dragStartCenterX: 0,
+  dragStartCenterY: 0,
+  initialized: false,
+};
+function worldToCanvas(x, y, rect, view = fieldMapView) {
+  return [
+    rect.width / 2 + (Number(x) - view.centerX) * view.scale,
+    rect.height / 2 - (Number(y) - view.centerY) * view.scale,
+  ];
 }
-function mapDisplayArea(area) {
-  if (!area) return area;
-  return {...area, x: Number(area.y), y: Number(area.x), xLen: Number(area.yLen), yLen: Number(area.xLen)};
+function canvasToWorld(screenX, screenY, rect, view = fieldMapView) {
+  return {
+    x: view.centerX + (screenX - rect.width / 2) / view.scale,
+    y: view.centerY - (screenY - rect.height / 2) / view.scale,
+  };
 }
-function mapDisplayBounds(bounds) {
-  return {xMin: Number(bounds.yMin), xMax: Number(bounds.yMax), yMin: Number(bounds.xMin), yMax: Number(bounds.xMax)};
+function niceGridStep(scale) {
+  const targetPx = 60;
+  const raw = targetPx / scale;
+  const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+  const normalized = raw / pow;
+  if (normalized <= 1) return pow;
+  if (normalized <= 2) return 2 * pow;
+  if (normalized <= 5) return 5 * pow;
+  return 10 * pow;
 }
 function fieldMapModel(next) {
   const detail = next.mission_detail || {};
@@ -410,18 +434,18 @@ function fieldMapModel(next) {
   const localization = next.localization || {};
   const localizationObjects = Array.isArray(localization.objects) ? localization.objects : [];
   return {
-    bounds: mapDisplayBounds(FIELD_DEFAULTS.bounds),
+    bounds: FIELD_DEFAULTS.bounds,
     areas: {
-      takeoff: mapDisplayArea({...FIELD_DEFAULTS.takeoff, x: Number(home.x ?? FIELD_DEFAULTS.takeoff.x), y: Number(home.y ?? FIELD_DEFAULTS.takeoff.y)}),
-      drop: mapDisplayArea({...FIELD_DEFAULTS.drop, x: Number(dropCenter.x ?? FIELD_DEFAULTS.drop.x), y: Number(dropCenter.y ?? FIELD_DEFAULTS.drop.y)}),
-      recce: mapDisplayArea({...FIELD_DEFAULTS.recce, x: Number(recceCenter.x ?? FIELD_DEFAULTS.recce.x), y: Number(recceCenter.y ?? FIELD_DEFAULTS.recce.y)}),
+      takeoff: {...FIELD_DEFAULTS.takeoff, x: Number(home.x ?? FIELD_DEFAULTS.takeoff.x), y: Number(home.y ?? FIELD_DEFAULTS.takeoff.y)},
+      drop: {...FIELD_DEFAULTS.drop, x: Number(dropCenter.x ?? FIELD_DEFAULTS.drop.x), y: Number(dropCenter.y ?? FIELD_DEFAULTS.drop.y)},
+      recce: {...FIELD_DEFAULTS.recce, x: Number(recceCenter.x ?? FIELD_DEFAULTS.recce.x), y: Number(recceCenter.y ?? FIELD_DEFAULTS.recce.y)},
     },
-    dropSurvey: pointList(detail.drop_survey_points, FIELD_DEFAULTS.dropSurvey, "D").map(mapDisplayPoint),
-    recceSurvey: pointList(detail.recce_survey_points, FIELD_DEFAULTS.recceSurvey, "R").map(mapDisplayPoint),
-    dropTargets: dropTargets.filter(item => Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y)) && Number(item.seen_count || 0) > 0).map(mapDisplayPoint),
-    recceTargets: recceTargets.filter(item => Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y)) && Number(item.seen_count || 0) > 0).map(mapDisplayPoint),
+    dropSurvey: pointList(detail.drop_survey_points, FIELD_DEFAULTS.dropSurvey, "D"),
+    recceSurvey: pointList(detail.recce_survey_points, FIELD_DEFAULTS.recceSurvey, "R"),
+    dropTargets: dropTargets.filter(item => Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y)) && Number(item.seen_count || 0) > 0),
+    recceTargets: recceTargets.filter(item => Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y)) && Number(item.seen_count || 0) > 0),
     recceStatus,
-    drone: dronePosition ? mapDisplayPoint(dronePosition) : null,
+    drone: dronePosition,
     stage: next.stage || "--",
     dropCount: Number(detail.drop_count || 0),
     requiredDrops: Math.max(1, Number(detail.drop_required_count || 0) || (detail.payload_slots || []).length || 2),
@@ -435,7 +459,7 @@ function fieldMapModel(next) {
     localizationTargets: localizationObjects.filter(item =>
       Number.isFinite(Number(item.x)) &&
       Number.isFinite(Number(item.y))
-    ).map(mapDisplayPoint),
+    ),
   };
 }
 function resizeFieldCanvas(canvas) {
@@ -451,23 +475,6 @@ function resizeFieldCanvas(canvas) {
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   return {ctx, rect};
 }
-function worldToCanvas(x, y, bounds, rect) {
-  const pad = 42;
-  const usableW = Math.max(1, rect.width - pad * 2);
-  const usableH = Math.max(1, rect.height - pad * 2);
-  const scale = Math.min(
-    usableW / (bounds.xMax - bounds.xMin),
-    usableH / (bounds.yMax - bounds.yMin),
-  );
-  const plotW = (bounds.xMax - bounds.xMin) * scale;
-  const plotH = (bounds.yMax - bounds.yMin) * scale;
-  const left = (rect.width - plotW) / 2;
-  const top = (rect.height - plotH) / 2;
-  return [
-    left + (Number(x) - bounds.xMin) * scale,
-    top + (bounds.yMax - Number(y)) * scale,
-  ];
-}
 function drawFieldLabel(ctx, text, x, y, options = {}) {
   ctx.fillStyle = options.color || "#d7e6f5";
   ctx.font = options.font || "12px Consolas, monospace";
@@ -476,8 +483,8 @@ function drawFieldLabel(ctx, text, x, y, options = {}) {
   ctx.fillText(text, x, y);
 }
 function drawArea(ctx, model, area, fill, stroke) {
-  const [x1, y1] = worldToCanvas(area.x - area.xLen / 2, area.y - area.yLen / 2, model.bounds, model.rect);
-  const [x2, y2] = worldToCanvas(area.x + area.xLen / 2, area.y + area.yLen / 2, model.bounds, model.rect);
+  const [x1, y1] = worldToCanvas(area.x - area.xLen / 2, area.y - area.yLen / 2, model.rect);
+  const [x2, y2] = worldToCanvas(area.x + area.xLen / 2, area.y + area.yLen / 2, model.rect);
   const left = Math.min(x1, x2);
   const top = Math.min(y1, y2);
   const width = Math.abs(x2 - x1);
@@ -490,57 +497,101 @@ function drawArea(ctx, model, area, fill, stroke) {
   drawFieldLabel(ctx, area.label, left + width / 2, top + height / 2, {color: stroke});
 }
 function drawCoordinateTicks(ctx, model) {
-  const bounds = model.bounds;
-  ctx.strokeStyle = "rgba(147,168,191,.50)";
+  const rect = model.rect;
+  const view = fieldMapView;
+  const step = niceGridStep(view.scale);
+  const topLeft = canvasToWorld(0, 0, rect, view);
+  const bottomRight = canvasToWorld(rect.width, rect.height, rect, view);
+  const vxMin = Math.min(topLeft.x, bottomRight.x);
+  const vxMax = Math.max(topLeft.x, bottomRight.x);
+  const vyMin = Math.min(topLeft.y, bottomRight.y);
+  const vyMax = Math.max(topLeft.y, bottomRight.y);
+
+  ctx.strokeStyle = "rgba(147,168,191,.18)";
   ctx.fillStyle = "#93a8bf";
   ctx.lineWidth = 1;
   ctx.font = "11px Consolas, monospace";
-  // x ticks on bottom edge
-  ctx.textBaseline = "top";
-  for (let x = 0; x <= bounds.xMax; x += 10) {
-    const [tickX, tickY] = worldToCanvas(x, bounds.yMin, bounds, model.rect);
+
+  // vertical grid lines (constant x)
+  const xStart = Math.floor(vxMin / step) * step;
+  for (let x = xStart; x <= vxMax; x += step) {
+    const [sx1, sy1] = worldToCanvas(x, vyMin, rect, view);
+    const [sx2, sy2] = worldToCanvas(x, vyMax, rect, view);
     ctx.beginPath();
-    ctx.moveTo(tickX, tickY);
-    ctx.lineTo(tickX, tickY + 5);
+    ctx.moveTo(sx1, sy1);
+    ctx.lineTo(sx2, sy2);
+    ctx.stroke();
+  }
+
+  // horizontal grid lines (constant y)
+  const yStart = Math.floor(vyMin / step) * step;
+  for (let y = yStart; y <= vyMax; y += step) {
+    const [sx1, sy1] = worldToCanvas(vxMin, y, rect, view);
+    const [sx2, sy2] = worldToCanvas(vxMax, y, rect, view);
+    ctx.beginPath();
+    ctx.moveTo(sx1, sy1);
+    ctx.lineTo(sx2, sy2);
+    ctx.stroke();
+  }
+
+  // highlight y=0 axis
+  ctx.strokeStyle = "rgba(147,168,191,.55)";
+  ctx.setLineDash([5, 5]);
+  const [x0a, y0a] = worldToCanvas(vxMin, 0, rect, view);
+  const [x0b, y0b] = worldToCanvas(vxMax, 0, rect, view);
+  ctx.beginPath();
+  ctx.moveTo(x0a, y0a);
+  ctx.lineTo(x0b, y0b);
+  ctx.stroke();
+  // x=0 axis
+  const [x0c, y0c] = worldToCanvas(0, vyMin, rect, view);
+  const [x0d, y0d] = worldToCanvas(0, vyMax, rect, view);
+  ctx.beginPath();
+  ctx.moveTo(x0c, y0c);
+  ctx.lineTo(x0d, y0d);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // edge labels
+  ctx.strokeStyle = "rgba(147,168,191,.50)";
+  // x labels at bottom
+  ctx.textBaseline = "top";
+  for (let x = xStart; x <= vxMax; x += step) {
+    const [tickX, tickY] = worldToCanvas(x, vyMin, rect, view);
+    ctx.beginPath();
+    ctx.moveTo(tickX, tickY + 2);
+    ctx.lineTo(tickX, tickY + 7);
     ctx.stroke();
     ctx.textAlign = "center";
-    ctx.fillText(`${x}`, tickX, tickY + 8);
+    ctx.fillText(`${Math.round(x)}`, tickX, tickY + 9);
   }
-  // y ticks on left edge
+  // y labels at left
   ctx.textBaseline = "middle";
-  for (let y = bounds.yMin; y <= bounds.yMax; y += 2) {
-    const [tickX, tickY] = worldToCanvas(bounds.xMin, y, bounds, model.rect);
+  for (let y = yStart; y <= vyMax; y += step) {
+    const [tickX, tickY] = worldToCanvas(vxMin, y, rect, view);
     ctx.beginPath();
-    ctx.moveTo(tickX - 5, tickY);
-    ctx.lineTo(tickX, tickY);
+    ctx.moveTo(tickX - 2, tickY);
+    ctx.lineTo(tickX - 7, tickY);
     ctx.stroke();
     ctx.textAlign = "right";
-    ctx.fillText(`${y}`, tickX - 8, tickY);
+    ctx.fillText(`${Math.round(y)}`, tickX - 9, tickY);
   }
+
   drawFieldLabel(ctx, "x/m", model.rect.width / 2, model.rect.height - 16, {color: "#93a8bf"});
   drawFieldLabel(ctx, "y/m", 24, model.rect.height / 2, {color: "#93a8bf", align: "left"});
 }
 function drawField(ctx, model) {
   ctx.clearRect(0, 0, model.rect.width, model.rect.height);
+  drawCoordinateTicks(ctx, model);
   drawArea(ctx, model, model.areas.takeoff, "rgba(147,168,191,.10)", "rgba(147,168,191,.75)");
   drawArea(ctx, model, model.areas.drop, "rgba(57,200,191,.12)", "rgba(57,200,191,.82)");
   drawArea(ctx, model, model.areas.recce, "rgba(237,169,61,.14)", "rgba(237,169,61,.85)");
-  const [x0a, y0a] = worldToCanvas(model.bounds.xMin, 0, model.bounds, model.rect);
-  const [x0b, y0b] = worldToCanvas(model.bounds.xMax, 0, model.bounds, model.rect);
-  ctx.strokeStyle = "rgba(147,168,191,.45)";
-  ctx.setLineDash([5, 5]);
-  ctx.beginPath();
-  ctx.moveTo(x0a, y0a);
-  ctx.lineTo(x0b, y0b);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  drawCoordinateTicks(ctx, model);
-  drawFieldLabel(ctx, "+x", model.rect.width - 56, 22, {color: "#93a8bf"});
-  drawFieldLabel(ctx, "+y", model.rect.width - 56, 40, {color: "#93a8bf"});
+  drawFieldLabel(ctx, "+x →", model.rect.width - 50, 22, {color: "#93a8bf"});
+  drawFieldLabel(ctx, "+y ↑", model.rect.width - 50, 40, {color: "#93a8bf"});
 }
 function drawSurveyPoints(ctx, model) {
   const drawPoint = (point, index, activeIndex, color) => {
-    const [x, y] = worldToCanvas(point.x, point.y, model.bounds, model.rect);
+    const [x, y] = worldToCanvas(point.x, point.y, model.rect);
     const done = index < activeIndex;
     const active = index === activeIndex;
     ctx.beginPath();
@@ -557,7 +608,7 @@ function drawSurveyPoints(ctx, model) {
 }
 function drawDrone(ctx, model) {
   if (!model.drone || !Number.isFinite(Number(model.drone.x)) || !Number.isFinite(Number(model.drone.y))) return;
-  const [x, y] = worldToCanvas(model.drone.x, model.drone.y, model.bounds, model.rect);
+  const [x, y] = worldToCanvas(model.drone.x, model.drone.y, model.rect);
   ctx.fillStyle = "#e6edf6";
   ctx.strokeStyle = "#08111a";
   ctx.lineWidth = 1;
@@ -580,7 +631,7 @@ function drawTargets(ctx, model) {
     const status = isDrop ? "" : model.recceStatus.get(Number(target.target_id)) || "pending";
     const confirmed = status === "confirmed";
     const color = confirmed ? "#2bc277" : isDrop ? "#39c8bf" : "#eda93d";
-    const [x, y] = worldToCanvas(target.x, target.y, model.bounds, model.rect);
+    const [x, y] = worldToCanvas(target.x, target.y, model.rect);
     ctx.beginPath();
     ctx.arc(x, y, current ? 7 : 5, 0, Math.PI * 2);
     ctx.fillStyle = visited && !confirmed ? "rgba(147,168,191,.75)" : color;
@@ -600,7 +651,7 @@ function drawLocalizationTargets(ctx, model) {
     const tx = Number(target.x);
     const ty = Number(target.y);
     if (!Number.isFinite(tx) || !Number.isFinite(ty)) return;
-    const [x, y] = worldToCanvas(tx, ty, model.bounds, model.rect);
+    const [x, y] = worldToCanvas(tx, ty, model.rect);
     const id = target.id ?? target.target_id ?? index;
     const count = target.count ?? target.seen_count ?? 0;
     ctx.beginPath();
@@ -652,12 +703,93 @@ function drawTargetCoordinateList(ctx, model) {
     });
   });
 }
+function fitFieldMapToDefaults() {
+  const bounds = FIELD_DEFAULTS.bounds;
+  fieldMapView.centerX = (bounds.xMin + bounds.xMax) / 2;
+  fieldMapView.centerY = (bounds.yMin + bounds.yMax) / 2;
+  const canvas = $("fieldMap");
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const pad = 70;
+  const scaleX = Math.max(1, (rect.width - pad * 2) / (bounds.xMax - bounds.xMin));
+  const scaleY = Math.max(1, (rect.height - pad * 2) / (bounds.yMax - bounds.yMin));
+  fieldMapView.scale = Math.max(
+    fieldMapView.minScale,
+    Math.min(fieldMapView.maxScale, Math.min(scaleX, scaleY))
+  );
+  fieldMapView.initialized = true;
+}
+function setupFieldMapInteractions() {
+  const canvas = $("fieldMap");
+  if (!canvas || canvas.dataset.mapReady === "1") return;
+  canvas.dataset.mapReady = "1";
+
+  canvas.addEventListener("wheel", event => {
+    event.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+    const before = canvasToWorld(mouseX, mouseY, rect);
+    const zoomFactor = event.deltaY < 0 ? 1.15 : 1 / 1.15;
+    fieldMapView.scale = Math.max(
+      fieldMapView.minScale,
+      Math.min(fieldMapView.maxScale, fieldMapView.scale * zoomFactor)
+    );
+    const after = canvasToWorld(mouseX, mouseY, rect);
+    fieldMapView.centerX += before.x - after.x;
+    fieldMapView.centerY += before.y - after.y;
+    renderFieldMap(state);
+  }, {passive: false});
+
+  canvas.addEventListener("mousedown", event => {
+    fieldMapView.isDragging = true;
+    fieldMapView.dragStartX = event.clientX;
+    fieldMapView.dragStartY = event.clientY;
+    fieldMapView.dragStartCenterX = fieldMapView.centerX;
+    fieldMapView.dragStartCenterY = fieldMapView.centerY;
+    canvas.classList.add("dragging");
+  });
+
+  window.addEventListener("mousemove", event => {
+    if (!fieldMapView.isDragging) return;
+    const dx = event.clientX - fieldMapView.dragStartX;
+    const dy = event.clientY - fieldMapView.dragStartY;
+    fieldMapView.centerX = fieldMapView.dragStartCenterX - dx / fieldMapView.scale;
+    fieldMapView.centerY = fieldMapView.dragStartCenterY + dy / fieldMapView.scale;
+    renderFieldMap(state);
+  });
+
+  window.addEventListener("mouseup", () => {
+    if (!fieldMapView.isDragging) return;
+    fieldMapView.isDragging = false;
+    const canvas2 = $("fieldMap");
+    if (canvas2) canvas2.classList.remove("dragging");
+  });
+
+  // button handlers
+  $("fieldMapZoomIn")?.addEventListener("click", () => {
+    fieldMapView.scale = Math.min(fieldMapView.maxScale, fieldMapView.scale * 1.2);
+    renderFieldMap(state);
+  });
+  $("fieldMapZoomOut")?.addEventListener("click", () => {
+    fieldMapView.scale = Math.max(fieldMapView.minScale, fieldMapView.scale / 1.2);
+    renderFieldMap(state);
+  });
+  $("fieldMapReset")?.addEventListener("click", () => {
+    fitFieldMapToDefaults();
+    renderFieldMap(state);
+  });
+}
 function renderFieldMap(next) {
   const canvas = $("fieldMap");
   if (!canvas) return;
+  setupFieldMapInteractions();
   const {ctx, rect} = resizeFieldCanvas(canvas);
   const model = fieldMapModel(next);
   model.rect = rect;
+  if (!fieldMapView.initialized) {
+    fitFieldMapToDefaults();
+  }
   drawField(ctx, model);
   drawSurveyPoints(ctx, model);
   drawTargets(ctx, model);

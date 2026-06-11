@@ -64,7 +64,13 @@
       <main id="dashboardPage" class="page active">
         <section class="dashboard-grid">
           <article class="panel field-map-panel">
-            <div class="panel-title">场地图</div>
+            <div class="panel-title">场地图
+              <span class="field-map-controls">
+                <button id="fieldMapZoomIn">+</button>
+                <button id="fieldMapZoomOut">−</button>
+                <button id="fieldMapReset">Reset</button>
+              </span>
+            </div>
             <div class="field-map-wrap">
               <canvas id="fieldMap"></canvas>
               <div id="fieldMapEmpty" class="field-map-empty">等待 mission 坐标</div>
