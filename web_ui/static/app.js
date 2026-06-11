@@ -402,6 +402,63 @@ function canvasToWorld(screenX, screenY, rect, view = fieldMapView) {
     y: view.centerY - (screenY - rect.height / 2) / view.scale,
   };
 }
+function finiteNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+function actionLocalizationDetail(actionLab) {
+  const payload = actionLab || latestActionLab || {};
+  const status = payload?.status || payload || {};
+  const candidates = [
+    status?.last_result?.detail,
+    status?.detail,
+  ];
+  for (const detail of candidates) {
+    if (!detail || typeof detail !== "object") continue;
+    if (Array.isArray(detail.raw_estimates)) {
+      return {detail, estimates: detail.raw_estimates};
+    }
+  }
+  for (const detail of candidates) {
+    if (!detail || typeof detail !== "object") continue;
+    if (Array.isArray(detail.localized_objects)) {
+      return {detail, estimates: detail.localized_objects};
+    }
+  }
+  return {detail: {}, estimates: []};
+}
+function actionLocalizationDrone(detail) {
+  const drone = detail?.drone && typeof detail.drone === "object" ? detail.drone : {};
+  const summary = detail?.summary && typeof detail.summary === "object" ? detail.summary : {};
+  const x = finiteNumber(drone.local_x ?? drone.x ?? summary.drone_x);
+  const y = finiteNumber(drone.local_y ?? drone.y ?? summary.drone_y);
+  if (x === null || y === null) return null;
+  return {x, y};
+}
+function actionLocalizationTargets(actionLab) {
+  const {detail, estimates} = actionLocalizationDetail(actionLab);
+  return {
+    drone: actionLocalizationDrone(detail),
+    targets: estimates
+      .map((estimate, index) => {
+        if (!estimate || typeof estimate !== "object") return null;
+        const x = finiteNumber(estimate.local_x ?? estimate.x);
+        const y = finiteNumber(estimate.local_y ?? estimate.y);
+        if (x === null || y === null) return null;
+        const source = estimate.source && typeof estimate.source === "object" ? estimate.source : {};
+        return {
+          index,
+          x,
+          y,
+          class_name: estimate.class_name,
+          confidence: finiteNumber(estimate.confidence),
+          ex: finiteNumber(source.ex),
+          ey: finiteNumber(source.ey),
+        };
+      })
+      .filter(Boolean),
+  };
+}
 function niceGridStep(scale) {
   const targetPx = 60;
   const raw = targetPx / scale;
@@ -431,6 +488,7 @@ function fieldMapModel(next) {
   const recceStatus = new Map(recceResults.map(item => [Number(item.target_id), item.status || "blank"]));
   const localization = next.localization || {};
   const localizationObjects = Array.isArray(localization.objects) ? localization.objects : [];
+  const singleViewLocalization = actionLocalizationTargets(next.action_lab || latestActionLab);
   return {
     bounds: FIELD_DEFAULTS.bounds,
     areas: {
@@ -458,6 +516,8 @@ function fieldMapModel(next) {
       Number.isFinite(Number(item.x)) &&
       Number.isFinite(Number(item.y))
     ),
+    singleViewTargets: singleViewLocalization.targets,
+    singleViewDrone: singleViewLocalization.drone,
   };
 }
 function resizeFieldCanvas(canvas) {
@@ -670,6 +730,57 @@ function drawLocalizationTargets(ctx, model) {
     });
   });
 }
+function drawSingleViewTargets(ctx, model) {
+  const targets = Array.isArray(model.singleViewTargets) ? model.singleViewTargets : [];
+  if (!targets.length) return;
+  const lineSource = model.singleViewDrone || (
+    model.drone && Number.isFinite(Number(model.drone.x)) && Number.isFinite(Number(model.drone.y))
+      ? {x: Number(model.drone.x), y: Number(model.drone.y)}
+      : null
+  );
+  targets.forEach((target, index) => {
+    const [x, y] = worldToCanvas(target.x, target.y, model.rect);
+    if (lineSource) {
+      const [sx, sy] = worldToCanvas(lineSource.x, lineSource.y, model.rect);
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(x, y);
+      ctx.strokeStyle = "rgba(255,91,91,.55)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.beginPath();
+    ctx.moveTo(x - 6, y);
+    ctx.lineTo(x + 6, y);
+    ctx.moveTo(x, y - 6);
+    ctx.lineTo(x, y + 6);
+    ctx.strokeStyle = "#ff5b5b";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = "#08111a";
+    ctx.strokeStyle = "#ff5b5b";
+    ctx.lineWidth = 1;
+    ctx.fill();
+    ctx.stroke();
+
+    const label = `SV${index}`;
+    const meta = [];
+    if (target.confidence !== null) meta.push(`conf=${num(target.confidence, 2)}`);
+    if (target.ex !== null && target.ey !== null) meta.push(`ex=${num(target.ex, 2)} ey=${num(target.ey, 2)}`);
+    drawFieldLabel(ctx, label, x + 10, y - 12, {align: "left", color: "#ff8a8a"});
+    if (meta.length) {
+      drawFieldLabel(ctx, meta.join(" "), x + 10, y + 5, {
+        align: "left",
+        color: "#ffb3b3",
+        font: "11px Consolas, monospace",
+      });
+    }
+  });
+}
 function drawTargetCoordinateList(ctx, model) {
   const targets = [
     ...model.dropTargets.map(target => ({...target, prefix: "D"})),
@@ -792,6 +903,7 @@ function renderFieldMap(next) {
   drawSurveyPoints(ctx, model);
   drawTargets(ctx, model);
   drawLocalizationTargets(ctx, model);
+  drawSingleViewTargets(ctx, model);
   drawDrone(ctx, model);
   drawTargetCoordinateList(ctx, model);
   $("fieldMapEmpty").style.display = model.hasMissionPosition ? "none" : "block";
@@ -801,6 +913,7 @@ function renderFieldMap(next) {
     `Drop targets: ${model.dropTargets.length}`,
     `Recce confirmed: ${model.confirmedCount}/${model.requiredConfirmed}`,
     `Localization: ${model.localizationTargets.length}`,
+    `SingleView: ${model.singleViewTargets.length}`,
     model.hasMissionPosition ? "Coord: mission" : "Coord: local fallback",
   ].map(item => `<span>${item}</span>`).join("");
 }
@@ -982,6 +1095,7 @@ async function refreshActionStatus() {
   const result = await json("/api/actions/status");
   if (!result.ok) throw new Error(result.error || "action status failed");
   renderActionLabStatus(result.action_lab || null);
+  renderFieldMap(state);
   return result;
 }
 function renderActionLabStatus(actionLab) {
@@ -1177,17 +1291,20 @@ async function startActionLabAction(sendActions) {
   if (!result.ok) throw new Error(result.error || "action start failed");
   $("completionHint").textContent = result.note || (sendActions ? "action dispatch requested" : "action dry-run started");
   renderActionLabStatus(result.action_lab || result.status);
+  renderFieldMap(state);
 }
 async function stopActionLabAction() {
   const result = await json("/api/actions/stop", {method: "POST", body: "{}"});
   if (!result.ok) throw new Error(result.error || "action stop failed");
   renderActionLabStatus(result.action_lab || result.status);
+  renderFieldMap(state);
 }
 async function resetActionLabAction() {
   cacheSelectedActionParams();
   const result = await json("/api/actions/reset", {method: "POST", body: "{}"});
   if (!result.ok) throw new Error(result.error || "action reset failed");
   renderActionLabStatus(result.action_lab || result.status);
+  renderFieldMap(state);
 }
 async function loadConfigFiles() {
   const files = await json("/api/config/files");
