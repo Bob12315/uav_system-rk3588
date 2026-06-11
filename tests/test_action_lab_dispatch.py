@@ -1221,3 +1221,34 @@ def test_action_lab_start_stop_reset_clear_navigation_queue_does_not_crash() -> 
     assert fl.clear_continuous_calls == 3
     assert fl.clear_nav_calls == 3
     assert fl.hold_calls == 2
+
+
+def test_multi_view_localize_dispatches_local_position_when_gates_enabled() -> None:
+    """multi_view_localize is in allowed_actions for local_position dispatch."""
+    runner = _runner()
+    runner.controller_switches.set_send_commands(True)
+
+    runner.action_lab_start_action(
+        "multi_view_localize",
+        {
+            "waypoint_mode": "absolute",
+            "waypoints": [{"x": 1.0, "y": 2.0, "altitude_m": 3.0}],
+            "capture_updates_per_waypoint": 1,
+            "settle_updates_per_waypoint": 1,
+            "max_updates_per_waypoint": 10,
+            "yaw_mode": "hold",
+        },
+        send_actions=True,
+    )
+    runner.action_lab_tick()
+
+    # check that local_position was sent via goto_local_ned
+    calls = runner.services.link_manager.calls
+    assert len(calls) >= 1
+    assert calls[0][0] == "goto_local_ned"
+
+    payload = runner.action_lab_status_payload()
+    assert payload["send_actions_requested"] is True
+    assert payload["send_actions_effective"] is True
+    assert payload["note"] == "local_position_dispatch_enabled"
+    assert payload["dispatch"]["sent"][0]["action_type"] == "local_position"
