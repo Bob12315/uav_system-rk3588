@@ -519,22 +519,32 @@ button.active-choice {
 .mission-action-panel {
   max-width: none;
 }
-.action-mission-layout {
+.action-mission-grid {
   display: grid;
-  grid-template-columns: minmax(420px, 1.1fr) minmax(320px, .8fr);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
   gap: 12px;
   align-items: start;
 }
-.action-mission-presets-panel {
+.action-mission-block {
   border: 1px solid var(--line);
   background: #0d1622;
   border-radius: 5px;
   padding: 10px;
-  margin-bottom: 10px;
+  min-width: 0;
 }
-.action-mission-presets-panel .hint {
-  margin-top: 0;
-  line-height: 1.45;
+.action-mission-templates,
+.action-mission-controls,
+.action-mission-timeline-block,
+.action-mission-editor {
+  grid-column: 1;
+}
+.action-mission-side {
+  grid-column: 2;
+  grid-row: 1 / span 4;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
 }
 .action-mission-presets {
   display: flex;
@@ -542,8 +552,36 @@ button.active-choice {
   gap: 7px;
   margin-top: 10px;
 }
+.action-mission-presets.primary button {
+  min-width: 180px;
+}
 .action-mission-presets button {
   min-height: 36px;
+}
+.mission-template-list {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.mission-template-list div {
+  border-top: 1px solid rgba(36, 54, 75, .75);
+  padding-top: 6px;
+  margin-top: 6px;
+}
+.legacy-templates {
+  margin-top: 12px;
+  color: var(--muted);
+}
+.legacy-templates summary {
+  cursor: pointer;
+  color: #bdd1e4;
+}
+.action-mission-control-note,
+.action-mission-safety-note {
+  margin-top: 9px;
+  color: var(--muted);
+  line-height: 1.45;
 }
 #actionMissionSteps {
   width: 100%;
@@ -567,6 +605,70 @@ button.active-choice {
 }
 .action-mission-status {
   grid-template-columns: 150px minmax(0, 1fr);
+}
+.blackboard-keys,
+.mission-results {
+  color: #bdd1e4;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.blackboard-key {
+  display: inline-block;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 7px;
+  margin: 0 5px 5px 0;
+  color: #9df2ec;
+  background: rgba(57, 200, 191, .08);
+}
+.timeline-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+.action-mission-timeline {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 860px;
+  font-size: 12px;
+}
+.action-mission-timeline th,
+.action-mission-timeline td {
+  border-bottom: 1px solid var(--line);
+  padding: 8px 7px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.action-mission-timeline th {
+  color: var(--muted);
+  font-weight: 600;
+}
+.action-mission-timeline tr.current-step {
+  background: rgba(57, 200, 191, .08);
+}
+.step-status {
+  display: inline-block;
+  min-width: 70px;
+  border-radius: 4px;
+  padding: 3px 7px;
+  text-align: center;
+  font-family: Consolas, monospace;
+}
+.step-status.pending { color: var(--muted); border: 1px solid var(--line); }
+.step-status.running { color: #8ebcff; border: 1px solid rgba(89, 143, 255, .5); background: rgba(89, 143, 255, .08); }
+.step-status.done { color: var(--ok); border: 1px solid rgba(43, 194, 119, .5); background: rgba(43, 194, 119, .08); }
+.step-status.failed { color: var(--danger); border: 1px solid rgba(241, 93, 99, .6); background: rgba(241, 93, 99, .1); }
+.step-status.skipped,
+.step-status.continued { color: var(--warn); border: 1px solid rgba(237, 169, 61, .55); background: rgba(237, 169, 61, .09); }
+.mission-result-group {
+  margin-bottom: 10px;
+}
+.mission-result-group strong {
+  display: block;
+  color: var(--accent);
+  margin-bottom: 3px;
 }
 .mission-detail-json {
   min-height: 280px;
@@ -640,7 +742,9 @@ button.active-choice {
 @media (max-width: 1000px) {
   header { align-items: flex-start; flex-direction: column; }
   .badges { margin-left: 0; justify-content: flex-start; }
-  .dashboard-grid, .top-grid, .controls-grid, .safety-grid, .bottom-grid, .config-grid, .action-lab-layout, .action-mission-layout { display: block; }
+  .dashboard-grid, .top-grid, .controls-grid, .safety-grid, .bottom-grid, .config-grid, .action-lab-layout, .action-mission-grid { display: block; }
+  .action-mission-side { display: block; }
+  .action-mission-side .action-mission-block { margin-bottom: 12px; }
   .panel { margin-bottom: 12px; }
   .field-map-wrap { height: 520px; }
   .action-gate-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

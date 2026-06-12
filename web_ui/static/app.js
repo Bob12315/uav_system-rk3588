@@ -11,6 +11,11 @@ let selectedActionName = "";
 let actionParamCache = {};
 let latestActionLab = null;
 let actionStatusJsonSelecting = false;
+let currentActionMission = null;
+let currentActionMissionSteps = [];
+let lastActionMissionStatus = null;
+let lastActionMissionResult = null;
+let actionMissionAutoTickTimer = null;
 const fallbackStageModes = ["AUTO", "IDLE", "APPROACH_TRACK", "OVERHEAD_HOLD", "CORRIDOR_FOLLOW"];
 const ACTION_SAFETY_HINTS = {
   goto_waypoint: "飞控移动命令：local_position / goto_local_ned，需要 SEND=ON 才实发。",
@@ -345,10 +350,138 @@ function countDispatchItems(value) {
   if (value && typeof value === "object") return Object.keys(value).length;
   return value ? 1 : 0;
 }
+function actionMissionDetail(actionMission) {
+  return (actionMission && typeof actionMission.detail === "object" && actionMission.detail) ? actionMission.detail : {};
+}
+function actionMissionBlackboard(actionMission) {
+  const detail = actionMissionDetail(actionMission);
+  return (detail.blackboard && typeof detail.blackboard === "object") ? detail.blackboard : {};
+}
+function inferActionMissionStepStatus(actionMission, index, stepCount) {
+  const payload = actionMission || {};
+  const current = Number.isFinite(Number(payload.current_index)) ? Number(payload.current_index) : 0;
+  if (payload.done) return "done";
+  if (payload.failed) {
+    if (index < current) return "done";
+    if (index === current) return "failed";
+    return "pending";
+  }
+  if (payload.running && index === current && current < stepCount) return "running";
+  if (index < current) return "done";
+  return "pending";
+}
+function failurePolicyLabel(policy) {
+  if (!policy || typeof policy !== "object") return "-";
+  const action = policy.action || "fail";
+  if (policy.target) return `${action}:${policy.target}`;
+  if (policy.max_attempts !== undefined) return `${action} x${policy.max_attempts}`;
+  return String(action);
+}
+function renderActionMissionTimeline(actionMission, configuredSteps) {
+  const element = $("actionMissionTimeline");
+  if (!element) return [];
+  const steps = Array.isArray(configuredSteps) ? configuredSteps : [];
+  const detail = actionMissionDetail(actionMission);
+  const attempts = detail.step_attempts || {};
+  const current = Number.isFinite(Number(actionMission?.current_index)) ? Number(actionMission.current_index) : -1;
+  const statuses = steps.map((step, index) => inferActionMissionStepStatus(actionMission || {}, index, steps.length));
+  element.innerHTML = steps.map((step, index) => {
+    const status = statuses[index];
+    const reason = index === current ? (actionMission?.reason || "-") : "-";
+    return `<tr class="${index === current ? "current-step" : ""}" data-step-status="${status}">
+      <td>${index}</td>
+      <td><span class="step-status ${status}">${status}</span></td>
+      <td>${escapeHtml(step.label || "-")}</td>
+      <td>${escapeHtml(step.name || "-")}</td>
+      <td>${escapeHtml(step.save_as || "-")}</td>
+      <td>${escapeHtml(failurePolicyLabel(step.on_failed))}</td>
+      <td>${escapeHtml(attempts[index] ?? attempts[String(index)] ?? "-")}</td>
+      <td>${escapeHtml(reason)}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="8" class="hint">Load or paste a mission JSON to preview steps.</td></tr>`;
+  return statuses;
+}
+function renderBlackboardKeys(actionMission) {
+  const element = $("actionMissionBlackboardKeys");
+  if (!element) return;
+  const detail = actionMissionDetail(actionMission);
+  const blackboard = actionMissionBlackboard(actionMission);
+  const keys = Array.isArray(detail.blackboard_keys) ? detail.blackboard_keys : Object.keys(blackboard);
+  element.innerHTML = keys.length
+    ? keys.map(key => `<span class="blackboard-key">${escapeHtml(key)}</span>`).join("")
+    : `<div class="hint">No blackboard keys yet.</div>`;
+}
+function getPathValue(source, path) {
+  let current = source;
+  for (const part of path) {
+    if (current === null || current === undefined) return undefined;
+    current = current[part];
+  }
+  return current;
+}
+function summarizeDropScan(blackboard) {
+  const dropScan = blackboard.drop_scan || {};
+  const objects = getPathValue(dropScan, ["localization", "objects"])
+    || dropScan.localized_objects
+    || dropScan.objects;
+  if (!Array.isArray(objects)) return "";
+  return `<div class="mission-result-group"><strong>Drop Scan</strong><div>Localized objects: ${objects.length}</div></div>`;
+}
+function summarizeDropTargets(blackboard) {
+  const selected = getPathValue(blackboard, ["drop_targets", "selected_targets"]);
+  if (!Array.isArray(selected)) return "";
+  const rows = selected.slice(0, 6).map((target, index) => {
+    const id = target.id ?? target.track_id ?? index + 1;
+    const x = target.local_x ?? target.x ?? "--";
+    const y = target.local_y ?? target.y ?? "--";
+    return `<div>T${index + 1}: id=${escapeHtml(id)} x=${escapeHtml(x)} y=${escapeHtml(y)}</div>`;
+  }).join("");
+  return `<div class="mission-result-group"><strong>Selected Drop Targets</strong><div>Selected drop targets: ${selected.length}</div>${rows}</div>`;
+}
+function summarizeReconReport(blackboard) {
+  const report = getPathValue(blackboard, ["recon_scan", "recon_report"]);
+  if (!report || typeof report !== "object") return "";
+  const barrels = Array.isArray(report.barrels) ? report.barrels : [];
+  const rows = barrels.slice(0, 8).map((barrel, index) => {
+    const id = barrel.id || `recon_${index + 1}`;
+    const content = barrel.content || barrel.class_name || "blank";
+    const confidence = barrel.confidence !== undefined ? ` conf=${Number(barrel.confidence).toFixed(2)}` : "";
+    return `<div>${escapeHtml(id)}: ${escapeHtml(content)}${escapeHtml(confidence)}</div>`;
+  }).join("");
+  return `<div class="mission-result-group"><strong>Recon Report</strong><div>Recon barrels: ${barrels.length}</div>${rows}</div>`;
+}
+function renderActionMissionSummary(actionMission) {
+  const element = $("actionMissionResults");
+  if (!element) return;
+  const blackboard = actionMissionBlackboard(actionMission);
+  const html = [
+    summarizeDropScan(blackboard),
+    summarizeDropTargets(blackboard),
+    summarizeReconReport(blackboard),
+  ].filter(Boolean).join("");
+  element.innerHTML = html || `<div class="hint">No mission result details yet.</div>`;
+}
+function updateActionMissionAutoTickButton() {
+  const button = $("actionMissionAutoTick");
+  if (!button) return;
+  const enabled = Boolean(actionMissionAutoTickTimer);
+  button.textContent = enabled ? "Auto Tick ON" : "Auto Tick OFF";
+  button.classList.toggle("warning", enabled);
+}
+function stopActionMissionAutoTick() {
+  if (actionMissionAutoTickTimer) {
+    clearInterval(actionMissionAutoTickTimer);
+    actionMissionAutoTickTimer = null;
+  }
+  updateActionMissionAutoTickButton();
+}
 function renderActionMissionStatus(actionMission) {
   const payload = actionMission || {};
-  const detail = payload.detail || {};
+  const detail = actionMissionDetail(payload);
   const sendEnabled = Boolean(state?.controllers?.send_commands);
+  lastActionMissionStatus = payload;
+  const actionResult = detail.action_result || detail.previous_action_result || detail.failed_action_result || null;
+  if (actionResult) lastActionMissionResult = actionResult;
   setOptionalText("actionMissionSystemSend", sendEnabled ? "ON" : "OFF");
   setOptionalText("actionMissionEnabled", String(Boolean(payload.enabled)));
   setOptionalText("actionMissionRunning", String(Boolean(payload.running)));
@@ -361,11 +494,15 @@ function renderActionMissionStatus(actionMission) {
   if (warning) {
     warning.textContent = sendEnabled
       ? "WARNING: System SEND=ON. Tick once may dispatch vehicle/simulator commands."
-      : "System SEND=OFF. Action dispatch requests remain gated.";
+      : "Dry-run: Tick will not dispatch vehicle commands.";
     warning.classList.toggle("send-on", sendEnabled);
   }
   const detailElement = $("actionMissionDetail");
   if (detailElement) detailElement.textContent = JSON.stringify(detail, null, 2);
+  renderBlackboardKeys(payload);
+  renderActionMissionSummary(payload);
+  renderActionMissionTimeline(payload, currentActionMissionSteps);
+  if (!payload.running || payload.done || payload.failed) stopActionMissionAutoTick();
 }
 function renderDashboardSummaries(next) {
   const actionLab = next.action_lab || latestActionLab || {};
@@ -1250,41 +1387,45 @@ function parseActionParams() {
     return null;
   }
 }
-function parseActionMissionSteps() {
-  try {
-    const value = $("actionMissionSteps").value.trim();
-    const parsed = value ? JSON.parse(value) : [];
-    const steps = Array.isArray(parsed)
-      ? parsed
-      : parsed && typeof parsed === "object" && Array.isArray(parsed.steps)
-        ? parsed.steps
-        : null;
-    if (!steps) throw new Error("Action Mission JSON must be a steps array or an object with steps");
-    if (!Array.isArray(steps)) throw new Error("steps must be a JSON array");
-    for (const [index, step] of steps.entries()) {
-      if (!step || typeof step !== "object" || typeof step.name !== "string" || !step.name.trim()) {
-        throw new Error(`step ${index + 1} must include name`);
-      }
-      if (step.params !== undefined && (step.params === null || Array.isArray(step.params) || typeof step.params !== "object")) {
-        throw new Error(`step ${index + 1} params must be an object`);
-      }
-      if (step.save_as !== undefined && step.save_as !== null && typeof step.save_as !== "string") {
-        throw new Error(`step ${index + 1} save_as must be a string`);
-      }
-      if (step.label !== undefined && step.label !== null && typeof step.label !== "string") {
-        throw new Error(`step ${index + 1} label must be a string`);
-      }
-      if (step.on_failed !== undefined && step.on_failed !== null && (Array.isArray(step.on_failed) || typeof step.on_failed !== "object")) {
-        throw new Error(`step ${index + 1} on_failed must be an object`);
-      }
+function parseActionMissionInput(text) {
+  const parsed = text.trim() ? JSON.parse(text) : [];
+  if (Array.isArray(parsed)) return {name: "", steps: parsed};
+  if (parsed && typeof parsed === "object" && Array.isArray(parsed.steps)) return parsed;
+  throw new Error("Action Mission JSON must be a steps array or an object with steps");
+}
+function normalizeActionMissionSteps(input) {
+  const steps = Array.isArray(input) ? input : input?.steps;
+  if (!Array.isArray(steps)) throw new Error("steps must be a JSON array");
+  if (!steps.length) throw new Error("steps must be non-empty");
+  return steps.map((step, index) => {
+    if (!step || typeof step !== "object" || typeof step.name !== "string" || !step.name.trim()) {
+      throw new Error(`step ${index + 1} must include name`);
     }
-    return steps.map(step => ({
-      name: step.name,
+    if (step.params !== undefined && (step.params === null || Array.isArray(step.params) || typeof step.params !== "object")) {
+      throw new Error(`step ${index + 1} params must be an object`);
+    }
+    if (step.save_as !== undefined && step.save_as !== null && typeof step.save_as !== "string") {
+      throw new Error(`step ${index + 1} save_as must be a string`);
+    }
+    if (step.label !== undefined && step.label !== null && typeof step.label !== "string") {
+      throw new Error(`step ${index + 1} label must be a string`);
+    }
+    if (step.on_failed !== undefined && step.on_failed !== null && (Array.isArray(step.on_failed) || typeof step.on_failed !== "object")) {
+      throw new Error(`step ${index + 1} on_failed must be an object`);
+    }
+    return {
+      name: step.name.trim(),
       params: step.params || {},
       ...(step.save_as ? {save_as: step.save_as} : {}),
       ...(step.label ? {label: step.label} : {}),
       ...(step.on_failed ? {on_failed: step.on_failed} : {}),
-    }));
+    };
+  });
+}
+function parseActionMissionSteps() {
+  try {
+    const parsed = parseActionMissionInput($("actionMissionSteps").value);
+    return normalizeActionMissionSteps(parsed);
   } catch (error) {
     $("completionHint").textContent = `Action Mission JSON 错误: ${error.message}`;
     return null;
@@ -1299,6 +1440,8 @@ async function refreshActionMission() {
 async function configureActionMission() {
   const steps = parseActionMissionSteps();
   if (steps === null) return;
+  currentActionMission = parseActionMissionInput($("actionMissionSteps").value);
+  currentActionMissionSteps = steps;
   const result = await json("/api/action-mission/configure", {
     method: "POST",
     body: JSON.stringify({steps}),
@@ -1319,12 +1462,14 @@ async function startActionMission() {
   renderActionMissionStatus(result.action_mission || null);
 }
 async function stopActionMission() {
+  stopActionMissionAutoTick();
   const result = await json("/api/action-mission/stop", {method: "POST", body: "{}"});
   if (!result.ok) throw new Error(result.error || "action mission stop failed");
   $("completionHint").textContent = "Action Mission stopped";
   renderActionMissionStatus(result.action_mission || null);
 }
 async function resetActionMission() {
+  stopActionMissionAutoTick();
   const result = await json("/api/action-mission/reset", {method: "POST", body: "{}"});
   if (!result.ok) throw new Error(result.error || "action mission reset failed");
   $("completionHint").textContent = "Action Mission reset";
@@ -1336,6 +1481,75 @@ async function tickActionMission() {
   $("completionHint").textContent = "Action Mission tick complete";
   renderActionMissionStatus(result.action_mission || null);
 }
+function setActionMissionEditorValue(mission) {
+  const editor = $("actionMissionSteps");
+  if (!editor) return;
+  currentActionMission = mission;
+  currentActionMissionSteps = normalizeActionMissionSteps(mission);
+  editor.value = JSON.stringify(mission, null, 2);
+  renderActionMissionTimeline(lastActionMissionStatus || {}, currentActionMissionSteps);
+}
+async function loadActionMissionTemplates() {
+  const element = $("actionMissionTemplateList");
+  if (!element) return;
+  try {
+    const result = await json("/api/action-mission/templates");
+    if (!result.ok) throw new Error(result.error || "template list failed");
+    element.innerHTML = (result.templates || []).map(template =>
+      `<div><strong>${escapeHtml(template.label || template.name)}</strong> · ${escapeHtml(template.step_count)} steps<br>${escapeHtml(template.description || template.path)}</div>`
+    ).join("");
+  } catch (error) {
+    element.textContent = `Template API unavailable: ${error.message}`;
+  }
+}
+async function loadActionMissionTemplate(name) {
+  const current = $("actionMissionSteps")?.value.trim();
+  const defaultText = JSON.stringify(DEFAULT_ACTION_MISSION_STEPS, null, 2).trim();
+  if (current && current !== defaultText && !window.confirm("当前 Mission JSON 将被覆盖，确认？")) return;
+  const result = await json(`/api/action-mission/template/${encodeURIComponent(name)}`);
+  if (!result.ok) throw new Error(result.error || "template load failed");
+  setActionMissionEditorValue(result.template);
+  $("completionHint").textContent = "已加载比赛模板，请检查参数后 Configure";
+}
+function validateActionMissionJson() {
+  const steps = parseActionMissionSteps();
+  if (steps === null) return;
+  currentActionMission = parseActionMissionInput($("actionMissionSteps").value);
+  currentActionMissionSteps = steps;
+  renderActionMissionTimeline(lastActionMissionStatus || {}, currentActionMissionSteps);
+  $("completionHint").textContent = `Action Mission JSON valid: ${steps.length} steps`;
+}
+function formatActionMissionJson() {
+  const parsed = parseActionMissionInput($("actionMissionSteps").value);
+  $("actionMissionSteps").value = JSON.stringify(parsed, null, 2);
+  validateActionMissionJson();
+}
+async function copyText(text, message) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+  } else {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  $("completionHint").textContent = message;
+}
+async function toggleActionMissionAutoTick() {
+  if (actionMissionAutoTickTimer) {
+    stopActionMissionAutoTick();
+    return;
+  }
+  actionMissionAutoTickTimer = setInterval(() => {
+    tickActionMission().catch(error => {
+      stopActionMissionAutoTick();
+      $("completionHint").textContent = error.message;
+    });
+  }, 500);
+  updateActionMissionAutoTickButton();
+}
 function loadActionMissionPreset(name) {
   const preset = actionMissionPresets[name];
   const editor = $("actionMissionSteps");
@@ -1345,7 +1559,7 @@ function loadActionMissionPreset(name) {
   if (current && current !== defaultText && !window.confirm("当前 Step JSON 将被覆盖，确认？")) {
     return;
   }
-  editor.value = JSON.stringify(preset, null, 2);
+  setActionMissionEditorValue(preset);
   $("completionHint").textContent = "已加载模板，请检查参数后 Configure";
 }
 function selectedActionIsRunning() {
@@ -1592,13 +1806,26 @@ async function init() {
   if ($("actionStop")) $("actionStop").onclick = () => stopActionLabAction().catch(error => { $("completionHint").textContent = error.message; });
   $("actionReset").onclick = () => resetActionLabAction().catch(error => { $("completionHint").textContent = error.message; });
   $("actionRefresh").onclick = () => refreshActionStatus().catch(error => { $("completionHint").textContent = error.message; });
-  if ($("actionMissionSteps")) $("actionMissionSteps").value = JSON.stringify(DEFAULT_ACTION_MISSION_STEPS, null, 2);
+  if ($("actionMissionSteps")) setActionMissionEditorValue(DEFAULT_ACTION_MISSION_STEPS);
   if ($("actionMissionConfigure")) $("actionMissionConfigure").onclick = () => configureActionMission().catch(error => { $("completionHint").textContent = error.message; });
   if ($("actionMissionStart")) $("actionMissionStart").onclick = () => startActionMission().catch(error => { $("completionHint").textContent = error.message; });
   if ($("actionMissionStop")) $("actionMissionStop").onclick = () => stopActionMission().catch(error => { $("completionHint").textContent = error.message; });
   if ($("actionMissionReset")) $("actionMissionReset").onclick = () => resetActionMission().catch(error => { $("completionHint").textContent = error.message; });
   if ($("actionMissionTick")) $("actionMissionTick").onclick = () => tickActionMission().catch(error => { $("completionHint").textContent = error.message; });
+  if ($("actionMissionAutoTick")) $("actionMissionAutoTick").onclick = () => toggleActionMissionAutoTick().catch(error => { $("completionHint").textContent = error.message; });
   if ($("actionMissionRefresh")) $("actionMissionRefresh").onclick = () => refreshActionMission().catch(error => { $("completionHint").textContent = error.message; });
+  if ($("actionMissionLoadCustom")) $("actionMissionLoadCustom").onclick = () => {
+    $("actionMissionSteps").focus();
+    $("completionHint").textContent = "Paste custom Mission JSON, then Validate or Configure";
+  };
+  if ($("actionMissionValidate")) $("actionMissionValidate").onclick = () => validateActionMissionJson();
+  if ($("actionMissionFormatJson")) $("actionMissionFormatJson").onclick = () => formatActionMissionJson();
+  if ($("actionMissionCopyJson")) $("actionMissionCopyJson").onclick = () => copyText($("actionMissionSteps").value, "Mission JSON copied").catch(error => { $("completionHint").textContent = error.message; });
+  if ($("actionMissionCopyStatus")) $("actionMissionCopyStatus").onclick = () => copyText(JSON.stringify(lastActionMissionStatus || {}, null, 2), "Action Mission status copied").catch(error => { $("completionHint").textContent = error.message; });
+  if ($("actionMissionCopyResult")) $("actionMissionCopyResult").onclick = () => copyText(JSON.stringify(lastActionMissionResult || {}, null, 2), "Action Mission last result copied").catch(error => { $("completionHint").textContent = error.message; });
+  document.querySelectorAll("[data-action-mission-template]").forEach(button => {
+    button.onclick = () => loadActionMissionTemplate(button.dataset.actionMissionTemplate).catch(error => { $("completionHint").textContent = error.message; });
+  });
   document.querySelectorAll("[data-action-mission-preset]").forEach(button => {
     button.onclick = () => loadActionMissionPreset(button.dataset.actionMissionPreset);
   });
@@ -1612,7 +1839,7 @@ async function init() {
     startActionLabAction(true).catch(error => { $("completionHint").textContent = error.message; });
   };
   completions = (await json("/api/commands/completions")).commands;
-  await Promise.all([loadAudit(), loadMissions(), loadConfigFiles(), loadActionLab()]);
+  await Promise.all([loadAudit(), loadMissions(), loadConfigFiles(), loadActionLab(), loadActionMissionTemplates()]);
   startStatusUpdates();
 }
 init().catch(error => { $("completionHint").textContent = error.message; });

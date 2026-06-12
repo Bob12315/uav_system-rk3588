@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import threading
 from pathlib import Path
@@ -50,6 +51,31 @@ class ActionMissionConfigureRequest(BaseModel):
 class ManualStepMoveRequest(BaseModel):
     direction: str
     step_m: float = Field(gt=0, le=5.0)
+
+
+ACTION_MISSION_TEMPLATE_DIR = ROOT_DIR / "config" / "action_missions"
+ACTION_MISSION_TEMPLATE_NAMES = {
+    "drop_two_targets_v1": "Two Drop Targets v1",
+    "rescue_2026_full_auto": "Full Rescue 2026",
+}
+
+
+def _load_action_mission_template(name: str) -> dict:
+    if name not in ACTION_MISSION_TEMPLATE_NAMES:
+        raise HTTPException(status_code=404, detail="unknown action mission template")
+    path = (ACTION_MISSION_TEMPLATE_DIR / f"{name}.json").resolve()
+    template_dir = ACTION_MISSION_TEMPLATE_DIR.resolve()
+    if path.parent != template_dir or path.suffix != ".json":
+        raise HTTPException(status_code=404, detail="unknown action mission template")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="action mission template not found") from exc
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail=f"invalid template JSON: {exc}") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("steps"), list):
+        raise HTTPException(status_code=500, detail="invalid action mission template structure")
+    return data
 
 
 class WebUiServer:
@@ -205,6 +231,27 @@ def create_app(runner, config: UiConfig) -> FastAPI:
             return {"ok": True, "action_mission": runner.action_mission_status_payload()}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+    @app.get("/api/action-mission/templates")
+    def action_mission_templates():
+        templates = []
+        for name, label in ACTION_MISSION_TEMPLATE_NAMES.items():
+            data = _load_action_mission_template(name)
+            templates.append(
+                {
+                    "name": name,
+                    "label": label,
+                    "path": f"config/action_missions/{name}.json",
+                    "description": str(data.get("description") or ""),
+                    "step_count": len(data.get("steps") or []),
+                }
+            )
+        return {"ok": True, "templates": templates}
+
+    @app.get("/api/action-mission/template/{name}")
+    def action_mission_template(name: str):
+        template = _load_action_mission_template(name)
+        return {"ok": True, "template": template}
 
     @app.post("/api/action-mission/configure")
     def action_mission_configure(request: ActionMissionConfigureRequest):

@@ -248,7 +248,7 @@ def test_action_mission_frontend_preserves_save_as_in_configure_request() -> Non
     code = r"""
 const fs = require("fs");
 const source = fs.readFileSync("web_ui/static/app.js", "utf8");
-const start = source.indexOf("function parseActionMissionSteps()");
+const start = source.indexOf("function parseActionMissionInput");
 const end = source.indexOf("\nasync function startActionMission()", start);
 if (start < 0 || end < 0) throw new Error("Action Mission parser source not found");
 const fnSource = source.slice(start, end);
@@ -300,6 +300,128 @@ configureActionMission().then(() => {
   process.stderr.write(error.stack || String(error));
   process.exit(1);
 });
+"""
+    result = subprocess.run(
+        [node, "-e", code],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_action_mission_template_api_lists_competition_templates() -> None:
+    app = create_app(_FakeRunner(), UiConfig(True, False, "127.0.0.1", 8080, "runtime/test-audit.jsonl"))
+
+    endpoint = next(route.endpoint for route in app.routes if getattr(route, "path", "") == "/api/action-mission/templates")
+    response = endpoint()
+
+    assert response["ok"] is True
+    names = {template["name"] for template in response["templates"]}
+    assert {"drop_two_targets_v1", "rescue_2026_full_auto"} <= names
+    assert all(template["path"].startswith("config/action_missions/") for template in response["templates"])
+
+
+def test_action_mission_template_api_returns_template_and_rejects_unknown() -> None:
+    from fastapi import HTTPException
+
+    app = create_app(_FakeRunner(), UiConfig(True, False, "127.0.0.1", 8080, "runtime/test-audit.jsonl"))
+    endpoint = next(route.endpoint for route in app.routes if getattr(route, "path", "") == "/api/action-mission/template/{name}")
+
+    response = endpoint("drop_two_targets_v1")
+
+    assert response["ok"] is True
+    assert response["template"]["name"] == "drop_two_targets_v1"
+    assert response["template"]["steps"]
+
+    with pytest.raises(HTTPException):
+        endpoint("../drop_two_targets_v1")
+
+    with pytest.raises(HTTPException):
+        endpoint("missing_template")
+
+
+def test_action_mission_frontend_parses_array_and_object_inputs() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    root = Path(__file__).parents[1]
+    code = r"""
+const fs = require("fs");
+const source = fs.readFileSync("web_ui/static/app.js", "utf8");
+const start = source.indexOf("function parseActionMissionInput");
+const end = source.indexOf("\nasync function refreshActionMission()", start);
+if (start < 0 || end < 0) throw new Error("Action Mission parser source not found");
+const fnSource = source.slice(start, end);
+eval(fnSource);
+const arraySteps = normalizeActionMissionSteps(parseActionMissionInput(JSON.stringify([
+  {name: "takeoff", label: "takeoff_label", save_as: "takeoff_result", on_failed: {action: "continue"}, params: {}},
+])));
+if (arraySteps[0].label !== "takeoff_label") throw new Error("array label not preserved");
+if (arraySteps[0].save_as !== "takeoff_result") throw new Error("array save_as not preserved");
+if (arraySteps[0].on_failed.action !== "continue") throw new Error("array on_failed not preserved");
+const objectSteps = normalizeActionMissionSteps(parseActionMissionInput(JSON.stringify({
+  name: "mission",
+  steps: [{name: "select_drop_targets", save_as: "drop_targets", params: {objects: "$drop_scan.localized_objects"}}],
+})));
+if (objectSteps[0].save_as !== "drop_targets") throw new Error("object save_as not preserved");
+if (objectSteps[0].params.objects !== "$drop_scan.localized_objects") throw new Error("object params not preserved");
+"""
+    result = subprocess.run(
+        [node, "-e", code],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_action_mission_frontend_timeline_statuses() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    root = Path(__file__).parents[1]
+    code = r"""
+const fs = require("fs");
+const source = fs.readFileSync("web_ui/static/app.js", "utf8");
+const start = source.indexOf("function actionMissionDetail");
+const end = source.indexOf("\nfunction renderDashboardSummaries", start);
+if (start < 0 || end < 0) throw new Error("Action Mission timeline source not found");
+const fnSource = source.slice(start, end);
+const elements = {
+  actionMissionTimeline: {innerHTML: ""},
+};
+function $(id) { return elements[id]; }
+function escapeHtml(value) { return String(value ?? ""); }
+function setOptionalText() {}
+function stopActionMissionAutoTick() {}
+eval(fnSource);
+const status = {
+  running: true,
+  done: false,
+  failed: false,
+  current_index: 2,
+  current_action: "select_drop_targets",
+  reason: "started",
+  detail: {step_attempts: {"0": 1, "1": 1, "2": 1}},
+};
+const steps = [
+  {name: "takeoff"},
+  {name: "multi_view_localize", save_as: "drop_scan"},
+  {name: "select_drop_targets", save_as: "drop_targets"},
+  {name: "goto_waypoint"},
+];
+const statuses = renderActionMissionTimeline(status, steps);
+if (statuses.join(",") !== "done,done,running,pending") {
+  throw new Error(`unexpected statuses: ${statuses.join(",")}`);
+}
+if (!elements.actionMissionTimeline.innerHTML.includes("drop_targets")) {
+  throw new Error("timeline did not render save_as");
+}
 """
     result = subprocess.run(
         [node, "-e", code],

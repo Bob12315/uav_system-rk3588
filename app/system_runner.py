@@ -764,6 +764,8 @@ class SystemRunner:
                 "detail": {},
             }
         status = self.action_mission_orchestrator.status()
+        detail = dict(status.detail)
+        detail["blackboard"] = dict(self.action_mission_orchestrator.blackboard.data)
         return {
             "enabled": True,
             "running": status.running,
@@ -772,7 +774,7 @@ class SystemRunner:
             "current_index": status.current_index,
             "current_action": status.current_action,
             "reason": status.reason,
-            "detail": status.detail,
+            "detail": detail,
         }
 
     def action_mission_start(self) -> dict[str, object]:
