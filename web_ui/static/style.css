@@ -599,7 +599,7 @@ button.active-choice {
 #events,
 #auditLog {
   max-height: none;
-  min-height: 420px;
+  min-height: 840px;
   overflow: visible;
   white-space: pre-wrap;
   word-break: break-word;
