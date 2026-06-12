@@ -480,7 +480,7 @@ def test_drop_targets_result_is_persisted_and_exposed() -> None:
 
 
 def test_web_ui_drop_targets_source_contains_red_rendering() -> None:
-    """Frontend source must include drawDropTargets, pointX/pointY, and red styling."""
+    """Localization markers recolor red for selected drop targets — no overlay pass."""
     static_dir = Path(__file__).parents[1] / "web_ui" / "static"
     script = (static_dir / "app.js").read_text(encoding="utf-8")
 
@@ -488,16 +488,25 @@ def test_web_ui_drop_targets_source_contains_red_rendering() -> None:
     assert "function pointY(obj)" in script
     assert "Number.isFinite(Number(obj.local_x))" in script
     assert "Number.isFinite(Number(obj.x))" in script
-    assert "function drawDropTargets(ctx, model)" in script
+    assert "function isSelectedDropTarget(obj, selectedTargets)" in script
+    assert "Math.abs(ox - tx) < 0.15" in script
     assert "#ff3b30" in script
     assert "dropTargetsSelected" in script
-    assert "drawDropTargets(ctx, model)" in script
 
-    # drawDropTargets must be called after drawLocalizationTargets in renderFieldMap
+    # drawLocalizationTargets must use pointX/pointY for coordinate reading
+    dl_start = script.index("function drawLocalizationTargets(ctx, model)")
+    dl_end = script.index("\nfunction drawSingleViewTargets", dl_start)
+    dl_body = script[dl_start:dl_end]
+    assert "pointX(target)" in dl_body, "drawLocalizationTargets must use pointX"
+    assert "pointY(target)" in dl_body, "drawLocalizationTargets must use pointY"
+    assert "isSelectedDropTarget(target, model.dropTargetsSelected)" in dl_body
+
+    # drawDropTargets (overlay) must NOT exist
+    assert "function drawDropTargets(ctx, model)" not in script
     rf_start = script.index("function renderFieldMap(next)")
-    loc_idx = script.index("drawLocalizationTargets(ctx, model);", rf_start)
-    drop_idx = script.index("drawDropTargets(ctx, model);", rf_start)
-    assert loc_idx < drop_idx, "drawDropTargets must be called after drawLocalizationTargets"
+    rf_end = script.index("\nfunction renderStatus", rf_start)
+    rf_body = script[rf_start:rf_end]
+    assert "drawDropTargets(ctx, model);" not in rf_body, "drawDropTargets call removed from renderFieldMap"
 
     # Legend must include Selected count
     assert "Selected:" in script

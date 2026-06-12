@@ -201,6 +201,20 @@ function pointY(obj) {
   if (Number.isFinite(Number(obj.y))) return Number(obj.y);
   return null;
 }
+function isSelectedDropTarget(obj, selectedTargets) {
+  if (!Array.isArray(selectedTargets) || !selectedTargets.length) return false;
+  const ox = pointX(obj);
+  const oy = pointY(obj);
+  return selectedTargets.some(target => {
+    if (obj.id != null && target.id != null && String(obj.id) === String(target.id)) {
+      return true;
+    }
+    const tx = pointX(target);
+    const ty = pointY(target);
+    if (ox === null || oy === null || tx === null || ty === null) return false;
+    return Math.abs(ox - tx) < 0.15 && Math.abs(oy - ty) < 0.15;
+  });
+}
 function positiveStep(inputId, label) {
   const value = Number($(inputId).value);
   if (!Number.isFinite(value) || value <= 0) {
@@ -738,54 +752,29 @@ function drawTargets(ctx, model) {
 }
 function drawLocalizationTargets(ctx, model) {
   model.localizationTargets.forEach((target, index) => {
-    const tx = Number(target.x);
-    const ty = Number(target.y);
-    if (!Number.isFinite(tx) || !Number.isFinite(ty)) return;
+    const tx = pointX(target);
+    const ty = pointY(target);
+    if (tx === null || ty === null) return;
     const [x, y] = worldToCanvas(tx, ty, model.rect);
     const id = target.id ?? target.target_id ?? index;
     const count = target.count ?? target.seen_count ?? 0;
+    const selected = isSelectedDropTarget(target, model.dropTargetsSelected);
+    const fillColor = selected ? "#ff3b30" : "#2bc277";
+    const labelColor = selected ? "#ff3b30" : "#2bc277";
     ctx.beginPath();
-    ctx.arc(x, y, 7, 0, Math.PI * 2);
-    ctx.fillStyle = "#2bc277";
+    ctx.arc(x, y, selected ? 8 : 7, 0, Math.PI * 2);
+    ctx.fillStyle = fillColor;
     ctx.strokeStyle = "#e6edf6";
     ctx.lineWidth = 2;
     ctx.fill();
     ctx.stroke();
     drawFieldLabel(ctx, `L${id} ${target.class_name || "obj"}`, x + 10, y - 12, {
       align: "left",
-      color: "#2bc277",
+      color: labelColor,
     });
     drawFieldLabel(ctx, `x=${num(tx, 2)} y=${num(ty, 2)} n=${count}`, x + 10, y + 5, {
       align: "left",
       color: "#93a8bf",
-      font: "11px Consolas, monospace",
-    });
-  });
-}
-function drawDropTargets(ctx, model) {
-  const targets = Array.isArray(model.dropTargetsSelected) ? model.dropTargetsSelected : [];
-  if (!targets.length) return;
-  targets.forEach((target, index) => {
-    const tx = pointX(target);
-    const ty = pointY(target);
-    if (tx === null || ty === null) return;
-    const [x, y] = worldToCanvas(tx, ty, model.rect);
-    const rank = target.rank ?? (index + 1);
-    const id = target.id ?? target.target_id ?? index;
-    ctx.beginPath();
-    ctx.arc(x, y, 8, 0, Math.PI * 2);
-    ctx.fillStyle = "#ff3b30";
-    ctx.strokeStyle = "#e6edf6";
-    ctx.lineWidth = 2;
-    ctx.fill();
-    ctx.stroke();
-    drawFieldLabel(ctx, `T${rank} ${target.class_name || "bucket"}`, x + 12, y - 14, {
-      align: "left",
-      color: "#ff3b30",
-    });
-    drawFieldLabel(ctx, `x=${num(tx, 2)} y=${num(ty, 2)} n=${target.seen_count ?? target.count ?? 0}`, x + 12, y + 3, {
-      align: "left",
-      color: "#ff8a80",
       font: "11px Consolas, monospace",
     });
   });
@@ -963,7 +952,6 @@ function renderFieldMap(next) {
   drawSurveyPoints(ctx, model);
   drawTargets(ctx, model);
   drawLocalizationTargets(ctx, model);
-  drawDropTargets(ctx, model);
   drawSingleViewTargets(ctx, model);
   drawDrone(ctx, model);
   drawTargetCoordinateList(ctx, model);
