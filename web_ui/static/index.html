@@ -162,60 +162,60 @@
       <div class="panel-title">Action Mission 控制</div>
       <div class="action-mission-grid">
         <section class="action-mission-block action-mission-templates">
-          <div class="panel-title minor">Mission Templates</div>
+          <div class="panel-title minor">任务模板</div>
           <div class="action-mission-presets primary">
-            <button data-action-mission-template="drop_two_targets_v1">Load Two Drop Targets v1</button>
-            <button data-action-mission-template="rescue_2026_full_auto">Load Full Rescue 2026</button>
-            <button id="actionMissionLoadCustom">Load Custom JSON</button>
-            <button id="actionMissionValidate">Validate JSON</button>
+            <button data-action-mission-template="drop_two_targets_v1">加载双目标投放 v1</button>
+            <button data-action-mission-template="rescue_2026_full_auto">加载 2026 完整救援</button>
+            <button id="actionMissionLoadCustom">粘贴自定义 JSON</button>
+            <button id="actionMissionValidate">校验 JSON</button>
           </div>
           <div id="actionMissionTemplateList" class="mission-template-list"></div>
           <details class="legacy-templates">
-            <summary>Legacy / Debug Templates</summary>
+            <summary>旧版 / 调试模板</summary>
             <div id="actionMissionPresets" class="action-mission-presets">
-              <button data-action-mission-preset="dry_goto">Dry-run Goto</button>
-              <button data-action-mission-preset="payload_release_test" class="warning">Payload Release Test</button>
-              <button data-action-mission-preset="goto_payload_release" class="warning">Goto + Payload Release</button>
-              <button data-action-mission-preset="survey_area_dry" class="warning">Survey Area Dry-run</button>
-              <button data-action-mission-preset="target_lock_test">Target Lock Test</button>
+              <button data-action-mission-preset="dry_goto">干跑到点</button>
+              <button data-action-mission-preset="payload_release_test" class="warning">投放测试</button>
+              <button data-action-mission-preset="goto_payload_release" class="warning">到点 + 投放</button>
+              <button data-action-mission-preset="survey_area_dry" class="warning">区域扫描干跑</button>
+              <button data-action-mission-preset="target_lock_test">目标锁定测试</button>
             </div>
           </details>
         </section>
 
         <section class="action-mission-block action-mission-controls">
-          <div class="panel-title minor">Mission Control</div>
+          <div class="panel-title minor">任务控制</div>
           <div class="button-row">
-            <button id="actionMissionConfigure">Configure</button>
-            <button id="actionMissionStart" class="warning">Start</button>
-            <button id="actionMissionTick" class="warning">Tick Once</button>
-            <button id="actionMissionAutoTick">Auto Tick OFF</button>
-            <button id="actionMissionStop" class="stop">Stop</button>
-            <button id="actionMissionReset">Reset</button>
-            <button id="actionMissionRefresh">Refresh</button>
+            <button id="actionMissionConfigure">配置</button>
+            <button id="actionMissionStart" class="warning">启动</button>
+            <button id="actionMissionTick" class="warning">推进一次</button>
+            <button id="actionMissionAutoTick">自动推进 关</button>
+            <button id="actionMissionStop" class="stop">停止</button>
+            <button id="actionMissionReset">重置</button>
+            <button id="actionMissionRefresh">刷新</button>
           </div>
-          <div class="action-mission-control-note">Configure only. No vehicle command.</div>
+          <div class="action-mission-control-note">仅配置任务步骤，不发送飞控命令。</div>
           <div id="actionMissionSendWarning" class="action-mission-send-warning">System SEND=OFF</div>
           <div class="action-mission-safety-note">
-            Configure only loads steps and does not send commands. Start creates the mission runner.
-            Tick advances actions. With System SEND=ON, Tick may dispatch local_position/body_velocity/set_servo commands.
-            Use Stop/Reset before switching templates.
+            配置只加载步骤，不会发送命令。启动只创建任务运行器。
+            推进会执行下一轮 Action；当 System SEND=ON 时，推进可能下发 local_position/body_velocity/set_servo 命令。
+            切换模板前请先停止或重置。
           </div>
         </section>
 
         <section class="action-mission-block action-mission-timeline-block">
-          <div class="panel-title minor">Step Timeline</div>
+          <div class="panel-title minor">步骤时间线</div>
           <div class="timeline-table-wrap">
             <table class="action-mission-timeline">
               <thead>
                 <tr>
-                  <th>Index</th>
-                  <th>Status</th>
-                  <th>Label</th>
-                  <th>Action</th>
+                  <th>序号</th>
+                  <th>状态</th>
+                  <th>标签</th>
+                  <th>动作</th>
                   <th>save_as</th>
                   <th>on_failed</th>
-                  <th>Attempts</th>
-                  <th>Reason</th>
+                  <th>尝试次数</th>
+                  <th>原因</th>
                 </tr>
               </thead>
               <tbody id="actionMissionTimeline"></tbody>
@@ -225,36 +225,36 @@
 
         <section class="action-mission-side">
           <article class="action-mission-block">
-            <div class="panel-title minor">Mission Status</div>
+            <div class="panel-title minor">任务状态</div>
             <dl class="mission-status action-mission-status">
               <dt>System SEND</dt><dd id="actionMissionSystemSend">--</dd>
-              <dt>Enabled</dt><dd id="actionMissionEnabled">--</dd>
-              <dt>Running</dt><dd id="actionMissionRunning">--</dd>
-              <dt>Done</dt><dd id="actionMissionDone">--</dd>
-              <dt>Failed</dt><dd id="actionMissionFailed">--</dd>
-              <dt>Current Index</dt><dd id="actionMissionIndex">--</dd>
-              <dt>Current Action</dt><dd id="actionMissionCurrent">--</dd>
-              <dt>Reason</dt><dd id="actionMissionReason">--</dd>
+              <dt>已配置</dt><dd id="actionMissionEnabled">--</dd>
+              <dt>运行中</dt><dd id="actionMissionRunning">--</dd>
+              <dt>已完成</dt><dd id="actionMissionDone">--</dd>
+              <dt>已失败</dt><dd id="actionMissionFailed">--</dd>
+              <dt>当前序号</dt><dd id="actionMissionIndex">--</dd>
+              <dt>当前动作</dt><dd id="actionMissionCurrent">--</dd>
+              <dt>原因</dt><dd id="actionMissionReason">--</dd>
             </dl>
           </article>
           <article class="action-mission-block">
-            <div class="panel-title minor">Blackboard Keys</div>
+            <div class="panel-title minor">黑板键</div>
             <div id="actionMissionBlackboardKeys" class="blackboard-keys"></div>
           </article>
           <article class="action-mission-block">
-            <div class="panel-title minor">Mission Results</div>
+            <div class="panel-title minor">任务结果摘要</div>
             <div id="actionMissionResults" class="mission-results"></div>
           </article>
         </section>
 
         <section class="action-mission-block action-mission-editor">
-          <div class="panel-title minor">Mission JSON Editor</div>
+          <div class="panel-title minor">任务 JSON 编辑器</div>
           <textarea id="actionMissionSteps" spellcheck="false"></textarea>
           <div class="button-row">
-            <button id="actionMissionFormatJson">Format JSON</button>
-            <button id="actionMissionCopyJson">Copy JSON</button>
-            <button id="actionMissionCopyStatus">Copy Status</button>
-            <button id="actionMissionCopyResult">Copy Last Result</button>
+            <button id="actionMissionFormatJson">格式化 JSON</button>
+            <button id="actionMissionCopyJson">复制 JSON</button>
+            <button id="actionMissionCopyStatus">复制状态</button>
+            <button id="actionMissionCopyResult">复制最后结果</button>
           </div>
           <pre id="actionMissionDetail" class="action-json mission-detail-json"></pre>
         </section>

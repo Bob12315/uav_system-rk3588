@@ -377,6 +377,16 @@ function failurePolicyLabel(policy) {
   if (policy.max_attempts !== undefined) return `${action} x${policy.max_attempts}`;
   return String(action);
 }
+function actionMissionStatusLabel(status) {
+  return {
+    pending: "待执行",
+    running: "执行中",
+    done: "已完成",
+    failed: "失败",
+    skipped: "已跳过",
+    continued: "已继续",
+  }[status] || status;
+}
 function renderActionMissionTimeline(actionMission, configuredSteps) {
   const element = $("actionMissionTimeline");
   if (!element) return [];
@@ -390,7 +400,7 @@ function renderActionMissionTimeline(actionMission, configuredSteps) {
     const reason = index === current ? (actionMission?.reason || "-") : "-";
     return `<tr class="${index === current ? "current-step" : ""}" data-step-status="${status}">
       <td>${index}</td>
-      <td><span class="step-status ${status}">${status}</span></td>
+      <td><span class="step-status ${status}">${escapeHtml(actionMissionStatusLabel(status))}</span></td>
       <td>${escapeHtml(step.label || "-")}</td>
       <td>${escapeHtml(step.name || "-")}</td>
       <td>${escapeHtml(step.save_as || "-")}</td>
@@ -398,7 +408,7 @@ function renderActionMissionTimeline(actionMission, configuredSteps) {
       <td>${escapeHtml(attempts[index] ?? attempts[String(index)] ?? "-")}</td>
       <td>${escapeHtml(reason)}</td>
     </tr>`;
-  }).join("") || `<tr><td colspan="8" class="hint">Load or paste a mission JSON to preview steps.</td></tr>`;
+  }).join("") || `<tr><td colspan="8" class="hint">加载模板或粘贴任务 JSON 后预览步骤。</td></tr>`;
   return statuses;
 }
 function renderBlackboardKeys(actionMission) {
@@ -409,7 +419,7 @@ function renderBlackboardKeys(actionMission) {
   const keys = Array.isArray(detail.blackboard_keys) ? detail.blackboard_keys : Object.keys(blackboard);
   element.innerHTML = keys.length
     ? keys.map(key => `<span class="blackboard-key">${escapeHtml(key)}</span>`).join("")
-    : `<div class="hint">No blackboard keys yet.</div>`;
+    : `<div class="hint">暂无黑板键。</div>`;
 }
 function getPathValue(source, path) {
   let current = source;
@@ -425,7 +435,7 @@ function summarizeDropScan(blackboard) {
     || dropScan.localized_objects
     || dropScan.objects;
   if (!Array.isArray(objects)) return "";
-  return `<div class="mission-result-group"><strong>Drop Scan</strong><div>Localized objects: ${objects.length}</div></div>`;
+  return `<div class="mission-result-group"><strong>投放区扫描</strong><div>已定位目标数：${objects.length}</div></div>`;
 }
 function summarizeDropTargets(blackboard) {
   const selected = getPathValue(blackboard, ["drop_targets", "selected_targets"]);
@@ -436,7 +446,7 @@ function summarizeDropTargets(blackboard) {
     const y = target.local_y ?? target.y ?? "--";
     return `<div>T${index + 1}: id=${escapeHtml(id)} x=${escapeHtml(x)} y=${escapeHtml(y)}</div>`;
   }).join("");
-  return `<div class="mission-result-group"><strong>Selected Drop Targets</strong><div>Selected drop targets: ${selected.length}</div>${rows}</div>`;
+  return `<div class="mission-result-group"><strong>已选择投放目标</strong><div>投放目标数：${selected.length}</div>${rows}</div>`;
 }
 function summarizeReconReport(blackboard) {
   const report = getPathValue(blackboard, ["recon_scan", "recon_report"]);
@@ -448,7 +458,7 @@ function summarizeReconReport(blackboard) {
     const confidence = barrel.confidence !== undefined ? ` conf=${Number(barrel.confidence).toFixed(2)}` : "";
     return `<div>${escapeHtml(id)}: ${escapeHtml(content)}${escapeHtml(confidence)}</div>`;
   }).join("");
-  return `<div class="mission-result-group"><strong>Recon Report</strong><div>Recon barrels: ${barrels.length}</div>${rows}</div>`;
+  return `<div class="mission-result-group"><strong>侦察报告</strong><div>侦察桶数：${barrels.length}</div>${rows}</div>`;
 }
 function renderActionMissionSummary(actionMission) {
   const element = $("actionMissionResults");
@@ -459,13 +469,13 @@ function renderActionMissionSummary(actionMission) {
     summarizeDropTargets(blackboard),
     summarizeReconReport(blackboard),
   ].filter(Boolean).join("");
-  element.innerHTML = html || `<div class="hint">No mission result details yet.</div>`;
+  element.innerHTML = html || `<div class="hint">暂无任务结果详情。</div>`;
 }
 function updateActionMissionAutoTickButton() {
   const button = $("actionMissionAutoTick");
   if (!button) return;
   const enabled = Boolean(actionMissionAutoTickTimer);
-  button.textContent = enabled ? "Auto Tick ON" : "Auto Tick OFF";
+  button.textContent = enabled ? "自动推进 开" : "自动推进 关";
   button.classList.toggle("warning", enabled);
 }
 function stopActionMissionAutoTick() {
@@ -483,18 +493,18 @@ function renderActionMissionStatus(actionMission) {
   const actionResult = detail.action_result || detail.previous_action_result || detail.failed_action_result || null;
   if (actionResult) lastActionMissionResult = actionResult;
   setOptionalText("actionMissionSystemSend", sendEnabled ? "ON" : "OFF");
-  setOptionalText("actionMissionEnabled", String(Boolean(payload.enabled)));
-  setOptionalText("actionMissionRunning", String(Boolean(payload.running)));
-  setOptionalText("actionMissionDone", String(Boolean(payload.done)));
-  setOptionalText("actionMissionFailed", String(Boolean(payload.failed)));
+  setOptionalText("actionMissionEnabled", boolText(Boolean(payload.enabled), "是", "否"));
+  setOptionalText("actionMissionRunning", boolText(Boolean(payload.running), "是", "否"));
+  setOptionalText("actionMissionDone", boolText(Boolean(payload.done), "是", "否"));
+  setOptionalText("actionMissionFailed", boolText(Boolean(payload.failed), "是", "否"));
   setOptionalText("actionMissionIndex", payload.current_index ?? "--");
   setOptionalText("actionMissionCurrent", payload.current_action || "--");
   setOptionalText("actionMissionReason", payload.reason || "--");
   const warning = $("actionMissionSendWarning");
   if (warning) {
     warning.textContent = sendEnabled
-      ? "WARNING: System SEND=ON. Tick once may dispatch vehicle/simulator commands."
-      : "Dry-run: Tick will not dispatch vehicle commands.";
+      ? "警告：System SEND=ON，推进一次可能向飞控或仿真器下发命令。"
+      : "干跑模式：推进不会下发飞控命令。";
     warning.classList.toggle("send-on", sendEnabled);
   }
   const detailElement = $("actionMissionDetail");
@@ -1391,27 +1401,27 @@ function parseActionMissionInput(text) {
   const parsed = text.trim() ? JSON.parse(text) : [];
   if (Array.isArray(parsed)) return {name: "", steps: parsed};
   if (parsed && typeof parsed === "object" && Array.isArray(parsed.steps)) return parsed;
-  throw new Error("Action Mission JSON must be a steps array or an object with steps");
+  throw new Error("Action Mission JSON 必须是步骤数组，或包含 steps 的对象");
 }
 function normalizeActionMissionSteps(input) {
   const steps = Array.isArray(input) ? input : input?.steps;
-  if (!Array.isArray(steps)) throw new Error("steps must be a JSON array");
-  if (!steps.length) throw new Error("steps must be non-empty");
+  if (!Array.isArray(steps)) throw new Error("steps 必须是 JSON 数组");
+  if (!steps.length) throw new Error("steps 不能为空");
   return steps.map((step, index) => {
     if (!step || typeof step !== "object" || typeof step.name !== "string" || !step.name.trim()) {
-      throw new Error(`step ${index + 1} must include name`);
+      throw new Error(`step ${index + 1} 必须包含 name`);
     }
     if (step.params !== undefined && (step.params === null || Array.isArray(step.params) || typeof step.params !== "object")) {
-      throw new Error(`step ${index + 1} params must be an object`);
+      throw new Error(`step ${index + 1} params 必须是 object`);
     }
     if (step.save_as !== undefined && step.save_as !== null && typeof step.save_as !== "string") {
-      throw new Error(`step ${index + 1} save_as must be a string`);
+      throw new Error(`step ${index + 1} save_as 必须是 string`);
     }
     if (step.label !== undefined && step.label !== null && typeof step.label !== "string") {
-      throw new Error(`step ${index + 1} label must be a string`);
+      throw new Error(`step ${index + 1} label 必须是 string`);
     }
     if (step.on_failed !== undefined && step.on_failed !== null && (Array.isArray(step.on_failed) || typeof step.on_failed !== "object")) {
-      throw new Error(`step ${index + 1} on_failed must be an object`);
+      throw new Error(`step ${index + 1} on_failed 必须是 object`);
     }
     return {
       name: step.name.trim(),
@@ -1433,7 +1443,7 @@ function parseActionMissionSteps() {
 }
 async function refreshActionMission() {
   const result = await json("/api/action-mission/status");
-  if (!result.ok) throw new Error(result.error || "action mission status failed");
+  if (!result.ok) throw new Error(result.error || "Action Mission 状态刷新失败");
   renderActionMissionStatus(result.action_mission || null);
   return result;
 }
@@ -1446,8 +1456,8 @@ async function configureActionMission() {
     method: "POST",
     body: JSON.stringify({steps}),
   });
-  if (!result.ok) throw new Error(result.error || "action mission configure failed");
-  $("completionHint").textContent = "Action Mission configured";
+  if (!result.ok) throw new Error(result.error || "Action Mission 配置失败");
+  $("completionHint").textContent = "Action Mission 已配置";
   renderActionMissionStatus(result.action_mission || null);
 }
 async function startActionMission() {
@@ -1457,28 +1467,28 @@ async function startActionMission() {
   );
   if (!confirmed) return;
   const result = await json("/api/action-mission/start", {method: "POST", body: "{}"});
-  if (!result.ok) throw new Error(result.error || "action mission start failed");
-  $("completionHint").textContent = "Action Mission started";
+  if (!result.ok) throw new Error(result.error || "Action Mission 启动失败");
+  $("completionHint").textContent = "Action Mission 已启动";
   renderActionMissionStatus(result.action_mission || null);
 }
 async function stopActionMission() {
   stopActionMissionAutoTick();
   const result = await json("/api/action-mission/stop", {method: "POST", body: "{}"});
-  if (!result.ok) throw new Error(result.error || "action mission stop failed");
-  $("completionHint").textContent = "Action Mission stopped";
+  if (!result.ok) throw new Error(result.error || "Action Mission 停止失败");
+  $("completionHint").textContent = "Action Mission 已停止";
   renderActionMissionStatus(result.action_mission || null);
 }
 async function resetActionMission() {
   stopActionMissionAutoTick();
   const result = await json("/api/action-mission/reset", {method: "POST", body: "{}"});
-  if (!result.ok) throw new Error(result.error || "action mission reset failed");
-  $("completionHint").textContent = "Action Mission reset";
+  if (!result.ok) throw new Error(result.error || "Action Mission 重置失败");
+  $("completionHint").textContent = "Action Mission 已重置";
   renderActionMissionStatus(result.action_mission || null);
 }
 async function tickActionMission() {
   const result = await json("/api/action-mission/tick", {method: "POST", body: "{}"});
-  if (!result.ok) throw new Error(result.error || "action mission tick failed");
-  $("completionHint").textContent = "Action Mission tick complete";
+  if (!result.ok) throw new Error(result.error || "Action Mission 推进失败");
+  $("completionHint").textContent = "Action Mission 推进完成";
   renderActionMissionStatus(result.action_mission || null);
 }
 function setActionMissionEditorValue(mission) {
@@ -1494,12 +1504,12 @@ async function loadActionMissionTemplates() {
   if (!element) return;
   try {
     const result = await json("/api/action-mission/templates");
-    if (!result.ok) throw new Error(result.error || "template list failed");
+    if (!result.ok) throw new Error(result.error || "模板列表加载失败");
     element.innerHTML = (result.templates || []).map(template =>
-      `<div><strong>${escapeHtml(template.label || template.name)}</strong> · ${escapeHtml(template.step_count)} steps<br>${escapeHtml(template.description || template.path)}</div>`
+      `<div><strong>${escapeHtml(template.label || template.name)}</strong> · ${escapeHtml(template.step_count)} 个步骤<br>${escapeHtml(template.description || template.path)}</div>`
     ).join("");
   } catch (error) {
-    element.textContent = `Template API unavailable: ${error.message}`;
+    element.textContent = `模板接口不可用：${error.message}`;
   }
 }
 async function loadActionMissionTemplate(name) {
@@ -1507,9 +1517,9 @@ async function loadActionMissionTemplate(name) {
   const defaultText = JSON.stringify(DEFAULT_ACTION_MISSION_STEPS, null, 2).trim();
   if (current && current !== defaultText && !window.confirm("当前 Mission JSON 将被覆盖，确认？")) return;
   const result = await json(`/api/action-mission/template/${encodeURIComponent(name)}`);
-  if (!result.ok) throw new Error(result.error || "template load failed");
+  if (!result.ok) throw new Error(result.error || "模板加载失败");
   setActionMissionEditorValue(result.template);
-  $("completionHint").textContent = "已加载比赛模板，请检查参数后 Configure";
+  $("completionHint").textContent = "已加载比赛模板，请检查参数后配置";
 }
 function validateActionMissionJson() {
   const steps = parseActionMissionSteps();
@@ -1517,7 +1527,7 @@ function validateActionMissionJson() {
   currentActionMission = parseActionMissionInput($("actionMissionSteps").value);
   currentActionMissionSteps = steps;
   renderActionMissionTimeline(lastActionMissionStatus || {}, currentActionMissionSteps);
-  $("completionHint").textContent = `Action Mission JSON valid: ${steps.length} steps`;
+  $("completionHint").textContent = `Action Mission JSON 校验通过：${steps.length} 个步骤`;
 }
 function formatActionMissionJson() {
   const parsed = parseActionMissionInput($("actionMissionSteps").value);
@@ -1816,13 +1826,13 @@ async function init() {
   if ($("actionMissionRefresh")) $("actionMissionRefresh").onclick = () => refreshActionMission().catch(error => { $("completionHint").textContent = error.message; });
   if ($("actionMissionLoadCustom")) $("actionMissionLoadCustom").onclick = () => {
     $("actionMissionSteps").focus();
-    $("completionHint").textContent = "Paste custom Mission JSON, then Validate or Configure";
+    $("completionHint").textContent = "请粘贴自定义任务 JSON，然后校验或配置";
   };
   if ($("actionMissionValidate")) $("actionMissionValidate").onclick = () => validateActionMissionJson();
   if ($("actionMissionFormatJson")) $("actionMissionFormatJson").onclick = () => formatActionMissionJson();
-  if ($("actionMissionCopyJson")) $("actionMissionCopyJson").onclick = () => copyText($("actionMissionSteps").value, "Mission JSON copied").catch(error => { $("completionHint").textContent = error.message; });
-  if ($("actionMissionCopyStatus")) $("actionMissionCopyStatus").onclick = () => copyText(JSON.stringify(lastActionMissionStatus || {}, null, 2), "Action Mission status copied").catch(error => { $("completionHint").textContent = error.message; });
-  if ($("actionMissionCopyResult")) $("actionMissionCopyResult").onclick = () => copyText(JSON.stringify(lastActionMissionResult || {}, null, 2), "Action Mission last result copied").catch(error => { $("completionHint").textContent = error.message; });
+  if ($("actionMissionCopyJson")) $("actionMissionCopyJson").onclick = () => copyText($("actionMissionSteps").value, "任务 JSON 已复制").catch(error => { $("completionHint").textContent = error.message; });
+  if ($("actionMissionCopyStatus")) $("actionMissionCopyStatus").onclick = () => copyText(JSON.stringify(lastActionMissionStatus || {}, null, 2), "Action Mission 状态已复制").catch(error => { $("completionHint").textContent = error.message; });
+  if ($("actionMissionCopyResult")) $("actionMissionCopyResult").onclick = () => copyText(JSON.stringify(lastActionMissionResult || {}, null, 2), "Action Mission 最后结果已复制").catch(error => { $("completionHint").textContent = error.message; });
   document.querySelectorAll("[data-action-mission-template]").forEach(button => {
     button.onclick = () => loadActionMissionTemplate(button.dataset.actionMissionTemplate).catch(error => { $("completionHint").textContent = error.message; });
   });
