@@ -596,6 +596,15 @@ button.active-choice {
 .scroll-list { max-height: 258px; min-height: 120px; overflow: auto; font-family: Consolas, monospace; font-size: 12px; }
 .log-line { border-bottom: 1px solid #1c2b3c; padding: 6px 3px; }
 .log-line.bad { color: var(--danger); }
+#events,
+#auditLog {
+  max-height: none;
+  min-height: 420px;
+  overflow: visible;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
 .status-cards, .command-cards {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
