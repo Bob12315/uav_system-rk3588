@@ -479,9 +479,10 @@ button.active-choice {
   font: 12px Consolas, monospace;
 }
 #actionStatusJson {
+  height: 720px;
   min-height: 720px;
-  max-height: none;
-  overflow: visible;
+  max-height: 720px;
+  overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
   user-select: text;

@@ -10,6 +10,7 @@ let actionSpecs = [];
 let selectedActionName = "";
 let actionParamCache = {};
 let latestActionLab = null;
+let actionStatusJsonSelecting = false;
 const fallbackStageModes = ["AUTO", "IDLE", "APPROACH_TRACK", "OVERHEAD_HOLD", "CORRIDOR_FOLLOW"];
 const ACTION_SAFETY_HINTS = {
   goto_waypoint: "飞控移动命令：local_position / goto_local_ned，需要 SEND=ON 才实发。",
@@ -1169,7 +1170,30 @@ function renderActionLabStatus(actionLab) {
     .filter(([, value]) => value !== undefined)
     .map(([key, value]) => `<div><span>${escapeHtml(key)}</span><code>${escapeHtml(JSON.stringify(value))}</code></div>`)
     .join("");
-  $("actionStatusJson").textContent = JSON.stringify(payload || status || {}, null, 2);
+  updateActionStatusJson(JSON.stringify(payload || status || {}, null, 2));
+}
+function nodeInside(element, node) {
+  if (!element || !node) return false;
+  const owner = node.nodeType === 3 ? node.parentNode : node;
+  return owner === element || (typeof element.contains === "function" && element.contains(owner));
+}
+function actionStatusJsonHasSelection() {
+  const element = $("actionStatusJson");
+  const selection = typeof window !== "undefined" && window.getSelection ? window.getSelection() : null;
+  if (!element || !selection || selection.isCollapsed) return false;
+  return nodeInside(element, selection.anchorNode) || nodeInside(element, selection.focusNode);
+}
+function updateActionStatusJson(text) {
+  const element = $("actionStatusJson");
+  if (!element) return;
+  const selecting = typeof actionStatusJsonSelecting !== "undefined" && actionStatusJsonSelecting;
+  if (selecting || actionStatusJsonHasSelection()) return;
+  if (element.textContent === text) return;
+  const scrollTop = element.scrollTop;
+  const scrollLeft = element.scrollLeft;
+  element.textContent = text;
+  element.scrollTop = scrollTop;
+  element.scrollLeft = scrollLeft;
 }
 function parseActionParams() {
   cacheSelectedActionParams();
@@ -1383,6 +1407,29 @@ function localDiff(before, after) {
   if (before === after) return "没有修改。";
   return "已修改配置；保存前后端会再次校验 YAML，并返回正式差异。";
 }
+function setupActionStatusJsonCopyGuard() {
+  const element = $("actionStatusJson");
+  if (!element) return;
+  element.addEventListener("mousedown", () => {
+    actionStatusJsonSelecting = true;
+  });
+  element.addEventListener("touchstart", () => {
+    actionStatusJsonSelecting = true;
+  });
+  document.addEventListener("mouseup", () => {
+    setTimeout(() => {
+      actionStatusJsonSelecting = actionStatusJsonHasSelection();
+    }, 0);
+  });
+  document.addEventListener("touchend", () => {
+    setTimeout(() => {
+      actionStatusJsonSelecting = actionStatusJsonHasSelection();
+    }, 0);
+  });
+  document.addEventListener("selectionchange", () => {
+    if (!actionStatusJsonHasSelection()) actionStatusJsonSelecting = false;
+  });
+}
 async function saveConfig(action = "save") {
   if (!currentConfigPath) return;
   if (action !== "save" && !confirm(`${$("applyConfig").textContent} 将可能停止命令发送或重启服务，确认继续？`)) return;
@@ -1493,6 +1540,7 @@ async function init() {
   $("restartYolo").onclick = () => confirm("确认重启 YOLO 服务？") && json("/api/services/yolo/restart", {method: "POST"}).then(loadAudit);
   $("restartApp").onclick = () => confirm("重启 App 将关闭自动发送并暂时断开网页，确认？") && json("/api/services/app/restart", {method: "POST"}).then(loadAudit);
   $("actionParams").oninput = () => cacheSelectedActionParams();
+  setupActionStatusJsonCopyGuard();
   if ($("actionRunToggle")) $("actionRunToggle").onclick = () => toggleActionLabRun().catch(error => { $("completionHint").textContent = error.message; });
   if ($("actionDryRunStart")) $("actionDryRunStart").onclick = () => startActionLabAction(false).catch(error => { $("completionHint").textContent = error.message; });
   if ($("actionDispatchStart")) $("actionDispatchStart").onclick = () => startActionLabAction(true).catch(error => { $("completionHint").textContent = error.message; });
