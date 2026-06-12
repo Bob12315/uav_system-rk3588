@@ -478,6 +478,14 @@ button.active-choice {
   padding: 9px;
   font: 12px Consolas, monospace;
 }
+#actionStatusJson {
+  min-height: 720px;
+  max-height: none;
+  overflow: visible;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
 .summary-stack { margin-top: 12px; }
 .summary-box {
   display: grid;
