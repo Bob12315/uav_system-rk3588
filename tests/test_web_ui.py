@@ -411,3 +411,94 @@ toggleActionLabRun().then(() => {
     )
 
     assert result.returncode == 0, result.stderr
+
+
+# ── selected drop targets ────────────────────────────────────────────
+
+
+def test_drop_targets_result_is_persisted_and_exposed() -> None:
+    """_maybe_save_drop_targets_result saves selected_targets when action completes."""
+    from unittest.mock import patch
+
+    from app.app_config import build_arg_parser, load_app_config
+    from app.system_runner import SystemRunner
+
+    args = build_arg_parser().parse_args(["--run-seconds", "0.1", "--no-yolo-udp"])
+    config = load_app_config(args)
+    runner = SystemRunner(config)
+
+    # Not running: should be a no-op
+    with patch.object(runner.action_runtime.runner, "action_name", "select_drop_targets"):
+        runner.action_runtime.last_result = None
+        runner._maybe_save_drop_targets_result()
+        assert runner.latest_drop_targets_result == {}
+
+    # Wrong action name: should be a no-op
+    with patch.object(runner.action_runtime.runner, "action_name", "goto_waypoint"):
+        runner.action_runtime.last_result = {
+            "done": True,
+            "detail": {"selected_targets": [{"id": 1, "x": 0.6, "y": 31.1}]},
+        }
+        runner._maybe_save_drop_targets_result()
+        assert runner.latest_drop_targets_result == {}
+
+    # select_drop_targets done with targets
+    with patch.object(runner.action_runtime.runner, "action_name", "select_drop_targets"):
+        runner.action_runtime.last_result = {
+            "done": True,
+            "failed": False,
+            "reason": "drop_targets_selected",
+            "detail": {
+                "selected_targets": [
+                    {"id": "1", "class_name": "bucket", "local_x": 0.6, "local_y": 31.1, "x": 0.6, "y": 31.1, "rank": 1},
+                    {"id": "2", "class_name": "bucket", "local_x": -0.98, "local_y": 28.4, "x": -0.98, "y": 28.4, "rank": 2},
+                ],
+                "selected_count": 2,
+                "candidate_count": 3,
+            },
+        }
+        runner._maybe_save_drop_targets_result()
+
+    result = runner.latest_drop_targets_result
+    assert result["source"] == "select_drop_targets"
+    assert "updated_at" in result
+    assert len(result["selected_targets"]) == 2
+    assert result["selected_count"] == 2
+    assert result["candidate_count"] == 3
+    assert result["selected_targets"][0]["rank"] == 1
+    assert result["selected_targets"][1]["rank"] == 2
+
+    # select_drop_targets not done: should be a no-op
+    runner.latest_drop_targets_result = {}
+    with patch.object(runner.action_runtime.runner, "action_name", "select_drop_targets"):
+        runner.action_runtime.last_result = {
+            "done": False,
+            "detail": {"selected_targets": [{"id": 1}]},
+        }
+        runner._maybe_save_drop_targets_result()
+    assert runner.latest_drop_targets_result == {}
+
+
+def test_web_ui_drop_targets_source_contains_red_rendering() -> None:
+    """Frontend source must include drawDropTargets, pointX/pointY, and red styling."""
+    static_dir = Path(__file__).parents[1] / "web_ui" / "static"
+    script = (static_dir / "app.js").read_text(encoding="utf-8")
+
+    assert "function pointX(obj)" in script
+    assert "function pointY(obj)" in script
+    assert "Number.isFinite(Number(obj.local_x))" in script
+    assert "Number.isFinite(Number(obj.x))" in script
+    assert "function drawDropTargets(ctx, model)" in script
+    assert "#ff3b30" in script
+    assert "dropTargetsSelected" in script
+    assert "drawDropTargets(ctx, model)" in script
+
+    # drawDropTargets must be called after drawLocalizationTargets in renderFieldMap
+    rf_start = script.index("function renderFieldMap(next)")
+    loc_idx = script.index("drawLocalizationTargets(ctx, model);", rf_start)
+    drop_idx = script.index("drawDropTargets(ctx, model);", rf_start)
+    assert loc_idx < drop_idx, "drawDropTargets must be called after drawLocalizationTargets"
+
+    # Legend must include Selected count
+    assert "Selected:" in script
+    assert "dropTargetsSelected.length" in script

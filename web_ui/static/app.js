@@ -191,6 +191,16 @@ function num(value, digits = 2, unit = "") {
 function boolText(value, yes = "YES", no = "NO") {
   return value ? yes : no;
 }
+function pointX(obj) {
+  if (Number.isFinite(Number(obj.local_x))) return Number(obj.local_x);
+  if (Number.isFinite(Number(obj.x))) return Number(obj.x);
+  return null;
+}
+function pointY(obj) {
+  if (Number.isFinite(Number(obj.local_y))) return Number(obj.local_y);
+  if (Number.isFinite(Number(obj.y))) return Number(obj.y);
+  return null;
+}
 function positiveStep(inputId, label) {
   const value = Number($(inputId).value);
   if (!Number.isFinite(value) || value <= 0) {
@@ -494,6 +504,22 @@ function fieldMapModel(next) {
   const localization = next.localization || {};
   const localizationObjects = Array.isArray(localization.objects) ? localization.objects : [];
   const singleViewLocalization = actionLocalizationTargets(next.action_lab || latestActionLab);
+
+  // selected drop targets — priority: drop_targets.status, localization.selected_targets, action_lab detail fallback
+  const dropTargetsStatus = next.drop_targets || {};
+  let dropTargetsFromSelection = Array.isArray(dropTargetsStatus.selected_targets)
+    ? dropTargetsStatus.selected_targets
+    : Array.isArray(localization.selected_targets)
+      ? localization.selected_targets
+      : [];
+  if (!dropTargetsFromSelection.length) {
+    const alDetail = actionLocalizationDetail(next.action_lab || latestActionLab).detail;
+    if (alDetail && Array.isArray(alDetail.selected_targets)) {
+      dropTargetsFromSelection = alDetail.selected_targets;
+    }
+  }
+  dropTargetsFromSelection = dropTargetsFromSelection.filter(item => pointX(item) !== null && pointY(item) !== null);
+
   return {
     bounds: FIELD_DEFAULTS.bounds,
     areas: {
@@ -523,6 +549,7 @@ function fieldMapModel(next) {
     ),
     singleViewTargets: singleViewLocalization.targets,
     singleViewDrone: singleViewLocalization.drone,
+    dropTargetsSelected: dropTargetsFromSelection,
   };
 }
 function resizeFieldCanvas(canvas) {
@@ -735,6 +762,34 @@ function drawLocalizationTargets(ctx, model) {
     });
   });
 }
+function drawDropTargets(ctx, model) {
+  const targets = Array.isArray(model.dropTargetsSelected) ? model.dropTargetsSelected : [];
+  if (!targets.length) return;
+  targets.forEach((target, index) => {
+    const tx = pointX(target);
+    const ty = pointY(target);
+    if (tx === null || ty === null) return;
+    const [x, y] = worldToCanvas(tx, ty, model.rect);
+    const rank = target.rank ?? (index + 1);
+    const id = target.id ?? target.target_id ?? index;
+    ctx.beginPath();
+    ctx.arc(x, y, 8, 0, Math.PI * 2);
+    ctx.fillStyle = "#ff3b30";
+    ctx.strokeStyle = "#e6edf6";
+    ctx.lineWidth = 2;
+    ctx.fill();
+    ctx.stroke();
+    drawFieldLabel(ctx, `T${rank} ${target.class_name || "bucket"}`, x + 12, y - 14, {
+      align: "left",
+      color: "#ff3b30",
+    });
+    drawFieldLabel(ctx, `x=${num(tx, 2)} y=${num(ty, 2)} n=${target.seen_count ?? target.count ?? 0}`, x + 12, y + 3, {
+      align: "left",
+      color: "#ff8a80",
+      font: "11px Consolas, monospace",
+    });
+  });
+}
 function drawSingleViewTargets(ctx, model) {
   const targets = Array.isArray(model.singleViewTargets) ? model.singleViewTargets : [];
   if (!targets.length) return;
@@ -908,6 +963,7 @@ function renderFieldMap(next) {
   drawSurveyPoints(ctx, model);
   drawTargets(ctx, model);
   drawLocalizationTargets(ctx, model);
+  drawDropTargets(ctx, model);
   drawSingleViewTargets(ctx, model);
   drawDrone(ctx, model);
   drawTargetCoordinateList(ctx, model);
@@ -916,6 +972,7 @@ function renderFieldMap(next) {
     `Stage: ${escapeHtml(model.stage)}`,
     `Drop: ${model.dropCount}/${model.requiredDrops}`,
     `Drop targets: ${model.dropTargets.length}`,
+    `Selected: ${model.dropTargetsSelected.length}`,
     `Recce confirmed: ${model.confirmedCount}/${model.requiredConfirmed}`,
     `Localization: ${model.localizationTargets.length}`,
     `SingleView: ${model.singleViewTargets.length}`,

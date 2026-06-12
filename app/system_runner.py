@@ -146,6 +146,7 @@ class SystemRunner:
         self.system_events: deque[dict[str, object]] = deque(maxlen=160)
         self.latest_snapshot: dict[str, object] = {}
         self.latest_localization_result: dict[str, object] = {}
+        self.latest_drop_targets_result: dict[str, object] = {}
         self.external_processes: dict[str, subprocess.Popen] = {}
         self.action_lab_specs = action_lab_specs()
         self.action_lab_enabled = True
@@ -517,6 +518,7 @@ class SystemRunner:
                     "action_lab": self._action_lab_snapshot(),
                     "action_mission": self.action_mission_status_payload(),
                     "localization": self.latest_localization_result,
+                    "drop_targets": self.latest_drop_targets_result,
                 }
             )
         manager = self.services.link_manager
@@ -545,6 +547,7 @@ class SystemRunner:
                 send_commands=bool(self.controller_switches.snapshot().send_commands),
             )
             self._maybe_save_localization_result()
+            self._maybe_save_drop_targets_result()
             self.logger.info(
                 "action_lab_tick called current_action=%s dispatch=%s",
                 self.action_runtime.action_name,
@@ -581,6 +584,35 @@ class SystemRunner:
             "object_count": detail.get("object_count", len(localized)),
             "raw_estimates_count": detail.get("raw_estimates_count", 0),
             "captures_count": detail.get("captures_count", 0),
+        }
+
+    def _maybe_save_drop_targets_result(self) -> None:
+        """If select_drop_targets just completed, persist selected targets for Web UI map."""
+        name = getattr(self.action_runtime, "action_name", None)
+        if name != "select_drop_targets":
+            return
+        last = getattr(self.action_runtime, "last_result", None)
+        if last is None:
+            return
+        detail = last.get("detail") if isinstance(last, dict) else getattr(last, "detail", None)
+        if isinstance(detail, dict):
+            detail = detail
+        elif hasattr(detail, "__dict__"):
+            detail = detail.__dict__  # type: ignore[union-attr]
+        else:
+            detail = {}
+        done = last.get("done") if isinstance(last, dict) else getattr(last, "done", False)
+        if not done:
+            return
+        selected = detail.get("selected_targets")
+        if not isinstance(selected, list):
+            return
+        self.latest_drop_targets_result = {
+            "source": "select_drop_targets",
+            "updated_at": time.time(),
+            "selected_targets": selected,
+            "selected_count": detail.get("selected_count", len(selected)),
+            "candidate_count": detail.get("candidate_count", 0),
         }
 
     def manual_step_move(self, direction: str, step_m: float) -> CommandResult:
@@ -782,6 +814,7 @@ class SystemRunner:
                 send_commands=bool(self.controller_switches.snapshot().send_commands),
             )
             self._maybe_save_localization_result()
+            self._maybe_save_drop_targets_result()
             return self.action_mission_status_payload()
 
     def _action_lab_snapshot(self) -> dict[str, object]:
