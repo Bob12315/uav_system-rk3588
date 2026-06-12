@@ -136,6 +136,27 @@ def test_action_mission_web_api_lifecycle() -> None:
     assert tick["action_mission"]["reason"] == "not_configured"
 
 
+def test_action_mission_step_request_accepts_save_as() -> None:
+    from web_ui.server import ActionMissionStepRequest
+
+    request = ActionMissionStepRequest(name="multi_view_localize", params={}, save_as="drop_scan")
+
+    assert request.save_as == "drop_scan"
+
+
+def test_action_mission_step_request_accepts_label_and_on_failed() -> None:
+    from web_ui.server import ActionMissionStepRequest
+
+    request = ActionMissionStepRequest(
+        name="target_lock",
+        label="lock0",
+        on_failed={"action": "retry_current", "max_attempts": 2},
+    )
+
+    assert request.label == "lock0"
+    assert request.on_failed == {"action": "retry_current", "max_attempts": 2}
+
+
 def test_action_lab_api_status_reports_dry_run_only():
     args = build_arg_parser().parse_args(["--run-seconds", "0.1", "--no-yolo-udp"])
     config = load_app_config(args)

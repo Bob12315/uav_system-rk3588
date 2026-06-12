@@ -243,6 +243,14 @@ class ActionDispatcher:
         action_type = str(action.get("action_type") or "")
         if action_type == "set_servo":
             return self._dispatch_set_servo(action, link_manager=link_manager)
+        if action_type == "set_mode":
+            return self._dispatch_set_mode(action, link_manager=link_manager)
+        if action_type == "arm":
+            return self._dispatch_arm(action, link_manager=link_manager)
+        if action_type == "takeoff":
+            return self._dispatch_takeoff(action, link_manager=link_manager)
+        if action_type == "land":
+            return self._dispatch_land(action, link_manager=link_manager)
         if action_type == "local_position":
             return self._dispatch_local_position(action, link_manager=link_manager)
         if action_type in ("flight_command", "body_velocity"):
@@ -316,6 +324,111 @@ class ActionDispatcher:
                 "channel": channel,
                 "pwm": pwm,
                 "key": str(action.get("key") or ""),
+            },
+        }
+
+    def _dispatch_set_mode(
+        self,
+        action: dict[str, object],
+        *,
+        link_manager: object | None,
+    ) -> dict[str, object]:
+        params = self._action_params(action)
+        raw_mode = params["mode"]
+        mode = "" if raw_mode is None else str(raw_mode).strip().upper()
+        priority = int(action.get("priority", params.get("priority", 2)))
+        key = str(action.get("key") or "")
+        if not mode:
+            return {"status": "error", "reason": "empty_mode"}
+        if link_manager is None:
+            return {"status": "error", "reason": "telemetry_not_connected"}
+        sender = getattr(link_manager, "set_mode", None)
+        if not callable(sender):
+            return {"status": "error", "reason": "set_mode_not_callable"}
+        sender(mode, priority=priority)
+        return {
+            "status": "sent",
+            "detail": {
+                "action_type": "set_mode",
+                "mode": mode,
+                "priority": priority,
+                "key": key,
+            },
+        }
+
+    def _dispatch_arm(
+        self,
+        action: dict[str, object],
+        *,
+        link_manager: object | None,
+    ) -> dict[str, object]:
+        params = self._action_params(action)
+        priority = int(action.get("priority", params.get("priority", 1)))
+        key = str(action.get("key") or "")
+        if link_manager is None:
+            return {"status": "error", "reason": "telemetry_not_connected"}
+        sender = getattr(link_manager, "arm", None)
+        if not callable(sender):
+            return {"status": "error", "reason": "arm_not_callable"}
+        sender(priority=priority)
+        return {
+            "status": "sent",
+            "detail": {
+                "action_type": "arm",
+                "priority": priority,
+                "key": key,
+            },
+        }
+
+    def _dispatch_takeoff(
+        self,
+        action: dict[str, object],
+        *,
+        link_manager: object | None,
+    ) -> dict[str, object]:
+        params = self._action_params(action)
+        altitude_m = float(params["altitude_m"])
+        priority = int(action.get("priority", params.get("priority", 2)))
+        key = str(action.get("key") or "")
+        if not altitude_m > 0.0:
+            return {"status": "error", "reason": "invalid_takeoff_altitude"}
+        if link_manager is None:
+            return {"status": "error", "reason": "telemetry_not_connected"}
+        sender = getattr(link_manager, "takeoff", None)
+        if not callable(sender):
+            return {"status": "error", "reason": "takeoff_not_callable"}
+        sender(altitude_m, priority=priority)
+        return {
+            "status": "sent",
+            "detail": {
+                "action_type": "takeoff",
+                "altitude_m": altitude_m,
+                "priority": priority,
+                "key": key,
+            },
+        }
+
+    def _dispatch_land(
+        self,
+        action: dict[str, object],
+        *,
+        link_manager: object | None,
+    ) -> dict[str, object]:
+        params = self._action_params(action)
+        priority = int(action.get("priority", params.get("priority", 2)))
+        key = str(action.get("key") or "")
+        if link_manager is None:
+            return {"status": "error", "reason": "telemetry_not_connected"}
+        sender = getattr(link_manager, "land", None)
+        if not callable(sender):
+            return {"status": "error", "reason": "land_not_callable"}
+        sender(priority=priority)
+        return {
+            "status": "sent",
+            "detail": {
+                "action_type": "land",
+                "priority": priority,
+                "key": key,
             },
         }
 

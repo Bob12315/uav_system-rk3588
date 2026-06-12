@@ -105,8 +105,8 @@ def test_web_ui_exposes_manual_step_movement_controls() -> None:
     assert 'data-manual-move="down"' in index
     assert 'data-manual-yaw="left"' in index
     assert "bodyOffsetToLocalOffset" in script
-    assert 'state?.drone?.yaw' in script
-    assert 'local_pos ${localOffset.map(commandNumber).join(" ")} offset' in script
+    assert '"/api/manual-step-move"' in script
+    assert "JSON.stringify({direction, step_m: step})" in script
     assert 'body_offset' not in script
     assert "condition_yaw ${angle} 20 ${turn} relative" in script
     assert "signedAngle" not in script
@@ -153,28 +153,31 @@ def test_action_lab_start_uses_confirmation_instead_of_send_checkbox() -> None:
     script = (static_dir / "app.js").read_text(encoding="utf-8")
 
     assert "actionSendToggle" not in index
-    assert "actionStop" not in index
+    assert 'id="actionDryRunStart"' in index
+    assert 'id="actionDispatchStart"' in index
+    assert 'id="actionStop"' in index
     assert 'id="actionRunToggle"' in index
     assert 'id="actionSelected"' in index
     assert 'id="actionRunningAction"' in index
     assert 'id="actionSwitchHint"' in index
     assert "Send actions to vehicle/simulator" not in index
-    assert "Start 会二次确认；确认后向 vehicle/simulator 请求下发" in index
-    assert 'window.confirm("即将启动 Action，并向 vehicle/simulator 下发控制指令。\\n确认继续？")' in script
+    assert "普通 Action；Dispatch 请求下发，实际发送仍受系统 SEND 和 dispatch 结果约束。" in script
+    assert 'async function startActionLabAction(sendActions)' in script
+    assert 'if (sendActions) {' in script
+    assert 'window.confirm(' in script
     assert "if (!confirmed) return;" in script
-    assert "send_actions: true" in script
+    assert "send_actions: Boolean(sendActions)" in script
     assert 'console.log("Action Lab start request body", requestBody);' in script
-    assert "?v=action-lab-run-toggle" in index
+    assert "?v=ui1-action-first" in index
     assert "$(\"actionSendToggle\").checked" not in script
-    assert "$(\"actionStop\")" not in script
     assert "let actionParamCache = {};" in script
     assert "function cacheSelectedActionParams()" in script
     assert "function toggleActionLabRun()" in script
     assert "selectedActionIsRunning()" in script
-    confirm_index = script.index('window.confirm("即将启动 Action')
+    confirm_index = script.index("window.confirm(")
     cancel_index = script.index("if (!confirmed) return;", confirm_index)
     body_index = script.index("const requestBody = {", cancel_index)
-    send_actions_index = script.index("send_actions: true", body_index)
+    send_actions_index = script.index("send_actions: Boolean(sendActions)", body_index)
     post_index = script.index('json("/api/actions/start"', send_actions_index)
     assert confirm_index < cancel_index < body_index < send_actions_index < post_index
 
@@ -187,7 +190,7 @@ def test_action_lab_start_confirm_controls_api_request() -> None:
     code = r"""
 const fs = require("fs");
 const source = fs.readFileSync("web_ui/static/app.js", "utf8");
-const start = source.indexOf("async function startActionLabAction()");
+const start = source.indexOf("async function startActionLabAction(sendActions)");
 const end = source.indexOf("\nasync function stopActionLabAction()", start);
 if (start < 0 || end < 0) throw new Error("startActionLabAction source not found");
 const fnSource = source.slice(start, end);
@@ -202,21 +205,98 @@ async function json(url, options) {
 }
 function $(id) { return {textContent: ""}; }
 function renderActionLabStatus() {}
+function renderFieldMap() {}
+let state = {};
 globalThis.window = {confirm: () => confirmValue};
 globalThis.console = {log: (...args) => logs.push(args)};
 eval(fnSource);
 (async () => {
-  await startActionLabAction();
-  if (calls.length !== 0) throw new Error("confirm=false should not call start API");
+  await startActionLabAction(false);
+  if (calls.length !== 1) throw new Error("dry-run start should call start API");
+  if (calls[0].body.send_actions !== false) throw new Error("dry-run send_actions was not false");
+  await startActionLabAction(true);
+  if (calls.length !== 1) throw new Error("confirm=false dispatch should not call start API");
   confirmValue = true;
-  await startActionLabAction();
-  if (calls.length !== 1) throw new Error("confirm=true should call start API once");
-  if (calls[0].url !== "/api/actions/start") throw new Error("wrong start URL");
-  if (calls[0].body.send_actions !== true) throw new Error("send_actions was not true");
+  await startActionLabAction(true);
+  if (calls.length !== 2) throw new Error("confirm=true should call start API once more");
+  if (calls[1].url !== "/api/actions/start") throw new Error("wrong start URL");
+  if (calls[1].body.send_actions !== true) throw new Error("send_actions was not true");
   if (!logs.some(item => item[0] === "Action Lab start request body" && item[1].send_actions === true)) {
     throw new Error("missing start request console log");
   }
 })().catch(error => {
+  process.stderr.write(error.stack || String(error));
+  process.exit(1);
+});
+"""
+    result = subprocess.run(
+        [node, "-e", code],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_action_mission_frontend_preserves_save_as_in_configure_request() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    root = Path(__file__).parents[1]
+    code = r"""
+const fs = require("fs");
+const source = fs.readFileSync("web_ui/static/app.js", "utf8");
+const start = source.indexOf("function parseActionMissionSteps()");
+const end = source.indexOf("\nasync function startActionMission()", start);
+if (start < 0 || end < 0) throw new Error("Action Mission parser source not found");
+const fnSource = source.slice(start, end);
+let calls = [];
+const mission = {
+  name: "test_mission",
+  steps: [
+    {
+      name: "multi_view_localize",
+      label: "drop_scan_label",
+      save_as: "drop_scan",
+      on_failed: {action: "retry_current", max_attempts: 2},
+      params: {
+        waypoint_mode: "absolute",
+        waypoints: [{x: 0, y: 0, altitude_m: 3}],
+      },
+    },
+    {
+      name: "select_drop_targets",
+      save_as: "drop_targets",
+      params: {
+        objects: "$drop_scan.localized_objects",
+        target_count: 2,
+      },
+    },
+  ],
+};
+const elements = {
+  actionMissionSteps: {value: JSON.stringify(mission)},
+  completionHint: {textContent: ""},
+};
+function $(id) { return elements[id]; }
+async function json(url, options) {
+  calls.push({url, body: JSON.parse(options.body)});
+  return {ok: true, action_mission: {enabled: true}};
+}
+function renderActionMissionStatus() {}
+eval(fnSource);
+configureActionMission().then(() => {
+  if (calls.length !== 1) throw new Error("configure should call API once");
+  if (calls[0].url !== "/api/action-mission/configure") throw new Error("wrong configure URL");
+  const steps = calls[0].body.steps;
+  if (steps[0].save_as !== "drop_scan") throw new Error("drop_scan save_as was not preserved");
+  if (steps[0].label !== "drop_scan_label") throw new Error("label was not preserved");
+  if (steps[0].on_failed.action !== "retry_current") throw new Error("on_failed was not preserved");
+  if (steps[1].save_as !== "drop_targets") throw new Error("drop_targets save_as was not preserved");
+  if (steps[1].params.objects !== "$drop_scan.localized_objects") throw new Error("params object reference was not preserved");
+}).catch(error => {
   process.stderr.write(error.stack || String(error));
   process.exit(1);
 });
@@ -247,6 +327,7 @@ const fnSource = source.slice(start, end);
 let selectedActionName = "";
 let actionParamCache = {};
 let latestActionLab = null;
+let state = {controllers: {send_commands: false}};
 let actionSpecs = [
   {name: "goto_waypoint", label: "Goto", default_params: {x: 1}},
   {name: "payload_release", label: "Payload", default_params: {channel: 8}},
@@ -265,13 +346,26 @@ const elements = {
   actionFailed: {textContent: ""},
   actionRunToggle: {textContent: "", classList: {toggle: () => {}}},
   actionSwitchHint: {textContent: ""},
-  actionHighlights: {innerHTML: ""},
+  actionHighlights: {innerHTML: "", classList: {toggle: () => {}}},
   actionStatusJson: {textContent: ""},
   completionHint: {textContent: ""},
   actionParamHint: {textContent: ""},
+  actionSafetyHint: {textContent: ""},
+  actionGateRequested: {textContent: ""},
+  actionGateEffective: {textContent: ""},
+  actionGateSystemSend: {textContent: ""},
+  actionGateDryRun: {textContent: ""},
+  actionGateSentCount: {textContent: ""},
+  actionGateSkippedCount: {textContent: ""},
+  actionGateErrorCount: {textContent: ""},
+  actionGateNote: {textContent: ""},
 };
 function $(id) { return elements[id]; }
 function escapeHtml(value) { return String(value); }
+function setOptionalText(id, value) { if (elements[id]) elements[id].textContent = value; }
+function dispatchFromActionLab(payload) { return payload.dispatch || {}; }
+function countDispatchItems(value) { return Array.isArray(value) ? value.length : 0; }
+const ACTION_SAFETY_HINTS = {};
 globalThis.document = {querySelectorAll: () => []};
 eval(fnSource);
 stopActionLabAction = () => { stopCalls += 1; return Promise.resolve(); };

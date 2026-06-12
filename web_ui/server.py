@@ -38,6 +38,9 @@ class ActionStartRequest(BaseModel):
 class ActionMissionStepRequest(BaseModel):
     name: str
     params: dict = Field(default_factory=dict)
+    save_as: str | None = None
+    label: str | None = None
+    on_failed: dict | None = None
 
 
 class ActionMissionConfigureRequest(BaseModel):
@@ -207,7 +210,13 @@ def create_app(runner, config: UiConfig) -> FastAPI:
     def action_mission_configure(request: ActionMissionConfigureRequest):
         try:
             runner.configure_action_mission([
-                MissionActionStep(step.name, dict(step.params or {}))
+                MissionActionStep(
+                    step.name,
+                    dict(step.params or {}),
+                    save_as=step.save_as,
+                    label=step.label,
+                    on_failed=step.on_failed,
+                )
                 for step in request.steps
             ])
             return {"ok": True, "action_mission": runner.action_mission_status_payload()}

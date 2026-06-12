@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from app.dispatch_policy import ACTION_DISPATCH_POLICY
 from missions.common.actions.action_lab import action_lab_specs, create_action_lab_registry
 from missions.common.actions.registry import default_registry
 
@@ -12,10 +13,14 @@ def test_create_action_lab_registry_lists_supported_actions() -> None:
     assert registry.list() == [
         "align_descend",
         "goto_waypoint",
+        "land",
         "multi_view_localize",
         "payload_release",
+        "recon_scan",
+        "select_drop_targets",
         "single_view_localize",
         "survey_area",
+        "takeoff",
         "target_lock",
     ]
 
@@ -32,6 +37,8 @@ def test_action_lab_specs_are_json_serializable() -> None:
 
     json.dumps(specs)
     assert [item["name"] for item in specs] == [
+        "takeoff",
+        "land",
         "goto_waypoint",
         "survey_area",
         "single_view_localize",
@@ -39,6 +46,8 @@ def test_action_lab_specs_are_json_serializable() -> None:
         "align_descend",
         "payload_release",
         "multi_view_localize",
+        "select_drop_targets",
+        "recon_scan",
     ]
 
 
@@ -104,5 +113,13 @@ def test_action_lab_does_not_auto_register_default_registry() -> None:
         "align_descend",
         "payload_release",
         "multi_view_localize",
+        "takeoff",
+        "land",
+        "select_drop_targets",
+        "recon_scan",
     ):
         assert name not in default_registry.list()
+
+
+def test_recon_scan_local_position_dispatch_policy_enabled() -> None:
+    assert "recon_scan" in ACTION_DISPATCH_POLICY["local_position"].allowed_actions

@@ -4,16 +4,22 @@ from typing import Any
 
 from .align_descend import AlignDescendAction
 from .goto_waypoint import GotoWaypointAction
+from .land import LandAction
 from .multi_view_localize import MultiViewLocalizeAction
 from .payload_release import PayloadReleaseAction
+from .recon_scan import ReconScanAction
 from .registry import ActionRegistry
+from .select_drop_targets import SelectDropTargetsAction
 from .single_view_localize import SingleViewLocalizeAction
 from .survey_area import SurveyAreaAction
+from .takeoff import TakeoffAction
 from .target_lock import TargetLockAction
 
 
 def create_action_lab_registry() -> ActionRegistry:
     registry = ActionRegistry()
+    registry.register("takeoff", TakeoffAction)
+    registry.register("land", LandAction)
     registry.register("goto_waypoint", GotoWaypointAction)
     registry.register("survey_area", SurveyAreaAction)
     registry.register("single_view_localize", SingleViewLocalizeAction)
@@ -21,11 +27,38 @@ def create_action_lab_registry() -> ActionRegistry:
     registry.register("target_lock", TargetLockAction)
     registry.register("align_descend", AlignDescendAction)
     registry.register("payload_release", PayloadReleaseAction)
+    registry.register("select_drop_targets", SelectDropTargetsAction)
+    registry.register("recon_scan", ReconScanAction)
     return registry
 
 
 def action_lab_specs() -> list[dict[str, Any]]:
     return [
+        {
+            "name": "takeoff",
+            "label": "Takeoff",
+            "description": "Set GUIDED mode, arm, take off, and wait until target altitude is reached.",
+            "default_params": {
+                "mode": "GUIDED",
+                "altitude_m": 3.0,
+                "altitude_tolerance_m": 0.3,
+                "require_armed": True,
+                "max_updates": 120,
+                "priority": 2,
+                "arm_priority": 1,
+                "mode_priority": 2,
+            },
+        },
+        {
+            "name": "land",
+            "label": "Land",
+            "description": "Command vehicle landing and wait until altitude is low or vehicle is disarmed.",
+            "default_params": {
+                "land_altitude_threshold_m": 0.25,
+                "max_updates": 200,
+                "priority": 2,
+            },
+        },
         {
             "name": "goto_waypoint",
             "label": "Goto Waypoint",
@@ -165,6 +198,79 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 },
                 "save_result": True,
                 "priority": 5,
+            },
+        },
+        {
+            "name": "select_drop_targets",
+            "label": "Select Drop Targets",
+            "description": "Select the best payload drop targets from localized_objects without sending vehicle commands.",
+            "default_params": {
+                "objects": [
+                    {
+                        "id": "demo_bucket_1",
+                        "class_name": "bucket_1",
+                        "local_x": 0.0,
+                        "local_y": 30.0,
+                        "seen_count": 3,
+                        "raw_count": 3,
+                        "weight": 3.0,
+                    },
+                    {
+                        "id": "demo_bucket_2",
+                        "class_name": "bucket_2",
+                        "local_x": 1.0,
+                        "local_y": 30.5,
+                        "seen_count": 3,
+                        "raw_count": 3,
+                        "weight": 2.8,
+                    },
+                ],
+                "target_count": 2,
+                "score_table": {
+                    "bucket_1": 500,
+                    "bucket_2": 300,
+                    "bucket_3": 100,
+                    "bucket": 50,
+                },
+                "min_seen_count": 2,
+                "min_raw_count": 0,
+                "min_weight": 0.0,
+                "deduplicate_radius_m": 0.35,
+                "prefer_class_order": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
+            },
+        },
+        {
+            "name": "recon_scan",
+            "label": "Recon Scan",
+            "description": "Scan the reconnaissance area, associate danger signs to white buckets, and generate a conservative report.",
+            "default_params": {
+                "waypoints": [
+                    {"x": -2.5, "y": 48.0, "altitude_m": 2.2},
+                    {"x": 2.5, "y": 48.0, "altitude_m": 2.2},
+                    {"x": 2.5, "y": 52.0, "altitude_m": 2.2},
+                    {"x": -2.5, "y": 52.0, "altitude_m": 2.2},
+                    {"x": 0.0, "y": 50.0, "altitude_m": 2.0},
+                ],
+                "yaw_mode": "arm_heading",
+                "capture_updates_per_waypoint": 4,
+                "settle_updates_per_waypoint": 2,
+                "max_updates_per_waypoint": 150,
+                "detection_source": "scene",
+                "bucket_class_names": ["recon_bucket", "white_bucket"],
+                "sign_class_names": ["danger_1", "danger_2", "danger_3"],
+                "min_bucket_confidence": 0.25,
+                "min_sign_confidence": 0.35,
+                "min_report_confidence": 0.65,
+                "associate_max_distance_norm": 0.35,
+                "cluster_radius_m": 0.6,
+                "blank_when_uncertain": True,
+                "priority": 5,
+                "camera": {
+                    "fov_x_deg": 113.0,
+                    "fov_y_deg": 93.0,
+                    "image_x_sign": 1.0,
+                    "image_y_sign": -1.0,
+                },
             },
         },
     ]

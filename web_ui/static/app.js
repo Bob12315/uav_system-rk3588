@@ -1184,7 +1184,13 @@ function parseActionParams() {
 function parseActionMissionSteps() {
   try {
     const value = $("actionMissionSteps").value.trim();
-    const steps = value ? JSON.parse(value) : [];
+    const parsed = value ? JSON.parse(value) : [];
+    const steps = Array.isArray(parsed)
+      ? parsed
+      : parsed && typeof parsed === "object" && Array.isArray(parsed.steps)
+        ? parsed.steps
+        : null;
+    if (!steps) throw new Error("Action Mission JSON must be a steps array or an object with steps");
     if (!Array.isArray(steps)) throw new Error("steps must be a JSON array");
     for (const [index, step] of steps.entries()) {
       if (!step || typeof step !== "object" || typeof step.name !== "string" || !step.name.trim()) {
@@ -1193,8 +1199,23 @@ function parseActionMissionSteps() {
       if (step.params !== undefined && (step.params === null || Array.isArray(step.params) || typeof step.params !== "object")) {
         throw new Error(`step ${index + 1} params must be an object`);
       }
+      if (step.save_as !== undefined && step.save_as !== null && typeof step.save_as !== "string") {
+        throw new Error(`step ${index + 1} save_as must be a string`);
+      }
+      if (step.label !== undefined && step.label !== null && typeof step.label !== "string") {
+        throw new Error(`step ${index + 1} label must be a string`);
+      }
+      if (step.on_failed !== undefined && step.on_failed !== null && (Array.isArray(step.on_failed) || typeof step.on_failed !== "object")) {
+        throw new Error(`step ${index + 1} on_failed must be an object`);
+      }
     }
-    return steps.map(step => ({name: step.name, params: step.params || {}}));
+    return steps.map(step => ({
+      name: step.name,
+      params: step.params || {},
+      ...(step.save_as ? {save_as: step.save_as} : {}),
+      ...(step.label ? {label: step.label} : {}),
+      ...(step.on_failed ? {on_failed: step.on_failed} : {}),
+    }));
   } catch (error) {
     $("completionHint").textContent = `Action Mission JSON 错误: ${error.message}`;
     return null;

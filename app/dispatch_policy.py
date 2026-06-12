@@ -16,7 +16,7 @@ class DispatchRule:
 
 ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
     "local_position": DispatchRule(
-        allowed_actions={"goto_waypoint", "survey_area", "multi_view_localize"},
+        allowed_actions={"goto_waypoint", "survey_area", "multi_view_localize", "recon_scan"},
         requires_send_actions=True,
         requires_send_commands=True,
     ),
@@ -36,6 +36,26 @@ ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
     ),
     "set_servo": DispatchRule(
         allowed_actions={"payload_release"},
+        requires_send_actions=True,
+        requires_send_commands=True,
+    ),
+    "set_mode": DispatchRule(
+        allowed_actions={"takeoff"},
+        requires_send_actions=True,
+        requires_send_commands=True,
+    ),
+    "arm": DispatchRule(
+        allowed_actions={"takeoff"},
+        requires_send_actions=True,
+        requires_send_commands=True,
+    ),
+    "takeoff": DispatchRule(
+        allowed_actions={"takeoff"},
+        requires_send_actions=True,
+        requires_send_commands=True,
+    ),
+    "land": DispatchRule(
+        allowed_actions={"land"},
         requires_send_actions=True,
         requires_send_commands=True,
     ),

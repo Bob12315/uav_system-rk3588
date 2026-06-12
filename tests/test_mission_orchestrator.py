@@ -9,13 +9,19 @@ from app.mission_orchestrator import MissionActionStep, MissionOrchestrator
 
 
 class FakeActionResult:
-    def __init__(self, done=False, failed=False, reason=""):
+    def __init__(self, done=False, failed=False, reason="", detail=None):
         self.done = done
         self.failed = failed
         self.reason = reason
+        self.detail = detail or {}
 
     def to_dict(self):
-        return {"done": self.done, "failed": self.failed, "reason": self.reason}
+        return {
+            "done": self.done,
+            "failed": self.failed,
+            "reason": self.reason,
+            "detail": dict(self.detail),
+        }
 
 
 class FakeRunner:
@@ -170,6 +176,7 @@ def test_reset_delegates_to_runtime_and_clears_state() -> None:
     assert status.failed is False
     assert status.current_index == 0
     assert status.reason == "reset"
+    assert orch.blackboard.data == {}
 
 
 def test_empty_steps_raises_value_error() -> None:
@@ -202,3 +209,226 @@ def test_stop_with_hold_passes_hold_current() -> None:
     orch.start()
     orch.stop(link_manager=object(), hold_current=True)
     assert orch.status().running is False
+
+
+def test_blackboard_save_as_stores_done_detail() -> None:
+    runtime = FakeRuntime([FakeActionResult(done=True, reason="done", detail={"value": 123})])
+    orch = MissionOrchestrator(
+        runtime,
+        [
+            MissionActionStep("fake1", {}, save_as="first"),
+            MissionActionStep("fake2", {}),
+        ],
+    )
+
+    orch.start()
+    orch.tick({})
+
+    assert orch.blackboard.data["first"]["value"] == 123
+    assert orch.status().detail["blackboard_keys"] == ["first"]
+
+
+def test_blackboard_resolves_next_step_params() -> None:
+    runtime = FakeRuntime([FakeActionResult(done=True, reason="done", detail={"value": 123})])
+    orch = MissionOrchestrator(
+        runtime,
+        [
+            MissionActionStep("fake1", {}, save_as="first"),
+            MissionActionStep("fake2", {"x": "$first.value"}),
+        ],
+    )
+
+    orch.start()
+    orch.tick({})
+
+    assert runtime.runner.sent_actions == [
+        ("fake1", {}),
+        ("fake2", {"x": 123}),
+    ]
+
+
+def test_missing_blackboard_reference_fails_mission_without_starting_action() -> None:
+    runtime = FakeRuntime([])
+    orch = MissionOrchestrator(
+        runtime,
+        [MissionActionStep("fake2", {"x": "$missing.value"})],
+    )
+
+    orch.start()
+    status = orch.status()
+
+    assert status.failed is True
+    assert status.running is False
+    assert status.reason == "param_resolution_failed"
+    assert runtime.runner.sent_actions == []
+
+
+def test_start_clears_existing_blackboard_data() -> None:
+    runtime = FakeRuntime([])
+    orch = MissionOrchestrator(runtime, _single_step())
+    orch.blackboard.set("old", {"value": 1})
+
+    orch.start()
+
+    assert orch.blackboard.data == {}
+
+
+def test_blackboard_save_failure_fails_mission() -> None:
+    runtime = FakeRuntime([FakeActionResult(done=True, reason="done", detail={"value": 123})])
+    orch = MissionOrchestrator(
+        runtime,
+        [
+            MissionActionStep("fake1", {}, save_as=" "),
+            MissionActionStep("fake2", {}),
+        ],
+    )
+
+    orch.start()
+    status = orch.tick({})
+
+    assert status.failed is True
+    assert status.running is False
+    assert status.reason == "blackboard_save_failed"
+
+
+def test_duplicate_step_label_raises_value_error() -> None:
+    runtime = FakeRuntime([])
+
+    with pytest.raises(ValueError, match="duplicate mission step label"):
+        MissionOrchestrator(
+            runtime,
+            [
+                MissionActionStep("a", label="same"),
+                MissionActionStep("b", label="same"),
+            ],
+        )
+
+
+def test_retry_current_succeeds_on_second_attempt() -> None:
+    runtime = FakeRuntime(
+        [
+            FakeActionResult(failed=True, reason="first_failed"),
+            FakeActionResult(done=True, reason="done"),
+        ]
+    )
+    orch = MissionOrchestrator(
+        runtime,
+        [
+            MissionActionStep(
+                "unstable",
+                {},
+                on_failed={"action": "retry_current", "max_attempts": 2},
+            )
+        ],
+    )
+
+    orch.start()
+    retry_status = orch.tick({})
+    done_status = orch.tick({})
+
+    assert retry_status.running is True
+    assert done_status.done is True
+    assert done_status.reason == "mission_done"
+    assert runtime.runner.sent_actions == [("unstable", {}), ("unstable", {})]
+
+
+def test_retry_current_exhaustion_fails_mission() -> None:
+    runtime = FakeRuntime(
+        [
+            FakeActionResult(failed=True, reason="failed_once"),
+            FakeActionResult(failed=True, reason="failed_twice"),
+        ]
+    )
+    orch = MissionOrchestrator(
+        runtime,
+        [
+            MissionActionStep(
+                "unstable",
+                {},
+                on_failed={"action": "retry_current", "max_attempts": 2},
+            )
+        ],
+    )
+
+    orch.start()
+    orch.tick({})
+    status = orch.tick({})
+
+    assert status.failed is True
+    assert status.reason == "retry_attempts_exhausted"
+
+
+def test_jump_to_starts_labeled_recovery_step() -> None:
+    runtime = FakeRuntime(
+        [
+            FakeActionResult(failed=True, reason="bad_failed"),
+            FakeActionResult(done=True, reason="recovered"),
+        ]
+    )
+    orch = MissionOrchestrator(
+        runtime,
+        [
+            MissionActionStep("bad", on_failed={"action": "jump_to", "target": "recovery", "max_attempts": 1}),
+            MissionActionStep("unused"),
+            MissionActionStep("recovery", label="recovery"),
+        ],
+    )
+
+    orch.start()
+    jump_status = orch.tick({})
+    done_status = orch.tick({})
+
+    assert jump_status.current_index == 2
+    assert done_status.done is True
+    assert runtime.runner.sent_actions == [("bad", {}), ("recovery", {})]
+
+
+def test_jump_to_missing_label_fails_mission() -> None:
+    runtime = FakeRuntime([FakeActionResult(failed=True, reason="bad_failed")])
+    orch = MissionOrchestrator(
+        runtime,
+        [
+            MissionActionStep("bad", on_failed={"action": "jump_to", "target": "missing", "max_attempts": 1}),
+        ],
+    )
+
+    orch.start()
+    status = orch.tick({})
+
+    assert status.failed is True
+    assert status.reason == "jump_target_not_found"
+
+
+def test_continue_after_failure_advances_to_next_step() -> None:
+    runtime = FakeRuntime(
+        [
+            FakeActionResult(failed=True, reason="recon_failed"),
+            FakeActionResult(done=True, reason="landed"),
+        ]
+    )
+    orch = MissionOrchestrator(
+        runtime,
+        [
+            MissionActionStep("recon_scan", on_failed={"action": "continue"}),
+            MissionActionStep("land"),
+        ],
+    )
+
+    orch.start()
+    continue_status = orch.tick({})
+    done_status = orch.tick({})
+
+    assert continue_status.current_action == "land"
+    assert done_status.done is True
+    assert runtime.runner.sent_actions == [("recon_scan", {}), ("land", {})]
+
+
+def test_default_failure_policy_still_fails_mission() -> None:
+    runtime = FakeRuntime([FakeActionResult(failed=True, reason="failed")])
+    orch = MissionOrchestrator(runtime, [MissionActionStep("bad")])
+
+    orch.start()
+    status = orch.tick({})
+
+    assert status.failed is True
+    assert status.reason == "failed"

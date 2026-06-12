@@ -1,0 +1,352 @@
+{
+  "name": "rescue_2026_full_auto",
+  "description": "Full rescue competition Action Mission: takeoff, two payload drops, recon scan, return home, and land.",
+  "steps": [
+    {
+      "name": "takeoff",
+      "params": {
+        "mode": "GUIDED",
+        "altitude_m": 3.0,
+        "altitude_tolerance_m": 0.3,
+        "require_armed": true,
+        "max_updates": 120,
+        "priority": 2,
+        "arm_priority": 1,
+        "mode_priority": 2
+      }
+    },
+    {
+      "name": "multi_view_localize",
+      "label": "drop_scan",
+      "save_as": "drop_scan",
+      "on_failed": {
+        "action": "retry_current",
+        "max_attempts": 2
+      },
+      "params": {
+        "waypoint_mode": "absolute",
+        "altitude_m": 3.0,
+        "yaw_mode": "arm_heading",
+        "waypoints": [
+          {"x": -1.8, "y": 28.0, "altitude_m": 3.0},
+          {"x": 1.8, "y": 28.0, "altitude_m": 3.0},
+          {"x": 1.8, "y": 32.0, "altitude_m": 3.0},
+          {"x": -1.8, "y": 32.0, "altitude_m": 3.0}
+        ],
+        "capture_updates_per_waypoint": 4,
+        "settle_updates_per_waypoint": 3,
+        "max_updates_per_waypoint": 120,
+        "tolerance_xy_m": 0.25,
+        "tolerance_z_m": 0.25,
+        "goto_min_hold_updates": 1,
+        "detection_source": "scene",
+        "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
+        "min_confidence": 0.25,
+        "camera": {
+          "fov_x_deg": 113.0,
+          "fov_y_deg": 93.0,
+          "image_x_sign": 1.0,
+          "image_y_sign": -1.0
+        },
+        "fusion": {
+          "cluster_radius_m": 0.6,
+          "outlier_radius_m": 0.5,
+          "min_cluster_size": 2,
+          "center_weight_power": 1.0
+        },
+        "save_result": true,
+        "priority": 5
+      }
+    },
+    {
+      "name": "select_drop_targets",
+      "save_as": "drop_targets",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "drop_scan",
+        "max_attempts": 1
+      },
+      "params": {
+        "objects": "$drop_scan.localized_objects",
+        "target_count": 2,
+        "score_table": {
+          "bucket_1": 500,
+          "bucket_2": 300,
+          "bucket_3": 100,
+          "bucket": 50
+        },
+        "min_seen_count": 2,
+        "min_raw_count": 0,
+        "min_weight": 0.0,
+        "deduplicate_radius_m": 0.35,
+        "prefer_class_order": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
+        "zone_center": {"x": 0.0, "y": 30.0}
+      }
+    },
+    {
+      "name": "goto_waypoint",
+      "label": "goto_target_0",
+      "params": {
+        "x": "$drop_targets.selected_targets.0.local_x",
+        "y": "$drop_targets.selected_targets.0.local_y",
+        "altitude_m": 2.5,
+        "yaw_mode": "arm_heading",
+        "tolerance_xy_m": 0.25,
+        "tolerance_z_m": 0.25,
+        "min_hold_updates": 2,
+        "priority": 5,
+        "key": "goto_drop_target_0"
+      }
+    },
+    {
+      "name": "target_lock",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "goto_target_0",
+        "max_attempts": 1
+      },
+      "params": {
+        "target": {
+          "local_x": "$drop_targets.selected_targets.0.local_x",
+          "local_y": "$drop_targets.selected_targets.0.local_y"
+        },
+        "max_match_distance_m": 0.8,
+        "detection_source": "scene",
+        "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
+        "min_confidence": 0.25,
+        "max_updates": 30,
+        "key": "target_lock_0"
+      }
+    },
+    {
+      "name": "align_descend",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "goto_target_0",
+        "max_attempts": 1
+      },
+      "params": {
+        "expected_dt_s": 0.1,
+        "lost_timeout_updates": 8,
+        "hold_updates_required": 5,
+        "max_retries": 2,
+        "max_updates": 180,
+        "finish_altitude_m": 1.1,
+        "config": {
+          "kp_vx": 0.7,
+          "kp_vy": 0.7,
+          "max_vx_mps": 0.25,
+          "max_vy_mps": 0.25,
+          "descend_speed_mps": 0.12,
+          "max_ex_cam": 0.045,
+          "max_ey_cam": 0.045,
+          "deadband_ex_cam": 0.012,
+          "deadband_ey_cam": 0.012,
+          "min_altitude_m": 1.0,
+          "require_target_locked": true
+        }
+      }
+    },
+    {
+      "name": "payload_release",
+      "on_failed": {
+        "action": "fail"
+      },
+      "params": {
+        "servo_outputs": [
+          {"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}
+        ],
+        "payload_id": "payload_1",
+        "target_id": "$drop_targets.selected_targets.0.id",
+        "release_wait_updates": 5,
+        "priority": 3,
+        "key": "payload_release_1"
+      }
+    },
+    {
+      "name": "goto_waypoint",
+      "label": "goto_target_1",
+      "params": {
+        "x": "$drop_targets.selected_targets.0.local_x",
+        "y": "$drop_targets.selected_targets.0.local_y",
+        "altitude_m": 3.0,
+        "yaw_mode": "arm_heading",
+        "tolerance_xy_m": 0.3,
+        "tolerance_z_m": 0.3,
+        "min_hold_updates": 1,
+        "priority": 5,
+        "key": "climb_after_payload_1"
+      }
+    },
+    {
+      "name": "goto_waypoint",
+      "params": {
+        "x": "$drop_targets.selected_targets.1.local_x",
+        "y": "$drop_targets.selected_targets.1.local_y",
+        "altitude_m": 2.5,
+        "yaw_mode": "arm_heading",
+        "tolerance_xy_m": 0.25,
+        "tolerance_z_m": 0.25,
+        "min_hold_updates": 2,
+        "priority": 5,
+        "key": "goto_drop_target_1"
+      }
+    },
+    {
+      "name": "target_lock",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "goto_target_1",
+        "max_attempts": 1
+      },
+      "params": {
+        "target": {
+          "local_x": "$drop_targets.selected_targets.1.local_x",
+          "local_y": "$drop_targets.selected_targets.1.local_y"
+        },
+        "max_match_distance_m": 0.8,
+        "detection_source": "scene",
+        "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
+        "min_confidence": 0.25,
+        "max_updates": 30,
+        "key": "target_lock_1"
+      }
+    },
+    {
+      "name": "align_descend",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "goto_target_1",
+        "max_attempts": 1
+      },
+      "params": {
+        "expected_dt_s": 0.1,
+        "lost_timeout_updates": 8,
+        "hold_updates_required": 5,
+        "max_retries": 2,
+        "max_updates": 180,
+        "finish_altitude_m": 1.1,
+        "config": {
+          "kp_vx": 0.7,
+          "kp_vy": 0.7,
+          "max_vx_mps": 0.25,
+          "max_vy_mps": 0.25,
+          "descend_speed_mps": 0.12,
+          "max_ex_cam": 0.045,
+          "max_ey_cam": 0.045,
+          "deadband_ex_cam": 0.012,
+          "deadband_ey_cam": 0.012,
+          "min_altitude_m": 1.0,
+          "require_target_locked": true
+        }
+      }
+    },
+    {
+      "name": "payload_release",
+      "on_failed": {
+        "action": "fail"
+      },
+      "params": {
+        "servo_outputs": [
+          {"channel": 9, "release_pwm": 1700, "hold_pwm": 1200}
+        ],
+        "payload_id": "payload_2",
+        "target_id": "$drop_targets.selected_targets.1.id",
+        "release_wait_updates": 5,
+        "priority": 3,
+        "key": "payload_release_2"
+      }
+    },
+    {
+      "name": "goto_waypoint",
+      "params": {
+        "x": "$drop_targets.selected_targets.1.local_x",
+        "y": "$drop_targets.selected_targets.1.local_y",
+        "altitude_m": 3.0,
+        "yaw_mode": "arm_heading",
+        "tolerance_xy_m": 0.3,
+        "tolerance_z_m": 0.3,
+        "min_hold_updates": 1,
+        "priority": 5,
+        "key": "climb_after_payload_2"
+      }
+    },
+    {
+      "name": "goto_waypoint",
+      "params": {
+        "x": 0.0,
+        "y": 48.0,
+        "altitude_m": 3.0,
+        "yaw_mode": "arm_heading",
+        "tolerance_xy_m": 0.5,
+        "tolerance_z_m": 0.4,
+        "min_hold_updates": 2,
+        "priority": 5,
+        "key": "goto_recon_entry"
+      }
+    },
+    {
+      "name": "recon_scan",
+      "label": "recon_scan",
+      "save_as": "recon_scan",
+      "on_failed": {
+        "action": "continue"
+      },
+      "params": {
+        "waypoints": [
+          {"x": -2.5, "y": 48.0, "altitude_m": 2.2},
+          {"x": 2.5, "y": 48.0, "altitude_m": 2.2},
+          {"x": 2.5, "y": 52.0, "altitude_m": 2.2},
+          {"x": -2.5, "y": 52.0, "altitude_m": 2.2},
+          {"x": 0.0, "y": 50.0, "altitude_m": 2.0}
+        ],
+        "yaw_mode": "arm_heading",
+        "goto_tolerance_xy_m": 0.3,
+        "goto_tolerance_z_m": 0.3,
+        "goto_min_hold_updates": 1,
+        "capture_updates_per_waypoint": 4,
+        "settle_updates_per_waypoint": 2,
+        "max_updates_per_waypoint": 150,
+        "detection_source": "scene",
+        "bucket_class_names": ["recon_bucket", "white_bucket"],
+        "sign_class_names": ["danger_1", "danger_2", "danger_3"],
+        "min_bucket_confidence": 0.25,
+        "min_sign_confidence": 0.35,
+        "min_report_confidence": 0.65,
+        "associate_max_distance_norm": 0.35,
+        "cluster_radius_m": 0.6,
+        "blank_when_uncertain": true,
+        "priority": 5,
+        "camera": {
+          "fov_x_deg": 113.0,
+          "fov_y_deg": 93.0,
+          "image_x_sign": 1.0,
+          "image_y_sign": -1.0
+        }
+      }
+    },
+    {
+      "name": "goto_waypoint",
+      "params": {
+        "x": 0.0,
+        "y": 0.0,
+        "altitude_m": 3.0,
+        "yaw_mode": "arm_heading",
+        "tolerance_xy_m": 0.5,
+        "tolerance_z_m": 0.4,
+        "min_hold_updates": 2,
+        "priority": 5,
+        "key": "return_home"
+      }
+    },
+    {
+      "name": "land",
+      "params": {
+        "land_altitude_threshold_m": 0.25,
+        "max_updates": 200,
+        "priority": 2,
+        "key": "land_home"
+      }
+    }
+  ]
+}
