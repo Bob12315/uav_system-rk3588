@@ -46,6 +46,7 @@ yolo_app/
   annotator.py            全屏画面标注
   udp_publisher.py        UDP JSON 输出
   command_receiver.py     目标选择命令输入
+  raw_frame_recorder.py   Web UI 控制的原始帧 mp4 录制
 ```
 
 默认配置文件位于 `../config/yolo.yaml`。
@@ -100,6 +101,18 @@ conda run --no-capture-output -n yolo python -u -m yolo_app.main \
 - `udp_ip` / `udp_port`：向控制进程发布的目的地址
 - `fullscreen`：板载屏幕全屏显示
 - `latest_frame`：丢弃已积压相机帧以控制延迟
+- `recording_dir`：Web UI 原始摄像头录制目录，默认 `~/uav_recordings`
+
+## 原始画面录制
+
+Web UI 的“开始录制 / 停止录制”按钮会通过 YOLO command UDP 控制本进程录制。
+录制发生在画框标注之前，写入当前实际读取到的原始帧，默认文件名：
+
+```text
+~/uav_recordings/camera_YYYYmmdd_HHMMSS_microseconds.mp4
+```
+
+该录制不包含 YOLO bbox、锁定框或文字叠加。
 
 ## UDP 输出
 

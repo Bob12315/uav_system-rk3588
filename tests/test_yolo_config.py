@@ -37,6 +37,7 @@ def _config() -> dict[str, object]:
         "latest_frame": True,
         "display": {"local_window_enabled": False, "fullscreen": False},
         "web_stream": {"enabled": True, "host": "0.0.0.0", "port": 8081},
+        "recording_dir": "~/uav_recordings",
     }
 
 
@@ -60,6 +61,7 @@ def test_load_config_resolves_paths_relative_to_yaml(tmp_path: Path, monkeypatch
     assert cfg.web_stream_enabled is True
     assert cfg.web_stream_width == 0
     assert cfg.web_stream_height == 0
+    assert cfg.recording_dir.endswith("/uav_recordings")
 
 
 def test_load_config_reads_web_stream_dimensions(tmp_path: Path, monkeypatch) -> None:

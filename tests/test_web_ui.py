@@ -58,6 +58,9 @@ def test_audit_log_is_persistent(tmp_path: Path) -> None:
 
 
 class _FakeRunner:
+    def __init__(self) -> None:
+        self.camera_recording = {"recording": False, "path": "", "message": "未录制"}
+
     def web_status_snapshot(self):
         return {"mission": "visual_tracking", "events": []}
 
@@ -75,6 +78,17 @@ class _FakeRunner:
 
     def apply_active_mission_config(self, _path: str):
         return CommandResult(True, "applied")
+
+    def camera_recording_status(self):
+        return dict(self.camera_recording)
+
+    def camera_recording_toggle(self):
+        self.camera_recording = {
+            "recording": not bool(self.camera_recording["recording"]),
+            "path": "~/uav_recordings/camera_*.mp4",
+            "message": "toggled",
+        }
+        return CommandResult(True, "camera recording toggled")
 
 
 def test_web_api_executes_command_and_records_audit(tmp_path: Path) -> None:
@@ -94,6 +108,25 @@ def test_web_api_executes_command_and_records_audit(tmp_path: Path) -> None:
     assert audit[0]["action"] == "target next"
 
 
+def test_web_api_toggles_camera_recording_and_records_audit(tmp_path: Path) -> None:
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    app = create_app(
+        _FakeRunner(),
+        UiConfig(True, False, "127.0.0.1", 8080, str(tmp_path / "audit.jsonl")),
+    )
+    client = TestClient(app)
+
+    response = client.post("/api/camera-recording/toggle")
+
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["recording"]["recording"] is True
+    audit = client.get("/api/audit").json()
+    assert audit[0]["source"] == "CAMERA_RECORDING"
+
+
 def test_web_ui_exposes_manual_step_movement_controls() -> None:
     static_dir = Path(__file__).parents[1] / "web_ui" / "static"
     index = (static_dir / "index.html").read_text(encoding="utf-8")
@@ -110,6 +143,20 @@ def test_web_ui_exposes_manual_step_movement_controls() -> None:
     assert 'body_offset' not in script
     assert "condition_yaw ${angle} 20 ${turn} relative" in script
     assert "signedAngle" not in script
+
+
+def test_web_ui_exposes_raw_camera_recording_controls() -> None:
+    static_dir = Path(__file__).parents[1] / "web_ui" / "static"
+    index = (static_dir / "index.html").read_text(encoding="utf-8")
+    script = (static_dir / "app.js").read_text(encoding="utf-8")
+    styles = (static_dir / "style.css").read_text(encoding="utf-8")
+
+    assert 'id="cameraRecordToggle"' in index
+    assert 'id="cameraRecordStatus"' in index
+    assert '"/api/camera-recording/status"' in script
+    assert '"/api/camera-recording/toggle"' in script
+    assert "function renderCameraRecordingStatus" in script
+    assert ".camera-recording-status" in styles
 
 
 def test_web_ui_distinguishes_selected_and_current_mission_steps() -> None:
@@ -168,7 +215,7 @@ def test_action_lab_start_uses_confirmation_instead_of_send_checkbox() -> None:
     assert "if (!confirmed) return;" in script
     assert "send_actions: Boolean(sendActions)" in script
     assert 'console.log("Action Lab start request body", requestBody);' in script
-    assert "?v=ui2-action-zh" in index
+    assert "?v=ui3-camera-recording" in index
     assert "$(\"actionSendToggle\").checked" not in script
     assert "let actionParamCache = {};" in script
     assert "function cacheSelectedActionParams()" in script
@@ -187,7 +234,7 @@ def test_action_names_render_with_chinese_suffixes() -> None:
     index = (static_dir / "index.html").read_text(encoding="utf-8")
     script = (static_dir / "app.js").read_text(encoding="utf-8")
 
-    assert "/static/app.js?v=ui2-action-zh" in index
+    assert "/static/app.js?v=ui3-camera-recording" in index
     assert "const ACTION_ZH_LABELS" in script
     for action_name, zh_label in {
         "takeoff": "起飞",

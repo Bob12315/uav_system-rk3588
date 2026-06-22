@@ -147,6 +147,11 @@ class SystemRunner:
         self.latest_snapshot: dict[str, object] = {}
         self.latest_localization_result: dict[str, object] = {}
         self.latest_drop_targets_result: dict[str, object] = {}
+        self.camera_recording: dict[str, object] = {
+            "recording": False,
+            "path": "",
+            "message": "未录制",
+        }
         self.external_processes: dict[str, subprocess.Popen] = {}
         self.action_lab_specs = action_lab_specs()
         self.action_lab_enabled = True
@@ -710,6 +715,39 @@ class SystemRunner:
         return self.action_runtime.status_payload(
             send_commands=bool(self.controller_switches.snapshot().send_commands),
         )
+
+    def camera_recording_status(self) -> dict[str, object]:
+        return dict(self.camera_recording)
+
+    def camera_recording_toggle(self) -> CommandResult:
+        recording = bool(self.camera_recording.get("recording"))
+        client = YoloCommandClient(self.config.yolo_command)
+        try:
+            if recording:
+                client.stop_recording()
+                self.camera_recording = {
+                    **self.camera_recording,
+                    "recording": False,
+                    "message": "录制停止请求已发送",
+                }
+                message = "camera recording stop sent"
+            else:
+                client.start_recording()
+                self.camera_recording = {
+                    "recording": True,
+                    "path": "~/uav_recordings/camera_*.mp4",
+                    "message": "录制开始请求已发送",
+                }
+                message = "camera recording start sent"
+        except Exception as exc:
+            message = f"camera recording command failed: {exc}"
+            self.camera_recording = {**self.camera_recording, "message": message}
+            result = CommandResult(False, message)
+            self._record_event("ERROR", result.message)
+            return result
+        result = CommandResult(True, message)
+        self._record_event("OK", result.message)
+        return result
 
     def action_lab_start_action(
         self,

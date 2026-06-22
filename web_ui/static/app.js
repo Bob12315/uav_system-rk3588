@@ -16,6 +16,7 @@ let currentActionMissionSteps = [];
 let lastActionMissionStatus = null;
 let lastActionMissionResult = null;
 let actionMissionAutoTickTimer = null;
+let latestCameraRecording = {recording: false, path: "", message: "未录制"};
 const fallbackStageModes = ["AUTO", "IDLE", "APPROACH_TRACK", "OVERHEAD_HOLD", "CORRIDOR_FOLLOW"];
 const ACTION_SAFETY_HINTS = {
   goto_waypoint: "飞控移动命令：local_position / goto_local_ned，需要 SEND=ON 才实发。",
@@ -187,6 +188,32 @@ async function execute(command, source = "BUTTON") {
     method: "POST", body: JSON.stringify({command, source})
   });
   $("completionHint").textContent = result.message;
+  await loadAudit();
+  return result;
+}
+function renderCameraRecordingStatus(payload) {
+  if (payload) latestCameraRecording = payload;
+  const status = latestCameraRecording || {};
+  const button = $("cameraRecordToggle");
+  const label = $("cameraRecordStatus");
+  if (button) {
+    button.textContent = status.recording ? "停止录制" : "开始录制";
+    button.classList.toggle("warning", Boolean(status.recording));
+  }
+  if (label) {
+    const path = status.path ? ` · ${status.path}` : "";
+    label.textContent = `${status.message || (status.recording ? "录制中" : "未录制")}${path}`;
+  }
+}
+async function refreshCameraRecordingStatus() {
+  const result = await json("/api/camera-recording/status");
+  if (result.ok) renderCameraRecordingStatus(result.recording || {});
+  return result;
+}
+async function toggleCameraRecording() {
+  const result = await json("/api/camera-recording/toggle", {method: "POST", body: "{}"});
+  renderCameraRecordingStatus(result.recording || {message: result.message || "录制状态未知"});
+  $("completionHint").textContent = result.message || (result.ok ? "camera recording toggled" : "camera recording failed");
   await loadAudit();
   return result;
 }
@@ -1814,6 +1841,12 @@ async function init() {
       }
     };
   }
+  if ($("cameraRecordToggle")) {
+    $("cameraRecordToggle").onclick = () => toggleCameraRecording().catch(error => {
+      renderCameraRecordingStatus({recording: false, path: "", message: `录制命令失败: ${error.message}`});
+    });
+    refreshCameraRecordingStatus().catch(() => {});
+  }
 
   document.querySelectorAll(".tab").forEach(tab => tab.onclick = () => {
     document.querySelectorAll(".tab").forEach(item => item.classList.toggle("active", item === tab));
@@ -1873,6 +1906,7 @@ async function init() {
   };
   completions = (await json("/api/commands/completions")).commands;
   await Promise.all([loadAudit(), loadMissions(), loadConfigFiles(), loadActionLab(), loadActionMissionTemplates()]);
+  refreshCameraRecordingStatus().catch(() => {});
   startStatusUpdates();
 }
 init().catch(error => { $("completionHint").textContent = error.message; });

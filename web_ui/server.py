@@ -319,6 +319,24 @@ def create_app(runner, config: UiConfig) -> FastAPI:
             pass
         return {"port": port, "path": "/video/yolo.mjpeg"}
 
+    @app.get("/api/camera-recording/status")
+    def camera_recording_status():
+        status_getter = getattr(runner, "camera_recording_status", None)
+        if not callable(status_getter):
+            return {"ok": False, "error": "camera recording is unavailable"}
+        return {"ok": True, "recording": status_getter()}
+
+    @app.post("/api/camera-recording/toggle")
+    def camera_recording_toggle():
+        toggle = getattr(runner, "camera_recording_toggle", None)
+        if not callable(toggle):
+            return {"ok": False, "message": "camera recording is unavailable"}
+        result = toggle()
+        audit.append("CAMERA_RECORDING", "toggle", result.ok, result.message)
+        status_getter = getattr(runner, "camera_recording_status", None)
+        status = status_getter() if callable(status_getter) else {}
+        return {"ok": result.ok, "message": result.message, "recording": status}
+
     @app.post("/api/yolo/target/{action}")
     def yolo_target_action(action: str, track_id: int | None = None):
         commands = {

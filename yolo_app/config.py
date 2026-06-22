@@ -43,6 +43,7 @@ class AppConfig:
     web_stream_max_fps: float
     web_stream_width: int
     web_stream_height: int
+    recording_dir: str
 
 
 def _str_to_bool(value: str | bool) -> bool:
@@ -94,6 +95,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--camera-fourcc")
     parser.add_argument("--latest-frame", type=_str_to_bool)
     parser.add_argument("--fullscreen", type=_str_to_bool)
+    parser.add_argument("--recording-dir")
     return parser
 
 
@@ -175,4 +177,5 @@ def load_config() -> AppConfig:
         web_stream_max_fps=float(web_stream_config.get("max_fps", 20.0)),
         web_stream_width=int(web_stream_config.get("width", 0)),
         web_stream_height=int(web_stream_config.get("height", 0)),
+        recording_dir=_expand_user_path(merged.get("recording_dir", "~/uav_recordings")),
     )

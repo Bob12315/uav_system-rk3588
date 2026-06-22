@@ -18,6 +18,8 @@ class CommandReceiver:
     {"action": "switch_prev"}
     {"action": "unlock_target"}
     {"action": "lock_target", "track_id": 7}
+    {"action": "recording_start"}
+    {"action": "recording_stop"}
     """
 
     def __init__(self, ip: str, port: int, enabled: bool = True) -> None:
@@ -45,7 +47,14 @@ class CommandReceiver:
                 continue
 
             action = decoded.get("action")
-            if action not in {"lock_target", "switch_next", "switch_prev", "unlock_target"}:
+            if action not in {
+                "lock_target",
+                "switch_next",
+                "switch_prev",
+                "unlock_target",
+                "recording_start",
+                "recording_stop",
+            }:
                 continue
             track_id = decoded.get("track_id")
             if track_id is not None:

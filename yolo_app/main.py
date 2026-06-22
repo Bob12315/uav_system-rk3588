@@ -15,6 +15,7 @@ try:
     from .command_receiver import CommandReceiver
     from .config import load_config
     from .mjpeg_stream import MjpegStream
+    from .raw_frame_recorder import RawFrameRecorder
     from .target_manager import TargetManager, build_scene_detections
     from .tracker_runner import TrackerRunner
     from .udp_publisher import UdpPublisher
@@ -25,6 +26,7 @@ except ImportError:
     from command_receiver import CommandReceiver
     from config import load_config
     from mjpeg_stream import MjpegStream
+    from raw_frame_recorder import RawFrameRecorder
     from target_manager import TargetManager, build_scene_detections
     from tracker_runner import TrackerRunner
     from udp_publisher import UdpPublisher
@@ -53,6 +55,7 @@ def main() -> int:
     udp_publisher = UdpPublisher(cfg.udp_ip, cfg.udp_port)
     command_receiver = CommandReceiver(cfg.command_ip, cfg.command_port, enabled=cfg.command_enabled)
     annotator = Annotator(cfg)
+    raw_recorder = RawFrameRecorder(cfg.recording_dir, cfg.camera_fps)
     writer = None
     web_stream = (
         MjpegStream(
@@ -91,7 +94,10 @@ def main() -> int:
             latency_ms = max(0.0, (time.time() - packet.timestamp) * 1000.0)
             commands = command_receiver.poll()
             for command in commands:
-                target_manager.apply_command(command, tracks)
+                if command.action in {"recording_start", "recording_stop"}:
+                    raw_recorder.handle_command(command.action, frame.shape)
+                else:
+                    target_manager.apply_command(command, tracks)
 
             current_target = target_manager.update(
                 tracks=tracks,
@@ -108,6 +114,7 @@ def main() -> int:
                 timestamp=packet.timestamp,
             )
             udp_publisher.publish(current_target, scene)
+            raw_recorder.write(frame)
 
             if cfg.show or cfg.save_video or web_stream is not None:
                 annotated = annotator.annotate(
@@ -146,6 +153,7 @@ def main() -> int:
             web_stream.close()
         if writer is not None:
             writer.release()
+        raw_recorder.close()
         cv2.destroyAllWindows()
 
     elapsed = max(time.perf_counter() - start_time, 1e-9)

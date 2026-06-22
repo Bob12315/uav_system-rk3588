@@ -95,3 +95,6 @@ web_stream:
 # true：保存带标注的视频。生成文件属于运行产物，不提交 Git。
 save_video: false
 save_path: "../runtime/videos/track_output.mp4"
+
+# Web UI 原始摄像头录制目录。录制写入未标注的实际读取帧。
+recording_dir: "~/uav_recordings"

@@ -31,3 +31,9 @@ class YoloCommandClient:
 
     def unlock_target(self) -> None:
         self.send("unlock_target")
+
+    def start_recording(self) -> None:
+        self.send("recording_start")
+
+    def stop_recording(self) -> None:
+        self.send("recording_stop")

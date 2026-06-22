@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>UAV Action Console</title>
-  <link rel="stylesheet" href="/static/style.css?v=ui2-action-zh">
+  <link rel="stylesheet" href="/static/style.css?v=ui3-camera-recording">
 </head>
 <body>
   <header>
@@ -37,6 +37,10 @@
           <img id="video" alt="YOLO 视频流">
           <canvas id="hitCanvas"></canvas>
           <div id="videoOffline" class="overlay-note">等待 YOLO Web 视频流</div>
+        </div>
+        <div class="button-row camera-recording-row">
+          <button id="cameraRecordToggle">开始录制</button>
+          <span id="cameraRecordStatus" class="camera-recording-status">未录制</span>
         </div>
       </article>
 
@@ -407,6 +411,6 @@
     </section>
   </main>
 
-  <script src="/static/app.js?v=ui2-action-zh"></script>
+  <script src="/static/app.js?v=ui3-camera-recording"></script>
 </body>
 </html>
