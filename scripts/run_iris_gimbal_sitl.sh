@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-GCS_HOST="${GCS_HOST:-10.31.18.109}"
+GCS_HOST="${GCS_HOST:-10.31.18.108}"
 VIDEO_HOST="${VIDEO_HOST:-${GCS_HOST}}"
 MAVLINK_PORT="${MAVLINK_PORT:-14550}"
 VIDEO_PORT="${VIDEO_PORT:-5600}"
