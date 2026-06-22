@@ -60,6 +60,7 @@ def test_audit_log_is_persistent(tmp_path: Path) -> None:
 class _FakeRunner:
     def __init__(self) -> None:
         self.camera_recording = {"recording": False, "path": "", "message": "未录制"}
+        self.latest_localization_result = {"objects": [{"x": 1.0, "y": 2.0}]}
 
     def web_status_snapshot(self):
         return {"mission": "visual_tracking", "events": []}
@@ -89,6 +90,10 @@ class _FakeRunner:
             "message": "toggled",
         }
         return CommandResult(True, "camera recording toggled")
+
+    def clear_localization_result(self):
+        self.latest_localization_result = {}
+        return CommandResult(True, "localized object coordinates cleared")
 
 
 def test_web_api_executes_command_and_records_audit(tmp_path: Path) -> None:
@@ -127,6 +132,25 @@ def test_web_api_toggles_camera_recording_and_records_audit(tmp_path: Path) -> N
     assert audit[0]["source"] == "CAMERA_RECORDING"
 
 
+def test_web_api_clears_localization_and_records_audit(tmp_path: Path) -> None:
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    runner = _FakeRunner()
+    app = create_app(
+        runner,
+        UiConfig(True, False, "127.0.0.1", 8080, str(tmp_path / "audit.jsonl")),
+    )
+    client = TestClient(app)
+
+    response = client.post("/api/localization/clear")
+
+    assert response.json()["ok"] is True
+    assert runner.latest_localization_result == {}
+    audit = client.get("/api/audit").json()
+    assert audit[0]["source"] == "LOCALIZATION"
+
+
 def test_web_ui_exposes_manual_step_movement_controls() -> None:
     static_dir = Path(__file__).parents[1] / "web_ui" / "static"
     index = (static_dir / "index.html").read_text(encoding="utf-8")
@@ -157,6 +181,18 @@ def test_web_ui_exposes_raw_camera_recording_controls() -> None:
     assert '"/api/camera-recording/toggle"' in script
     assert "function renderCameraRecordingStatus" in script
     assert ".camera-recording-status" in styles
+
+
+def test_web_ui_exposes_clear_localization_control() -> None:
+    static_dir = Path(__file__).parents[1] / "web_ui" / "static"
+    index = (static_dir / "index.html").read_text(encoding="utf-8")
+    script = (static_dir / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="clearLocalization"' in index
+    assert "清空筒坐标" in index
+    assert '"/api/localization/clear"' in script
+    assert "async function clearLocalization()" in script
+    assert "state.localization = {};" in script
 
 
 def test_web_ui_distinguishes_selected_and_current_mission_steps() -> None:
@@ -215,7 +251,7 @@ def test_action_lab_start_uses_confirmation_instead_of_send_checkbox() -> None:
     assert "if (!confirmed) return;" in script
     assert "send_actions: Boolean(sendActions)" in script
     assert 'console.log("Action Lab start request body", requestBody);' in script
-    assert "?v=ui3-camera-recording" in index
+    assert "?v=ui4-clear-localization" in index
     assert "$(\"actionSendToggle\").checked" not in script
     assert "let actionParamCache = {};" in script
     assert "function cacheSelectedActionParams()" in script
@@ -234,7 +270,7 @@ def test_action_names_render_with_chinese_suffixes() -> None:
     index = (static_dir / "index.html").read_text(encoding="utf-8")
     script = (static_dir / "app.js").read_text(encoding="utf-8")
 
-    assert "/static/app.js?v=ui3-camera-recording" in index
+    assert "/static/app.js?v=ui4-clear-localization" in index
     assert "const ACTION_ZH_LABELS" in script
     for action_name, zh_label in {
         "takeoff": "起飞",

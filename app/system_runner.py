@@ -591,6 +591,12 @@ class SystemRunner:
             "captures_count": detail.get("captures_count", 0),
         }
 
+    def clear_localization_result(self) -> CommandResult:
+        self.latest_localization_result = {}
+        result = CommandResult(True, "localized object coordinates cleared")
+        self._record_event("OK", result.message)
+        return result
+
     def _maybe_save_drop_targets_result(self) -> None:
         """If select_drop_targets just completed, persist selected targets for Web UI map."""
         name = getattr(self.action_runtime, "action_name", None)

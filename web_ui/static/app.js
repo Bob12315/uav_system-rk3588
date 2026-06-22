@@ -217,6 +217,14 @@ async function toggleCameraRecording() {
   await loadAudit();
   return result;
 }
+async function clearLocalization() {
+  const result = await json("/api/localization/clear", {method: "POST", body: "{}"});
+  $("completionHint").textContent = result.message || "localized object coordinates cleared";
+  state.localization = {};
+  renderFieldMap(state);
+  await loadAudit();
+  return result;
+}
 function setBadge(element, text, cls) {
   element.textContent = text;
   element.className = `badge ${cls || ""}`;
@@ -1133,6 +1141,11 @@ function setupFieldMapInteractions() {
   $("fieldMapReset")?.addEventListener("click", () => {
     fitFieldMapToDefaults();
     renderFieldMap(state);
+  });
+  $("clearLocalization")?.addEventListener("click", () => {
+    clearLocalization().catch(error => {
+      $("completionHint").textContent = `清空筒坐标失败: ${error.message}`;
+    });
   });
 }
 function renderFieldMap(next) {

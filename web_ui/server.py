@@ -307,6 +307,15 @@ def create_app(runner, config: UiConfig) -> FastAPI:
         except Exception as exc:
             return {"ok": False, "message": str(exc)}
 
+    @app.post("/api/localization/clear")
+    def clear_localization():
+        clear = getattr(runner, "clear_localization_result", None)
+        if not callable(clear):
+            return {"ok": False, "message": "localization clear is unavailable"}
+        result = clear()
+        audit.append("LOCALIZATION", "clear", result.ok, result.message)
+        return {"ok": result.ok, "message": result.message}
+
     @app.get("/api/yolo/stream")
     def yolo_stream():
         port = 8081
