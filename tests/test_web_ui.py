@@ -168,7 +168,7 @@ def test_action_lab_start_uses_confirmation_instead_of_send_checkbox() -> None:
     assert "if (!confirmed) return;" in script
     assert "send_actions: Boolean(sendActions)" in script
     assert 'console.log("Action Lab start request body", requestBody);' in script
-    assert "?v=ui1-action-first" in index
+    assert "?v=ui2-action-zh" in index
     assert "$(\"actionSendToggle\").checked" not in script
     assert "let actionParamCache = {};" in script
     assert "function cacheSelectedActionParams()" in script
@@ -180,6 +180,34 @@ def test_action_lab_start_uses_confirmation_instead_of_send_checkbox() -> None:
     send_actions_index = script.index("send_actions: Boolean(sendActions)", body_index)
     post_index = script.index('json("/api/actions/start"', send_actions_index)
     assert confirm_index < cancel_index < body_index < send_actions_index < post_index
+
+
+def test_action_names_render_with_chinese_suffixes() -> None:
+    static_dir = Path(__file__).parents[1] / "web_ui" / "static"
+    index = (static_dir / "index.html").read_text(encoding="utf-8")
+    script = (static_dir / "app.js").read_text(encoding="utf-8")
+
+    assert "/static/app.js?v=ui2-action-zh" in index
+    assert "const ACTION_ZH_LABELS" in script
+    for action_name, zh_label in {
+        "takeoff": "起飞",
+        "land": "降落",
+        "goto_waypoint": "飞到航点",
+        "survey_area": "区域扫描",
+        "single_view_localize": "单视角定位",
+        "multi_view_localize": "多视角定位",
+        "target_lock": "目标锁定",
+        "align_descend": "对准下降",
+        "payload_release": "载荷投放",
+        "select_drop_targets": "选择投放目标",
+        "recon_scan": "侦察扫描",
+    }.items():
+        assert f"{action_name}: \"{zh_label}\"" in script
+
+    assert "actionDisplayName(spec.name, spec.label || spec.name)" in script
+    assert "actionNameWithZh(step.name)" in script
+    assert "actionNameWithZh(selectedActionName)" in script
+    assert "actionNameWithZh(runningAction)" in script
 
 
 def test_action_lab_start_confirm_controls_api_request() -> None:
@@ -397,6 +425,7 @@ const elements = {
 };
 function $(id) { return elements[id]; }
 function escapeHtml(value) { return String(value ?? ""); }
+function actionNameWithZh(name) { return name ? `${name} 汉化` : "--"; }
 function setOptionalText() {}
 function stopActionMissionAutoTick() {}
 eval(fnSource);
@@ -421,6 +450,9 @@ if (statuses.join(",") !== "done,done,running,pending") {
 }
 if (!elements.actionMissionTimeline.innerHTML.includes("drop_targets")) {
   throw new Error("timeline did not render save_as");
+}
+if (!elements.actionMissionTimeline.innerHTML.includes("select_drop_targets 汉化")) {
+  throw new Error("timeline did not render localized action name");
 }
 """
     result = subprocess.run(
@@ -487,6 +519,8 @@ function escapeHtml(value) { return String(value); }
 function setOptionalText(id, value) { if (elements[id]) elements[id].textContent = value; }
 function dispatchFromActionLab(payload) { return payload.dispatch || {}; }
 function countDispatchItems(value) { return Array.isArray(value) ? value.length : 0; }
+function actionDisplayName(name, fallback) { return `${fallback || name} 汉化`; }
+function actionNameWithZh(name) { return name ? `${name} 汉化` : "--"; }
 const ACTION_SAFETY_HINTS = {};
 globalThis.document = {querySelectorAll: () => []};
 eval(fnSource);
@@ -509,10 +543,11 @@ if (elements.actionParams.value !== "{\"channel\":9}") {
 }
 renderActionLabStatus({status: {running: true, action_name: "payload_release", last_result: {}}, note: "action_dispatch_enabled", send_actions_effective: true});
 if (elements.actionRunToggle.textContent !== "停止") throw new Error("running selected action should show stop");
+if (elements.actionRunningAction.textContent !== "payload_release 汉化") throw new Error("running action should be localized");
 toggleActionLabRun().then(() => {
   if (stopCalls !== 1 || startCalls !== 0) throw new Error("toggle should stop selected running action");
   selectAction("goto_waypoint");
-  if (!elements.actionSwitchHint.textContent.includes("点击“开始”将停止 payload_release 并启动 goto_waypoint")) {
+  if (!elements.actionSwitchHint.textContent.includes("点击“开始”将停止 payload_release 汉化 并启动 goto_waypoint 汉化")) {
     throw new Error("missing running/selected switch hint");
   }
   if (elements.actionRunToggle.textContent !== "开始") throw new Error("different selected action should show start");

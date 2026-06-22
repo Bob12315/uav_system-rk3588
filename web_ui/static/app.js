@@ -26,6 +26,19 @@ const ACTION_SAFETY_HINTS = {
   single_view_localize: "单帧定位调试 Action：只读取当前 YOLO 检测和飞行状态，计算目标 local 坐标，不发送飞控命令。",
   multi_view_localize: "四点移动采样并融合定位所有筒；会发送 local_position，需要 SEND=ON 才实发。",
 };
+const ACTION_ZH_LABELS = {
+  takeoff: "起飞",
+  land: "降落",
+  goto_waypoint: "飞到航点",
+  survey_area: "区域扫描",
+  single_view_localize: "单视角定位",
+  multi_view_localize: "多视角定位",
+  target_lock: "目标锁定",
+  align_descend: "对准下降",
+  payload_release: "载荷投放",
+  select_drop_targets: "选择投放目标",
+  recon_scan: "侦察扫描",
+};
 const DEFAULT_ACTION_MISSION_STEPS = [
   {
     name: "goto_waypoint",
@@ -195,6 +208,16 @@ function num(value, digits = 2, unit = "") {
 }
 function boolText(value, yes = "YES", no = "NO") {
   return value ? yes : no;
+}
+function actionDisplayName(name, fallback = "") {
+  const base = String(fallback || name || "--");
+  const zh = ACTION_ZH_LABELS[name] || "";
+  if (!zh || base.includes(zh)) return base;
+  return `${base} ${zh}`;
+}
+function actionNameWithZh(name) {
+  if (!name) return "--";
+  return actionDisplayName(name, name);
 }
 function pointX(obj) {
   if (Number.isFinite(Number(obj.local_x))) return Number(obj.local_x);
@@ -402,7 +425,7 @@ function renderActionMissionTimeline(actionMission, configuredSteps) {
       <td>${index}</td>
       <td><span class="step-status ${status}">${escapeHtml(actionMissionStatusLabel(status))}</span></td>
       <td>${escapeHtml(step.label || "-")}</td>
-      <td>${escapeHtml(step.name || "-")}</td>
+      <td>${escapeHtml(actionNameWithZh(step.name))}</td>
       <td>${escapeHtml(step.save_as || "-")}</td>
       <td>${escapeHtml(failurePolicyLabel(step.on_failed))}</td>
       <td>${escapeHtml(attempts[index] ?? attempts[String(index)] ?? "-")}</td>
@@ -498,7 +521,7 @@ function renderActionMissionStatus(actionMission) {
   setOptionalText("actionMissionDone", boolText(Boolean(payload.done), "是", "否"));
   setOptionalText("actionMissionFailed", boolText(Boolean(payload.failed), "是", "否"));
   setOptionalText("actionMissionIndex", payload.current_index ?? "--");
-  setOptionalText("actionMissionCurrent", payload.current_action || "--");
+  setOptionalText("actionMissionCurrent", actionNameWithZh(payload.current_action));
   setOptionalText("actionMissionReason", payload.reason || "--");
   const warning = $("actionMissionSendWarning");
   if (warning) {
@@ -521,7 +544,7 @@ function renderDashboardSummaries(next) {
   const dispatch = dispatchFromActionLab(actionLab);
   const mission = next.action_mission || {};
   renderSummaryRows("dashboardActionSummary", [
-    ["Action", actionStatus.action_name || "--", actionStatus.running ? "active" : ""],
+    ["Action", actionNameWithZh(actionStatus.action_name), actionStatus.running ? "active" : ""],
     ["State", actionStatus.state || "--"],
     ["Reason", actionLast.reason || "--"],
     ["Done / Failed", `${Boolean(actionLast.done)} / ${Boolean(actionLast.failed)}`, actionLast.failed ? "danger" : ""],
@@ -529,7 +552,7 @@ function renderDashboardSummaries(next) {
   renderSummaryRows("dashboardMissionSummary", [
     ["Enabled", String(Boolean(mission.enabled))],
     ["Running", String(Boolean(mission.running)), mission.running ? "active" : ""],
-    ["Current", mission.current_action || "--"],
+    ["Current", actionNameWithZh(mission.current_action)],
     ["Reason", mission.reason || "--"],
   ]);
   renderSummaryRows("dashboardDispatchSummary", [
@@ -1129,8 +1152,8 @@ function renderStatus(next) {
   setBadge($("batteryBadge"), `BAT ${drone.battery_valid ? `${drone.battery_remaining}%` : "--"}`, "");
   setBadge($("altitudeBadge"), `ALT ${num(drone.relative_altitude, 1, "m")}`, "");
   const actionStatus = (next.action_lab?.status || next.action_lab || {});
-  setBadge($("actionBadge"), `ACTION ${actionStatus.running ? (actionStatus.action_name || "RUN") : "--"}`, actionStatus.running ? "active" : "");
-  setBadge($("missionBadge"), `MISSION ${next.action_mission?.running ? (next.action_mission.current_action || "RUN") : "--"}`, next.action_mission?.running ? "active" : "");
+  setBadge($("actionBadge"), `ACTION ${actionStatus.running ? actionNameWithZh(actionStatus.action_name || "RUN") : "--"}`, actionStatus.running ? "active" : "");
+  setBadge($("missionBadge"), `MISSION ${next.action_mission?.running ? actionNameWithZh(next.action_mission.current_action || "RUN") : "--"}`, next.action_mission?.running ? "active" : "");
   setOptionalText("missionName", next.mission || "--");
   setOptionalText("missionStage", next.stage || "--");
   setOptionalText("stageController", next.stage_controller || "--");
@@ -1252,7 +1275,7 @@ async function loadActionLab() {
   const result = await json("/api/actions/list");
   actionSpecs = result.actions || [];
   $("actionButtons").innerHTML = actionSpecs.filter(spec => spec.name !== "payload_release").map(spec =>
-    `<button data-action-name="${escapeHtml(spec.name)}">${escapeHtml(spec.label || spec.name)}</button>`
+    `<button data-action-name="${escapeHtml(spec.name)}">${escapeHtml(actionDisplayName(spec.name, spec.label || spec.name))}</button>`
   ).join("");
   $("actionButtons").querySelectorAll("[data-action-name]").forEach(button => {
     button.onclick = () => selectAction(button.dataset.actionName);
@@ -1315,8 +1338,8 @@ function renderActionLabStatus(actionLab) {
       : `Dry-run${note ? `: ${note}` : ""}`;
   }
   $("actionState").textContent = status?.state || "--";
-  $("actionSelected").textContent = selectedActionName || "--";
-  $("actionRunningAction").textContent = runningAction || "--";
+  $("actionSelected").textContent = actionNameWithZh(selectedActionName);
+  $("actionRunningAction").textContent = actionNameWithZh(runningAction);
   $("actionRunning").textContent = String(Boolean(status?.running));
   $("actionReason").textContent = last.reason || "--";
   $("actionDone").textContent = String(Boolean(last.done));
@@ -1336,7 +1359,7 @@ function renderActionLabStatus(actionLab) {
   setOptionalText("actionGateNote", note || dispatch.note || "--");
   if ($("actionSwitchHint")) {
     $("actionSwitchHint").textContent = runningAction && runningAction !== selectedActionName
-      ? `当前运行：${runningAction}；当前选中：${selectedActionName || "--"}。点击“开始”将停止 ${runningAction} 并启动 ${selectedActionName || "--"}。`
+      ? `当前运行：${actionNameWithZh(runningAction)}；当前选中：${actionNameWithZh(selectedActionName)}。点击“开始”将停止 ${actionNameWithZh(runningAction)} 并启动 ${actionNameWithZh(selectedActionName)}。`
       : "";
   }
   const highlights = {
