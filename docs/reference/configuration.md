@@ -233,11 +233,27 @@ bash scripts/config/apply_rk3588_real.sh
 bash scripts/config/apply_rk3588_sitl.sh
 ```
 
+调好当前生效配置后，可以保存回对应 profile：
+
+```bash
+bash scripts/config/save_rk3588_real.sh
+bash scripts/config/save_rk3588_sitl.sh
+```
+
 模板位于：
 
 ```text
 config/profiles/rk3588-real/
 config/profiles/rk3588-sitl/
+```
+
+保存/应用脚本会管理：
+
+```text
+config/telemetry.yaml
+config/yolo.yaml
+config/action_missions/*.json
+missions/*/config.yaml（如果这些 mission 配置文件存在）
 ```
 
 两个脚本都会先检查 `config/app.yaml` 中 `executor.send_commands` 是否严格为

@@ -22,6 +22,13 @@ bash scripts/config/apply_rk3588_real.sh
 bash scripts/config/apply_rk3588_sitl.sh
 ```
 
+After tuning the active files, save them back to a profile:
+
+```bash
+bash scripts/config/save_rk3588_real.sh
+bash scripts/config/save_rk3588_sitl.sh
+```
+
 Both scripts refuse to switch profiles unless
 `config/app.yaml executor.send_commands` is strictly `false`.
 
@@ -31,6 +38,23 @@ the board exposes a stable `/dev/v4l/by-id/...` path.
 
 The SITL profile expects a PC to send MAVLink UDP to port `14550` and H264/RTP
 video to port `5600` on the RK3588 board.
+
+Profile save/apply manages:
+
+```text
+config/telemetry.yaml
+config/yolo.yaml
+config/action_missions/*.json
+missions/*/config.yaml, when those mission configs exist
+```
+
+Review and commit profile changes after saving:
+
+```bash
+git diff -- config/profiles
+git add config/profiles
+git commit -m "Update RK3588 profile parameters"
+```
 
 ## Deployment
 
