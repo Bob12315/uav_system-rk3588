@@ -6,11 +6,28 @@ profile_require_send_commands_off() {
 from pathlib import Path
 import sys
 
-import yaml
+path = Path(sys.argv[1])
+in_executor = False
+executor_indent = None
+for raw_line in path.read_text(encoding="utf-8").splitlines():
+    line_without_comment = raw_line.split("#", 1)[0].rstrip()
+    if not line_without_comment.strip():
+        continue
+    indent = len(line_without_comment) - len(line_without_comment.lstrip(" "))
+    stripped = line_without_comment.strip()
+    if stripped == "executor:":
+        in_executor = True
+        executor_indent = indent
+        continue
+    if in_executor and indent <= (executor_indent or 0):
+        in_executor = False
+    if in_executor and stripped.startswith("send_commands:"):
+        value = stripped.split(":", 1)[1].strip()
+        if value == "false":
+            raise SystemExit(0)
+        raise SystemExit("Refusing profile operation: config/app.yaml executor.send_commands must be false")
 
-data = yaml.safe_load(Path(sys.argv[1]).read_text(encoding="utf-8")) or {}
-if data.get("executor", {}).get("send_commands") is not False:
-    raise SystemExit("Refusing profile operation: config/app.yaml executor.send_commands must be false")
+raise SystemExit("Refusing profile operation: config/app.yaml executor.send_commands was not found")
 PY
 }
 
