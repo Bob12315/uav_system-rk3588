@@ -273,7 +273,7 @@ class AlignDescendAction(ActionModule):
         if altitude.value_m <= self.config.min_altitude_m:
             self.done = True
             detail = self._detail(
-                command=self._command_with_yaw_hold(_inactive_command()),
+                command=self._command_with_yaw_hold(_inactive_command(), data),
                 command_detail={**command_detail, "hold_reason": "min_altitude_reached"},
                 height_m=altitude.value_m,
                 altitude_source=altitude.source,
@@ -291,7 +291,7 @@ class AlignDescendAction(ActionModule):
                 else "finish_altitude_reached"
             )
             detail = self._detail(
-                command=self._command_with_yaw_hold(_inactive_command()),
+                command=self._command_with_yaw_hold(_inactive_command(), data),
                 command_detail={**command_detail, "hold_reason": done_reason},
                 height_m=altitude.value_m,
                 altitude_source=altitude.source,
@@ -300,7 +300,7 @@ class AlignDescendAction(ActionModule):
             return ActionResult(actions=[], done=True, reason=done_reason, detail=detail)
 
         reason = "align_descending" if target_ok and command_detail["aligned"] else command_detail["hold_reason"]
-        command = self._command_with_yaw_hold(command)
+        command = self._command_with_yaw_hold(command, data)
         detail = self._detail(
             command=command,
             command_detail={**command_detail, "hold_reason": reason},
@@ -337,22 +337,45 @@ class AlignDescendAction(ActionModule):
             return
         self.yaw_hold_rad = self._current_yaw_rad(context)
 
-    def _command_with_yaw_hold(self, command: dict[str, Any]) -> dict[str, Any]:
+    def _command_with_yaw_hold(self, command: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
         if self.yaw_hold_rad is None:
             return command
-        return {**command, "yaw_hold_rad": self.yaw_hold_rad}
+        result = {**command, "yaw_hold_rad": self.yaw_hold_rad}
+        if context is not None:
+            velocity_yaw_rad = self._current_valid_attitude_yaw_rad(context)
+            if velocity_yaw_rad is not None:
+                result["velocity_yaw_rad"] = velocity_yaw_rad
+        return result
 
     def _current_yaw_rad(self, context: dict[str, Any]) -> float | None:
-        value = self._float_from(context, "yaw")
+        value = self._float_from(context, "arm_heading_yaw_rad")
+        if value is not None:
+            return self._normalize_yaw(value)
+
+        value = self._current_valid_attitude_yaw_rad(context)
         if value is not None:
             return value
+
+        value = self._float_from(context, "yaw")
+        if value is not None:
+            return self._normalize_yaw(value)
+        return None
+
+    def _current_valid_attitude_yaw_rad(self, context: dict[str, Any]) -> float | None:
         for section_name in ("drone", "vehicle"):
             section = context.get(section_name)
-            if isinstance(section, dict):
-                value = self._float_from(section, "yaw")
-                if value is not None:
-                    return value
+            if not isinstance(section, dict):
+                continue
+            if not bool(section.get("attitude_valid", False)):
+                continue
+            value = self._float_from(section, "yaw")
+            if value is not None:
+                return self._normalize_yaw(value)
         return None
+
+    @staticmethod
+    def _normalize_yaw(yaw: float) -> float:
+        return math.atan2(math.sin(yaw), math.cos(yaw))
 
     def _inputs(self, context: dict[str, Any]) -> dict[str, Any]:
         inputs: dict[str, Any] = {}

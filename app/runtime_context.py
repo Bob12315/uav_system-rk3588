@@ -85,10 +85,12 @@ class RuntimeContextBuilder:
 
     def _update_arm_heading(self, drone: dict[str, object]) -> None:
         vehicle_armed = bool(drone.get("armed", False))
+        attitude_valid = bool(drone.get("attitude_valid", False))
         yaw = self._float_or_none(drone.get("yaw"))
         if (
             vehicle_armed
             and self._last_vehicle_armed is False
+            and attitude_valid
             and yaw is not None
         ):
             self.arm_heading_yaw_rad = yaw
@@ -98,6 +100,7 @@ class RuntimeContextBuilder:
         elif (
             vehicle_armed
             and self.arm_heading_yaw_rad is None
+            and attitude_valid
             and yaw is not None
         ):
             self.arm_heading_yaw_rad = yaw

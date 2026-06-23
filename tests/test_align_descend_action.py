@@ -362,23 +362,44 @@ def test_output_is_plain_json_serializable_dict() -> None:
     json.dumps(result.to_dict())
 
 
-def test_align_descend_records_start_yaw_hold_from_drone_context() -> None:
+def test_align_descend_uses_arm_heading_yaw_before_current_drone_yaw() -> None:
     action = AlignDescendAction()
     action.start()
 
-    result = action.update(_active_context(drone={"relative_altitude": 5.0, "yaw": 1.25}))
+    result = action.update(
+        _active_context(
+            arm_heading_yaw_rad=1.7,
+            drone={"relative_altitude": 5.0, "attitude_valid": True, "yaw": 0.2},
+        )
+    )
 
     assert result.detail["yaw_hold_active"] is True
-    assert result.detail["yaw_hold_rad"] == pytest.approx(1.25)
-    assert result.detail["command"]["yaw_hold_rad"] == pytest.approx(1.25)
+    assert result.detail["yaw_hold_rad"] == pytest.approx(1.7)
+    assert result.detail["command"]["yaw_hold_rad"] == pytest.approx(1.7)
+    assert result.detail["command"]["velocity_yaw_rad"] == pytest.approx(0.2)
+
+
+def test_align_descend_does_not_lock_default_yaw_when_attitude_invalid() -> None:
+    action = AlignDescendAction()
+    action.start()
+
+    result = action.update(
+        _active_context(
+            drone={"relative_altitude": 5.0, "attitude_valid": False, "yaw": 0.0},
+        )
+    )
+
+    assert result.detail["yaw_hold_active"] is False
+    assert result.detail["yaw_hold_rad"] is None
+    assert "yaw_hold_rad" not in result.detail["command"]
 
 
 def test_align_descend_keeps_initial_yaw_hold_across_updates() -> None:
     action = AlignDescendAction()
     action.start()
 
-    action.update(_active_context(drone={"relative_altitude": 5.0, "yaw": 1.25}))
-    result = action.update(_active_context(drone={"relative_altitude": 5.0, "yaw": -0.5}))
+    action.update(_active_context(drone={"relative_altitude": 5.0, "attitude_valid": True, "yaw": 1.25}))
+    result = action.update(_active_context(drone={"relative_altitude": 5.0, "attitude_valid": True, "yaw": -0.5}))
 
     assert result.detail["yaw_hold_rad"] == pytest.approx(1.25)
     assert result.detail["command"]["yaw_hold_rad"] == pytest.approx(1.25)

@@ -13,6 +13,7 @@ def _params(**overrides: object) -> dict[str, object]:
         "waypoints": [{"x": 1.0, "y": 2.0, "altitude_m": 5.0}],
         "capture_updates_per_waypoint": 1,
         "max_updates_per_waypoint": 10,
+        "yaw_mode": "hold",
     }
     params.update(overrides)
     return params

@@ -172,7 +172,7 @@ def action_lab_specs() -> list[dict[str, Any]]:
             "default_params": {
                 "waypoint_mode": "absolute",
                 "altitude_m": 3.5,
-                "yaw_mode": "hold",
+                "yaw_mode": "arm_heading",
                 "waypoints": [
                     {"x": -1.2, "y": 28, "altitude_m": 3},
                     {"x": 1.2, "y": 28, "altitude_m": 3},

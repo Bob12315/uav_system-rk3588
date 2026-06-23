@@ -83,7 +83,7 @@ def test_multi_view_localize_spec_defaults_to_drop_zone_absolute_waypoints() -> 
     params = spec["default_params"]
 
     assert params["waypoint_mode"] == "absolute"
-    assert params["yaw_mode"] == "hold"
+    assert params["yaw_mode"] == "arm_heading"
     assert params["altitude_m"] == 3.5
     assert isinstance(params["waypoints"], list)
     assert len(params["waypoints"]) == 4

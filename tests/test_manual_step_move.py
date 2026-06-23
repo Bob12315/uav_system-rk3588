@@ -10,7 +10,8 @@ from telemetry_link.command_dispatcher import CommandResult
 
 def _fake_runner(*, local_x=10.0, local_y=20.0, local_z=-3.0, yaw=0.0,
                  local_position_valid=True, action_running=False,
-                 mission_running=False):
+                 mission_running=False, attitude_valid=True,
+                 arm_heading_yaw_rad=None):
     """Minimal fake SystemRunner with a fake link_manager."""
 
     class FakeManager:
@@ -59,8 +60,12 @@ def _fake_runner(*, local_x=10.0, local_y=20.0, local_z=-3.0, yaw=0.0,
                 "local_y": local_y,
                 "local_z": local_z,
                 "yaw": yaw,
+                "attitude_valid": attitude_valid,
             }
         },
+        "runtime_context_builder": type("FakeRuntimeContext", (), {
+            "arm_heading_yaw_rad": arm_heading_yaw_rad,
+        })(),
         "action_runtime_lock": type("FakeLock2", (), {
             "__enter__": lambda s: None,
             "__exit__": lambda s, *a: None,
@@ -161,6 +166,19 @@ def test_missing_yaw() -> None:
     from app.system_runner import SystemRunner
     result = SystemRunner.manual_step_move(fake, "forward", 1.0)
     assert result.ok is False
+
+
+def test_manual_step_move_sends_arm_heading_yaw_not_current_yaw() -> None:
+    manager, fake = _fake_runner(
+        local_x=10,
+        local_y=20,
+        local_z=-3,
+        yaw=0.3,
+        arm_heading_yaw_rad=1.2,
+    )
+    from app.system_runner import SystemRunner
+    SystemRunner.manual_step_move(fake, "forward", 1.0)
+    assert manager.last_local_pos["yaw"] == pytest.approx(1.2)
 
 
 def test_clears_before_sending() -> None:

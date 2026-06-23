@@ -19,7 +19,7 @@ class GotoWaypointAction(ActionModule):
         if altitude_m <= 0.0:
             raise ValueError("altitude_m must be positive")
 
-        yaw_mode = str(data.get("yaw_mode", "hold")).strip().lower()
+        yaw_mode = str(data.get("yaw_mode", "arm_heading")).strip().lower()
         if yaw_mode not in {"hold", "fixed", "arm_heading"}:
             raise ValueError("yaw_mode must be hold, fixed, or arm_heading")
         yaw_rad = None
@@ -112,7 +112,7 @@ class GotoWaypointAction(ActionModule):
         self.target_y = 0.0
         self.target_z = 0.0
         self.altitude_m = 0.0
-        self.yaw_mode = "hold"
+        self.yaw_mode = "arm_heading"
         self.yaw_rad: float | None = None
         self.frame = 1
         self.tolerance_xy_m = 0.3

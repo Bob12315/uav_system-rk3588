@@ -157,7 +157,7 @@ class MultiViewLocalizeAction(ActionModule):
         self.waypoint_mode = "relative_to_start"
         self.radius_m = 0.8
         self.altitude_m_obs = 3.0
-        self.yaw_mode = "hold"
+        self.yaw_mode = "arm_heading"
         self.yaw_rad = None
         self.frame = 1
         self.capture_updates_per_waypoint = 3

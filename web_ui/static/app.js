@@ -47,7 +47,7 @@ const DEFAULT_ACTION_MISSION_STEPS = [
       x: 0.0,
       y: 0.0,
       altitude_m: 1.5,
-      yaw_mode: "hold",
+      yaw_mode: "arm_heading",
     },
   },
   {
@@ -74,7 +74,7 @@ const actionMissionPresets = {
         x: 0.0,
         y: 0.0,
         altitude_m: 1.5,
-        yaw_mode: "hold",
+        yaw_mode: "arm_heading",
       },
     },
   ],
@@ -102,7 +102,7 @@ const actionMissionPresets = {
         x: 0.0,
         y: 0.0,
         altitude_m: 1.5,
-        yaw_mode: "hold",
+        yaw_mode: "arm_heading",
       },
     },
     {

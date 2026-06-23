@@ -654,9 +654,16 @@ class SystemRunner:
             x = float(drone["local_x"])
             y = float(drone["local_y"])
             z = float(drone["local_z"])
-            yaw = float(drone["yaw"])
         except (KeyError, ValueError):
-            return CommandResult(False, "current local position or yaw unavailable")
+            return CommandResult(False, "current local position unavailable")
+        yaw = self.runtime_context_builder.arm_heading_yaw_rad
+        if yaw is None:
+            if not bool(drone.get("attitude_valid", False)):
+                return CommandResult(False, "arm heading yaw unavailable and current attitude is invalid")
+            try:
+                yaw = float(drone["yaw"])
+            except (KeyError, ValueError):
+                return CommandResult(False, "current yaw unavailable")
         if not math.isfinite(x) or not math.isfinite(y) or not math.isfinite(z) or not math.isfinite(yaw):
             return CommandResult(False, "current position or yaw is not finite")
 

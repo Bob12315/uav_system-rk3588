@@ -29,21 +29,31 @@ def test_start_rejects_invalid_altitude_and_yaw_options() -> None:
         action.start({"x": 1, "y": 2, "altitude_m": 5, "yaw_mode": "fixed"})
 
 
-def test_hold_yaw_default_outputs_local_position_without_yaw() -> None:
+def test_default_arm_heading_yaw_outputs_context_yaw() -> None:
+    action = GotoWaypointAction()
+    action.start({"x": 1, "y": 2, "altitude_m": 5})
+
+    result = action.update({"arm_heading_yaw_rad": 0.75})
+
+    assert result.reason == "waiting_for_position"
+    assert result.actions[0] == {
+        "action_type": "local_position",
+        "params": {"x": 1.0, "y": 2.0, "z": -5.0, "frame": 1, "yaw": pytest.approx(0.75)},
+        "key": "goto_waypoint_1.00_2.00_5.00",
+        "once": False,
+        "priority": 4,
+    }
+
+
+def test_default_arm_heading_yaw_missing_context_fails_without_action() -> None:
     action = GotoWaypointAction()
     action.start({"x": 1, "y": 2, "altitude_m": 5})
 
     result = action.update({})
 
-    assert result.reason == "waiting_for_position"
-    assert result.actions[0] == {
-        "action_type": "local_position",
-        "params": {"x": 1.0, "y": 2.0, "z": -5.0, "frame": 1},
-        "key": "goto_waypoint_1.00_2.00_5.00",
-        "once": False,
-        "priority": 4,
-    }
-    assert "yaw" not in result.actions[0]["params"]
+    assert result.failed is True
+    assert result.reason == "missing_arm_heading_yaw"
+    assert result.actions == []
 
 
 def test_fixed_yaw_outputs_yaw_param() -> None:
@@ -87,7 +97,7 @@ def test_arm_heading_yaw_missing_context_fails_without_action() -> None:
 
 def test_missing_position_waits_and_keeps_outputting_action() -> None:
     action = GotoWaypointAction()
-    action.start({"x": 1, "y": 2, "altitude_m": 5})
+    action.start({"x": 1, "y": 2, "altitude_m": 5, "yaw_mode": "hold"})
 
     result = action.update({})
 
@@ -100,7 +110,7 @@ def test_missing_position_waits_and_keeps_outputting_action() -> None:
 
 def test_not_reached_outputs_action_and_error_detail() -> None:
     action = GotoWaypointAction()
-    action.start({"x": 1, "y": 2, "altitude_m": 5})
+    action.start({"x": 1, "y": 2, "altitude_m": 5, "yaw_mode": "hold"})
 
     result = action.update({"local_position": {"x": 10, "y": 2, "z": -4}})
 
@@ -113,7 +123,7 @@ def test_not_reached_outputs_action_and_error_detail() -> None:
 
 def test_reached_completes_without_action() -> None:
     action = GotoWaypointAction()
-    action.start({"x": 1, "y": 2, "altitude_m": 5})
+    action.start({"x": 1, "y": 2, "altitude_m": 5, "yaw_mode": "hold"})
 
     result = action.update({"local_position": {"x": 1.1, "y": 2.1, "z": -5.1}})
 
@@ -125,7 +135,7 @@ def test_reached_completes_without_action() -> None:
 
 def test_min_hold_updates_requires_consecutive_reached_updates() -> None:
     action = GotoWaypointAction()
-    action.start({"x": 1, "y": 2, "altitude_m": 5, "min_hold_updates": 2})
+    action.start({"x": 1, "y": 2, "altitude_m": 5, "min_hold_updates": 2, "yaw_mode": "hold"})
 
     first = action.update({"local_position": {"x": 1.0, "y": 2.0, "z": -5.0}})
     second = action.update({"local_position": {"x": 1.0, "y": 2.0, "z": -5.0}})
@@ -140,7 +150,7 @@ def test_min_hold_updates_requires_consecutive_reached_updates() -> None:
 
 def test_supports_drone_local_position_context() -> None:
     action = GotoWaypointAction()
-    action.start({"x": 1, "y": 2, "altitude_m": 5})
+    action.start({"x": 1, "y": 2, "altitude_m": 5, "yaw_mode": "hold"})
 
     result = action.update(
         {"drone": {"local_position": {"x": 1.0, "y": 2.0, "z": -5.0}}}
@@ -175,7 +185,7 @@ def test_reset_returns_to_not_started_state() -> None:
 
 def test_action_output_is_plain_dict_not_mission_action() -> None:
     action = GotoWaypointAction()
-    action.start({"x": 1, "y": 2, "altitude_m": 5})
+    action.start({"x": 1, "y": 2, "altitude_m": 5, "yaw_mode": "hold"})
 
     result = action.update({})
 

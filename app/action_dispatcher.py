@@ -547,6 +547,7 @@ class ActionDispatcher:
         vz = float(command.get("vz_body_mps", command.get("vz_cmd", 0.0)))
         yaw_rate = float(command.get("yaw_rate_cmd", 0.0))
         yaw_hold_rad = self._optional_float(command.get("yaw_hold_rad"))
+        velocity_yaw_rad = self._optional_float(command.get("velocity_yaw_rad"))
         priority = int(action.get("priority", command.get("priority", 5)))
         send_vx = vx if active else 0.0
         send_vy = vy if active else 0.0
@@ -568,6 +569,9 @@ class ActionDispatcher:
         }
         if yaw_hold_rad is not None:
             detail["yaw_hold_rad"] = yaw_hold_rad
+            if velocity_yaw_rad is None:
+                velocity_yaw_rad = yaw_hold_rad
+            detail["velocity_yaw_rad"] = velocity_yaw_rad
         if not valid:
             return {
                 "status": "skipped",
@@ -587,17 +591,18 @@ class ActionDispatcher:
             local_vx, local_vy = self._body_velocity_to_local_ned(
                 vx_forward_mps=send_vx,
                 vy_right_mps=send_vy,
-                yaw_rad=yaw_hold_rad,
+                yaw_rad=velocity_yaw_rad,
             )
             self._logger.info(
                 (
                     "action_lab dispatch yaw_hold_velocity local_vx_north_mps=%.3f "
-                    "local_vy_east_mps=%.3f vz_down_mps=%.3f yaw_hold_rad=%s "
+                    "local_vy_east_mps=%.3f vz_down_mps=%.3f velocity_yaw_rad=%s yaw_hold_rad=%s "
                     "frame=LOCAL_NED priority=%s key=%s active=%s"
                 ),
                 local_vx,
                 local_vy,
                 send_vz,
+                self._format_log_float(velocity_yaw_rad),
                 self._format_log_float(yaw_hold_rad),
                 priority,
                 action.get("key"),

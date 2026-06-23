@@ -360,6 +360,16 @@ class CommandSender(threading.Thread):
             if command.yaw is None
             else self._velocity_with_yaw_type_mask()
         )
+        self.logger.debug(
+            "send velocity setpoint frame=%s vx=%.3f vy=%.3f vz=%.3f yaw=%s yaw_rate=%.3f type_mask=%s",
+            command.frame,
+            command.vx,
+            command.vy,
+            command.vz,
+            command.yaw,
+            command.yaw_rate,
+            type_mask,
+        )
         master.mav.set_position_target_local_ned_send(
             0,
             master.target_system,

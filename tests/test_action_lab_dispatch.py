@@ -143,6 +143,7 @@ def _survey_params(**overrides: object) -> dict[str, object]:
         "capture_updates_per_waypoint": 3,
         "max_updates_per_waypoint": 200,
         "detection_source": "scene",
+        "yaw_mode": "hold",
     }
     data.update(overrides)
     return data
@@ -181,6 +182,7 @@ def _align_result(command: dict[str, object]) -> dict[str, object]:
 
 
 def _set_drone_snapshot(runner: SystemRunner, **drone: object) -> None:
+    drone.setdefault("attitude_valid", True)
     with runner.control_command_log_lock:
         runner.latest_snapshot = {"drone": drone}
 
@@ -633,6 +635,25 @@ def test_align_descend_flight_command_dispatches_yaw_hold_when_present() -> None
     assert dispatch["sent"][0]["frame"] == 1
 
 
+def test_align_descend_flight_command_uses_velocity_yaw_for_local_conversion() -> None:
+    runner = _runner()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_start_action("align_descend", {}, send_actions=True)
+
+    dispatch = runner._dispatch_action_lab_result(
+        _align_result(_flight_command(yaw_hold_rad=1.57, velocity_yaw_rad=0.25))
+    )
+
+    vx_north = 0.4 * math.cos(0.25) - (-0.329) * math.sin(0.25)
+    vy_east = 0.4 * math.sin(0.25) + (-0.329) * math.cos(0.25)
+    assert runner.services.link_manager.calls == [
+        ("send_velocity_command", (vx_north, vy_east, 0.0, 1, 1.57), 0)
+    ]
+    assert all(call[0] != "send_body_velocity" for call in runner.services.link_manager.calls)
+    assert dispatch["sent"][0]["yaw_hold_rad"] == 1.57
+    assert dispatch["sent"][0]["velocity_yaw_rad"] == 0.25
+
+
 def test_align_descend_flight_command_once_false_dispatches_each_update() -> None:
     runner = _runner()
     runner.controller_switches.set_send_commands(True)
@@ -780,6 +801,16 @@ def test_arm_heading_context_fallback_when_first_seen_armed() -> None:
     assert context["arm_heading_fallback"] is True
 
 
+def test_arm_heading_context_ignores_invalid_attitude_default_yaw() -> None:
+    runner = _runner()
+    _set_drone_snapshot(runner, armed=True, yaw=0.0, attitude_valid=False)
+
+    context = runner.action_lab_context()
+
+    assert "arm_heading_yaw_rad" not in context
+    assert runner.arm_heading_yaw_rad is None
+
+
 def test_payload_release_dispatches_release_pwm_to_servo_output_8() -> None:
     runner = _runner()
     runner.controller_switches.set_send_commands(True)
@@ -922,10 +953,13 @@ class _FakeLinkFallback:
             raise RuntimeError("local position failed")
         self.calls.append(("local_position", (x, y, z, frame, yaw), priority))
 
-    def send_velocity_command(self, vx, vy, vz, frame=1):
+    def send_velocity_command(self, vx, vy, vz, frame=1, yaw_rad=None):
         if self.fail:
             raise RuntimeError("velocity failed")
-        self.calls.append(("send_velocity_command", (vx, vy, vz, frame), 0))
+        args = (vx, vy, vz, frame)
+        if yaw_rad is not None:
+            args = (*args, yaw_rad)
+        self.calls.append(("send_velocity_command", args, 0))
 
     def set_servo(self, channel, pwm, priority=3):
         if self.fail:
@@ -1276,6 +1310,7 @@ def test_multi_view_localize_dispatches_local_position_when_gates_enabled() -> N
     """multi_view_localize is in allowed_actions for local_position dispatch."""
     runner = _runner()
     runner.controller_switches.set_send_commands(True)
+    runner.arm_heading_yaw_rad = 0.0
 
     runner.action_lab_start_action(
         "multi_view_localize",
