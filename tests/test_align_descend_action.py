@@ -176,6 +176,8 @@ def test_normal_unaligned_update_outputs_active_zero_descent() -> None:
     assert result.actions == []
     assert result.detail["command"]["active"] is True
     assert result.detail["command"]["vz_cmd"] == pytest.approx(0.0)
+    assert result.detail["ex_cam"] == pytest.approx(0.2)
+    assert result.detail["ey_cam"] == pytest.approx(0.02)
     assert result.reason == "aligning"
 
 
@@ -358,6 +360,28 @@ def test_output_is_plain_json_serializable_dict() -> None:
     assert isinstance(result.detail["command"], dict)
     assert result.detail["command"]["type"] == "flight_command"
     json.dumps(result.to_dict())
+
+
+def test_align_descend_records_start_yaw_hold_from_drone_context() -> None:
+    action = AlignDescendAction()
+    action.start()
+
+    result = action.update(_active_context(drone={"relative_altitude": 5.0, "yaw": 1.25}))
+
+    assert result.detail["yaw_hold_active"] is True
+    assert result.detail["yaw_hold_rad"] == pytest.approx(1.25)
+    assert result.detail["command"]["yaw_hold_rad"] == pytest.approx(1.25)
+
+
+def test_align_descend_keeps_initial_yaw_hold_across_updates() -> None:
+    action = AlignDescendAction()
+    action.start()
+
+    action.update(_active_context(drone={"relative_altitude": 5.0, "yaw": 1.25}))
+    result = action.update(_active_context(drone={"relative_altitude": 5.0, "yaw": -0.5}))
+
+    assert result.detail["yaw_hold_rad"] == pytest.approx(1.25)
+    assert result.detail["command"]["yaw_hold_rad"] == pytest.approx(1.25)
 
 
 def test_above_finish_altitude_allows_descent_when_aligned() -> None:

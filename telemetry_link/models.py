@@ -119,6 +119,7 @@ class ControlCommand:
     vx: float = 0.0
     vy: float = 0.0
     vz: float = 0.0
+    yaw: float | None = None
     yaw_rate: float = 0.0
     timestamp: float = 0.0
     frame: int = 1

@@ -20,3 +20,19 @@
     "require_target_locked": true
   }
 }
+
+{
+  "detection_source": "scene",
+  "class_names": [
+    "bucket"
+  ],
+  "min_confidence": 0.35,
+  "camera": {
+    "fov_x_deg": 76,
+    "fov_y_deg": 61,
+    "image_x_sign": 1,
+    "image_y_sign": -1
+  }
+}
+如果后面发现定位出来的坐标“距离中心偏差被放大”，说明 FOV 设大了，往 72 / 58 调。
+如果坐标偏差被压小，实际桶在图像边缘但算出来离中心不够远，说明 FOV 设小了，往 80 / 64 调。

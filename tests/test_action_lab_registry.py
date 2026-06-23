@@ -102,6 +102,26 @@ def test_multi_view_localize_spec_defaults_to_drop_zone_absolute_waypoints() -> 
     assert params["fusion"]["min_cluster_size"] == 3
 
 
+def test_align_descend_spec_defaults_to_low_altitude_descent_profile() -> None:
+    spec = next(item for item in action_lab_specs() if item["name"] == "align_descend")
+    params = spec["default_params"]
+    config = params["config"]
+
+    assert params["expected_dt_s"] == 0.1
+    assert params["finish_altitude_m"] == 1.1
+    assert config["kp_vx"] == 0.7
+    assert config["kp_vy"] == 0.7
+    assert config["max_vx_mps"] == 0.25
+    assert config["max_vy_mps"] == 0.25
+    assert config["descend_speed_mps"] == 0.12
+    assert config["max_ex_cam"] == 0.045
+    assert config["max_ey_cam"] == 0.045
+    assert config["deadband_ex_cam"] == 0.012
+    assert config["deadband_ey_cam"] == 0.012
+    assert config["min_altitude_m"] == 1.0
+    assert config["require_target_locked"] is True
+
+
 def test_action_lab_does_not_auto_register_default_registry() -> None:
     create_action_lab_registry()
 

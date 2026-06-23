@@ -331,6 +331,24 @@ def test_send_body_velocity_queues_velocity_with_body_ned_frame() -> None:
     assert cmd.frame == BODY_NED
 
 
+def test_send_body_velocity_can_hold_yaw() -> None:
+    from telemetry_link.frames import BODY_NED
+
+    manager = LinkManager(_config())
+    manager.send_body_velocity(
+        vx_forward_mps=0.1,
+        vy_right_mps=-0.2,
+        vz_down_mps=0.3,
+        yaw_rad=1.25,
+    )
+
+    cmd = _cq(manager).peek_control()
+    assert cmd is not None
+    assert cmd.command_type == ControlType.VELOCITY
+    assert cmd.yaw == pytest.approx(1.25)
+    assert cmd.frame == BODY_NED
+
+
 def test_set_servo_output_pwm_delegates_to_set_servo() -> None:
     manager = LinkManager(_config())
     manager.set_servo_output_pwm(servo_output=8, pwm=1200, priority=3)

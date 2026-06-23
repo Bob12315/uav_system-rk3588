@@ -355,7 +355,11 @@ class CommandSender(threading.Thread):
             self.logger.warning("failed to send gimbal rate command: %s", exc)
 
     def _send_velocity(self, master, command: ControlCommand) -> None:
-        type_mask = self._velocity_only_type_mask()
+        type_mask = (
+            self._velocity_only_type_mask()
+            if command.yaw is None
+            else self._velocity_with_yaw_type_mask()
+        )
         master.mav.set_position_target_local_ned_send(
             0,
             master.target_system,
@@ -371,7 +375,7 @@ class CommandSender(threading.Thread):
             0.0,
             0.0,
             0.0,
-            0.0,
+            0.0 if command.yaw is None else command.yaw,
             command.yaw_rate,
         )
 
@@ -391,6 +395,9 @@ class CommandSender(threading.Thread):
             self._velocity_yaw_rate_type_mask()
             | mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
         )
+
+    def _velocity_with_yaw_type_mask(self) -> int:
+        return self._velocity_only_type_mask() & ~mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE
 
     def _send_yaw_rate(self, master, command: ControlCommand) -> None:
         type_mask = self._velocity_yaw_rate_type_mask()

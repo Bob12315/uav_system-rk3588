@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import math
 import time
 from typing import Any
 
@@ -104,12 +105,26 @@ class ActionDispatcher:
             command = detail.get("command")
             if isinstance(command, dict) and command.get("type") == "flight_command":
                 self._logger.info(
-                    "align_descend command generated flight_command vx=%.3f vy=%.3f vz=%.3f active=%s valid=%s",
+                    (
+                        "align_descend command generated flight_command "
+                        "vx=%.3f vy=%.3f vz=%.3f yaw_rate=%.3f active=%s valid=%s "
+                        "hold_reason=%s aligned=%s ex_cam=%s ey_cam=%s height_m=%s "
+                        "finish_altitude_m=%s min_altitude_m=%s yaw_hold_rad=%s"
+                    ),
                     float(command.get("vx_cmd", 0.0)),
                     float(command.get("vy_cmd", 0.0)),
                     float(command.get("vz_cmd", 0.0)),
+                    float(command.get("yaw_rate_cmd", 0.0)),
                     bool(command.get("active", False)),
                     bool(command.get("valid", False)),
+                    str(detail.get("hold_reason", "")),
+                    bool(detail.get("aligned", False)),
+                    self._format_log_float(detail.get("ex_cam")),
+                    self._format_log_float(detail.get("ey_cam")),
+                    self._format_log_float(detail.get("height_m")),
+                    self._format_log_float(detail.get("finish_altitude_m")),
+                    self._format_log_float(detail.get("min_altitude_m")),
+                    self._format_log_float(command.get("yaw_hold_rad", detail.get("yaw_hold_rad"))),
                 )
                 actions.append(
                     {
@@ -126,6 +141,13 @@ class ActionDispatcher:
             send_commands=send_commands,
             link_manager=link_manager,
         )
+
+    @staticmethod
+    def _format_log_float(value: object) -> str:
+        try:
+            return f"{float(value):.3f}"
+        except (TypeError, ValueError):
+            return "None"
 
     # ------------------------------------------------------------------
     # dispatch_actions — mirrors _dispatch_action_lab_actions
@@ -269,6 +291,15 @@ class ActionDispatcher:
         if not isinstance(params, dict):
             raise ValueError("missing_params")
         return params
+
+    @staticmethod
+    def _optional_float(value: object) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     def _dispatch_set_servo(
         self,
@@ -515,6 +546,7 @@ class ActionDispatcher:
         vy = float(command.get("vy_body_mps", command.get("vy_cmd", 0.0)))
         vz = float(command.get("vz_body_mps", command.get("vz_cmd", 0.0)))
         yaw_rate = float(command.get("yaw_rate_cmd", 0.0))
+        yaw_hold_rad = self._optional_float(command.get("yaw_hold_rad"))
         priority = int(action.get("priority", command.get("priority", 5)))
         send_vx = vx if active else 0.0
         send_vy = vy if active else 0.0
@@ -534,6 +566,8 @@ class ActionDispatcher:
             "enable_body": bool(command.get("enable_body", False)),
             "enable_approach": bool(command.get("enable_approach", False)),
         }
+        if yaw_hold_rad is not None:
+            detail["yaw_hold_rad"] = yaw_hold_rad
         if not valid:
             return {
                 "status": "skipped",
@@ -542,18 +576,66 @@ class ActionDispatcher:
             }
 
         frame = BODY_NED
+        if yaw_hold_rad is not None:
+            sender = getattr(link_manager, "send_velocity_command", None) if link_manager is not None else None
+            if not callable(sender):
+                return {
+                    "status": "skipped",
+                    "reason": "flight_command_dispatch_not_available",
+                    "detail": detail,
+                }
+            local_vx, local_vy = self._body_velocity_to_local_ned(
+                vx_forward_mps=send_vx,
+                vy_right_mps=send_vy,
+                yaw_rad=yaw_hold_rad,
+            )
+            self._logger.info(
+                (
+                    "action_lab dispatch yaw_hold_velocity local_vx_north_mps=%.3f "
+                    "local_vy_east_mps=%.3f vz_down_mps=%.3f yaw_hold_rad=%s "
+                    "frame=LOCAL_NED priority=%s key=%s active=%s"
+                ),
+                local_vx,
+                local_vy,
+                send_vz,
+                self._format_log_float(yaw_hold_rad),
+                priority,
+                action.get("key"),
+                active,
+            )
+            if self._callable_accepts_keyword(sender, "yaw_rad"):
+                sender(local_vx, local_vy, send_vz, frame=LOCAL_NED, yaw_rad=yaw_hold_rad)
+            else:
+                sender(local_vx, local_vy, send_vz, frame=LOCAL_NED)
+            detail["frame"] = LOCAL_NED
+            detail["vx_local_ned"] = local_vx
+            detail["vy_local_ned"] = local_vy
+            return {"status": "sent", "detail": detail}
+
         # prefer semantic wrapper (T4)
         wrapper = getattr(link_manager, "send_body_velocity", None)
         if callable(wrapper):
+            yaw_supported = self._callable_accepts_keyword(wrapper, "yaw_rad")
             self._logger.info(
-                "action_lab dispatch send_body_velocity vx_forward_mps=%.3f vy_right_mps=%.3f vz_down_mps=%.3f key=%s active=%s",
-                send_vx, send_vy, send_vz, action.get("key"), active,
+                (
+                    "action_lab dispatch send_body_velocity vx_forward_mps=%.3f "
+                    "vy_right_mps=%.3f vz_down_mps=%.3f yaw_hold_rad=%s key=%s active=%s"
+                ),
+                send_vx,
+                send_vy,
+                send_vz,
+                self._format_log_float(yaw_hold_rad),
+                action.get("key"),
+                active,
             )
-            wrapper(
-                vx_forward_mps=send_vx,
-                vy_right_mps=send_vy,
-                vz_down_mps=send_vz,
-            )
+            kwargs: dict[str, object] = {
+                "vx_forward_mps": send_vx,
+                "vy_right_mps": send_vy,
+                "vz_down_mps": send_vz,
+            }
+            if yaw_hold_rad is not None and yaw_supported:
+                kwargs["yaw_rad"] = yaw_hold_rad
+            wrapper(**kwargs)
             detail["frame"] = frame
             return {"status": "sent", "detail": detail}
 
@@ -566,18 +648,38 @@ class ActionDispatcher:
                 "detail": detail,
             }
         self._logger.info(
-            "action_lab dispatch flight_command vx=%.3f vy=%.3f vz=%.3f yaw_rate=%.3f frame=BODY_NED priority=%s key=%s active=%s",
+            (
+                "action_lab dispatch flight_command vx=%.3f vy=%.3f vz=%.3f "
+                "yaw_rate=%.3f yaw_hold_rad=%s frame=BODY_NED priority=%s key=%s active=%s"
+            ),
             send_vx,
             send_vy,
             send_vz,
             send_yaw_rate,
+            self._format_log_float(yaw_hold_rad),
             priority,
             action.get("key"),
             active,
         )
-        sender(send_vx, send_vy, send_vz, frame=frame)
+        if yaw_hold_rad is not None and self._callable_accepts_keyword(sender, "yaw_rad"):
+            sender(send_vx, send_vy, send_vz, frame=frame, yaw_rad=yaw_hold_rad)
+        else:
+            sender(send_vx, send_vy, send_vz, frame=frame)
         detail["frame"] = frame
         return {"status": "sent", "detail": detail}
+
+    @staticmethod
+    def _body_velocity_to_local_ned(
+        *,
+        vx_forward_mps: float,
+        vy_right_mps: float,
+        yaw_rad: float,
+    ) -> tuple[float, float]:
+        cos_yaw = math.cos(yaw_rad)
+        sin_yaw = math.sin(yaw_rad)
+        vx_north = vx_forward_mps * cos_yaw - vy_right_mps * sin_yaw
+        vy_east = vx_forward_mps * sin_yaw + vy_right_mps * cos_yaw
+        return vx_north, vy_east
 
     def _dispatch_yolo_lock_target(
         self,

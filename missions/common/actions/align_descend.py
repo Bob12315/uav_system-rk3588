@@ -165,6 +165,7 @@ class AlignDescendAction(ActionModule):
         self.finish_altitude_m = self._finish_altitude(data)
         if self.finish_altitude_m is not None and self.finish_altitude_m < self.config.min_altitude_m:
             self.finish_altitude_m = self.config.min_altitude_m
+        self.yaw_hold_rad = None
         self.started = True
         self.stopped = False
         self.done = False
@@ -216,6 +217,7 @@ class AlignDescendAction(ActionModule):
             )
 
         data = context or {}
+        self._ensure_yaw_hold(data)
         inputs = self._inputs(data)
         altitude = self._current_altitude(data)
         if altitude is None:
@@ -271,7 +273,7 @@ class AlignDescendAction(ActionModule):
         if altitude.value_m <= self.config.min_altitude_m:
             self.done = True
             detail = self._detail(
-                command=_inactive_command(),
+                command=self._command_with_yaw_hold(_inactive_command()),
                 command_detail={**command_detail, "hold_reason": "min_altitude_reached"},
                 height_m=altitude.value_m,
                 altitude_source=altitude.source,
@@ -289,7 +291,7 @@ class AlignDescendAction(ActionModule):
                 else "finish_altitude_reached"
             )
             detail = self._detail(
-                command=_inactive_command(),
+                command=self._command_with_yaw_hold(_inactive_command()),
                 command_detail={**command_detail, "hold_reason": done_reason},
                 height_m=altitude.value_m,
                 altitude_source=altitude.source,
@@ -298,6 +300,7 @@ class AlignDescendAction(ActionModule):
             return ActionResult(actions=[], done=True, reason=done_reason, detail=detail)
 
         reason = "align_descending" if target_ok and command_detail["aligned"] else command_detail["hold_reason"]
+        command = self._command_with_yaw_hold(command)
         detail = self._detail(
             command=command,
             command_detail={**command_detail, "hold_reason": reason},
@@ -326,7 +329,30 @@ class AlignDescendAction(ActionModule):
         self.hold_updates = 0
         self.retries = 0
         self.failure_reason = ""
+        self.yaw_hold_rad: float | None = None
         self.last_detail: dict[str, Any] = {}
+
+    def _ensure_yaw_hold(self, context: dict[str, Any]) -> None:
+        if self.yaw_hold_rad is not None:
+            return
+        self.yaw_hold_rad = self._current_yaw_rad(context)
+
+    def _command_with_yaw_hold(self, command: dict[str, Any]) -> dict[str, Any]:
+        if self.yaw_hold_rad is None:
+            return command
+        return {**command, "yaw_hold_rad": self.yaw_hold_rad}
+
+    def _current_yaw_rad(self, context: dict[str, Any]) -> float | None:
+        value = self._float_from(context, "yaw")
+        if value is not None:
+            return value
+        for section_name in ("drone", "vehicle"):
+            section = context.get(section_name)
+            if isinstance(section, dict):
+                value = self._float_from(section, "yaw")
+                if value is not None:
+                    return value
+        return None
 
     def _inputs(self, context: dict[str, Any]) -> dict[str, Any]:
         inputs: dict[str, Any] = {}
@@ -442,6 +468,10 @@ class AlignDescendAction(ActionModule):
             "finish_altitude_m": self.finish_altitude_m,
             "min_altitude_m": self.config.min_altitude_m,
             "altitude_source": altitude_source,
+            "ex_cam": command_detail.get("ex_cam"),
+            "ey_cam": command_detail.get("ey_cam"),
+            "yaw_hold_rad": self.yaw_hold_rad,
+            "yaw_hold_active": self.yaw_hold_rad is not None,
             "reached_finish_altitude": bool(reached_finish_altitude),
             "lost_updates": int(self.lost_updates),
             "hold_updates": int(self.hold_updates),

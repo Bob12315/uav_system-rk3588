@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 
 from app.app_config import build_arg_parser, load_app_config
@@ -34,10 +35,14 @@ class FakeLink:
         vx_forward_mps: float,
         vy_right_mps: float,
         vz_down_mps: float,
+        yaw_rad: float | None = None,
     ) -> None:
         if self.fail:
             raise RuntimeError("velocity failed")
-        self.calls.append(("send_body_velocity", (vx_forward_mps, vy_right_mps, vz_down_mps), 0))
+        args = (vx_forward_mps, vy_right_mps, vz_down_mps)
+        if yaw_rad is not None:
+            args = (*args, yaw_rad)
+        self.calls.append(("send_body_velocity", args, 0))
 
     def set_servo_output_pwm(
         self,
@@ -68,10 +73,20 @@ class FakeLink:
             raise RuntimeError("local position failed")
         self.calls.append(("local_position", (x, y, z, frame, yaw), priority))
 
-    def send_velocity_command(self, vx: float, vy: float, vz: float, frame: int = 1) -> None:
+    def send_velocity_command(
+        self,
+        vx: float,
+        vy: float,
+        vz: float,
+        frame: int = 1,
+        yaw_rad: float | None = None,
+    ) -> None:
         if self.fail:
             raise RuntimeError("velocity failed")
-        self.calls.append(("send_velocity_command", (vx, vy, vz, frame), 0))
+        args = (vx, vy, vz, frame)
+        if yaw_rad is not None:
+            args = (*args, yaw_rad)
+        self.calls.append(("send_velocity_command", args, 0))
 
     # ── navigation queue management (added T2) ────────────────────
 
@@ -600,6 +615,24 @@ def test_align_descend_flight_command_dispatches_when_gates_enabled() -> None:
     assert payload["note"] == "action_dispatch_enabled"
 
 
+def test_align_descend_flight_command_dispatches_yaw_hold_when_present() -> None:
+    runner = _runner()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_start_action("align_descend", {}, send_actions=True)
+
+    dispatch = runner._dispatch_action_lab_result(
+        _align_result(_flight_command(yaw_hold_rad=1.25))
+    )
+
+    vx_north = 0.4 * math.cos(1.25) - (-0.329) * math.sin(1.25)
+    vy_east = 0.4 * math.sin(1.25) + (-0.329) * math.cos(1.25)
+    assert runner.services.link_manager.calls == [
+        ("send_velocity_command", (vx_north, vy_east, 0.0, 1, 1.25), 0)
+    ]
+    assert dispatch["sent"][0]["yaw_hold_rad"] == 1.25
+    assert dispatch["sent"][0]["frame"] == 1
+
+
 def test_align_descend_flight_command_once_false_dispatches_each_update() -> None:
     runner = _runner()
     runner.controller_switches.set_send_commands(True)
@@ -927,6 +960,22 @@ def test_fallback_flight_command_still_dispatches_when_wrappers_absent() -> None
         ("send_velocity_command", (0.4, -0.329, 0.0, 8), 0)
     ]
     assert dispatch["sent"][0]["action_type"] == "flight_command"
+
+
+def test_fallback_flight_command_passes_yaw_hold_when_supported() -> None:
+    runner = _runner_fallback()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_start_action("align_descend", {}, send_actions=True)
+    dispatch = runner._dispatch_action_lab_result(
+        _align_result(_flight_command(yaw_hold_rad=-0.4))
+    )
+    vx_north = 0.4 * math.cos(-0.4) - (-0.329) * math.sin(-0.4)
+    vy_east = 0.4 * math.sin(-0.4) + (-0.329) * math.cos(-0.4)
+    assert runner.services.link_manager.calls == [
+        ("send_velocity_command", (vx_north, vy_east, 0.0, 1, -0.4), 0)
+    ]
+    assert dispatch["sent"][0]["yaw_hold_rad"] == -0.4
+    assert dispatch["sent"][0]["frame"] == 1
 
 
 def test_fallback_set_servo_still_dispatches_when_wrappers_absent() -> None:

@@ -1,4 +1,4 @@
-# RK3588 SITL YOLO 感知进程模板
+# RK3588 YOLO 感知进程配置
 # 说明：
 # - 本进程仅支持 RKNN INT8 模型，通过 RK3588 NPU 推理。
 # - bool 值只能使用 true / false，不要加引号。
@@ -8,17 +8,17 @@
 # RKNN 模型
 # -----------------------------------------------------------------------------
 # 仓库内随代码管理的 RKNN INT8 模型。
-model_path: "../data/models/sitl-rk3588.rknn"
+model_path: "../data/models/target_yolo11n_best-rk3588.rknn"
 
 # 模型类别名称，顺序必须与 RKNN 模型输出一致。
-class_names: ["bucket"]
+class_names: ["Target", "bucket", "class_2"]
 
 # 检测置信度阈值与 NMS IOU 阈值，范围通常为 0.0 到 1.0。
 conf_thres: 0.25
 iou_thres: 0.45
 
-# 类别过滤列表。空列表表示保留全部类别，例如 [0] 表示只保留 class_id=0。
-classes: []
+# 类别过滤列表。空列表表示保留全部类别，例如 [1] 表示只保留 class_id=1。
+classes: [1]
 
 # -----------------------------------------------------------------------------
 # 视频输入
