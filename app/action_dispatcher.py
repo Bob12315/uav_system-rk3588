@@ -108,7 +108,7 @@ class ActionDispatcher:
                     (
                         "align_descend command generated flight_command "
                         "vx=%.3f vy=%.3f vz=%.3f yaw_rate=%.3f active=%s valid=%s "
-                        "hold_reason=%s aligned=%s ex_cam=%s ey_cam=%s height_m=%s "
+                        "hold_reason=%s aligned=%s slow_descending=%s ex_cam=%s ey_cam=%s height_m=%s "
                         "finish_altitude_m=%s min_altitude_m=%s yaw_hold_rad=%s"
                     ),
                     float(command.get("vx_cmd", 0.0)),
@@ -119,6 +119,7 @@ class ActionDispatcher:
                     bool(command.get("valid", False)),
                     str(detail.get("hold_reason", "")),
                     bool(detail.get("aligned", False)),
+                    bool(detail.get("slow_descending", False)),
                     self._format_log_float(detail.get("ex_cam")),
                     self._format_log_float(detail.get("ey_cam")),
                     self._format_log_float(detail.get("height_m")),

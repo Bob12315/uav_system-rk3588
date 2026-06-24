@@ -8,7 +8,7 @@
 # RKNN 模型
 # -----------------------------------------------------------------------------
 # 仓库内随代码管理的 RKNN INT8 模型。
-model_path: "../data/models/best-int8-rk3588.rknn"
+model_path: "../data/models/target_yolo11n_best-rk3588.rknn"
 
 # 模型类别名称，顺序必须与 RKNN 模型输出一致。
 class_names: ["Target", "bucket", "class_2"]
@@ -18,7 +18,7 @@ conf_thres: 0.25
 iou_thres: 0.45
 
 # 类别过滤列表。空列表表示保留全部类别，例如 [0] 表示只保留 class_id=0。
-classes: []
+classes: [1]
 
 # -----------------------------------------------------------------------------
 # 视频输入
@@ -45,7 +45,7 @@ latest_frame: true
 selection_mode: "class"
 
 # selection_mode=class 时优先选择的类别名。
-target_class: "target"
+target_class: "bucket"
 
 # 锁定目标连续丢失多少帧后自动解锁。
 max_lost_frames: 5

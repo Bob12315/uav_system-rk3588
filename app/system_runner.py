@@ -11,6 +11,7 @@ import time
 from collections import deque
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import yaml
@@ -249,8 +250,23 @@ class SystemRunner:
                 drone = self.services.get_drone_state()
                 gimbal = self.services.get_gimbal_state()
                 link = self.services.get_link_status()
-                self.services.fusion_manager.update(perception, drone, gimbal)
+                fused = self.services.fusion_manager.update(perception, drone, gimbal)
                 command = FlightCommand(valid=True)
+                inputs = SimpleNamespace(
+                    dt=loop_sleep_sec,
+                    target_valid=bool(getattr(perception, "target_valid", False)),
+                    target_locked=str(getattr(perception, "tracking_state", "")).lower() == "locked",
+                    control_allowed=bool(getattr(drone, "control_allowed", False)),
+                )
+                mission = SimpleNamespace(
+                    active_mode="action_lab_only",
+                    hold_reason="mission_disabled",
+                )
+                mode_status = SimpleNamespace(
+                    mode_name="action_lab_only",
+                    hold_reason="mission_disabled",
+                )
+                health = SimpleNamespace(hold_reason="mission_disabled")
 
                 with self.control_command_log_lock:
                     self.latest_mission_name = "action_lab_only"
@@ -271,6 +287,23 @@ class SystemRunner:
                             "reason": "mission_modules_unavailable",
                         },
                     }
+
+                self._record_blackbox_cycle(
+                    now=now,
+                    dt=loop_sleep_sec,
+                    perception=perception,
+                    drone=drone,
+                    gimbal=gimbal,
+                    link=link,
+                    fused=fused,
+                    inputs=inputs,
+                    mission=mission,
+                    health=health,
+                    mode_status=mode_status,
+                    raw_command=command,
+                    shaped_command=command,
+                    send_commands=False,
+                )
 
                 if (now - last_print_time) >= print_sleep_sec:
                     self.logger.info(
@@ -359,7 +392,7 @@ class SystemRunner:
                     self._maybe_recenter_gimbal_after_target_loss(now, bool(inputs.target_valid), False)
                 self.last_send_commands = bool(controller_enabled.send_commands)
 
-                self.blackbox.record(
+                self._record_blackbox_cycle(
                     now=now,
                     dt=inputs.dt,
                     perception=perception,
@@ -429,6 +462,94 @@ class SystemRunner:
         except Exception:
             self.logger.exception("app control loop failed")
             self.stop_event.set()
+
+    def _record_blackbox_cycle(
+        self,
+        *,
+        now: float,
+        dt: float,
+        perception,
+        drone,
+        gimbal,
+        link,
+        fused,
+        inputs,
+        mission,
+        health,
+        mode_status,
+        raw_command: FlightCommand,
+        shaped_command: FlightCommand,
+        send_commands: bool,
+    ) -> None:
+        armed = bool(getattr(drone, "armed", False))
+        if not self.blackbox.update_recording_state(armed=armed, now=now):
+            return
+        self.blackbox.record(
+            now=now,
+            dt=dt,
+            perception=perception,
+            drone=drone,
+            gimbal=gimbal,
+            link=link,
+            fused=fused,
+            inputs=inputs,
+            mission=mission,
+            health=health,
+            mode_status=mode_status,
+            raw_command=raw_command,
+            shaped_command=shaped_command,
+            send_commands=send_commands,
+            debug=self._blackbox_debug_payload(
+                raw_command=raw_command,
+                shaped_command=shaped_command,
+                send_commands=send_commands,
+            ),
+        )
+
+    def _blackbox_debug_payload(
+        self,
+        *,
+        raw_command: FlightCommand,
+        shaped_command: FlightCommand,
+        send_commands: bool,
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "commands": {
+                "raw": asdict(raw_command),
+                "shaped": asdict(shaped_command),
+                "send_commands": bool(send_commands),
+            }
+        }
+        runtime = getattr(self, "action_runtime", None)
+        if runtime is None:
+            return payload
+
+        last_result = runtime.last_result or {}
+        dispatcher = runtime.dispatcher
+        action_name = runtime.action_name
+        action_payload: dict[str, object] = {
+            "name": action_name,
+            "state": runtime.runner.state,
+            "send_actions_requested": bool(runtime.send_actions_requested),
+            "last_result": last_result,
+            "last_dispatch": getattr(dispatcher, "last_dispatch", {}),
+        }
+        payload["action_lab"] = action_payload
+
+        if action_name == "align_descend" or _result_name_is_align_descend(last_result):
+            detail = last_result.get("detail") if isinstance(last_result, dict) else {}
+            if not isinstance(detail, dict):
+                detail = {}
+            payload["align_descend"] = {
+                "state": runtime.runner.state,
+                "reason": last_result.get("reason", "") if isinstance(last_result, dict) else "",
+                "done": bool(last_result.get("done", False)) if isinstance(last_result, dict) else False,
+                "failed": bool(last_result.get("failed", False)) if isinstance(last_result, dict) else False,
+                "detail": detail,
+                "command": detail.get("command", {}),
+                "last_dispatch": getattr(dispatcher, "last_dispatch", {}),
+            }
+        return payload
 
     def _update_active_mode(self, mode_name: str, inputs) -> tuple[FlightCommand, object]:
         if mode_name == "IDLE":
@@ -1463,3 +1584,20 @@ class _Status:
         self.valid = valid
         self.hold_reason = hold_reason
         self.detail = {}
+
+
+def _result_name_is_align_descend(result: object) -> bool:
+    if not isinstance(result, dict):
+        return False
+    reason = str(result.get("reason", ""))
+    if reason.startswith("align_") or reason in {
+        "aligning",
+        "align_descending",
+        "descending",
+        "descending_slow",
+        "min_altitude_reached",
+        "finish_altitude_reached",
+    }:
+        return True
+    detail = result.get("detail")
+    return isinstance(detail, dict) and "ex_cam" in detail and "ey_cam" in detail and "height_m" in detail

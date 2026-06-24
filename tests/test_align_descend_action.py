@@ -43,8 +43,13 @@ def test_align_descend_config_defaults() -> None:
         {"max_vx_mps": 0.0},
         {"max_vy_mps": 0.0},
         {"descend_speed_mps": 0.0},
+        {"slow_descend_speed_mps": -0.01},
         {"max_ex_cam": 0.0},
         {"max_ey_cam": 0.0},
+        {"slow_descend_max_ex_cam": 0.0},
+        {"slow_descend_max_ey_cam": 0.0},
+        {"slow_descend_max_ex_cam": 0.05, "max_ex_cam": 0.1},
+        {"slow_descend_max_ey_cam": 0.05, "max_ey_cam": 0.1},
         {"deadband_ex_cam": -0.1},
         {"deadband_ey_cam": -0.1},
         {"deadband_ex_cam": 0.2, "max_ex_cam": 0.1},
@@ -104,6 +109,41 @@ def test_helper_descends_only_when_aligned() -> None:
     assert aligned_command["vz_cmd"] == pytest.approx(0.3)
     assert unaligned_detail["aligned"] is False
     assert unaligned_command["vz_cmd"] == pytest.approx(0.0)
+
+
+def test_helper_allows_configured_slow_descent_near_alignment() -> None:
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.08, ey_cam=0.02),
+        AlignDescendConfig(
+            max_ex_cam=0.05,
+            max_ey_cam=0.05,
+            slow_descend_speed_mps=0.06,
+            slow_descend_max_ex_cam=0.10,
+            slow_descend_max_ey_cam=0.10,
+        ),
+    )
+
+    assert detail["aligned"] is False
+    assert detail["slow_descending"] is True
+    assert detail["hold_reason"] == "descending_slow"
+    assert command["vz_cmd"] == pytest.approx(0.06)
+
+
+def test_helper_does_not_slow_descend_outside_configured_window() -> None:
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.12, ey_cam=0.02),
+        AlignDescendConfig(
+            max_ex_cam=0.05,
+            max_ey_cam=0.05,
+            slow_descend_speed_mps=0.06,
+            slow_descend_max_ex_cam=0.10,
+            slow_descend_max_ey_cam=0.10,
+        ),
+    )
+
+    assert detail["slow_descending"] is False
+    assert detail["hold_reason"] == "aligning"
+    assert command["vz_cmd"] == pytest.approx(0.0)
 
 
 @pytest.mark.parametrize(

@@ -15,8 +15,11 @@ class AlignDescendConfig:
     max_vx_mps: float = 0.4
     max_vy_mps: float = 0.4
     descend_speed_mps: float = 0.2
+    slow_descend_speed_mps: float = 0.0
     max_ex_cam: float = 0.06
     max_ey_cam: float = 0.06
+    slow_descend_max_ex_cam: float | None = None
+    slow_descend_max_ey_cam: float | None = None
     min_altitude_m: float = 2.0
     deadband_ex_cam: float = 0.015
     deadband_ey_cam: float = 0.015
@@ -31,9 +34,25 @@ class AlignDescendConfig:
         for name in ("max_vx_mps", "max_vy_mps", "descend_speed_mps"):
             if float(getattr(self, name)) <= 0.0:
                 raise ValueError(f"{name} must be positive")
+        if float(self.slow_descend_speed_mps) < 0.0:
+            raise ValueError("slow_descend_speed_mps must be non-negative")
         for name in ("max_ex_cam", "max_ey_cam"):
             if float(getattr(self, name)) <= 0.0:
                 raise ValueError(f"{name} must be positive")
+        for name in ("slow_descend_max_ex_cam", "slow_descend_max_ey_cam"):
+            value = getattr(self, name)
+            if value is not None and float(value) <= 0.0:
+                raise ValueError(f"{name} must be positive when set")
+        if (
+            self.slow_descend_max_ex_cam is not None
+            and float(self.slow_descend_max_ex_cam) < float(self.max_ex_cam)
+        ):
+            raise ValueError("slow_descend_max_ex_cam must be >= max_ex_cam")
+        if (
+            self.slow_descend_max_ey_cam is not None
+            and float(self.slow_descend_max_ey_cam) < float(self.max_ey_cam)
+        ):
+            raise ValueError("slow_descend_max_ey_cam must be >= max_ey_cam")
         if float(self.min_altitude_m) <= 0.0:
             raise ValueError("min_altitude_m must be positive")
         for name in ("deadband_ex_cam", "deadband_ey_cam"):
@@ -87,6 +106,7 @@ def compute_align_descend_command(
 
     if enabled:
         aligned = abs(ex_cam) <= config.max_ex_cam and abs(ey_cam) <= config.max_ey_cam
+        slow_descend_aligned = _slow_descend_aligned(ex_cam, ey_cam, config)
         ex_for_control = 0.0 if abs(ex_cam) <= config.deadband_ex_cam else ex_cam
         ey_for_control = 0.0 if abs(ey_cam) <= config.deadband_ey_cam else ey_cam
         vx = _clamp(
@@ -99,8 +119,15 @@ def compute_align_descend_command(
             -config.max_vy_mps,
             config.max_vy_mps,
         )
-        vz = config.descend_speed_mps if aligned else 0.0
-        reason = "descending" if aligned else "aligning"
+        if aligned:
+            vz = config.descend_speed_mps
+            reason = "descending"
+        elif slow_descend_aligned:
+            vz = config.slow_descend_speed_mps
+            reason = "descending_slow"
+        else:
+            vz = 0.0
+            reason = "aligning"
 
     command = _command_dict(
         vx=vx,
@@ -111,6 +138,7 @@ def compute_align_descend_command(
     detail = {
         "enabled": enabled,
         "aligned": aligned,
+        "slow_descending": bool(enabled and not aligned and vz > 0.0),
         "hold_reason": reason,
         "ex_cam": ex_cam,
         "ey_cam": ey_cam,
@@ -485,6 +513,7 @@ class AlignDescendAction(ActionModule):
             "command": command,
             "enabled": bool(command_detail.get("enabled", False)),
             "aligned": bool(command_detail.get("aligned", False)),
+            "slow_descending": bool(command_detail.get("slow_descending", False)),
             "hold_reason": str(command_detail.get("hold_reason", "")),
             "height_m": height_m,
             "current_altitude_m": height_m,
@@ -605,3 +634,13 @@ def _inactive_command() -> dict[str, Any]:
 
 def _clamp(value: float, low: float, high: float) -> float:
     return min(high, max(low, value))
+
+
+def _slow_descend_aligned(ex_cam: float, ey_cam: float, config: AlignDescendConfig) -> bool:
+    if config.slow_descend_speed_mps <= 0.0:
+        return False
+    max_ex = config.slow_descend_max_ex_cam
+    max_ey = config.slow_descend_max_ey_cam
+    if max_ex is None or max_ey is None:
+        return False
+    return abs(ex_cam) <= max_ex and abs(ey_cam) <= max_ey

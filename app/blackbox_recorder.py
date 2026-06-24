@@ -33,22 +33,73 @@ class BlackboxRecorder:
         self._last_mode: str | None = None
         self._last_target_valid: bool | None = None
         self._last_send_commands: bool | None = None
+        self._recording = False
+        self._session_started_at: float | None = None
+        self._session_reason = ""
 
     @property
     def path(self) -> Path | None:
         return self._path
+
+    @property
+    def recording(self) -> bool:
+        return self._recording
 
     def start(self) -> None:
         if not self.enabled:
             return
         try:
             self.output_dir.mkdir(parents=True, exist_ok=True)
-            self._open_new_file()
-            self._write_meta()
             self._prune_old_files()
         except OSError as exc:
             self.enabled = False
             self.logger.warning("blackbox disabled because it cannot start: %s", exc)
+
+    def update_recording_state(
+        self,
+        *,
+        armed: bool,
+        now: float,
+        start_reason: str = "vehicle_armed",
+        stop_reason: str = "vehicle_disarmed",
+    ) -> bool:
+        if not self.enabled:
+            return False
+        if armed:
+            if not self._recording:
+                self.start_recording(now=now, reason=start_reason)
+        elif self._recording:
+            self.stop_recording(now=now, reason=stop_reason)
+        return self._recording
+
+    def start_recording(self, *, now: float | None = None, reason: str = "manual") -> None:
+        if not self.enabled:
+            return
+        try:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            self._session_started_at = time.time() if now is None else now
+            self._session_reason = reason
+            self._open_new_file()
+            self._write_meta()
+            self._prune_old_files()
+            self._recording = True
+        except OSError as exc:
+            self.enabled = False
+            self._recording = False
+            self.logger.warning("blackbox disabled because it cannot start: %s", exc)
+
+    def stop_recording(self, *, now: float | None = None, reason: str = "manual") -> None:
+        if not self._recording and self._handle is None:
+            return
+        path = self._path
+        try:
+            if self._handle is not None:
+                self._handle.flush()
+        finally:
+            self.close()
+            self._recording = False
+        if path is not None:
+            self.logger.info("blackbox saved to %s reason=%s", path, reason)
 
     def close(self) -> None:
         if self._handle is None:
@@ -76,11 +127,12 @@ class BlackboxRecorder:
         raw_command: FlightCommand,
         shaped_command: FlightCommand,
         send_commands: bool,
+        debug: dict[str, Any] | None = None,
     ) -> None:
         if not self.enabled:
             return
         if self._handle is None:
-            self.start()
+            self.start_recording(now=now, reason="record_called")
             if self._handle is None:
                 return
         if self.sample_interval_sec > 0 and (now - self._last_record_time) < self.sample_interval_sec:
@@ -120,6 +172,8 @@ class BlackboxRecorder:
             payload["command_shaped"] = self._command_dict(shaped_command)
         if self.config.include_events:
             payload["events"] = events
+        if debug:
+            payload["debug"] = debug
 
         self._write(payload, now)
 
@@ -133,6 +187,12 @@ class BlackboxRecorder:
                 break
             index += 1
         self._path = path
+        self._seq = 0
+        self._writes_since_flush = 0
+        self._last_record_time = 0.0
+        self._last_mode = None
+        self._last_target_valid = None
+        self._last_send_commands = None
         self._handle = path.open("a", encoding="utf-8")
         self.logger.info("blackbox recording to %s", path)
 
@@ -145,6 +205,10 @@ class BlackboxRecorder:
             "format": "uav_project.blackbox.v1",
             "data_file": self._path.name,
             "sample_hz": self.config.sample_hz,
+            "trigger": {
+                "reason": self._session_reason,
+                "started_at": self._session_started_at,
+            },
             "fields": {
                 "perception": self.config.include_perception,
                 "drone": self.config.include_drone,
