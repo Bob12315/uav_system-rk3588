@@ -146,7 +146,12 @@
           "deadband_ex_cam": 0.012,
           "deadband_ey_cam": 0.012,
           "min_altitude_m": 1.0,
-          "require_target_locked": true
+          "require_target_locked": true,
+          "height_gain_enabled": true,
+          "gain_low_altitude_m": 1.2,
+          "gain_high_altitude_m": 3.0,
+          "gain_high_scale": 0.30,
+          "scale_max_velocity_with_height": true
         }
       }
     },
@@ -243,7 +248,12 @@
           "deadband_ex_cam": 0.012,
           "deadband_ey_cam": 0.012,
           "min_altitude_m": 1.0,
-          "require_target_locked": true
+          "require_target_locked": true,
+          "height_gain_enabled": true,
+          "gain_low_altitude_m": 1.2,
+          "gain_high_altitude_m": 3.0,
+          "gain_high_scale": 0.30,
+          "scale_max_velocity_with_height": true
         }
       }
     },

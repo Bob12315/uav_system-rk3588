@@ -123,6 +123,11 @@ def test_align_descend_spec_defaults_to_low_altitude_descent_profile() -> None:
     assert config["deadband_ey_cam"] == 0.012
     assert config["min_altitude_m"] == 1.0
     assert config["require_target_locked"] is True
+    assert config["height_gain_enabled"] is True
+    assert config["gain_low_altitude_m"] == 1.2
+    assert config["gain_high_altitude_m"] == 3.0
+    assert config["gain_high_scale"] == 0.30
+    assert config["scale_max_velocity_with_height"] is True
 
 
 def test_action_lab_does_not_auto_register_default_registry() -> None:
