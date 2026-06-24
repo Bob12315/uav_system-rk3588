@@ -56,6 +56,13 @@ def test_align_descend_config_defaults() -> None:
         {"deadband_ey_cam": 0.2, "max_ey_cam": 0.1},
         {"vx_sign": 0.0},
         {"vy_sign": 0.0},
+        {"gain_low_altitude_m": 0.0},
+        {"gain_low_altitude_m": -0.1},
+        {"gain_low_altitude_m": 1.0, "gain_high_altitude_m": 1.0},
+        {"gain_low_altitude_m": 1.0, "gain_high_altitude_m": 0.9},
+        {"gain_high_scale": 0.0},
+        {"gain_high_scale": -0.1},
+        {"gain_high_scale": 1.1},
     ],
 )
 def test_align_descend_config_rejects_invalid_values(kwargs) -> None:
@@ -73,6 +80,107 @@ def test_helper_maps_camera_error_to_body_velocity_with_signs() -> None:
     assert command["vx_cmd"] == pytest.approx(-0.16)
     assert command["vy_cmd"] == pytest.approx(0.08)
     assert command["vz_cmd"] == pytest.approx(0.0)
+
+
+def test_height_gain_disabled_by_default_keeps_existing_behavior() -> None:
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.1, ey_cam=0.2),
+        AlignDescendConfig(),
+        altitude_m=3.0,
+    )
+
+    assert command["vx_cmd"] == pytest.approx(-0.16)
+    assert command["vy_cmd"] == pytest.approx(0.08)
+    assert detail["height_gain_scale"] == pytest.approx(1.0)
+    assert detail["kp_vx_eff"] == pytest.approx(0.8)
+    assert detail["kp_vy_eff"] == pytest.approx(0.8)
+    assert detail["max_vx_eff"] == pytest.approx(0.4)
+    assert detail["max_vy_eff"] == pytest.approx(0.4)
+
+
+def test_height_gain_scales_kp_and_max_velocity_at_high_altitude() -> None:
+    config = AlignDescendConfig(
+        height_gain_enabled=True,
+        gain_low_altitude_m=1.0,
+        gain_high_altitude_m=3.0,
+        gain_high_scale=0.25,
+        kp_vx=0.8,
+        kp_vy=0.8,
+        max_vx_mps=0.4,
+        max_vy_mps=0.4,
+    )
+
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.1, ey_cam=0.2),
+        config,
+        altitude_m=3.0,
+    )
+
+    assert detail["height_gain_scale"] == pytest.approx(0.25)
+    assert command["vx_cmd"] == pytest.approx(-0.04)
+    assert command["vy_cmd"] == pytest.approx(0.02)
+    assert detail["max_vx_eff"] == pytest.approx(0.1)
+    assert detail["max_vy_eff"] == pytest.approx(0.1)
+
+
+def test_height_gain_restores_original_kp_at_low_altitude() -> None:
+    config = AlignDescendConfig(
+        height_gain_enabled=True,
+        gain_low_altitude_m=1.0,
+        gain_high_altitude_m=3.0,
+        gain_high_scale=0.25,
+    )
+
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.1, ey_cam=0.2),
+        config,
+        altitude_m=1.0,
+    )
+
+    assert detail["height_gain_scale"] == pytest.approx(1.0)
+    assert command["vx_cmd"] == pytest.approx(-0.16)
+    assert command["vy_cmd"] == pytest.approx(0.08)
+
+
+def test_height_gain_interpolates_linearly_between_altitudes() -> None:
+    _, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.1, ey_cam=0.2),
+        AlignDescendConfig(
+            height_gain_enabled=True,
+            gain_low_altitude_m=1.0,
+            gain_high_altitude_m=3.0,
+            gain_high_scale=0.25,
+        ),
+        altitude_m=2.0,
+    )
+
+    assert detail["height_gain_scale"] == pytest.approx(0.625)
+
+
+def test_height_gain_can_leave_max_velocity_unscaled() -> None:
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=1.0, ey_cam=1.0),
+        AlignDescendConfig(
+            height_gain_enabled=True,
+            gain_low_altitude_m=1.0,
+            gain_high_altitude_m=3.0,
+            gain_high_scale=0.25,
+            kp_vx=0.8,
+            kp_vy=0.8,
+            max_vx_mps=0.4,
+            max_vy_mps=0.4,
+            scale_max_velocity_with_height=False,
+        ),
+        altitude_m=3.0,
+    )
+
+    assert detail["height_gain_scale"] == pytest.approx(0.25)
+    assert detail["kp_vx_eff"] == pytest.approx(0.2)
+    assert detail["kp_vy_eff"] == pytest.approx(0.2)
+    assert detail["max_vx_eff"] == pytest.approx(0.4)
+    assert detail["max_vy_eff"] == pytest.approx(0.4)
+    assert command["vx_cmd"] == pytest.approx(-0.2)
+    assert command["vy_cmd"] == pytest.approx(0.2)
 
 
 def test_helper_clamps_velocity() -> None:

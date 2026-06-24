@@ -26,6 +26,11 @@ class AlignDescendConfig:
     vx_sign: float = -1.0
     vy_sign: float = 1.0
     require_target_locked: bool = True
+    height_gain_enabled: bool = False
+    gain_low_altitude_m: float = 1.2
+    gain_high_altitude_m: float = 3.0
+    gain_high_scale: float = 0.3
+    scale_max_velocity_with_height: bool = True
 
     def __post_init__(self) -> None:
         for name in ("kp_vx", "kp_vy"):
@@ -66,6 +71,12 @@ class AlignDescendConfig:
             raise ValueError("vx_sign must be non-zero")
         if float(self.vy_sign) == 0.0:
             raise ValueError("vy_sign must be non-zero")
+        if float(self.gain_low_altitude_m) <= 0.0:
+            raise ValueError("gain_low_altitude_m must be positive")
+        if float(self.gain_high_altitude_m) <= float(self.gain_low_altitude_m):
+            raise ValueError("gain_high_altitude_m must be > gain_low_altitude_m")
+        if float(self.gain_high_scale) <= 0.0 or float(self.gain_high_scale) > 1.0:
+            raise ValueError("gain_high_scale must be > 0 and <= 1")
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,10 +88,20 @@ class _AltitudeSample:
 def compute_align_descend_command(
     inputs: dict[str, Any],
     config: AlignDescendConfig,
+    altitude_m: float | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     control_allowed = bool(inputs.get("control_allowed", True))
     target_valid = bool(inputs.get("target_valid") or inputs.get("vision_valid"))
     target_locked = bool(inputs.get("target_locked", True))
+    gain_scale = _height_gain_scale(altitude_m, config)
+    kp_vx_eff = config.kp_vx * gain_scale
+    kp_vy_eff = config.kp_vy * gain_scale
+    if config.scale_max_velocity_with_height:
+        max_vx_eff = config.max_vx_mps * gain_scale
+        max_vy_eff = config.max_vy_mps * gain_scale
+    else:
+        max_vx_eff = config.max_vx_mps
+        max_vy_eff = config.max_vy_mps
 
     reason = ""
     ex_cam = 0.0
@@ -110,14 +131,14 @@ def compute_align_descend_command(
         ex_for_control = 0.0 if abs(ex_cam) <= config.deadband_ex_cam else ex_cam
         ey_for_control = 0.0 if abs(ey_cam) <= config.deadband_ey_cam else ey_cam
         vx = _clamp(
-            config.vx_sign * config.kp_vx * ey_for_control,
-            -config.max_vx_mps,
-            config.max_vx_mps,
+            config.vx_sign * kp_vx_eff * ey_for_control,
+            -max_vx_eff,
+            max_vx_eff,
         )
         vy = _clamp(
-            config.vy_sign * config.kp_vy * ex_for_control,
-            -config.max_vy_mps,
-            config.max_vy_mps,
+            config.vy_sign * kp_vy_eff * ex_for_control,
+            -max_vy_eff,
+            max_vy_eff,
         )
         if aligned:
             vz = config.descend_speed_mps
@@ -142,6 +163,11 @@ def compute_align_descend_command(
         "hold_reason": reason,
         "ex_cam": ex_cam,
         "ey_cam": ey_cam,
+        "height_gain_scale": gain_scale,
+        "kp_vx_eff": kp_vx_eff,
+        "kp_vy_eff": kp_vy_eff,
+        "max_vx_eff": max_vx_eff,
+        "max_vy_eff": max_vy_eff,
     }
     return command, detail
 
@@ -260,7 +286,11 @@ class AlignDescendAction(ActionModule):
                 detail=detail,
             )
 
-        command, command_detail = compute_align_descend_command(inputs, self.config)
+        command, command_detail = compute_align_descend_command(
+            inputs,
+            self.config,
+            altitude_m=altitude.value_m,
+        )
         target_ok = command_detail["enabled"] is True
 
         if target_ok:
@@ -522,6 +552,11 @@ class AlignDescendAction(ActionModule):
             "altitude_source": altitude_source,
             "ex_cam": command_detail.get("ex_cam"),
             "ey_cam": command_detail.get("ey_cam"),
+            "height_gain_scale": command_detail.get("height_gain_scale"),
+            "kp_vx_eff": command_detail.get("kp_vx_eff"),
+            "kp_vy_eff": command_detail.get("kp_vy_eff"),
+            "max_vx_eff": command_detail.get("max_vx_eff"),
+            "max_vy_eff": command_detail.get("max_vy_eff"),
             "yaw_hold_rad": self.yaw_hold_rad,
             "yaw_hold_active": self.yaw_hold_rad is not None,
             "reached_finish_altitude": bool(reached_finish_altitude),
@@ -634,6 +669,29 @@ def _inactive_command() -> dict[str, Any]:
 
 def _clamp(value: float, low: float, high: float) -> float:
     return min(high, max(low, value))
+
+
+def _height_gain_scale(altitude_m: float | None, config: AlignDescendConfig) -> float:
+    if not config.height_gain_enabled or altitude_m is None:
+        return 1.0
+    try:
+        height = float(altitude_m)
+    except (TypeError, ValueError):
+        return 1.0
+    if not math.isfinite(height):
+        return 1.0
+
+    low = float(config.gain_low_altitude_m)
+    high = float(config.gain_high_altitude_m)
+    high_scale = float(config.gain_high_scale)
+
+    if height <= low:
+        return 1.0
+    if height >= high:
+        return high_scale
+
+    t = (height - low) / (high - low)
+    return 1.0 + t * (high_scale - 1.0)
 
 
 def _slow_descend_aligned(ex_cam: float, ey_cam: float, config: AlignDescendConfig) -> bool:
