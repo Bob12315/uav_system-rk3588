@@ -127,7 +127,7 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "hold_updates_required": 3,
                 "max_retries": 1,
                 "max_updates": 120,
-                "finish_altitude_m": 1.1,
+                "finish_altitude_m": 0.8,
                 "config": {
                     "kp_vx": 0.85,
                     "kp_vy": 0.85,
@@ -141,7 +141,7 @@ def action_lab_specs() -> list[dict[str, Any]]:
                     "slow_descend_max_ey_cam": 0.10,
                     "deadband_ex_cam": 0.012,
                     "deadband_ey_cam": 0.012,
-                    "min_altitude_m": 1.0,
+                    "min_altitude_m": 0.8,
                     "require_target_locked": True,
                     "height_gain_enabled": True,
                     "gain_low_altitude_m": 1.2,
