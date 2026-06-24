@@ -114,14 +114,14 @@
         "config": {
           "kp_vx": 0.85,
           "kp_vy": 0.85,
-          "max_vx_mps": 0.30,
-          "max_vy_mps": 0.30,
+          "max_vx_mps": 0.25,
+          "max_vy_mps": 0.25,
           "descend_speed_mps": 0.16,
           "slow_descend_speed_mps": 0.06,
           "max_ex_cam": 0.075,
           "max_ey_cam": 0.075,
-          "slow_descend_max_ex_cam": 0.12,
-          "slow_descend_max_ey_cam": 0.12,
+          "slow_descend_max_ex_cam": 0.10,
+          "slow_descend_max_ey_cam": 0.10,
           "deadband_ex_cam": 0.012,
           "deadband_ey_cam": 0.012,
           "min_altitude_m": 1.0,
@@ -129,7 +129,7 @@
           "height_gain_enabled": true,
           "gain_low_altitude_m": 1.2,
           "gain_high_altitude_m": 3.0,
-          "gain_high_scale": 0.30,
+          "gain_high_scale": 0.20,
           "scale_max_velocity_with_height": true
         }
       }
@@ -202,14 +202,14 @@
         "config": {
           "kp_vx": 0.85,
           "kp_vy": 0.85,
-          "max_vx_mps": 0.30,
-          "max_vy_mps": 0.30,
+          "max_vx_mps": 0.25,
+          "max_vy_mps": 0.25,
           "descend_speed_mps": 0.16,
           "slow_descend_speed_mps": 0.06,
           "max_ex_cam": 0.075,
           "max_ey_cam": 0.075,
-          "slow_descend_max_ex_cam": 0.12,
-          "slow_descend_max_ey_cam": 0.12,
+          "slow_descend_max_ex_cam": 0.10,
+          "slow_descend_max_ey_cam": 0.10,
           "deadband_ex_cam": 0.012,
           "deadband_ey_cam": 0.012,
           "min_altitude_m": 1.0,
@@ -217,7 +217,7 @@
           "height_gain_enabled": true,
           "gain_low_altitude_m": 1.2,
           "gain_high_altitude_m": 3.0,
-          "gain_high_scale": 0.30,
+          "gain_high_scale": 0.20,
           "scale_max_velocity_with_height": true
         }
       }

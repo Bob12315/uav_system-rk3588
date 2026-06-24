@@ -111,14 +111,15 @@ def test_align_descend_spec_defaults_to_low_altitude_descent_profile() -> None:
     assert params["finish_altitude_m"] == 1.1
     assert config["kp_vx"] == 0.85
     assert config["kp_vy"] == 0.85
-    assert config["max_vx_mps"] == 0.30
-    assert config["max_vy_mps"] == 0.30
+    assert params["max_updates"] == 120
+    assert config["max_vx_mps"] == 0.25
+    assert config["max_vy_mps"] == 0.25
     assert config["descend_speed_mps"] == 0.16
     assert config["slow_descend_speed_mps"] == 0.06
     assert config["max_ex_cam"] == 0.075
     assert config["max_ey_cam"] == 0.075
-    assert config["slow_descend_max_ex_cam"] == 0.12
-    assert config["slow_descend_max_ey_cam"] == 0.12
+    assert config["slow_descend_max_ex_cam"] == 0.10
+    assert config["slow_descend_max_ey_cam"] == 0.10
     assert config["deadband_ex_cam"] == 0.012
     assert config["deadband_ey_cam"] == 0.012
     assert config["min_altitude_m"] == 1.0
@@ -126,7 +127,7 @@ def test_align_descend_spec_defaults_to_low_altitude_descent_profile() -> None:
     assert config["height_gain_enabled"] is True
     assert config["gain_low_altitude_m"] == 1.2
     assert config["gain_high_altitude_m"] == 3.0
-    assert config["gain_high_scale"] == 0.30
+    assert config["gain_high_scale"] == 0.20
     assert config["scale_max_velocity_with_height"] is True
 
 
