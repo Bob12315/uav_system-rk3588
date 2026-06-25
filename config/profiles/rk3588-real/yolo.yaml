@@ -8,7 +8,7 @@
 # RKNN 模型
 # -----------------------------------------------------------------------------
 # 仓库内随代码管理的 RKNN INT8 模型。
-model_path: "../data/models/target_yolo11n_best-rk3588.rknn"
+model_path: "../data/models/best-rk3588-int8.rknn"
 
 # 模型类别名称，顺序必须与 RKNN 模型输出一致。
 class_names: ["Target", "bucket", "class_2"]

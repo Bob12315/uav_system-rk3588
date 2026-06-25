@@ -171,6 +171,8 @@ def _postprocess_flat_output(
     iou: float,
     class_names: tuple[str, ...],
 ) -> list[Detection]:
+    if output.ndim == 4 and output.shape[2] == 1:
+        output = np.squeeze(output, axis=2)
     if output.ndim != 3 or output.shape[0] != 1 or output.shape[1] < 5:
         raise ValueError(f"expected flat RKNN YOLO output shape (1, 4 + classes, boxes), got {output.shape}")
 
