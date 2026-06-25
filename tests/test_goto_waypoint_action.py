@@ -95,6 +95,38 @@ def test_arm_heading_yaw_missing_context_fails_without_action() -> None:
     assert "requires arm_heading_yaw_rad" in result.detail["note"]
 
 
+def test_field_heading_yaw_outputs_context_field_heading() -> None:
+    action = GotoWaypointAction()
+    action.start({"x": 1, "y": 2, "altitude_m": 5, "yaw_mode": "field_heading"})
+
+    result = action.update(
+        {
+            "field_heading_yaw_rad": 1.25,
+            "field_heading_confirmed": True,
+            "field_heading_source": "takeoff_auto",
+        }
+    )
+
+    assert result.reason == "waiting_for_position"
+    assert result.actions[0]["action_type"] == "local_position"
+    assert result.actions[0]["params"]["yaw"] == pytest.approx(1.25)
+    assert result.detail["field_heading_yaw_rad"] == pytest.approx(1.25)
+    assert result.detail["field_heading_confirmed"] is True
+    assert result.detail["field_heading_source"] == "takeoff_auto"
+
+
+def test_field_heading_yaw_missing_context_fails_without_action() -> None:
+    action = GotoWaypointAction()
+    action.start({"x": 1, "y": 2, "altitude_m": 5, "yaw_mode": "field_heading"})
+
+    result = action.update({})
+
+    assert result.failed is True
+    assert result.reason == "missing_field_heading_yaw"
+    assert result.actions == []
+    assert "requires field_heading_yaw_rad" in result.detail["note"]
+
+
 def test_missing_position_waits_and_keeps_outputting_action() -> None:
     action = GotoWaypointAction()
     action.start({"x": 1, "y": 2, "altitude_m": 5, "yaw_mode": "hold"})

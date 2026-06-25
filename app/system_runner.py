@@ -157,14 +157,15 @@ class SystemRunner:
         self.action_lab_specs = action_lab_specs()
         self.action_lab_enabled = True
         self.action_runtime_lock = threading.RLock()
+        self.runtime_context_builder = RuntimeContextBuilder(logger=self.logger)
         self.action_runtime = ActionRuntimeService(
             runner=ActionRunner(create_action_lab_registry()),
             dispatcher=ActionDispatcher(
                 logger=self.logger,
                 yolo_client=YoloCommandClient(self.config.yolo_command),
+                field_heading_confirmer=self.runtime_context_builder.confirm_field_heading,
             )
         )
-        self.runtime_context_builder = RuntimeContextBuilder(logger=self.logger)
         self.action_mission_orchestrator: MissionOrchestrator | None = None
 
     def run(self) -> None:

@@ -12,7 +12,7 @@ def test_takeoff_start_uses_default_params() -> None:
 
     assert action.altitude_m == 3.0
     assert action.mode == "GUIDED"
-    assert action.phase == "set_mode"
+    assert action.phase == "confirm_field_heading"
 
 
 def test_takeoff_update_before_start_fails() -> None:
@@ -26,7 +26,7 @@ def test_takeoff_update_before_start_fails() -> None:
 
 def test_takeoff_set_mode_phase_outputs_set_mode_action() -> None:
     action = TakeoffAction()
-    action.start({"altitude_m": 3.0})
+    action.start({"altitude_m": 3.0, "auto_confirm_field_heading": False})
 
     result = action.update({})
 
@@ -38,7 +38,7 @@ def test_takeoff_set_mode_phase_outputs_set_mode_action() -> None:
 
 def test_takeoff_arm_phase_outputs_arm_action() -> None:
     action = TakeoffAction()
-    action.start({"altitude_m": 3.0})
+    action.start({"altitude_m": 3.0, "auto_confirm_field_heading": False})
     action.update({})
 
     result = action.update({})
@@ -49,7 +49,7 @@ def test_takeoff_arm_phase_outputs_arm_action() -> None:
 
 def test_takeoff_phase_outputs_takeoff_action() -> None:
     action = TakeoffAction()
-    action.start({"altitude_m": 3.0})
+    action.start({"altitude_m": 3.0, "auto_confirm_field_heading": False})
     action.update({})
     action.update({})
 
@@ -62,7 +62,7 @@ def test_takeoff_phase_outputs_takeoff_action() -> None:
 
 def test_takeoff_wait_altitude_until_target_reached() -> None:
     action = TakeoffAction()
-    action.start({"altitude_m": 3.0})
+    action.start({"altitude_m": 3.0, "auto_confirm_field_heading": False})
     action.update({})
     action.update({})
     action.update({})
@@ -78,7 +78,7 @@ def test_takeoff_wait_altitude_until_target_reached() -> None:
 
 def test_takeoff_reads_altitude_from_local_position_z() -> None:
     action = TakeoffAction()
-    action.start({"altitude_m": 3.0})
+    action.start({"altitude_m": 3.0, "auto_confirm_field_heading": False})
     action.update({})
     action.update({})
     action.update({})
@@ -93,7 +93,7 @@ def test_takeoff_reads_altitude_from_local_position_z() -> None:
 
 def test_takeoff_skips_arm_when_require_armed_false() -> None:
     action = TakeoffAction()
-    action.start({"require_armed": False})
+    action.start({"require_armed": False, "auto_confirm_field_heading": False})
 
     set_mode = action.update({})
     takeoff = action.update({})
@@ -106,7 +106,7 @@ def test_takeoff_skips_arm_when_require_armed_false() -> None:
 
 def test_takeoff_waits_for_altitude_data_without_immediate_failure() -> None:
     action = TakeoffAction()
-    action.start({"altitude_m": 3.0})
+    action.start({"altitude_m": 3.0, "auto_confirm_field_heading": False})
     action.update({})
     action.update({})
     action.update({})
@@ -120,7 +120,7 @@ def test_takeoff_waits_for_altitude_data_without_immediate_failure() -> None:
 
 def test_takeoff_times_out_after_max_updates() -> None:
     action = TakeoffAction()
-    action.start({"max_updates": 3})
+    action.start({"max_updates": 3, "auto_confirm_field_heading": False})
 
     action.update({})
     action.update({})
@@ -129,6 +129,44 @@ def test_takeoff_times_out_after_max_updates() -> None:
 
     assert result.failed is True
     assert result.reason == "takeoff_timeout"
+
+
+def test_takeoff_default_auto_confirm_outputs_field_heading_action_first() -> None:
+    action = TakeoffAction()
+    action.start({"altitude_m": 3.0})
+
+    result = action.update({"drone": {"attitude_valid": True, "yaw": 1.2}})
+
+    assert result.reason == "field_heading_confirm_sent"
+    assert result.actions[0]["action_type"] == "confirm_field_heading"
+    assert result.actions[0]["params"] == {"yaw_rad": pytest.approx(1.2), "source": "takeoff_auto"}
+    assert action.phase == "set_mode"
+
+
+def test_takeoff_after_confirm_outputs_set_mode_next() -> None:
+    action = TakeoffAction()
+    action.start({"altitude_m": 3.0})
+
+    action.update({"drone": {"attitude_valid": True, "yaw": -0.4}})
+    result = action.update({"field_heading_confirmed": True, "field_heading_yaw_rad": -0.4})
+
+    assert result.reason == "set_mode_sent"
+    assert result.actions[0]["action_type"] == "set_mode"
+    assert result.detail["field_heading_confirmed"] is True
+    assert result.detail["field_heading_yaw_rad"] == pytest.approx(-0.4)
+
+
+def test_takeoff_auto_confirm_missing_yaw_fails_before_set_mode() -> None:
+    action = TakeoffAction()
+    action.start({"altitude_m": 3.0})
+
+    result = action.update({"drone": {"attitude_valid": False, "yaw": 0.0}})
+
+    assert result.failed is True
+    assert result.reason == "missing_field_heading_yaw"
+    assert result.actions == []
+    assert result.detail["phase"] == "confirm_field_heading"
+    assert result.detail["attitude_valid"] is False
 
 
 def test_takeoff_rejects_invalid_altitude() -> None:

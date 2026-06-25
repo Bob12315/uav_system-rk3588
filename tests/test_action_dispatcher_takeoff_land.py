@@ -20,8 +20,8 @@ class FakeLinkManager:
         self.calls.append(("land", priority))
 
 
-def _dispatcher(send_actions: bool = True) -> ActionDispatcher:
-    dispatcher = ActionDispatcher()
+def _dispatcher(send_actions: bool = True, field_heading_confirmer: object | None = None) -> ActionDispatcher:
+    dispatcher = ActionDispatcher(field_heading_confirmer=field_heading_confirmer)
     dispatcher.send_actions = send_actions
     return dispatcher
 
@@ -91,6 +91,56 @@ def test_takeoff_dispatches_when_gates_enabled() -> None:
 
     assert dispatch["sent"][0]["action_type"] == "takeoff"
     assert fake_link.calls == [("takeoff", 3.0, 2)]
+
+
+def test_confirm_field_heading_dispatches_without_telemetry_or_send_commands() -> None:
+    calls: list[tuple[float, str]] = []
+
+    def confirmer(*, yaw_rad: float, source: str) -> bool:
+        calls.append((yaw_rad, source))
+        return True
+
+    dispatcher = _dispatcher(send_actions=False, field_heading_confirmer=confirmer)
+    dispatch = dispatcher.dispatch_actions(
+        [
+            {
+                "action_type": "confirm_field_heading",
+                "params": {"yaw_rad": 0.75, "source": "takeoff_auto"},
+                "key": "takeoff_confirm_field_heading",
+                "once": True,
+                "priority": 2,
+            }
+        ],
+        action_name="takeoff",
+        send_commands=False,
+        link_manager=None,
+    )
+
+    assert calls == [(0.75, "takeoff_auto")]
+    assert dispatch["sent"][0]["action_type"] == "confirm_field_heading"
+    assert dispatch["sent"][0]["yaw_rad"] == 0.75
+    assert dispatch["sent"][0]["source"] == "takeoff_auto"
+    assert dispatch["sent"][0]["key"] == "takeoff_confirm_field_heading"
+
+
+def test_confirm_field_heading_requires_confirmer() -> None:
+    dispatcher = _dispatcher(send_actions=False)
+    dispatch = dispatcher.dispatch_actions(
+        [
+            {
+                "action_type": "confirm_field_heading",
+                "params": {"yaw_rad": 0.75, "source": "takeoff_auto"},
+                "key": "takeoff_confirm_field_heading",
+                "once": True,
+            }
+        ],
+        action_name="takeoff",
+        send_commands=False,
+        link_manager=None,
+    )
+
+    assert dispatch["errors"][0]["action_type"] == "confirm_field_heading"
+    assert dispatch["errors"][0]["error"] == "field_heading_confirmer_not_available"
 
 
 def test_land_dispatches_when_gates_enabled() -> None:

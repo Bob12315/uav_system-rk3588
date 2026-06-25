@@ -4,6 +4,8 @@ import logging
 import math
 from dataclasses import dataclass, field
 
+import pytest
+
 from app.app_config import build_arg_parser, load_app_config
 from app.system_runner import SystemRunner
 from web_ui.server import ActionStartRequest, create_app
@@ -782,13 +784,32 @@ def test_goto_waypoint_arm_heading_dispatch_sent_includes_yaw() -> None:
     )
     runner.action_lab_tick()
 
-    assert runner.arm_heading_yaw_rad == 1.25
+    assert runner.arm_heading_yaw_rad == pytest.approx(0.1)
     assert runner.arm_heading_fallback is False
     assert runner.services.link_manager.calls == [
-        ("goto_local_ned", (1.0, 0.0, -1.5, 1.25), 4)
+        ("goto_local_ned", (1.0, 0.0, -1.5, pytest.approx(0.1)), 4)
     ]
     payload = runner.action_lab_status_payload()
-    assert payload["dispatch"]["sent"][0]["yaw"] == 1.25
+    assert payload["dispatch"]["sent"][0]["yaw"] == pytest.approx(0.1)
+
+
+def test_goto_waypoint_field_heading_dispatch_sent_includes_yaw() -> None:
+    runner = _runner()
+    runner.controller_switches.set_send_commands(True)
+    assert runner.runtime_context_builder.confirm_field_heading(yaw_rad=-0.65, source="test")
+
+    runner.action_lab_start_action(
+        "goto_waypoint",
+        _goto_params(yaw_mode="field_heading"),
+        send_actions=True,
+    )
+    runner.action_lab_tick()
+
+    assert runner.services.link_manager.calls == [
+        ("goto_local_ned", (1.0, 0.0, -1.5, pytest.approx(-0.65)), 4)
+    ]
+    payload = runner.action_lab_status_payload()
+    assert payload["dispatch"]["sent"][0]["yaw"] == pytest.approx(-0.65)
 
 
 def test_arm_heading_context_fallback_when_first_seen_armed() -> None:

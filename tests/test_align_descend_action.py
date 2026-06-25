@@ -523,8 +523,32 @@ def test_align_descend_uses_arm_heading_yaw_before_current_drone_yaw() -> None:
 
     assert result.detail["yaw_hold_active"] is True
     assert result.detail["yaw_hold_rad"] == pytest.approx(1.7)
+    assert result.detail["yaw_hold_source"] == "arm_heading"
     assert result.detail["command"]["yaw_hold_rad"] == pytest.approx(1.7)
     assert result.detail["command"]["velocity_yaw_rad"] == pytest.approx(0.2)
+
+
+def test_align_descend_prefers_field_heading_over_arm_heading() -> None:
+    action = AlignDescendAction()
+    action.start()
+
+    result = action.update(
+        _active_context(
+            field_heading_yaw_rad=-1.1,
+            field_heading_confirmed=True,
+            field_heading_source="takeoff_auto",
+            arm_heading_yaw_rad=1.7,
+            drone={"relative_altitude": 5.0, "attitude_valid": True, "yaw": 0.2},
+        )
+    )
+
+    assert result.detail["yaw_hold_active"] is True
+    assert result.detail["yaw_hold_rad"] == pytest.approx(-1.1)
+    assert result.detail["yaw_hold_source"] == "field_heading"
+    assert result.detail["field_heading_yaw_rad"] == pytest.approx(-1.1)
+    assert result.detail["field_heading_confirmed"] is True
+    assert result.detail["field_heading_source"] == "takeoff_auto"
+    assert result.detail["command"]["yaw_hold_rad"] == pytest.approx(-1.1)
 
 
 def test_align_descend_does_not_lock_default_yaw_when_attitude_invalid() -> None:

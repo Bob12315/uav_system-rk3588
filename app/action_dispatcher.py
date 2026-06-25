@@ -25,10 +25,12 @@ class ActionDispatcher:
         policy: dict[str, DispatchRule] | None = None,
         logger: logging.Logger | None = None,
         yolo_client: object | None = None,
+        field_heading_confirmer: object | None = None,
     ) -> None:
         self._policy = policy or ACTION_DISPATCH_POLICY
         self._logger = logger or logging.getLogger(self.__class__.__name__)
         self.yolo_client = yolo_client
+        self.field_heading_confirmer = field_heading_confirmer
         self.send_actions: bool = False
         self.dispatched_keys: set[str] = set()
         self.last_dispatch: dict[str, list[dict[str, object]]] = self.empty_dispatch()
@@ -272,6 +274,8 @@ class ActionDispatcher:
             return self._dispatch_arm(action, link_manager=link_manager)
         if action_type == "takeoff":
             return self._dispatch_takeoff(action, link_manager=link_manager)
+        if action_type == "confirm_field_heading":
+            return self._dispatch_confirm_field_heading(action, link_manager=link_manager)
         if action_type == "land":
             return self._dispatch_land(action, link_manager=link_manager)
         if action_type == "local_position":
@@ -463,6 +467,35 @@ class ActionDispatcher:
                 "key": key,
             },
         }
+
+    def _dispatch_confirm_field_heading(
+        self,
+        action: dict[str, object],
+        *,
+        link_manager: object | None,
+    ) -> dict[str, object]:
+        del link_manager
+        params = self._action_params(action)
+        try:
+            yaw_rad = float(params["yaw_rad"])
+        except (KeyError, TypeError, ValueError):
+            return {"status": "error", "reason": "invalid_field_heading_yaw"}
+        if not math.isfinite(yaw_rad):
+            return {"status": "error", "reason": "invalid_field_heading_yaw"}
+        source = str(params.get("source") or "action")
+        if not callable(self.field_heading_confirmer):
+            return {"status": "error", "reason": "field_heading_confirmer_not_available"}
+        ok = self.field_heading_confirmer(yaw_rad=yaw_rad, source=source)
+        key = str(action.get("key") or "")
+        detail = {
+            "action_type": "confirm_field_heading",
+            "yaw_rad": yaw_rad,
+            "source": source,
+            "key": key,
+        }
+        if not ok:
+            return {"status": "error", "reason": "invalid_field_heading_yaw", "detail": detail}
+        return {"status": "sent", "detail": detail}
 
     def _dispatch_local_position(
         self,

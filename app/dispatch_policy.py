@@ -54,6 +54,11 @@ ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
         requires_send_actions=True,
         requires_send_commands=True,
     ),
+    "confirm_field_heading": DispatchRule(
+        allowed_actions={"takeoff"},
+        requires_send_actions=False,
+        requires_send_commands=False,
+    ),
     "land": DispatchRule(
         allowed_actions={"land"},
         requires_send_actions=True,

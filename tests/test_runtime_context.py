@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import math
+
+import pytest
+
 from app.runtime_context import RuntimeContextBuilder
 
 
 def test_build_action_context_includes_new_fields() -> None:
     builder = RuntimeContextBuilder()
     snapshot: dict[str, object] = {
-        "drone": {"armed": False, "yaw": 1.0},
+        "drone": {"armed": False, "attitude_valid": True, "yaw": 1.0},
         "gimbal": {"pitch": 0.1, "yaw": 0.2},
         "link": {"connected": True},
         "health": {"hold_reason": "ok"},
@@ -21,6 +25,8 @@ def test_build_action_context_includes_new_fields() -> None:
     assert context["health"] == {"hold_reason": "ok"}
     assert context["command"] == {"vx_cmd": 0.5}
     assert context["mission_detail"] == {"name": "test"}
+    assert context["pre_arm_yaw_rad"] == pytest.approx(1.0)
+    assert context["field_heading_confirmed"] is False
 
 
 def test_build_action_context_new_fields_default_to_empty_dict() -> None:
@@ -32,6 +38,7 @@ def test_build_action_context_new_fields_default_to_empty_dict() -> None:
     assert context["health"] == {}
     assert context["command"] == {}
     assert context["mission_detail"] == {}
+    assert context["field_heading_confirmed"] is False
 
 
 def test_build_action_context_retains_existing_fields() -> None:
@@ -70,3 +77,44 @@ def test_build_action_context_retains_existing_fields() -> None:
     assert "timestamp" in context
     assert "drone" in context
     assert "scene" in context
+
+
+def test_disarmed_valid_attitude_records_pre_arm_yaw() -> None:
+    builder = RuntimeContextBuilder()
+
+    context = builder.build_action_context(
+        {"drone": {"armed": False, "attitude_valid": True, "yaw": math.pi + 0.25}}
+    )
+
+    assert context["pre_arm_yaw_rad"] == pytest.approx(-math.pi + 0.25)
+    assert builder.pre_arm_yaw_rad == pytest.approx(-math.pi + 0.25)
+
+
+def test_confirm_field_heading_records_normalized_yaw() -> None:
+    builder = RuntimeContextBuilder()
+
+    ok = builder.confirm_field_heading(yaw_rad=math.pi + 0.1, source="test")
+    context = builder.build_action_context({"drone": {}})
+
+    assert ok is True
+    assert builder.field_heading_yaw_rad == pytest.approx(-math.pi + 0.1)
+    assert context["field_heading_yaw_rad"] == pytest.approx(-math.pi + 0.1)
+    assert context["field_heading_confirmed"] is True
+    assert context["field_heading_source"] == "test"
+
+
+def test_confirm_field_heading_rejects_invalid_yaw() -> None:
+    builder = RuntimeContextBuilder()
+
+    assert builder.confirm_field_heading(yaw_rad=float("nan")) is False
+    assert builder.field_heading_yaw_rad is None
+
+
+def test_arm_heading_prefers_pre_arm_yaw_on_armed_transition() -> None:
+    builder = RuntimeContextBuilder()
+
+    builder.build_action_context({"drone": {"armed": False, "attitude_valid": True, "yaw": 0.4}})
+    context = builder.build_action_context({"drone": {"armed": True, "attitude_valid": True, "yaw": 1.2}})
+
+    assert context["arm_heading_yaw_rad"] == pytest.approx(0.4)
+    assert "arm_heading_fallback" not in context

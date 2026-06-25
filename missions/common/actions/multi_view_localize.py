@@ -44,8 +44,8 @@ class MultiViewLocalizeAction(ActionModule):
             raise ValueError("altitude_m must be positive")
 
         self.yaw_mode = str(data.get("yaw_mode", "arm_heading")).strip().lower()
-        if self.yaw_mode not in {"hold", "fixed", "arm_heading"}:
-            raise ValueError("yaw_mode must be hold, fixed, or arm_heading")
+        if self.yaw_mode not in {"hold", "fixed", "arm_heading", "field_heading"}:
+            raise ValueError("yaw_mode must be hold, fixed, arm_heading, or field_heading")
         self.yaw_rad = None
         if self.yaw_mode == "fixed":
             self.yaw_rad = self._required_float(data, "yaw_rad")

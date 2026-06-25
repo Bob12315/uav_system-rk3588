@@ -220,6 +220,7 @@ class AlignDescendAction(ActionModule):
         if self.finish_altitude_m is not None and self.finish_altitude_m < self.config.min_altitude_m:
             self.finish_altitude_m = self.config.min_altitude_m
         self.yaw_hold_rad = None
+        self.yaw_hold_source = None
         self.started = True
         self.stopped = False
         self.done = False
@@ -271,6 +272,7 @@ class AlignDescendAction(ActionModule):
             )
 
         data = context or {}
+        self.latest_context = data
         self._ensure_yaw_hold(data)
         inputs = self._inputs(data)
         altitude = self._current_altitude(data)
@@ -388,12 +390,16 @@ class AlignDescendAction(ActionModule):
         self.retries = 0
         self.failure_reason = ""
         self.yaw_hold_rad: float | None = None
+        self.yaw_hold_source: str | None = None
+        self.latest_context: dict[str, Any] = {}
         self.last_detail: dict[str, Any] = {}
 
     def _ensure_yaw_hold(self, context: dict[str, Any]) -> None:
         if self.yaw_hold_rad is not None:
             return
-        self.yaw_hold_rad = self._current_yaw_rad(context)
+        yaw, source = self._current_yaw_rad(context)
+        self.yaw_hold_rad = yaw
+        self.yaw_hold_source = source
 
     def _command_with_yaw_hold(self, command: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
         if self.yaw_hold_rad is None:
@@ -405,19 +411,23 @@ class AlignDescendAction(ActionModule):
                 result["velocity_yaw_rad"] = velocity_yaw_rad
         return result
 
-    def _current_yaw_rad(self, context: dict[str, Any]) -> float | None:
+    def _current_yaw_rad(self, context: dict[str, Any]) -> tuple[float | None, str | None]:
+        value = self._float_from(context, "field_heading_yaw_rad")
+        if value is not None:
+            return self._normalize_yaw(value), "field_heading"
+
         value = self._float_from(context, "arm_heading_yaw_rad")
         if value is not None:
-            return self._normalize_yaw(value)
+            return self._normalize_yaw(value), "arm_heading"
 
         value = self._current_valid_attitude_yaw_rad(context)
         if value is not None:
-            return value
+            return value, "attitude"
 
         value = self._float_from(context, "yaw")
         if value is not None:
-            return self._normalize_yaw(value)
-        return None
+            return self._normalize_yaw(value), "yaw"
+        return None, None
 
     def _current_valid_attitude_yaw_rad(self, context: dict[str, Any]) -> float | None:
         for section_name in ("drone", "vehicle"):
@@ -539,6 +549,7 @@ class AlignDescendAction(ActionModule):
             and self.finish_altitude_m is not None
             and height_m <= self.finish_altitude_m
         )
+        latest_context = self.latest_context
         return {
             "command": command,
             "enabled": bool(command_detail.get("enabled", False)),
@@ -558,7 +569,11 @@ class AlignDescendAction(ActionModule):
             "max_vx_eff": command_detail.get("max_vx_eff"),
             "max_vy_eff": command_detail.get("max_vy_eff"),
             "yaw_hold_rad": self.yaw_hold_rad,
+            "yaw_hold_source": self.yaw_hold_source,
             "yaw_hold_active": self.yaw_hold_rad is not None,
+            "field_heading_yaw_rad": self._float_from(latest_context, "field_heading_yaw_rad"),
+            "field_heading_confirmed": bool(latest_context.get("field_heading_confirmed", False)),
+            "field_heading_source": str(latest_context.get("field_heading_source") or ""),
             "reached_finish_altitude": bool(reached_finish_altitude),
             "lost_updates": int(self.lost_updates),
             "hold_updates": int(self.hold_updates),

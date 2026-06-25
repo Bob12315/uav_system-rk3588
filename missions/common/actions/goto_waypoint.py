@@ -20,8 +20,8 @@ class GotoWaypointAction(ActionModule):
             raise ValueError("altitude_m must be positive")
 
         yaw_mode = str(data.get("yaw_mode", "arm_heading")).strip().lower()
-        if yaw_mode not in {"hold", "fixed", "arm_heading"}:
-            raise ValueError("yaw_mode must be hold, fixed, or arm_heading")
+        if yaw_mode not in {"hold", "fixed", "arm_heading", "field_heading"}:
+            raise ValueError("yaw_mode must be hold, fixed, arm_heading, or field_heading")
         yaw_rad = None
         if yaw_mode == "fixed":
             yaw_rad = self._required_float(data, "yaw_rad")
@@ -61,6 +61,7 @@ class GotoWaypointAction(ActionModule):
 
         context_data = context or {}
         arm_heading_yaw_rad = self._arm_heading_yaw(context_data)
+        field_heading_yaw_rad = self._field_heading_yaw(context_data)
         if self.yaw_mode == "arm_heading" and arm_heading_yaw_rad is None:
             detail = self._detail(None, None, None)
             detail["note"] = "yaw_mode arm_heading requires arm_heading_yaw_rad from vehicle context"
@@ -69,12 +70,20 @@ class GotoWaypointAction(ActionModule):
                 reason="missing_arm_heading_yaw",
                 detail=detail,
             )
+        if self.yaw_mode == "field_heading" and field_heading_yaw_rad is None:
+            detail = self._detail(None, None, None, context_data)
+            detail["note"] = "yaw_mode field_heading requires field_heading_yaw_rad from vehicle context"
+            return ActionResult(
+                failed=True,
+                reason="missing_field_heading_yaw",
+                detail=detail,
+            )
 
         current = self._current_position(context_data)
         if current is None:
             self.reached_updates = 0
             return ActionResult(
-                actions=[self._action_dict(arm_heading_yaw_rad)],
+                actions=[self._action_dict(arm_heading_yaw_rad, field_heading_yaw_rad)],
                 reason="waiting_for_position",
                 detail=self._detail(None, None, None, context_data),
             )
@@ -97,7 +106,7 @@ class GotoWaypointAction(ActionModule):
         if self.reached_updates >= self.min_hold_updates:
             return ActionResult(done=True, reason="waypoint_reached", detail=detail)
         return ActionResult(
-            actions=[self._action_dict(arm_heading_yaw_rad)],
+            actions=[self._action_dict(arm_heading_yaw_rad, field_heading_yaw_rad)],
             reason="goto_active",
             detail=detail,
         )
@@ -122,7 +131,11 @@ class GotoWaypointAction(ActionModule):
         self.key = ""
         self.reached_updates = 0
 
-    def _action_dict(self, arm_heading_yaw_rad: float | None = None) -> dict[str, Any]:
+    def _action_dict(
+        self,
+        arm_heading_yaw_rad: float | None = None,
+        field_heading_yaw_rad: float | None = None,
+    ) -> dict[str, Any]:
         params: dict[str, Any] = {
             "x": self.target_x,
             "y": self.target_y,
@@ -133,6 +146,8 @@ class GotoWaypointAction(ActionModule):
             params["yaw"] = self.yaw_rad
         elif self.yaw_mode == "arm_heading":
             params["yaw"] = arm_heading_yaw_rad
+        elif self.yaw_mode == "field_heading":
+            params["yaw"] = field_heading_yaw_rad
         return {
             "action_type": "local_position",
             "params": params,
@@ -167,6 +182,13 @@ class GotoWaypointAction(ActionModule):
             detail["arm_heading_yaw_rad"] = arm_heading_yaw_rad
         if context_data.get("arm_heading_fallback"):
             detail["arm_heading_fallback"] = True
+        field_heading_yaw_rad = self._field_heading_yaw(context_data)
+        if field_heading_yaw_rad is not None:
+            detail["field_heading_yaw_rad"] = field_heading_yaw_rad
+        if "field_heading_confirmed" in context_data:
+            detail["field_heading_confirmed"] = bool(context_data.get("field_heading_confirmed"))
+        if "field_heading_source" in context_data:
+            detail["field_heading_source"] = context_data.get("field_heading_source")
         return detail
 
     def _arm_heading_yaw(self, context: dict[str, Any]) -> float | None:
@@ -174,9 +196,20 @@ class GotoWaypointAction(ActionModule):
         if value is None:
             return None
         try:
-            return float(value)
+            result = float(value)
         except (TypeError, ValueError):
             return None
+        return result if math.isfinite(result) else None
+
+    def _field_heading_yaw(self, context: dict[str, Any]) -> float | None:
+        value = context.get("field_heading_yaw_rad")
+        if value is None:
+            return None
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            return None
+        return result if math.isfinite(result) else None
 
     def _current_position(self, context: dict[str, Any]) -> dict[str, float] | None:
         value = context.get("local_position")
