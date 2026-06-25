@@ -148,9 +148,9 @@
           "min_altitude_m": 0.8,
           "require_target_locked": true,
           "height_gain_enabled": true,
-          "gain_low_altitude_m": 1.2,
+          "gain_low_altitude_m": 0.8,
           "gain_high_altitude_m": 3.0,
-          "gain_high_scale": 0.20,
+          "gain_high_scale": 0.30,
           "scale_max_velocity_with_height": true
         }
       }
@@ -250,9 +250,9 @@
           "min_altitude_m": 0.8,
           "require_target_locked": true,
           "height_gain_enabled": true,
-          "gain_low_altitude_m": 1.2,
+          "gain_low_altitude_m": 0.8,
           "gain_high_altitude_m": 3.0,
-          "gain_high_scale": 0.20,
+          "gain_high_scale": 0.30,
           "scale_max_velocity_with_height": true
         }
       }
