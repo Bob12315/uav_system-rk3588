@@ -298,6 +298,16 @@ def create_app(runner, config: UiConfig) -> FastAPI:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    @app.post("/api/action-mission/skip-current")
+    def action_mission_skip_current():
+        try:
+            result = runner.action_mission_skip_current()
+            audit.append("ACTION_MISSION", "skip_current", True, result.get("reason", "skip_current"))
+            return {"ok": True, "action_mission": result}
+        except Exception as exc:
+            audit.append("ACTION_MISSION", "skip_current", False, str(exc))
+            return {"ok": False, "error": str(exc)}
+
     @app.post("/api/manual-step-move")
     def manual_step_move(request: ManualStepMoveRequest):
         try:

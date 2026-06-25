@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -102,6 +103,7 @@ class MissionOrchestrator:
         self.blackboard = MissionBlackboard()
         self.step_attempts: dict[int, int] = {}
         self.failure_policy_counts: dict[str, int] = {}
+        self.skipped_steps: list[dict[str, Any]] = []
         self.labels = self._build_labels()
 
     # ------------------------------------------------------------------
@@ -118,6 +120,7 @@ class MissionOrchestrator:
         self.blackboard.clear()
         self.step_attempts.clear()
         self.failure_policy_counts.clear()
+        self.skipped_steps.clear()
         self._start_current_step(link_manager=link_manager)
 
     def tick(
@@ -207,6 +210,95 @@ class MissionOrchestrator:
         self.blackboard.clear()
         self.step_attempts.clear()
         self.failure_policy_counts.clear()
+        self.skipped_steps.clear()
+
+    def skip_current_step(
+        self,
+        *,
+        link_manager: object | None = None,
+        hold_current: bool = True,
+        reason: str = "manual_skip",
+    ) -> MissionOrchestratorStatus:
+        """Skip the currently-running step, stop its action, clear
+        navigation, and advance to the next step (or mark done).
+
+        The blackboard is NOT cleared; skipped steps are recorded so
+        the UI timeline can show a distinct ``skipped`` status.
+        """
+
+        if self.done:
+            self.reason = "skip_ignored_done"
+            self.detail = {"requested_reason": reason}
+            return self.status()
+
+        if self.failed:
+            self.reason = "skip_ignored_failed"
+            self.detail = {"requested_reason": reason}
+            return self.status()
+
+        if not self.running:
+            self.reason = "skip_ignored_not_running"
+            self.detail = {
+                "requested_reason": reason,
+                "current_index": self.current_index,
+            }
+            return self.status()
+
+        step = self.steps[self.current_index]
+        skipped_index = self.current_index
+        skipped_name = step.name
+        skipped_label = step.label
+
+        # 1. stop the runtime action
+        stop = getattr(self.runtime, "stop", None)
+        if callable(stop):
+            stop(link_manager, hold_current=hold_current)
+
+        # 2. belt-and-braces: clear any stale LOCAL_POSITION / velocity
+        clear_nav = getattr(self.runtime, "clear_navigation_queue", None)
+        if callable(clear_nav):
+            clear_nav(link_manager, hold_current=hold_current)
+
+        # 3. record the skipped step for the UI timeline
+        self.skipped_steps.append(
+            {
+                "index": skipped_index,
+                "name": skipped_name,
+                "label": skipped_label,
+                "reason": reason,
+                "time": time.time(),
+            }
+        )
+
+        # 4. advance — or finish if this was the last step
+        if self.current_index + 1 >= len(self.steps):
+            self.done = True
+            self.running = False
+            self.failed = False
+            self.reason = "mission_done_after_manual_skip"
+            self.detail = {
+                "skipped_step_index": skipped_index,
+                "skipped_step_name": skipped_name,
+                "skipped_step_label": skipped_label,
+                "requested_reason": reason,
+                "blackboard_keys": sorted(self.blackboard.data.keys()),
+            }
+            return self.status()
+
+        self.current_index += 1
+        self.reason = "manual_skip_to_next_step"
+        self.detail = {
+            "skipped_step_index": skipped_index,
+            "skipped_step_name": skipped_name,
+            "skipped_step_label": skipped_label,
+            "next_step_index": self.current_index,
+            "next_step_name": self.steps[self.current_index].name,
+            "next_step_label": self.steps[self.current_index].label,
+            "requested_reason": reason,
+            "blackboard_keys": sorted(self.blackboard.data.keys()),
+        }
+        self._start_current_step(link_manager=link_manager)
+        return self.status()
 
     # ------------------------------------------------------------------
     # helpers
@@ -220,6 +312,7 @@ class MissionOrchestrator:
         detail["blackboard_keys"] = sorted(self.blackboard.data.keys())
         detail["step_attempts"] = dict(self.step_attempts)
         detail["failure_policy_counts"] = dict(self.failure_policy_counts)
+        detail["skipped_steps"] = list(self.skipped_steps)
         return MissionOrchestratorStatus(
             running=self.running,
             done=self.done,

@@ -432,3 +432,139 @@ def test_default_failure_policy_still_fails_mission() -> None:
 
     assert status.failed is True
     assert status.reason == "failed"
+
+
+# ── skip_current_step tests ──────────────────────────────────────────
+
+
+def test_skip_current_step_advances_to_next_step() -> None:
+    """Running mission skip_current_step advances from index 0 to 1 and starts the next step."""
+    runtime = FakeRuntime([])
+    orch = MissionOrchestrator(runtime, _steps())
+    orch.start()
+
+    status = orch.skip_current_step()
+
+    assert status.current_index == 1
+    assert status.current_action == "payload_release"
+    assert status.reason == "manual_skip_to_next_step"
+    # runtime.stop was called (but _start_current_step re-sets state to "running")
+    # clear_navigation_queue was called
+    assert runtime.clear_nav_calls == 1
+    # next step was started
+    assert ("payload_release", {"payload_id": "p1"}) in runtime.runner.sent_actions[1:]
+
+
+def test_skip_does_not_clear_blackboard() -> None:
+    """skip_current_step preserves blackboard data."""
+    runtime = FakeRuntime([FakeActionResult(done=True, reason="done", detail={"value": 42})])
+    orch = MissionOrchestrator(
+        runtime,
+        [
+            MissionActionStep("fake1", {}, save_as="first"),
+            MissionActionStep("fake2", {}),
+        ],
+    )
+    orch.start()
+    orch.tick({})  # step1 done, saves to blackboard
+
+    # now skip step2
+    status = orch.skip_current_step()
+
+    assert orch.blackboard.data.get("first") == {"value": 42}
+    assert "first" in status.detail.get("blackboard_keys", [])
+
+
+def test_skip_last_step_marks_done() -> None:
+    """Skipping the last step marks mission done."""
+    runtime = FakeRuntime([])
+    orch = MissionOrchestrator(runtime, _single_step())
+    orch.start()
+
+    status = orch.skip_current_step()
+
+    assert status.done is True
+    assert status.running is False
+    assert status.reason == "mission_done_after_manual_skip"
+
+
+def test_skip_not_running_is_ignored() -> None:
+    """skip_current_step on a not-running mission does not move index."""
+    runtime = FakeRuntime([])
+    orch = MissionOrchestrator(runtime, _steps())
+
+    status = orch.skip_current_step()
+
+    assert status.reason == "skip_ignored_not_running"
+    assert status.current_index == 0
+
+
+def test_skip_done_mission_is_ignored() -> None:
+    """skip_current_step on an already-done mission is ignored."""
+    runtime = FakeRuntime([FakeActionResult(done=True, reason="done")])
+    orch = MissionOrchestrator(runtime, _single_step())
+    orch.start()
+    orch.tick({})  # should be done
+
+    status = orch.skip_current_step()
+
+    assert status.reason == "skip_ignored_done"
+
+
+def test_skip_failed_mission_is_ignored() -> None:
+    """skip_current_step on a failed mission is ignored."""
+    runtime = FakeRuntime([FakeActionResult(failed=True, reason="boom")])
+    orch = MissionOrchestrator(runtime, _steps())
+    orch.start()
+    orch.tick({})  # should be failed
+
+    status = orch.skip_current_step()
+
+    assert status.reason == "skip_ignored_failed"
+
+
+def test_skip_next_step_param_resolution_fails() -> None:
+    """If the next step references a missing blackboard key, skip should
+    still allow param_resolution_failed."""
+    runtime = FakeRuntime([])
+    orch = MissionOrchestrator(
+        runtime,
+        [
+            MissionActionStep("fake1", {}),
+            MissionActionStep("fake2", {"x": "$missing.value"}),
+        ],
+    )
+    orch.start()
+
+    status = orch.skip_current_step()
+
+    # The skip itself succeeded but _start_current_step for step2 found a
+    # missing param — the mission should be marked failed.
+    assert status.failed is True
+    assert status.reason == "param_resolution_failed"
+
+
+def test_skip_records_skipped_steps() -> None:
+    """skip_current_step appends to skipped_steps list."""
+    runtime = FakeRuntime([])
+    orch = MissionOrchestrator(runtime, _steps())
+    orch.start()
+
+    orch.skip_current_step()
+
+    assert len(orch.skipped_steps) == 1
+    assert orch.skipped_steps[0]["index"] == 0
+    assert orch.skipped_steps[0]["name"] == "goto_waypoint"
+
+
+def test_skip_hold_current_passed_to_stop() -> None:
+    """skip_current_step passes hold_current=True to runtime.stop."""
+    runtime = FakeRuntime([])
+    orch = MissionOrchestrator(runtime, _steps())
+    orch.start()
+
+    orch.skip_current_step(hold_current=True)
+
+    # runtime.stop was called; after _start_current_step, state is "running"
+    # (next step started), but clear_navigation_queue was called
+    assert runtime.clear_nav_calls == 1

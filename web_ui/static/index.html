@@ -193,6 +193,7 @@
             <button id="actionMissionConfigure">配置</button>
             <button id="actionMissionStart" class="warning">启动</button>
             <button id="actionMissionTick" class="warning">推进一次</button>
+            <button id="actionMissionSkipCurrent" class="warning">跳过当前阶段</button>
             <button id="actionMissionAutoTick">自动推进 关</button>
             <button id="actionMissionStop" class="stop">停止</button>
             <button id="actionMissionReset">重置</button>
@@ -203,6 +204,7 @@
           <div class="action-mission-safety-note">
             配置只加载步骤，不会发送命令。启动只创建任务运行器。
             推进会执行下一轮 Action；当 System SEND=ON 时，推进可能下发 local_position/body_velocity/set_servo 命令。
+            跳过当前阶段会停止当前 Action、清理连续控制和 LOCAL_POSITION，并尝试保持当前位置，然后启动下一阶段；不会清空黑板。
             切换模板前请先停止或重置。
           </div>
         </section>

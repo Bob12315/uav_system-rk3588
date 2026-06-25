@@ -1063,6 +1063,18 @@ class SystemRunner:
             self._maybe_save_drop_targets_result()
             return self.action_mission_status_payload()
 
+    def action_mission_skip_current(self) -> dict[str, object]:
+        if self.action_mission_orchestrator is None:
+            return self.action_mission_status_payload()
+        with self.action_runtime_lock:
+            self.action_mission_orchestrator.skip_current_step(
+                link_manager=self.services.link_manager,
+                hold_current=True,
+                reason="manual_web_skip",
+            )
+            self._record_event("WARN", "action mission current step skipped manually")
+            return self.action_mission_status_payload()
+
     def _action_lab_snapshot(self) -> dict[str, object]:
         return self.action_runtime.status_payload(
             send_commands=bool(self.controller_switches.snapshot().send_commands),

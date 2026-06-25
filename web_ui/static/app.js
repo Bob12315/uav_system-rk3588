@@ -473,6 +473,9 @@ function actionMissionBlackboard(actionMission) {
 function inferActionMissionStepStatus(actionMission, index, stepCount) {
   const payload = actionMission || {};
   const current = Number.isFinite(Number(payload.current_index)) ? Number(payload.current_index) : 0;
+  const detail = actionMissionDetail(payload);
+  const skippedSet = new Set((Array.isArray(detail.skipped_steps) ? detail.skipped_steps : []).map(s => s.index));
+  if (skippedSet.has(index)) return "skipped";
   if (payload.done) return "done";
   if (payload.failed) {
     if (index < current) return "done";
@@ -506,11 +509,14 @@ function renderActionMissionTimeline(actionMission, configuredSteps) {
   const steps = Array.isArray(configuredSteps) ? configuredSteps : [];
   const detail = actionMissionDetail(actionMission);
   const attempts = detail.step_attempts || {};
+  const skippedSet = new Set((Array.isArray(detail.skipped_steps) ? detail.skipped_steps : []).map(s => s.index));
   const current = Number.isFinite(Number(actionMission?.current_index)) ? Number(actionMission.current_index) : -1;
   const statuses = steps.map((step, index) => inferActionMissionStepStatus(actionMission || {}, index, steps.length));
   element.innerHTML = steps.map((step, index) => {
     const status = statuses[index];
-    const reason = index === current ? (actionMission?.reason || "-") : "-";
+    const reason = index === current ? (actionMission?.reason || "-")
+      : skippedSet.has(index) ? "manual skip"
+      : "-";
     return `<tr class="${index === current ? "current-step" : ""}" data-step-status="${status}">
       <td>${index}</td>
       <td><span class="step-status ${status}">${escapeHtml(actionMissionStatusLabel(status))}</span></td>
@@ -619,6 +625,11 @@ function renderActionMissionStatus(actionMission) {
       ? "警告：System SEND=ON，推进一次可能向飞控或仿真器下发命令。"
       : "干跑模式：推进不会下发飞控命令。";
     warning.classList.toggle("send-on", sendEnabled);
+  }
+  const skipButton = $("actionMissionSkipCurrent");
+  if (skipButton) {
+    const canSkip = Boolean(payload.enabled && payload.running && !payload.done && !payload.failed);
+    skipButton.disabled = !canSkip;
   }
   const detailElement = $("actionMissionDetail");
   if (detailElement) detailElement.textContent = JSON.stringify(detail, null, 2);
@@ -1613,6 +1624,28 @@ async function tickActionMission() {
   $("completionHint").textContent = "Action Mission 推进完成";
   renderActionMissionStatus(result.action_mission || null);
 }
+async function skipCurrentActionMissionStep() {
+  const current = lastActionMissionStatus || state.action_mission || {};
+  const index = current.current_index ?? "--";
+  const action = current.current_action || "--";
+  const confirmed = window.confirm(
+    `确认跳过当前 Action Mission 阶段？\n\n` +
+    `当前序号: ${index}\n` +
+    `当前动作: ${action}\n\n` +
+    `该操作会停止当前 Action，清理连续控制/LOCAL_POSITION，并尝试保持当前位置，然后进入下一阶段。\n` +
+    `不会清空 blackboard。`
+  );
+  if (!confirmed) return;
+  const result = await json("/api/action-mission/skip-current", {
+    method: "POST",
+    body: "{}",
+  });
+  if (!result.ok) throw new Error(result.error || "skip current step failed");
+  lastActionMissionStatus = result.action_mission || {};
+  renderActionMissionStatus(lastActionMissionStatus);
+  $("completionHint").textContent = `已跳过当前阶段：${lastActionMissionStatus.reason || "manual_skip"}`;
+  await loadAudit();
+}
 function setActionMissionEditorValue(mission) {
   const editor = $("actionMissionSteps");
   if (!editor) return;
@@ -1957,6 +1990,11 @@ async function init() {
   if ($("actionMissionTick")) $("actionMissionTick").onclick = () => tickActionMission().catch(error => { $("completionHint").textContent = error.message; });
   if ($("actionMissionAutoTick")) $("actionMissionAutoTick").onclick = () => toggleActionMissionAutoTick().catch(error => { $("completionHint").textContent = error.message; });
   if ($("actionMissionRefresh")) $("actionMissionRefresh").onclick = () => refreshActionMission().catch(error => { $("completionHint").textContent = error.message; });
+  $("actionMissionSkipCurrent")?.addEventListener("click", () => {
+    skipCurrentActionMissionStep().catch(error => {
+      $("completionHint").textContent = `跳过当前阶段失败: ${error.message}`;
+    });
+  });
   if ($("actionMissionLoadCustom")) $("actionMissionLoadCustom").onclick = () => {
     $("actionMissionSteps").focus();
     $("completionHint").textContent = "请粘贴自定义任务 JSON，然后校验或配置";
