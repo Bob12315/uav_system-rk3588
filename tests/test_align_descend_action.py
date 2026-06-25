@@ -883,3 +883,168 @@ def test_payload_offset_clamped_at_low_altitude() -> None:
 def test_payload_offset_config_rejects_invalid_values(kwargs) -> None:
     with pytest.raises(ValueError):
         AlignDescendConfig(**kwargs)
+
+
+# ── multi-point height gain tests ──────────────────────────────────────
+
+
+def test_height_gain_default_linear_mode_unchanged() -> None:
+    """Default height_gain_mode='linear' preserves old behavior."""
+    config = AlignDescendConfig(
+        height_gain_enabled=True,
+        gain_low_altitude_m=1.0,
+        gain_high_altitude_m=3.0,
+        gain_high_scale=0.25,
+        height_gain_mode="linear",
+    )
+    _, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.1, ey_cam=0.2),
+        config,
+        altitude_m=3.0,
+    )
+    assert detail["height_gain_scale"] == pytest.approx(0.25)
+    assert detail["height_gain_mode"] == "linear"
+    assert detail["height_gain_points_active"] is False
+
+
+def test_height_gain_points_below_min_returns_first_scale() -> None:
+    """Height below lowest point returns first scale."""
+    config = AlignDescendConfig(
+        height_gain_enabled=True,
+        height_gain_mode="points",
+        height_scale_points=[
+            {"altitude_m": 0.8, "scale": 0.40},
+            {"altitude_m": 2.4, "scale": 0.80},
+        ],
+    )
+    _, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.1, ey_cam=0.2),
+        config,
+        altitude_m=0.5,
+    )
+    assert detail["height_gain_scale"] == pytest.approx(0.40)
+    assert detail["height_gain_points_active"] is True
+
+
+def test_height_gain_points_above_max_returns_last_scale() -> None:
+    """Height above highest point returns last scale."""
+    config = AlignDescendConfig(
+        height_gain_enabled=True,
+        height_gain_mode="points",
+        height_scale_points=[
+            {"altitude_m": 3.5, "scale": 0.55},
+            {"altitude_m": 5.0, "scale": 0.55},
+        ],
+    )
+    _, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.1, ey_cam=0.2),
+        config,
+        altitude_m=6.0,
+    )
+    assert detail["height_gain_scale"] == pytest.approx(0.55)
+
+
+def test_height_gain_points_interpolates_linearly() -> None:
+    """Height between two points linearly interpolates scale."""
+    config = AlignDescendConfig(
+        height_gain_enabled=True,
+        height_gain_mode="points",
+        height_scale_points=[
+            {"altitude_m": 1.3, "scale": 0.45},
+            {"altitude_m": 2.4, "scale": 0.80},
+        ],
+    )
+    _, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.1, ey_cam=0.2),
+        config,
+        altitude_m=1.85,
+    )
+    # t = (1.85-1.3)/(2.4-1.3) = 0.5 → 0.45 + 0.5*(0.80-0.45) = 0.625
+    assert detail["height_gain_scale"] == pytest.approx(0.625)
+
+
+def test_height_gain_points_affects_vx_vy() -> None:
+    """Same raw error, higher altitude with higher scale produces larger vx/vy."""
+    points = [
+        {"altitude_m": 0.8, "scale": 0.40},
+        {"altitude_m": 2.4, "scale": 0.80},
+    ]
+    config_low = AlignDescendConfig(
+        height_gain_enabled=True, height_gain_mode="points", height_scale_points=points,
+        kp_vx=0.8, kp_vy=0.8,
+    )
+    config_high = AlignDescendConfig(
+        height_gain_enabled=True, height_gain_mode="points", height_scale_points=points,
+        kp_vx=0.8, kp_vy=0.8,
+    )
+
+    cmd_low, _ = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.1, ey_cam=0.2), config_low, altitude_m=0.8,
+    )
+    cmd_high, _ = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.1, ey_cam=0.2), config_high, altitude_m=2.4,
+    )
+
+    # scale 0.80 > 0.40 → velocities at 2.4m should be larger magnitude
+    assert abs(cmd_high["vx_cmd"]) > abs(cmd_low["vx_cmd"])
+    assert abs(cmd_high["vy_cmd"]) > abs(cmd_low["vy_cmd"])
+
+
+def test_height_gain_points_scales_max_velocity() -> None:
+    """scale_max_velocity_with_height=true: max_vx_eff/max_vy_eff also scaled."""
+    config = AlignDescendConfig(
+        height_gain_enabled=True,
+        height_gain_mode="points",
+        height_scale_points=[
+            {"altitude_m": 0.8, "scale": 0.40},
+            {"altitude_m": 2.4, "scale": 0.80},
+        ],
+        max_vx_mps=0.4,
+        max_vy_mps=0.4,
+        scale_max_velocity_with_height=True,
+    )
+    _, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.1, ey_cam=0.2),
+        config,
+        altitude_m=2.4,
+    )
+    assert detail["max_vx_eff"] == pytest.approx(0.4 * 0.80)
+    assert detail["max_vy_eff"] == pytest.approx(0.4 * 0.80)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"height_gain_mode": "invalid"},
+        {"height_gain_mode": "points", "height_scale_points": None},
+        {"height_gain_mode": "points", "height_scale_points": []},
+        {"height_gain_mode": "points", "height_scale_points": [{"altitude_m": 1.0, "scale": 1.0}]},
+        {"height_gain_mode": "points", "height_scale_points": [
+            {"altitude_m": 0.0, "scale": 0.5},
+            {"altitude_m": 1.0, "scale": 0.5},
+        ]},
+        {"height_gain_mode": "points", "height_scale_points": [
+            {"altitude_m": -1.0, "scale": 0.5},
+            {"altitude_m": 1.0, "scale": 0.5},
+        ]},
+        {"height_gain_mode": "points", "height_scale_points": [
+            {"altitude_m": 1.0, "scale": 0.0},
+            {"altitude_m": 2.0, "scale": 1.0},
+        ]},
+        {"height_gain_mode": "points", "height_scale_points": [
+            {"altitude_m": 1.0, "scale": -0.1},
+            {"altitude_m": 2.0, "scale": 1.0},
+        ]},
+        {"height_gain_mode": "points", "height_scale_points": [
+            {"altitude_m": 1.0, "scale": 1.6},
+            {"altitude_m": 2.0, "scale": 1.0},
+        ]},
+        {"height_gain_mode": "points", "height_scale_points": [
+            {"altitude_m": 1.0, "scale": 0.5},
+            {"altitude_m": 1.0, "scale": 0.8},
+        ]},
+    ],
+)
+def test_height_gain_points_rejects_invalid_config(kwargs) -> None:
+    with pytest.raises(ValueError):
+        AlignDescendConfig(**kwargs)

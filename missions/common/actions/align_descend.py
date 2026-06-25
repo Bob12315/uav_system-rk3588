@@ -31,6 +31,8 @@ class AlignDescendConfig:
     gain_high_altitude_m: float = 3.0
     gain_high_scale: float = 0.3
     scale_max_velocity_with_height: bool = True
+    height_gain_mode: str = "linear"
+    height_scale_points: list[dict[str, float]] | None = None
     # payload drop offset compensation (BODY frame, m)
     payload_offset_enabled: bool = False
     payload_forward_m: float = 0.0
@@ -87,6 +89,27 @@ class AlignDescendConfig:
             raise ValueError("gain_high_altitude_m must be > gain_low_altitude_m")
         if float(self.gain_high_scale) <= 0.0 or float(self.gain_high_scale) > 1.0:
             raise ValueError("gain_high_scale must be > 0 and <= 1")
+        # multi-point height gain validation
+        if self.height_gain_mode not in ("linear", "points"):
+            raise ValueError("height_gain_mode must be 'linear' or 'points'")
+        if self.height_gain_mode == "points":
+            if self.height_scale_points is None or not isinstance(self.height_scale_points, list):
+                raise ValueError("height_scale_points must be a non-empty list when mode='points'")
+            if len(self.height_scale_points) < 2:
+                raise ValueError("height_scale_points must contain at least 2 points")
+            altitudes: list[float] = []
+            for i, point in enumerate(self.height_scale_points):
+                if not isinstance(point, dict):
+                    raise ValueError(f"height_scale_points[{i}] must be a dict")
+                alt = float(point.get("altitude_m", float("nan")))
+                scl = float(point.get("scale", float("nan")))
+                if not math.isfinite(alt) or alt <= 0.0:
+                    raise ValueError(f"height_scale_points[{i}].altitude_m must be finite and > 0")
+                if not math.isfinite(scl) or scl <= 0.0 or scl > 1.5:
+                    raise ValueError(f"height_scale_points[{i}].scale must be finite, > 0, <= 1.5")
+                altitudes.append(alt)
+            if len(set(altitudes)) != len(altitudes):
+                raise ValueError("height_scale_points contains duplicate altitude_m values")
         # payload offset validation
         if float(self.fov_x_deg) <= 0.0 or float(self.fov_x_deg) >= 180.0:
             raise ValueError("fov_x_deg must be in (0, 180)")
@@ -275,6 +298,10 @@ def compute_align_descend_command(
         "corrected_ex_cam": corrected_ex_cam,
         "corrected_ey_cam": corrected_ey_cam,
         "height_gain_scale": gain_scale,
+        "height_gain_mode": config.height_gain_mode,
+        "height_gain_points_active": bool(
+            config.height_gain_enabled and config.height_gain_mode == "points"
+        ),
         "kp_vx_eff": kp_vx_eff,
         "kp_vy_eff": kp_vy_eff,
         "max_vx_eff": max_vx_eff,
@@ -819,6 +846,12 @@ def _height_gain_scale(altitude_m: float | None, config: AlignDescendConfig) -> 
     if not math.isfinite(height):
         return 1.0
 
+    if config.height_gain_mode == "points" and config.height_scale_points:
+        return _height_gain_scale_points(height, config)
+    return _height_gain_scale_linear(height, config)
+
+
+def _height_gain_scale_linear(height: float, config: AlignDescendConfig) -> float:
     low = float(config.gain_low_altitude_m)
     high = float(config.gain_high_altitude_m)
     high_scale = float(config.gain_high_scale)
@@ -830,6 +863,25 @@ def _height_gain_scale(altitude_m: float | None, config: AlignDescendConfig) -> 
 
     t = (height - low) / (high - low)
     return 1.0 + t * (high_scale - 1.0)
+
+
+def _height_gain_scale_points(height_m: float, config: AlignDescendConfig) -> float:
+    points = sorted(config.height_scale_points or [], key=lambda p: float(p["altitude_m"]))
+    if height_m <= points[0]["altitude_m"]:
+        return float(points[0]["scale"])
+    if height_m >= points[-1]["altitude_m"]:
+        return float(points[-1]["scale"])
+    for i in range(len(points) - 1):
+        lower = points[i]
+        upper = points[i + 1]
+        lower_alt = float(lower["altitude_m"])
+        upper_alt = float(upper["altitude_m"])
+        if lower_alt <= height_m <= upper_alt:
+            t = (height_m - lower_alt) / (upper_alt - lower_alt)
+            lower_scale = float(lower["scale"])
+            upper_scale = float(upper["scale"])
+            return lower_scale + t * (upper_scale - lower_scale)
+    return 1.0
 
 
 def _slow_descend_aligned(ex_cam: float, ey_cam: float, config: AlignDescendConfig) -> bool:
