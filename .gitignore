@@ -19,6 +19,12 @@ __pycache__/
 logs/
 yolo_app/logs/
 
+# IDE internal state
+.reasonix/
+
+# Personal notes
+action调试.md
+
 # Local runtime state: SITL EEPROM, MAVLink logs, blackbox data, and videos.
 runtime/*
 !runtime/.gitkeep
