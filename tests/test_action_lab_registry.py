@@ -111,15 +111,15 @@ def test_align_descend_spec_defaults_to_low_altitude_descent_profile() -> None:
     assert params["finish_altitude_m"] == 0.8
     assert config["kp_vx"] == 0.85
     assert config["kp_vy"] == 0.85
-    assert params["max_updates"] == 120
+    assert params["max_updates"] == 180
     assert config["max_vx_mps"] == 0.25
     assert config["max_vy_mps"] == 0.25
     assert config["descend_speed_mps"] == 0.16
-    assert config["slow_descend_speed_mps"] == 0.06
+    assert config["slow_descend_speed_mps"] == 0.08
     assert config["max_ex_cam"] == 0.075
     assert config["max_ey_cam"] == 0.075
-    assert config["slow_descend_max_ex_cam"] == 0.10
-    assert config["slow_descend_max_ey_cam"] == 0.10
+    assert config["slow_descend_max_ex_cam"] == 0.25
+    assert config["slow_descend_max_ey_cam"] == 0.22
     assert config["deadband_ex_cam"] == 0.012
     assert config["deadband_ey_cam"] == 0.012
     assert config["min_altitude_m"] == 0.8
