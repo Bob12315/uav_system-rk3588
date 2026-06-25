@@ -63,7 +63,7 @@ class _FakeRunner:
         self.latest_localization_result = {"objects": [{"x": 1.0, "y": 2.0}]}
 
     def web_status_snapshot(self):
-        return {"mission": "visual_tracking", "events": []}
+        return {"mission": "visual_tracking", "events": [], "field_heading": self.field_heading_status()}
 
     def web_missions(self):
         return [{"name": "visual_tracking", "active": True}]
@@ -94,6 +94,19 @@ class _FakeRunner:
     def clear_localization_result(self):
         self.latest_localization_result = {}
         return CommandResult(True, "localized object coordinates cleared")
+
+    def field_heading_status(self):
+        return {
+            "attitude_valid": True,
+            "current_yaw_deg": 28.6,
+            "field_heading_yaw_deg": 28.6,
+            "field_heading_confirmed": True,
+            "field_heading_source": "manual_web",
+            "delta_current_to_field_deg": 0.0,
+        }
+
+    def confirm_field_heading_manual(self):
+        return CommandResult(True, "field heading confirmed yaw=28.6 deg")
 
 
 def test_web_api_executes_command_and_records_audit(tmp_path: Path) -> None:
@@ -151,6 +164,42 @@ def test_web_api_clears_localization_and_records_audit(tmp_path: Path) -> None:
     assert audit[0]["source"] == "LOCALIZATION"
 
 
+def test_web_api_confirms_field_heading_and_records_audit(tmp_path: Path) -> None:
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    app = create_app(
+        _FakeRunner(),
+        UiConfig(True, False, "127.0.0.1", 8080, str(tmp_path / "audit.jsonl")),
+    )
+    client = TestClient(app)
+
+    response = client.post("/api/field-heading/confirm")
+
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["field_heading"]["field_heading_confirmed"] is True
+    assert payload["field_heading"]["field_heading_source"] == "manual_web"
+    audit = client.get("/api/audit").json()
+    assert audit[0]["source"] == "FIELD_HEADING"
+
+
+def test_web_status_api_includes_field_heading(tmp_path: Path) -> None:
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    app = create_app(
+        _FakeRunner(),
+        UiConfig(True, False, "127.0.0.1", 8080, str(tmp_path / "audit.jsonl")),
+    )
+    client = TestClient(app)
+
+    payload = client.get("/api/status").json()
+
+    assert payload["field_heading"]["field_heading_confirmed"] is True
+    assert payload["field_heading"]["delta_current_to_field_deg"] == 0.0
+
+
 def test_web_ui_exposes_manual_step_movement_controls() -> None:
     static_dir = Path(__file__).parents[1] / "web_ui" / "static"
     index = (static_dir / "index.html").read_text(encoding="utf-8")
@@ -181,6 +230,22 @@ def test_web_ui_exposes_raw_camera_recording_controls() -> None:
     assert '"/api/camera-recording/toggle"' in script
     assert "function renderCameraRecordingStatus" in script
     assert ".camera-recording-status" in styles
+
+
+def test_web_ui_exposes_field_heading_controls() -> None:
+    static_dir = Path(__file__).parents[1] / "web_ui" / "static"
+    index = (static_dir / "index.html").read_text(encoding="utf-8")
+    script = (static_dir / "app.js").read_text(encoding="utf-8")
+    styles = (static_dir / "style.css").read_text(encoding="utf-8")
+
+    assert 'id="confirmFieldHeading"' in index
+    assert 'id="fieldHeadingCurrentYaw"' in index
+    assert 'id="fieldHeadingDelta"' in index
+    assert '"/api/field-heading/confirm"' in script
+    assert "function renderFieldHeading" in script
+    assert "function confirmFieldHeading" in script
+    assert "delta_current_to_field_deg" in script
+    assert ".field-heading-panel" in styles
 
 
 def test_web_ui_exposes_clear_localization_control() -> None:

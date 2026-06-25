@@ -650,12 +650,83 @@ class SystemRunner:
             )
         manager = self.services.link_manager
         snapshot["active_source"] = manager.get_active_source() if manager is not None else "none"
+        snapshot["field_heading"] = self.field_heading_status()
         return self._json_safe(snapshot)
 
     def action_lab_context(self) -> dict[str, object]:
         with self.control_command_log_lock:
             snapshot = dict(self.latest_snapshot)
         return self.runtime_context_builder.build_action_context(snapshot)
+
+    def field_heading_status(self) -> dict[str, object]:
+        builder = self.runtime_context_builder
+        with self.control_command_log_lock:
+            snapshot = dict(self.latest_snapshot)
+        drone = snapshot.get("drone", {})
+        current_yaw = None
+        attitude_valid = False
+        if isinstance(drone, dict):
+            attitude_valid = bool(drone.get("attitude_valid", False))
+            current_yaw = RuntimeContextBuilder._float_or_none(drone.get("yaw"))
+
+        field_yaw = builder.field_heading_yaw_rad
+        pre_arm_yaw = builder.pre_arm_yaw_rad
+        arm_yaw = builder.arm_heading_yaw_rad
+
+        def deg(rad: float | None) -> float | None:
+            return None if rad is None else math.degrees(float(rad))
+
+        def yaw_delta_deg(a: float | None, b: float | None) -> float | None:
+            if a is None or b is None:
+                return None
+            delta = math.atan2(math.sin(float(a) - float(b)), math.cos(float(a) - float(b)))
+            return math.degrees(delta)
+
+        return {
+            "attitude_valid": attitude_valid,
+            "current_yaw_rad": current_yaw,
+            "current_yaw_deg": deg(current_yaw),
+            "pre_arm_yaw_rad": pre_arm_yaw,
+            "pre_arm_yaw_deg": deg(pre_arm_yaw),
+            "arm_heading_yaw_rad": arm_yaw,
+            "arm_heading_yaw_deg": deg(arm_yaw),
+            "arm_heading_fallback": bool(builder.arm_heading_fallback),
+            "field_heading_yaw_rad": field_yaw,
+            "field_heading_yaw_deg": deg(field_yaw),
+            "field_heading_confirmed": bool(builder.field_heading_confirmed),
+            "field_heading_source": builder.field_heading_source,
+            "field_heading_time": builder.field_heading_time,
+            "delta_current_to_field_deg": yaw_delta_deg(current_yaw, field_yaw),
+        }
+
+    def confirm_field_heading_manual(self) -> CommandResult:
+        with self.control_command_log_lock:
+            snapshot = dict(self.latest_snapshot)
+        drone = snapshot.get("drone", {})
+        if not isinstance(drone, dict):
+            return CommandResult(False, "drone state unavailable")
+        if not bool(drone.get("attitude_valid", False)):
+            return CommandResult(False, "attitude yaw not valid")
+        yaw = RuntimeContextBuilder._float_or_none(drone.get("yaw"))
+        if yaw is None:
+            return CommandResult(False, "attitude yaw not valid")
+        ok = self.runtime_context_builder.confirm_field_heading(
+            yaw_rad=yaw,
+            source="manual_web",
+        )
+        if not ok:
+            return CommandResult(False, "field heading confirm failed")
+        status = self.field_heading_status()
+        yaw_deg = status.get("field_heading_yaw_deg")
+        message = (
+            f"field heading confirmed yaw={yaw_deg:.1f} deg"
+            if yaw_deg is not None
+            else "field heading confirmed"
+        )
+        if bool(drone.get("armed", False)):
+            message = f"{message}; vehicle is armed, confirm on ground before flight when possible"
+        self._record_event("OK", message)
+        return CommandResult(True, message)
 
     def _update_arm_heading(self, drone: dict[str, object]) -> None:
         return self.runtime_context_builder._update_arm_heading(drone)

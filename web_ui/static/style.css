@@ -140,6 +140,34 @@ button.active-choice {
 .current-target { padding: 9px; margin-bottom: 10px; background: var(--panel2); }
 .compact-target-panel .button-row button { flex: 1 1 auto; }
 .button-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.field-heading-panel {
+  border-color: rgba(57, 200, 191, 0.35);
+}
+.field-heading-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+.field-heading-status-grid div {
+  background: rgba(8, 17, 26, 0.55);
+  border: 1px solid rgba(147, 168, 191, 0.25);
+  border-radius: 6px;
+  padding: 8px;
+}
+.field-heading-status-grid span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.field-heading-status-grid strong {
+  color: var(--text);
+  font-family: Consolas, monospace;
+}
+.ok-text { color: var(--accent) !important; }
+.warning-text { color: #ffbf66 !important; }
+.danger-text { color: #ff5b5b !important; }
 .mini-state { display: flex; gap: 24px; margin-top: 15px; color: var(--muted); }
 .field-map-wrap {
   position: relative;

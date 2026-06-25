@@ -241,6 +241,9 @@ function infoRows(target, rows) {
 function num(value, digits = 2, unit = "") {
   return Number.isFinite(Number(value)) ? `${Number(value).toFixed(digits)}${unit}` : "--";
 }
+function degNum(value, digits = 1) {
+  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(digits)}°` : "--";
+}
 function boolText(value, yes = "YES", no = "NO") {
   return value ? yes : no;
 }
@@ -360,6 +363,58 @@ function updateControlHighlights(next, drone, controls) {
       );
     });
   }
+}
+function renderFieldHeading(next) {
+  const field = next.field_heading || {};
+  setOptionalText("fieldHeadingCurrentYaw", degNum(field.current_yaw_deg));
+  setOptionalText("fieldHeadingPreArmYaw", degNum(field.pre_arm_yaw_deg));
+  setOptionalText("fieldHeadingConfirmedYaw", degNum(field.field_heading_yaw_deg));
+  setOptionalText("fieldHeadingDelta", degNum(field.delta_current_to_field_deg));
+  setOptionalText("fieldHeadingConfirmed", field.field_heading_confirmed ? "YES" : "NO");
+  setOptionalText("fieldHeadingSource", field.field_heading_source || "--");
+  setOptionalText("fieldHeadingTime", stamp(field.field_heading_time));
+  setOptionalText("fieldHeadingAttitudeValid", field.attitude_valid ? "YES" : "NO");
+
+  const delta = Number(field.delta_current_to_field_deg);
+  const deltaElement = $("fieldHeadingDelta");
+  if (deltaElement) {
+    deltaElement.classList.toggle("ok-text", Number.isFinite(delta) && Math.abs(delta) <= 2.0);
+    deltaElement.classList.toggle("warning-text", Number.isFinite(delta) && Math.abs(delta) > 2.0 && Math.abs(delta) <= 8.0);
+    deltaElement.classList.toggle("danger-text", Number.isFinite(delta) && Math.abs(delta) > 8.0);
+  }
+
+  const hint = $("fieldHeadingHint");
+  if (hint) {
+    if (!field.attitude_valid) {
+      hint.textContent = "姿态 yaw 无效，无法确认场地方向。请检查 MAVLink ATTITUDE 数据。";
+    } else if (!field.field_heading_confirmed) {
+      hint.textContent = "未确认：起飞前把机头对准场地方向，然后点击确认。程序起飞也会自动确认。确认只记录内部 yaw，不发 MAVLink。";
+    } else if (Number.isFinite(delta)) {
+      hint.textContent = `已确认：当前 yaw 与场地方向偏差 ${delta.toFixed(1)}°。地面静止时建议接近 0°。`;
+    } else {
+      hint.textContent = "已确认场地方向。确认只记录内部 yaw，不发 MAVLink。";
+    }
+  }
+}
+async function confirmFieldHeading() {
+  const field = state.field_heading || {};
+  if (!field.attitude_valid) {
+    $("completionHint").textContent = "姿态 yaw 无效，无法确认场地方向";
+    return;
+  }
+  const confirmed = window.confirm(
+    "确认将当前机头 yaw 记录为场地方向？\n"
+    + "请确保飞机放在地上，机头已经对准场地方向。\n"
+    + `当前 yaw: ${degNum(field.current_yaw_deg)}`
+  );
+  if (!confirmed) return;
+  const result = await json("/api/field-heading/confirm", {method: "POST", body: "{}"});
+  $("completionHint").textContent = result.message || (result.ok ? "field heading confirmed" : "field heading confirm failed");
+  if (result.field_heading) {
+    state.field_heading = result.field_heading;
+    renderFieldHeading(state);
+  }
+  await loadAudit();
 }
 function renderMissionSteps(next) {
   if (!$("missionSelect") || !$("stageOverride") || !$("missionSteps")) return;
@@ -1199,6 +1254,7 @@ function renderStatus(next) {
   setOptionalText("stageController", next.stage_controller || "--");
   setOptionalText("holdReason", next.hold_reason || "none");
   updateControlHighlights(next, drone, controls);
+  renderFieldHeading(next);
   renderMissionSteps(next);
   $("targetCurrent").textContent = target.target_valid
     ? `当前锁定: ${target.class_name} #${target.track_id} (${Number(target.confidence).toFixed(2)})`
@@ -1225,6 +1281,9 @@ function renderStatus(next) {
     ["高度", `${num(drone.relative_altitude, 2, " m")} / ${num(drone.altitude, 2, " m")}`],
     ["飞控模式", drone.mode || "--"],
     ["解锁", boolText(drone.armed, "ARMED", "DISARMED")],
+    ["当前 yaw", degNum(next.field_heading?.current_yaw_deg)],
+    ["场地方向", next.field_heading?.field_heading_confirmed ? degNum(next.field_heading?.field_heading_yaw_deg) : "--"],
+    ["yaw 偏差", degNum(next.field_heading?.delta_current_to_field_deg)],
   ]);
   renderDetections(scene, target);
   cards($("statusCards"), {
@@ -1860,6 +1919,11 @@ async function init() {
     });
     refreshCameraRecordingStatus().catch(() => {});
   }
+  $("confirmFieldHeading")?.addEventListener("click", () => {
+    confirmFieldHeading().catch(error => {
+      $("completionHint").textContent = `确认场地方向失败: ${error.message}`;
+    });
+  });
 
   document.querySelectorAll(".tab").forEach(tab => tab.onclick = () => {
     document.querySelectorAll(".tab").forEach(item => item.classList.toggle("active", item === tab));

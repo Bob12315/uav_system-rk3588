@@ -295,6 +295,29 @@
         </div>
       </article>
 
+      <article class="panel safety-panel field-heading-panel">
+        <div class="panel-title">场地方向 / Field Heading</div>
+        <div class="field-heading-status-grid" id="fieldHeadingStatus">
+          <div><span>当前 yaw</span><strong id="fieldHeadingCurrentYaw">--</strong></div>
+          <div><span>预解锁 yaw</span><strong id="fieldHeadingPreArmYaw">--</strong></div>
+          <div><span>已确认 yaw</span><strong id="fieldHeadingConfirmedYaw">--</strong></div>
+          <div><span>当前偏差</span><strong id="fieldHeadingDelta">--</strong></div>
+          <div><span>确认状态</span><strong id="fieldHeadingConfirmed">--</strong></div>
+          <div><span>来源</span><strong id="fieldHeadingSource">--</strong></div>
+          <div><span>确认时间</span><strong id="fieldHeadingTime">--</strong></div>
+          <div><span>姿态有效</span><strong id="fieldHeadingAttitudeValid">--</strong></div>
+        </div>
+        <div class="button-row field-heading-actions">
+          <button id="confirmFieldHeading" class="warning"
+            data-confirm="确认将当前机头 yaw 记录为场地方向？请确保飞机放在地上，机头已经对准场地方向。">
+            确认场地方向
+          </button>
+        </div>
+        <div id="fieldHeadingHint" class="hint">
+          起飞前把机头对准场地方向，然后点击确认。程序起飞会自动确认；此按钮用于遥控器起飞前或调试。确认只记录内部 yaw，不发 MAVLink。
+        </div>
+      </article>
+
       <article class="panel safety-panel">
         <div class="panel-title">Payload Release Action</div>
         <div class="payload-release-zone">

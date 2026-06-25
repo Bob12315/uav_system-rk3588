@@ -307,6 +307,19 @@ def create_app(runner, config: UiConfig) -> FastAPI:
         except Exception as exc:
             return {"ok": False, "message": str(exc)}
 
+    @app.post("/api/field-heading/confirm")
+    def confirm_field_heading():
+        try:
+            result = runner.confirm_field_heading_manual()
+            audit.append("FIELD_HEADING", "confirm", result.ok, result.message)
+            return {
+                "ok": result.ok,
+                "message": result.message,
+                "field_heading": runner.field_heading_status(),
+            }
+        except Exception as exc:
+            return {"ok": False, "message": str(exc)}
+
     @app.post("/api/localization/clear")
     def clear_localization():
         clear = getattr(runner, "clear_localization_result", None)

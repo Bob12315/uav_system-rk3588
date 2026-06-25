@@ -812,6 +812,34 @@ def test_goto_waypoint_field_heading_dispatch_sent_includes_yaw() -> None:
     assert payload["dispatch"]["sent"][0]["yaw"] == pytest.approx(-0.65)
 
 
+def test_field_heading_status_reports_delta_and_manual_confirm_does_not_call_link() -> None:
+    runner = _runner()
+    _set_drone_snapshot(runner, armed=False, yaw=0.5)
+
+    result = runner.confirm_field_heading_manual()
+    status = runner.field_heading_status()
+
+    assert result.ok is True
+    assert "field heading confirmed" in result.message
+    assert status["field_heading_confirmed"] is True
+    assert status["field_heading_source"] == "manual_web"
+    assert status["field_heading_yaw_rad"] == pytest.approx(0.5)
+    assert status["delta_current_to_field_deg"] == pytest.approx(0.0)
+    assert runner.services.link_manager.calls == []
+
+
+def test_field_heading_manual_confirm_fails_when_attitude_invalid() -> None:
+    runner = _runner()
+    _set_drone_snapshot(runner, armed=False, yaw=0.5, attitude_valid=False)
+
+    result = runner.confirm_field_heading_manual()
+
+    assert result.ok is False
+    assert result.message == "attitude yaw not valid"
+    assert runner.runtime_context_builder.field_heading_confirmed is False
+    assert runner.services.link_manager.calls == []
+
+
 def test_arm_heading_context_fallback_when_first_seen_armed() -> None:
     runner = _runner()
     _set_drone_snapshot(runner, armed=True, yaw=-0.25)
