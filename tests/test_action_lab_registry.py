@@ -55,8 +55,7 @@ def test_payload_release_spec_defaults_to_servo_output_8() -> None:
     payload_spec = next(item for item in action_lab_specs() if item["name"] == "payload_release")
 
     assert payload_spec["default_params"]["servo_outputs"] == [
-        {"channel": 8, "release_pwm": 1200, "hold_pwm": 1700},
-        {"channel": 9, "release_pwm": 1700, "hold_pwm": 1200},
+        {"channel": 8, "release_pwm": 1440, "hold_pwm": 1800},
     ]
     assert "SERVO output" in payload_spec["description"]
 
@@ -65,15 +64,15 @@ def test_localize_specs_default_to_flipped_image_y() -> None:
     specs = {item["name"]: item for item in action_lab_specs()}
     multi_view_params = specs["multi_view_localize"]["default_params"]
 
-    assert specs["single_view_localize"]["default_params"]["camera"]["fov_x_deg"] == 113.0
-    assert specs["single_view_localize"]["default_params"]["camera"]["fov_y_deg"] == 93.0
-    assert specs["single_view_localize"]["default_params"]["camera"]["image_x_sign"] == 1
-    assert specs["single_view_localize"]["default_params"]["camera"]["image_y_sign"] == -1
+    assert specs["single_view_localize"]["default_params"]["camera"]["fov_x_deg"] == 75.0
+    assert specs["single_view_localize"]["default_params"]["camera"]["fov_y_deg"] == 60.0
+    assert specs["single_view_localize"]["default_params"]["camera"]["image_x_sign"] == 1.0
+    assert specs["single_view_localize"]["default_params"]["camera"]["image_y_sign"] == -1.0
     assert "horizontal_fov_deg" not in specs["single_view_localize"]["default_params"]["camera"]
     assert "vertical_fov_deg" not in specs["single_view_localize"]["default_params"]["camera"]
     assert "model" not in specs["single_view_localize"]["default_params"]["camera"]
-    assert multi_view_params["camera"]["fov_x_deg"] == 113.0
-    assert multi_view_params["camera"]["fov_y_deg"] == 93.0
+    assert multi_view_params["camera"]["fov_x_deg"] == 75.0
+    assert multi_view_params["camera"]["fov_y_deg"] == 60.0
     assert multi_view_params["camera"]["image_x_sign"] == 1.0
     assert multi_view_params["camera"]["image_y_sign"] == -1.0
 
@@ -83,23 +82,23 @@ def test_multi_view_localize_spec_defaults_to_drop_zone_absolute_waypoints() -> 
     params = spec["default_params"]
 
     assert params["waypoint_mode"] == "absolute"
-    assert params["yaw_mode"] == "arm_heading"
-    assert params["altitude_m"] == 3.5
+    assert params["yaw_mode"] == "field_heading"
+    assert params["altitude_m"] == 5.0
     assert isinstance(params["waypoints"], list)
     assert len(params["waypoints"]) == 4
     assert params["waypoints"] == [
-        {"x": -1.2, "y": 28, "altitude_m": 3},
-        {"x": 1.2, "y": 28, "altitude_m": 3},
-        {"x": 1.2, "y": 32, "altitude_m": 3},
-        {"x": -1.2, "y": 32, "altitude_m": 3},
+        {"x": -1.0, "y": 4.8, "altitude_m": 5.0},
+        {"x": 1.0, "y": 4.8, "altitude_m": 5.0},
+        {"x": 1.0, "y": 6.2, "altitude_m": 5.0},
+        {"x": -1.0, "y": 6.2, "altitude_m": 5.0},
     ]
     for waypoint in params["waypoints"]:
         assert {"x", "y", "altitude_m"} <= waypoint.keys()
-    assert params["camera"]["fov_x_deg"] == 113.0
-    assert params["camera"]["fov_y_deg"] == 93.0
+    assert params["camera"]["fov_x_deg"] == 75.0
+    assert params["camera"]["fov_y_deg"] == 60.0
     assert params["camera"]["image_y_sign"] == -1.0
-    assert params["fusion"]["cluster_radius_m"] == 1.0
-    assert params["fusion"]["min_cluster_size"] == 3
+    assert params["fusion"]["cluster_radius_m"] == 0.8
+    assert params["fusion"]["min_cluster_size"] == 2
 
 
 def test_align_descend_spec_defaults_to_low_altitude_descent_profile() -> None:
@@ -109,26 +108,24 @@ def test_align_descend_spec_defaults_to_low_altitude_descent_profile() -> None:
 
     assert params["expected_dt_s"] == 0.1
     assert params["finish_altitude_m"] == 0.8
-    assert config["kp_vx"] == 0.85
-    assert config["kp_vy"] == 0.85
-    assert params["max_updates"] == 180
-    assert config["max_vx_mps"] == 0.25
-    assert config["max_vy_mps"] == 0.25
-    assert config["descend_speed_mps"] == 0.48
-    assert config["slow_descend_speed_mps"] == 0.24
-    assert config["max_ex_cam"] == 0.075
-    assert config["max_ey_cam"] == 0.075
-    assert config["slow_descend_max_ex_cam"] == 0.25
-    assert config["slow_descend_max_ey_cam"] == 0.22
-    assert config["deadband_ex_cam"] == 0.012
-    assert config["deadband_ey_cam"] == 0.012
+    assert config["kp_vx"] == 0.55
+    assert config["kp_vy"] == 0.55
+    assert params["max_updates"] == 220
+    assert config["max_vx_mps"] == 0.35
+    assert config["max_vy_mps"] == 0.35
+    assert config["descend_speed_mps"] == 0.32
+    assert config["slow_descend_speed_mps"] == 0.18
+    assert config["max_ex_cam"] == 0.10
+    assert config["max_ey_cam"] == 0.10
+    assert config["slow_descend_max_ex_cam"] == 0.28
+    assert config["slow_descend_max_ey_cam"] == 0.28
+    assert config["deadband_ex_cam"] == 0.018
+    assert config["deadband_ey_cam"] == 0.018
     assert config["min_altitude_m"] == 0.8
-    assert config["require_target_locked"] is True
+    assert config["require_target_locked"] is False
     assert config["height_gain_enabled"] is True
-    assert config["gain_low_altitude_m"] == 0.8
-    assert config["gain_high_altitude_m"] == 3.0
-    assert config["gain_high_scale"] == 0.30
-    assert config["scale_max_velocity_with_height"] is True
+    assert config["height_gain_mode"] == "points"
+    assert len(config["height_scale_points"]) == 5
 
 
 def test_action_lab_does_not_auto_register_default_registry() -> None:
