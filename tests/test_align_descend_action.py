@@ -708,3 +708,178 @@ def test_invalid_finish_below_min_altitude_is_clamped() -> None:
     action.start({"finish_altitude_m": 1.0, "config": {"min_altitude_m": 2.5}})
 
     assert action.finish_altitude_m == pytest.approx(2.5)
+
+
+# ── payload offset compensation tests ─────────────────────────────────
+
+
+def test_payload_offset_disabled_preserves_old_behavior() -> None:
+    """With payload_offset_enabled=False, desired offsets are zero, corrected == raw."""
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.1, ey_cam=0.2),
+        AlignDescendConfig(),
+        altitude_m=1.0,
+    )
+
+    # same control as before
+    assert command["vx_cmd"] == pytest.approx(-0.16)
+    assert command["vy_cmd"] == pytest.approx(0.08)
+    # desired is zero
+    assert detail["desired_ex_cam"] == pytest.approx(0.0)
+    assert detail["desired_ey_cam"] == pytest.approx(0.0)
+    # corrected equals raw
+    assert detail["corrected_ex_cam"] == pytest.approx(0.1)
+    assert detail["corrected_ey_cam"] == pytest.approx(0.2)
+    assert detail["raw_ex_cam"] == pytest.approx(0.1)
+    assert detail["raw_ey_cam"] == pytest.approx(0.2)
+    # ex_cam/ey_cam are corrected values
+    assert detail["ex_cam"] == pytest.approx(0.1)
+    assert detail["ey_cam"] == pytest.approx(0.2)
+    assert detail["payload_offset_enabled"] is False
+
+
+def test_payload_offset_forward_produces_nonzero_desired_ey() -> None:
+    """Forward payload (positive payload_forward_m) → desired_ey_cam != 0."""
+    config = AlignDescendConfig(
+        payload_offset_enabled=True,
+        payload_forward_m=0.2,
+        payload_right_m=0.0,
+        fov_y_deg=90.0,
+        image_y_sign=-1.0,
+    )
+    _, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.0, ey_cam=0.0),
+        config,
+        altitude_m=1.0,
+    )
+
+    # desired_ey = atan(0.2 / (-1 * 1.0)) / radians(45) ≈ negative
+    assert detail["desired_ey_cam"] < 0.0
+    assert detail["desired_ex_cam"] == pytest.approx(0.0)
+    assert detail["payload_offset_enabled"] is True
+    assert detail["payload_offset_valid"] is True
+    assert detail["payload_forward_m"] == pytest.approx(0.2)
+
+
+def test_payload_offset_right_produces_nonzero_desired_ex() -> None:
+    """Right payload (positive payload_right_m) → desired_ex_cam > 0."""
+    config = AlignDescendConfig(
+        payload_offset_enabled=True,
+        payload_forward_m=0.0,
+        payload_right_m=0.2,
+        fov_x_deg=90.0,
+        image_x_sign=1.0,
+    )
+    _, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.0, ey_cam=0.0),
+        config,
+        altitude_m=1.0,
+    )
+
+    assert detail["desired_ex_cam"] > 0.0
+    assert detail["desired_ey_cam"] == pytest.approx(0.0)
+    assert detail["payload_offset_valid"] is True
+
+
+def test_corrected_error_controls_aligned_judgment() -> None:
+    """When raw == desired, corrected is ~0 → aligned=True even if raw is nonzero."""
+    config = AlignDescendConfig(
+        payload_offset_enabled=True,
+        payload_forward_m=0.2,
+        fov_y_deg=90.0,
+        image_y_sign=-1.0,
+        max_ex_cam=0.06,
+        max_ey_cam=0.06,
+        descend_speed_mps=0.3,
+    )
+
+    # compute desired first so we can feed it back as raw
+    _, pre = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.0, ey_cam=0.0),
+        config,
+        altitude_m=1.0,
+    )
+    desired_ex = pre["desired_ex_cam"]
+    desired_ey = pre["desired_ey_cam"]
+
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=desired_ex, ey_cam=desired_ey),
+        config,
+        altitude_m=1.0,
+    )
+
+    assert detail["aligned"] is True
+    assert command["vz_cmd"] == pytest.approx(0.3)
+    # corrected should be near zero, raw nonzero
+    assert abs(detail["corrected_ex_cam"]) < 1e-6
+    assert abs(detail["corrected_ey_cam"]) < 1e-6
+    assert abs(detail["raw_ex_cam"]) > 0.0 or abs(detail["raw_ey_cam"]) > 0.0
+
+
+def test_corrected_error_zeroes_control_when_raw_matches_desired() -> None:
+    """vx/vy commands ~0 when raw == desired."""
+    config = AlignDescendConfig(
+        payload_offset_enabled=True,
+        payload_forward_m=0.2,
+        fov_y_deg=90.0,
+        image_y_sign=-1.0,
+    )
+
+    _, pre = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.0, ey_cam=0.0),
+        config,
+        altitude_m=1.0,
+    )
+    command, _ = compute_align_descend_command(
+        _valid_inputs(ex_cam=pre["desired_ex_cam"], ey_cam=pre["desired_ey_cam"]),
+        config,
+        altitude_m=1.0,
+    )
+
+    assert command["vx_cmd"] == pytest.approx(0.0)
+    assert command["vy_cmd"] == pytest.approx(0.0)
+
+
+def test_payload_offset_clamped_at_low_altitude() -> None:
+    """At very low altitude, desired offset is clamped to max_payload_offset_ey_cam."""
+    config = AlignDescendConfig(
+        payload_offset_enabled=True,
+        payload_forward_m=2.0,  # very large offset
+        payload_right_m=0.0,
+        fov_y_deg=90.0,
+        image_y_sign=-1.0,
+        max_payload_offset_ey_cam=0.3,
+    )
+    _, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.0, ey_cam=0.0),
+        config,
+        altitude_m=0.5,
+    )
+
+    assert detail["desired_ey_cam"] == pytest.approx(-0.3)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"fov_x_deg": 0.0},
+        {"fov_x_deg": 180.0},
+        {"fov_x_deg": 190.0},
+        {"fov_y_deg": 0.0},
+        {"fov_y_deg": 180.0},
+        {"image_x_sign": 0.0},
+        {"image_x_sign": 2.0},
+        {"image_y_sign": 0.0},
+        {"image_y_sign": -2.0},
+        {"max_payload_offset_ex_cam": 0.0},
+        {"max_payload_offset_ex_cam": -0.1},
+        {"max_payload_offset_ex_cam": 1.6},
+        {"max_payload_offset_ey_cam": 0.0},
+        {"max_payload_offset_ey_cam": -0.1},
+        {"payload_forward_m": float("nan")},
+        {"payload_right_m": float("inf")},
+    ],
+)
+def test_payload_offset_config_rejects_invalid_values(kwargs) -> None:
+    with pytest.raises(ValueError):
+        AlignDescendConfig(**kwargs)

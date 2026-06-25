@@ -130,7 +130,16 @@
           "gain_low_altitude_m": 0.8,
           "gain_high_altitude_m": 3.0,
           "gain_high_scale": 0.30,
-          "scale_max_velocity_with_height": true
+          "scale_max_velocity_with_height": true,
+          "payload_offset_enabled": true,
+          "payload_forward_m": 0.18,
+          "payload_right_m": 0.0,
+          "fov_x_deg": 113.0,
+          "fov_y_deg": 93.0,
+          "image_x_sign": 1.0,
+          "image_y_sign": -1.0,
+          "max_payload_offset_ex_cam": 0.8,
+          "max_payload_offset_ey_cam": 0.8
         }
       }
     },
@@ -218,7 +227,16 @@
           "gain_low_altitude_m": 0.8,
           "gain_high_altitude_m": 3.0,
           "gain_high_scale": 0.30,
-          "scale_max_velocity_with_height": true
+          "scale_max_velocity_with_height": true,
+          "payload_offset_enabled": true,
+          "payload_forward_m": -0.18,
+          "payload_right_m": 0.0,
+          "fov_x_deg": 113.0,
+          "fov_y_deg": 93.0,
+          "image_x_sign": 1.0,
+          "image_y_sign": -1.0,
+          "max_payload_offset_ex_cam": 0.8,
+          "max_payload_offset_ey_cam": 0.8
         }
       }
     },

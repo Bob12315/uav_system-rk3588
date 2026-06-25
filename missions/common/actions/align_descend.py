@@ -31,6 +31,16 @@ class AlignDescendConfig:
     gain_high_altitude_m: float = 3.0
     gain_high_scale: float = 0.3
     scale_max_velocity_with_height: bool = True
+    # payload drop offset compensation (BODY frame, m)
+    payload_offset_enabled: bool = False
+    payload_forward_m: float = 0.0
+    payload_right_m: float = 0.0
+    fov_x_deg: float = 113.0
+    fov_y_deg: float = 93.0
+    image_x_sign: float = 1.0
+    image_y_sign: float = -1.0
+    max_payload_offset_ex_cam: float = 0.8
+    max_payload_offset_ey_cam: float = 0.8
 
     def __post_init__(self) -> None:
         for name in ("kp_vx", "kp_vy"):
@@ -77,12 +87,96 @@ class AlignDescendConfig:
             raise ValueError("gain_high_altitude_m must be > gain_low_altitude_m")
         if float(self.gain_high_scale) <= 0.0 or float(self.gain_high_scale) > 1.0:
             raise ValueError("gain_high_scale must be > 0 and <= 1")
+        # payload offset validation
+        if float(self.fov_x_deg) <= 0.0 or float(self.fov_x_deg) >= 180.0:
+            raise ValueError("fov_x_deg must be in (0, 180)")
+        if float(self.fov_y_deg) <= 0.0 or float(self.fov_y_deg) >= 180.0:
+            raise ValueError("fov_y_deg must be in (0, 180)")
+        if float(self.image_x_sign) not in (1.0, -1.0):
+            raise ValueError("image_x_sign must be 1.0 or -1.0")
+        if float(self.image_y_sign) not in (1.0, -1.0):
+            raise ValueError("image_y_sign must be 1.0 or -1.0")
+        if float(self.max_payload_offset_ex_cam) <= 0.0 or float(self.max_payload_offset_ex_cam) > 1.5:
+            raise ValueError("max_payload_offset_ex_cam must be > 0 and <= 1.5")
+        if float(self.max_payload_offset_ey_cam) <= 0.0 or float(self.max_payload_offset_ey_cam) > 1.5:
+            raise ValueError("max_payload_offset_ey_cam must be > 0 and <= 1.5")
+        if not math.isfinite(float(self.payload_forward_m)):
+            raise ValueError("payload_forward_m must be finite")
+        if not math.isfinite(float(self.payload_right_m)):
+            raise ValueError("payload_right_m must be finite")
 
 
 @dataclass(frozen=True, slots=True)
 class _AltitudeSample:
     value_m: float
     source: str
+
+
+def _payload_offset_to_error_setpoint(
+    altitude_m: float | None,
+    config: AlignDescendConfig,
+) -> tuple[float, float, dict[str, Any]]:
+    """Convert payload physical offset (BODY frame) to desired camera error.
+
+    Returns (desired_ex_cam, desired_ey_cam, detail).
+    """
+    base_detail: dict[str, Any] = {
+        "payload_offset_enabled": bool(config.payload_offset_enabled),
+        "payload_forward_m": config.payload_forward_m,
+        "payload_right_m": config.payload_right_m,
+        "fov_x_deg": config.fov_x_deg,
+        "fov_y_deg": config.fov_y_deg,
+        "image_x_sign": config.image_x_sign,
+        "image_y_sign": config.image_y_sign,
+    }
+
+    if not config.payload_offset_enabled:
+        return 0.0, 0.0, {**base_detail, "payload_offset_valid": False}
+
+    if altitude_m is None:
+        return 0.0, 0.0, {
+            **base_detail,
+            "payload_offset_valid": False,
+            "payload_offset_reason": "missing_altitude",
+        }
+
+    try:
+        alt = float(altitude_m)
+    except (TypeError, ValueError):
+        return 0.0, 0.0, {
+            **base_detail,
+            "payload_offset_valid": False,
+            "payload_offset_reason": "invalid_altitude",
+        }
+
+    if not math.isfinite(alt) or alt <= 0.0:
+        return 0.0, 0.0, {
+            **base_detail,
+            "payload_offset_valid": False,
+            "payload_offset_reason": "altitude_not_positive",
+        }
+
+    half_fov_x = math.radians(config.fov_x_deg) / 2.0
+    half_fov_y = math.radians(config.fov_y_deg) / 2.0
+
+    # BODY frame: payload_right_m → affects ex, payload_forward_m → affects ey
+    desired_ex = math.atan(
+        config.payload_right_m / (config.image_x_sign * alt)
+    ) / half_fov_x
+    desired_ey = math.atan(
+        config.payload_forward_m / (config.image_y_sign * alt)
+    ) / half_fov_y
+
+    desired_ex = _clamp(desired_ex, -config.max_payload_offset_ex_cam, config.max_payload_offset_ex_cam)
+    desired_ey = _clamp(desired_ey, -config.max_payload_offset_ey_cam, config.max_payload_offset_ey_cam)
+
+    return desired_ex, desired_ey, {
+        **base_detail,
+        "payload_offset_valid": True,
+        "desired_ex_cam": desired_ex,
+        "desired_ey_cam": desired_ey,
+        "offset_altitude_m": alt,
+    }
 
 
 def compute_align_descend_command(
@@ -125,11 +219,22 @@ def compute_align_descend_command(
     vy = 0.0
     vz = 0.0
 
+    # compute payload offset desired setpoint
+    desired_ex_cam, desired_ey_cam, offset_detail = _payload_offset_to_error_setpoint(
+        altitude_m=altitude_m,
+        config=config,
+    )
+
+    raw_ex_cam = ex_cam
+    raw_ey_cam = ey_cam
+    corrected_ex_cam = raw_ex_cam - desired_ex_cam
+    corrected_ey_cam = raw_ey_cam - desired_ey_cam
+
     if enabled:
-        aligned = abs(ex_cam) <= config.max_ex_cam and abs(ey_cam) <= config.max_ey_cam
-        slow_descend_aligned = _slow_descend_aligned(ex_cam, ey_cam, config)
-        ex_for_control = 0.0 if abs(ex_cam) <= config.deadband_ex_cam else ex_cam
-        ey_for_control = 0.0 if abs(ey_cam) <= config.deadband_ey_cam else ey_cam
+        aligned = abs(corrected_ex_cam) <= config.max_ex_cam and abs(corrected_ey_cam) <= config.max_ey_cam
+        slow_descend_aligned = _slow_descend_aligned(corrected_ex_cam, corrected_ey_cam, config)
+        ex_for_control = 0.0 if abs(corrected_ex_cam) <= config.deadband_ex_cam else corrected_ex_cam
+        ey_for_control = 0.0 if abs(corrected_ey_cam) <= config.deadband_ey_cam else corrected_ey_cam
         vx = _clamp(
             config.vx_sign * kp_vx_eff * ey_for_control,
             -max_vx_eff,
@@ -161,13 +266,20 @@ def compute_align_descend_command(
         "aligned": aligned,
         "slow_descending": bool(enabled and not aligned and vz > 0.0),
         "hold_reason": reason,
-        "ex_cam": ex_cam,
-        "ey_cam": ey_cam,
+        "ex_cam": corrected_ex_cam,
+        "ey_cam": corrected_ey_cam,
+        "raw_ex_cam": raw_ex_cam,
+        "raw_ey_cam": raw_ey_cam,
+        "desired_ex_cam": desired_ex_cam,
+        "desired_ey_cam": desired_ey_cam,
+        "corrected_ex_cam": corrected_ex_cam,
+        "corrected_ey_cam": corrected_ey_cam,
         "height_gain_scale": gain_scale,
         "kp_vx_eff": kp_vx_eff,
         "kp_vy_eff": kp_vy_eff,
         "max_vx_eff": max_vx_eff,
         "max_vy_eff": max_vy_eff,
+        **offset_detail,
     }
     return command, detail
 
@@ -563,6 +675,17 @@ class AlignDescendAction(ActionModule):
             "altitude_source": altitude_source,
             "ex_cam": command_detail.get("ex_cam"),
             "ey_cam": command_detail.get("ey_cam"),
+            "raw_ex_cam": command_detail.get("raw_ex_cam"),
+            "raw_ey_cam": command_detail.get("raw_ey_cam"),
+            "desired_ex_cam": command_detail.get("desired_ex_cam"),
+            "desired_ey_cam": command_detail.get("desired_ey_cam"),
+            "corrected_ex_cam": command_detail.get("corrected_ex_cam"),
+            "corrected_ey_cam": command_detail.get("corrected_ey_cam"),
+            "payload_offset_enabled": command_detail.get("payload_offset_enabled"),
+            "payload_offset_valid": command_detail.get("payload_offset_valid"),
+            "payload_forward_m": command_detail.get("payload_forward_m"),
+            "payload_right_m": command_detail.get("payload_right_m"),
+            "offset_altitude_m": command_detail.get("offset_altitude_m"),
             "height_gain_scale": command_detail.get("height_gain_scale"),
             "kp_vx_eff": command_detail.get("kp_vx_eff"),
             "kp_vy_eff": command_detail.get("kp_vy_eff"),
