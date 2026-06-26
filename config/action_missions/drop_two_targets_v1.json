@@ -20,7 +20,7 @@
       "name": "multi_view_localize",
       "save_as": "drop_scan",
       "params": {
-        "waypoint_mode": "absolute",
+        "waypoint_mode": "field",
         "altitude_m": 5.0,
         "yaw_mode": "field_heading",
         "waypoints": [

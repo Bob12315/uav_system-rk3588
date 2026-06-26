@@ -20,6 +20,9 @@ class SurveyAreaAction(ActionModule):
             raise ValueError("waypoints must be a non-empty list")
 
         self.waypoints = [self._validated_waypoint(item) for item in waypoints]
+        self.waypoint_mode = str(data.get("waypoint_mode", "absolute")).strip().lower()
+        if self.waypoint_mode not in {"absolute", "field"}:
+            raise ValueError("waypoint_mode must be absolute or field")
         self.yaw_mode = str(data.get("yaw_mode", "arm_heading")).strip().lower()
         if self.yaw_mode not in {"hold", "fixed", "arm_heading", "field_heading"}:
             raise ValueError("yaw_mode must be hold, fixed, arm_heading, or field_heading")
@@ -113,6 +116,7 @@ class SurveyAreaAction(ActionModule):
         self.detection_source = "scene"
         self.class_names: set[str] | None = None
         self.yaw_mode = "arm_heading"
+        self.waypoint_mode = "absolute"
         self.yaw_rad: float | None = None
         self.frame = 1
         self.goto_tolerance_xy_m = 0.3
@@ -200,6 +204,7 @@ class SurveyAreaAction(ActionModule):
             "x": waypoint["x"],
             "y": waypoint["y"],
             "altitude_m": waypoint["altitude_m"],
+            "waypoint_mode": self.waypoint_mode,
             "yaw_mode": self.yaw_mode,
             "frame": self.frame,
             "tolerance_xy_m": self.goto_tolerance_xy_m,

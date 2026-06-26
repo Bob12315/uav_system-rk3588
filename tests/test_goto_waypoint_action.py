@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from missions.common.actions.goto_waypoint import GotoWaypointAction
@@ -125,6 +127,58 @@ def test_field_heading_yaw_missing_context_fails_without_action() -> None:
     assert result.reason == "missing_field_heading_yaw"
     assert result.actions == []
     assert "requires field_heading_yaw_rad" in result.detail["note"]
+
+
+def test_field_waypoint_mode_transforms_to_local_ned_heading_zero() -> None:
+    action = GotoWaypointAction()
+    action.start({"x": 1, "y": 2, "altitude_m": 3, "waypoint_mode": "field", "yaw_mode": "field_heading"})
+
+    result = action.update(
+        {
+            "field_heading_yaw_rad": 0.0,
+            "field_origin_local_x": 10.0,
+            "field_origin_local_y": 20.0,
+            "field_origin_local_z": -1.0,
+            "field_origin_confirmed": True,
+        }
+    )
+
+    params = result.actions[0]["params"]
+    assert params["x"] == pytest.approx(12.0)
+    assert params["y"] == pytest.approx(21.0)
+    assert params["z"] == pytest.approx(-3.0)
+    assert params["yaw"] == pytest.approx(0.0)
+
+
+def test_field_waypoint_mode_transforms_to_local_ned_heading_90_deg() -> None:
+    action = GotoWaypointAction()
+    action.start({"x": 1, "y": 2, "altitude_m": 3, "waypoint_mode": "field", "yaw_mode": "field_heading"})
+
+    result = action.update(
+        {
+            "field_heading_yaw_rad": math.pi / 2.0,
+            "field_origin_local_x": 10.0,
+            "field_origin_local_y": 20.0,
+            "field_origin_local_z": -1.0,
+            "field_origin_confirmed": True,
+        }
+    )
+
+    params = result.actions[0]["params"]
+    assert params["x"] == pytest.approx(9.0)
+    assert params["y"] == pytest.approx(22.0)
+    assert params["z"] == pytest.approx(-3.0)
+
+
+def test_field_waypoint_mode_missing_origin_fails() -> None:
+    action = GotoWaypointAction()
+    action.start({"x": 1, "y": 2, "altitude_m": 3, "waypoint_mode": "field", "yaw_mode": "field_heading"})
+
+    result = action.update({"field_heading_yaw_rad": 0.0})
+
+    assert result.failed is True
+    assert result.reason == "missing_field_origin"
+    assert result.actions == []
 
 
 def test_missing_position_waits_and_keeps_outputting_action() -> None:

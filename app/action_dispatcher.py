@@ -485,7 +485,16 @@ class ActionDispatcher:
         source = str(params.get("source") or "action")
         if not callable(self.field_heading_confirmer):
             return {"status": "error", "reason": "field_heading_confirmer_not_available"}
-        ok = self.field_heading_confirmer(yaw_rad=yaw_rad, source=source)
+        drone = params.get("drone")
+        if not isinstance(drone, dict):
+            drone = {
+                "local_position_valid": params.get("local_position_valid"),
+                "local_x": params.get("local_x"),
+                "local_y": params.get("local_y"),
+                "local_z": params.get("local_z"),
+                "yaw": yaw_rad,
+            }
+        ok = self.field_heading_confirmer(yaw_rad=yaw_rad, drone=drone, source=source)
         key = str(action.get("key") or "")
         detail = {
             "action_type": "confirm_field_heading",

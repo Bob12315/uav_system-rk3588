@@ -28,14 +28,14 @@ class MultiViewLocalizeAction(ActionModule):
         data = params or {}
 
         self.waypoint_mode = str(data.get("waypoint_mode", "relative_to_start")).strip().lower()
-        if self.waypoint_mode not in {"relative_to_start", "absolute"}:
-            raise ValueError("waypoint_mode must be relative_to_start or absolute")
+        if self.waypoint_mode not in {"relative_to_start", "absolute", "field"}:
+            raise ValueError("waypoint_mode must be relative_to_start, absolute, or field")
 
         waypoints_raw = data.get("waypoints")
         self.waypoints: list[dict[str, float]] | None = None
-        if self.waypoint_mode == "absolute":
+        if self.waypoint_mode in {"absolute", "field"}:
             if not isinstance(waypoints_raw, list) or not waypoints_raw:
-                raise ValueError("waypoints must be a non-empty list when waypoint_mode=absolute")
+                raise ValueError("waypoints must be a non-empty list when waypoint_mode=absolute or field")
             self.waypoints = [self._validated_waypoint(item) for item in waypoints_raw]
 
         self.radius_m = float(data.get("radius_m", 0.8))
@@ -302,6 +302,7 @@ class MultiViewLocalizeAction(ActionModule):
             "x": wp["x"],
             "y": wp["y"],
             "altitude_m": wp["altitude_m"],
+            "waypoint_mode": "field" if self.waypoint_mode == "field" else "absolute",
             "yaw_mode": yaw_mode,
             "frame": self.frame,
             "tolerance_xy_m": self.goto_tolerance_xy_m,

@@ -135,11 +135,17 @@ def test_takeoff_default_auto_confirm_outputs_field_heading_action_first() -> No
     action = TakeoffAction()
     action.start({"altitude_m": 3.0})
 
-    result = action.update({"drone": {"attitude_valid": True, "yaw": 1.2}})
+    result = action.update(
+        {"drone": {"attitude_valid": True, "yaw": 1.2, "local_position_valid": True, "local_x": 10, "local_y": 20, "local_z": -1}}
+    )
 
     assert result.reason == "field_heading_confirm_sent"
     assert result.actions[0]["action_type"] == "confirm_field_heading"
-    assert result.actions[0]["params"] == {"yaw_rad": pytest.approx(1.2), "source": "takeoff_auto"}
+    assert result.actions[0]["params"]["yaw_rad"] == pytest.approx(1.2)
+    assert result.actions[0]["params"]["source"] == "takeoff_auto"
+    assert result.actions[0]["params"]["drone"]["local_x"] == pytest.approx(10)
+    assert result.actions[0]["params"]["drone"]["local_y"] == pytest.approx(20)
+    assert result.actions[0]["params"]["drone"]["local_z"] == pytest.approx(-1)
     assert action.phase == "set_mode"
 
 
@@ -147,7 +153,9 @@ def test_takeoff_after_confirm_outputs_set_mode_next() -> None:
     action = TakeoffAction()
     action.start({"altitude_m": 3.0})
 
-    action.update({"drone": {"attitude_valid": True, "yaw": -0.4}})
+    action.update(
+        {"drone": {"attitude_valid": True, "yaw": -0.4, "local_position_valid": True, "local_x": 0, "local_y": 0, "local_z": 0}}
+    )
     result = action.update({"field_heading_confirmed": True, "field_heading_yaw_rad": -0.4})
 
     assert result.reason == "set_mode_sent"
@@ -167,6 +175,18 @@ def test_takeoff_auto_confirm_missing_yaw_fails_before_set_mode() -> None:
     assert result.actions == []
     assert result.detail["phase"] == "confirm_field_heading"
     assert result.detail["attitude_valid"] is False
+
+
+def test_takeoff_auto_confirm_missing_local_position_fails_before_set_mode() -> None:
+    action = TakeoffAction()
+    action.start({"altitude_m": 3.0})
+
+    result = action.update({"drone": {"attitude_valid": True, "yaw": 0.3, "local_position_valid": False}})
+
+    assert result.failed is True
+    assert result.reason == "missing_field_origin"
+    assert result.actions == []
+    assert result.detail["phase"] == "confirm_field_heading"
 
 
 def test_takeoff_rejects_invalid_altitude() -> None:

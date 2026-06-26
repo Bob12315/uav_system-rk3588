@@ -796,7 +796,11 @@ def test_goto_waypoint_arm_heading_dispatch_sent_includes_yaw() -> None:
 def test_goto_waypoint_field_heading_dispatch_sent_includes_yaw() -> None:
     runner = _runner()
     runner.controller_switches.set_send_commands(True)
-    assert runner.runtime_context_builder.confirm_field_heading(yaw_rad=-0.65, source="test")
+    assert runner.runtime_context_builder.confirm_field_heading(
+        yaw_rad=-0.65,
+        drone={"local_position_valid": True, "local_x": 0.0, "local_y": 0.0, "local_z": 0.0},
+        source="test",
+    )
 
     runner.action_lab_start_action(
         "goto_waypoint",
@@ -814,17 +818,41 @@ def test_goto_waypoint_field_heading_dispatch_sent_includes_yaw() -> None:
 
 def test_field_heading_status_reports_delta_and_manual_confirm_does_not_call_link() -> None:
     runner = _runner()
-    _set_drone_snapshot(runner, armed=False, yaw=0.5)
+    _set_drone_snapshot(
+        runner,
+        armed=False,
+        yaw=0.5,
+        local_position_valid=True,
+        local_x=10.0,
+        local_y=20.0,
+        local_z=-1.0,
+    )
 
     result = runner.confirm_field_heading_manual()
     status = runner.field_heading_status()
 
     assert result.ok is True
-    assert "field heading confirmed" in result.message
+    assert "field heading/origin confirmed" in result.message
     assert status["field_heading_confirmed"] is True
     assert status["field_heading_source"] == "manual_web"
     assert status["field_heading_yaw_rad"] == pytest.approx(0.5)
+    assert status["origin_confirmed"] is True
+    assert status["origin_local_x"] == pytest.approx(10.0)
+    assert status["origin_local_y"] == pytest.approx(20.0)
+    assert status["origin_local_z"] == pytest.approx(-1.0)
     assert status["delta_current_to_field_deg"] == pytest.approx(0.0)
+    assert runner.services.link_manager.calls == []
+
+
+def test_field_heading_manual_confirm_fails_when_local_position_invalid() -> None:
+    runner = _runner()
+    _set_drone_snapshot(runner, armed=False, yaw=0.5, local_position_valid=False)
+
+    result = runner.confirm_field_heading_manual()
+
+    assert result.ok is False
+    assert "LOCAL_NED" in result.message
+    assert runner.runtime_context_builder.field_heading_confirmed is False
     assert runner.services.link_manager.calls == []
 
 

@@ -94,10 +94,10 @@ def test_takeoff_dispatches_when_gates_enabled() -> None:
 
 
 def test_confirm_field_heading_dispatches_without_telemetry_or_send_commands() -> None:
-    calls: list[tuple[float, str]] = []
+    calls: list[tuple[float, str, dict[str, object] | None]] = []
 
-    def confirmer(*, yaw_rad: float, source: str) -> bool:
-        calls.append((yaw_rad, source))
+    def confirmer(*, yaw_rad: float, drone: dict[str, object] | None = None, source: str) -> bool:
+        calls.append((yaw_rad, source, drone))
         return True
 
     dispatcher = _dispatcher(send_actions=False, field_heading_confirmer=confirmer)
@@ -105,7 +105,11 @@ def test_confirm_field_heading_dispatches_without_telemetry_or_send_commands() -
         [
             {
                 "action_type": "confirm_field_heading",
-                "params": {"yaw_rad": 0.75, "source": "takeoff_auto"},
+                "params": {
+                    "yaw_rad": 0.75,
+                    "source": "takeoff_auto",
+                    "drone": {"local_position_valid": True, "local_x": 1.0, "local_y": 2.0, "local_z": -0.5},
+                },
                 "key": "takeoff_confirm_field_heading",
                 "once": True,
                 "priority": 2,
@@ -116,7 +120,9 @@ def test_confirm_field_heading_dispatches_without_telemetry_or_send_commands() -
         link_manager=None,
     )
 
-    assert calls == [(0.75, "takeoff_auto")]
+    assert calls[0][0] == 0.75
+    assert calls[0][1] == "takeoff_auto"
+    assert calls[0][2]["local_x"] == 1.0
     assert dispatch["sent"][0]["action_type"] == "confirm_field_heading"
     assert dispatch["sent"][0]["yaw_rad"] == 0.75
     assert dispatch["sent"][0]["source"] == "takeoff_auto"

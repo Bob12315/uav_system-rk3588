@@ -665,8 +665,10 @@ class SystemRunner:
         drone = snapshot.get("drone", {})
         current_yaw = None
         attitude_valid = False
+        local_position_valid = False
         if isinstance(drone, dict):
             attitude_valid = bool(drone.get("attitude_valid", False))
+            local_position_valid = bool(drone.get("local_position_valid", False))
             current_yaw = RuntimeContextBuilder._float_or_none(drone.get("yaw"))
 
         field_yaw = builder.field_heading_yaw_rad
@@ -684,6 +686,7 @@ class SystemRunner:
 
         return {
             "attitude_valid": attitude_valid,
+            "local_position_valid": local_position_valid,
             "current_yaw_rad": current_yaw,
             "current_yaw_deg": deg(current_yaw),
             "pre_arm_yaw_rad": pre_arm_yaw,
@@ -697,6 +700,15 @@ class SystemRunner:
             "field_heading_source": builder.field_heading_source,
             "field_heading_time": builder.field_heading_time,
             "delta_current_to_field_deg": yaw_delta_deg(current_yaw, field_yaw),
+            "origin_confirmed": bool(builder.field_origin_confirmed),
+            "field_origin_confirmed": bool(builder.field_origin_confirmed),
+            "origin_local_x": builder.field_origin_local_x,
+            "origin_local_y": builder.field_origin_local_y,
+            "origin_local_z": builder.field_origin_local_z,
+            "field_origin_local_x": builder.field_origin_local_x,
+            "field_origin_local_y": builder.field_origin_local_y,
+            "field_origin_local_z": builder.field_origin_local_z,
+            "field_origin_time": builder.field_origin_time,
         }
 
     def confirm_field_heading_manual(self) -> CommandResult:
@@ -712,16 +724,26 @@ class SystemRunner:
             return CommandResult(False, "attitude yaw not valid")
         ok = self.runtime_context_builder.confirm_field_heading(
             yaw_rad=yaw,
+            drone=drone,
             source="manual_web",
         )
         if not ok:
-            return CommandResult(False, "field heading confirm failed")
+            return CommandResult(False, "无法确认原点：当前 LOCAL_NED 位置无效")
         status = self.field_heading_status()
         yaw_deg = status.get("field_heading_yaw_deg")
+        origin_x = status.get("origin_local_x")
+        origin_y = status.get("origin_local_y")
+        origin_z = status.get("origin_local_z")
         message = (
-            f"field heading confirmed yaw={yaw_deg:.1f} deg"
+            (
+                f"field heading/origin confirmed yaw={yaw_deg:.1f} deg "
+                f"origin=({origin_x:.2f},{origin_y:.2f},{origin_z:.2f})"
+            )
             if yaw_deg is not None
-            else "field heading confirmed"
+            and origin_x is not None
+            and origin_y is not None
+            and origin_z is not None
+            else "field heading/origin confirmed"
         )
         if bool(drone.get("armed", False)):
             message = f"{message}; vehicle is armed, confirm on ground before flight when possible"

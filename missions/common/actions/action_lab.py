@@ -69,6 +69,7 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "x": 0.0,
                 "y": 5.5,
                 "altitude_m": 3.5,
+                "waypoint_mode": "field",
                 "yaw_mode": "field_heading",
                 "tolerance_xy_m": 0.35,
                 "tolerance_z_m": 0.35,
@@ -207,7 +208,7 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "no best_target selection, no auto-lock, no payload release."
             ),
             "default_params": {
-                "waypoint_mode": "absolute",
+                "waypoint_mode": "field",
                 "altitude_m": 5.0,
                 "yaw_mode": "field_heading",
                 "waypoints": [

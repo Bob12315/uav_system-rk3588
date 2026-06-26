@@ -24,7 +24,7 @@
         "max_attempts": 2
       },
       "params": {
-        "waypoint_mode": "absolute",
+        "waypoint_mode": "field",
         "altitude_m": 3.0,
         "yaw_mode": "arm_heading",
         "waypoints": [

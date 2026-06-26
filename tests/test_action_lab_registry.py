@@ -77,11 +77,11 @@ def test_localize_specs_default_to_flipped_image_y() -> None:
     assert multi_view_params["camera"]["image_y_sign"] == -1.0
 
 
-def test_multi_view_localize_spec_defaults_to_drop_zone_absolute_waypoints() -> None:
+def test_multi_view_localize_spec_defaults_to_drop_zone_field_waypoints() -> None:
     spec = next(item for item in action_lab_specs() if item["name"] == "multi_view_localize")
     params = spec["default_params"]
 
-    assert params["waypoint_mode"] == "absolute"
+    assert params["waypoint_mode"] == "field"
     assert params["yaw_mode"] == "field_heading"
     assert params["altitude_m"] == 5.0
     assert isinstance(params["waypoints"], list)

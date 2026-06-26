@@ -93,7 +93,11 @@ def test_disarmed_valid_attitude_records_pre_arm_yaw() -> None:
 def test_confirm_field_heading_records_normalized_yaw() -> None:
     builder = RuntimeContextBuilder()
 
-    ok = builder.confirm_field_heading(yaw_rad=math.pi + 0.1, source="test")
+    ok = builder.confirm_field_heading(
+        yaw_rad=math.pi + 0.1,
+        drone={"local_position_valid": True, "local_x": 10.0, "local_y": 20.0, "local_z": -1.0},
+        source="test",
+    )
     context = builder.build_action_context({"drone": {}})
 
     assert ok is True
@@ -101,6 +105,10 @@ def test_confirm_field_heading_records_normalized_yaw() -> None:
     assert context["field_heading_yaw_rad"] == pytest.approx(-math.pi + 0.1)
     assert context["field_heading_confirmed"] is True
     assert context["field_heading_source"] == "test"
+    assert context["field_origin_confirmed"] is True
+    assert context["field_origin_local_x"] == pytest.approx(10.0)
+    assert context["field_origin_local_y"] == pytest.approx(20.0)
+    assert context["field_origin_local_z"] == pytest.approx(-1.0)
 
 
 def test_confirm_field_heading_rejects_invalid_yaw() -> None:
@@ -108,6 +116,14 @@ def test_confirm_field_heading_rejects_invalid_yaw() -> None:
 
     assert builder.confirm_field_heading(yaw_rad=float("nan")) is False
     assert builder.field_heading_yaw_rad is None
+
+
+def test_confirm_field_heading_rejects_invalid_local_position() -> None:
+    builder = RuntimeContextBuilder()
+
+    assert builder.confirm_field_heading(yaw_rad=0.5, drone={"local_position_valid": False}) is False
+    assert builder.field_heading_yaw_rad is None
+    assert builder.field_origin_confirmed is False
 
 
 def test_arm_heading_prefers_pre_arm_yaw_on_armed_transition() -> None:

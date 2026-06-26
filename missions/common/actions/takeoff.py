@@ -97,9 +97,23 @@ class TakeoffAction(ActionModule):
                     reason="missing_field_heading_yaw",
                     detail=detail,
                 )
+            drone = self._field_heading_drone(context_data, yaw)
+            if drone is None:
+                self.phase = "failed"
+                self.failed = True
+                self.failure_reason = "missing_field_origin"
+                detail = self._detail(altitude, phase="confirm_field_heading", context=context_data)
+                detail["attitude_valid"] = self._attitude_valid(context_data)
+                detail["note"] = "takeoff auto_confirm_field_heading requires valid LOCAL_NED position before set_mode"
+                self.last_detail = detail
+                return ActionResult(
+                    failed=True,
+                    reason="missing_field_origin",
+                    detail=detail,
+                )
             action = {
                 "action_type": "confirm_field_heading",
-                "params": {"yaw_rad": yaw, "source": "takeoff_auto"},
+                "params": {"yaw_rad": yaw, "source": "takeoff_auto", "drone": drone},
                 "key": f"{self.key}_confirm_field_heading",
                 "once": True,
                 "priority": self.mode_priority,
@@ -325,6 +339,23 @@ class TakeoffAction(ActionModule):
         if isinstance(drone, dict):
             return bool(drone.get("attitude_valid", False))
         return False
+
+    def _field_heading_drone(self, context: dict[str, Any], yaw: float) -> dict[str, Any] | None:
+        drone = context.get("drone")
+        if not isinstance(drone, dict) or not bool(drone.get("local_position_valid", False)):
+            return None
+        local_x = self._finite_float(drone.get("local_x"))
+        local_y = self._finite_float(drone.get("local_y"))
+        local_z = self._finite_float(drone.get("local_z"))
+        if local_x is None or local_y is None or local_z is None:
+            return None
+        return {
+            "yaw": yaw,
+            "local_position_valid": True,
+            "local_x": local_x,
+            "local_y": local_y,
+            "local_z": local_z,
+        }
 
     @staticmethod
     def _finite_float(value: Any) -> float | None:

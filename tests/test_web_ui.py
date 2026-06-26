@@ -98,11 +98,16 @@ class _FakeRunner:
     def field_heading_status(self):
         return {
             "attitude_valid": True,
+            "local_position_valid": True,
             "current_yaw_deg": 28.6,
             "field_heading_yaw_deg": 28.6,
             "field_heading_confirmed": True,
             "field_heading_source": "manual_web",
             "delta_current_to_field_deg": 0.0,
+            "origin_confirmed": True,
+            "origin_local_x": 1.0,
+            "origin_local_y": 2.0,
+            "origin_local_z": -0.5,
         }
 
     def confirm_field_heading_manual(self):
@@ -180,6 +185,7 @@ def test_web_api_confirms_field_heading_and_records_audit(tmp_path: Path) -> Non
     assert payload["ok"] is True
     assert payload["field_heading"]["field_heading_confirmed"] is True
     assert payload["field_heading"]["field_heading_source"] == "manual_web"
+    assert payload["field_heading"]["origin_confirmed"] is True
     audit = client.get("/api/audit").json()
     assert audit[0]["source"] == "FIELD_HEADING"
 
@@ -198,6 +204,7 @@ def test_web_status_api_includes_field_heading(tmp_path: Path) -> None:
 
     assert payload["field_heading"]["field_heading_confirmed"] is True
     assert payload["field_heading"]["delta_current_to_field_deg"] == 0.0
+    assert payload["field_heading"]["origin_local_x"] == 1.0
 
 
 def test_web_ui_exposes_manual_step_movement_controls() -> None:
@@ -241,6 +248,7 @@ def test_web_ui_exposes_field_heading_controls() -> None:
     assert 'id="confirmFieldHeading"' in index
     assert 'id="fieldHeadingCurrentYaw"' in index
     assert 'id="fieldHeadingDelta"' in index
+    assert 'id="fieldHeadingOrigin"' in index
     assert '"/api/field-heading/confirm"' in script
     assert "function renderFieldHeading" in script
     assert "function confirmFieldHeading" in script

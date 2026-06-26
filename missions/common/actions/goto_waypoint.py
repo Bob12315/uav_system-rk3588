@@ -18,6 +18,9 @@ class GotoWaypointAction(ActionModule):
         altitude_m = self._required_float(data, "altitude_m")
         if altitude_m <= 0.0:
             raise ValueError("altitude_m must be positive")
+        waypoint_mode = str(data.get("waypoint_mode", "absolute")).strip().lower()
+        if waypoint_mode not in {"absolute", "field"}:
+            raise ValueError("waypoint_mode must be absolute or field")
 
         yaw_mode = str(data.get("yaw_mode", "arm_heading")).strip().lower()
         if yaw_mode not in {"hold", "fixed", "arm_heading", "field_heading"}:
@@ -41,6 +44,7 @@ class GotoWaypointAction(ActionModule):
         self.target_y = y
         self.altitude_m = altitude_m
         self.target_z = -altitude_m
+        self.waypoint_mode = waypoint_mode
         self.yaw_mode = yaw_mode
         self.yaw_rad = yaw_rad
         self.frame = int(data.get("frame", 1))
@@ -78,19 +82,28 @@ class GotoWaypointAction(ActionModule):
                 reason="missing_field_heading_yaw",
                 detail=detail,
             )
+        target = self._local_target(context_data)
+        if target is None:
+            detail = self._detail(None, None, None, context_data)
+            detail["note"] = "waypoint_mode field requires field_origin_local_x/y and field_heading_yaw_rad"
+            return ActionResult(
+                failed=True,
+                reason="missing_field_origin",
+                detail=detail,
+            )
 
         current = self._current_position(context_data)
         if current is None:
             self.reached_updates = 0
             return ActionResult(
-                actions=[self._action_dict(arm_heading_yaw_rad, field_heading_yaw_rad)],
+                actions=[self._action_dict(target, arm_heading_yaw_rad, field_heading_yaw_rad)],
                 reason="waiting_for_position",
                 detail=self._detail(None, None, None, context_data),
             )
 
-        dx = self.target_x - current["x"]
-        dy = self.target_y - current["y"]
-        dz = self.target_z - current["z"]
+        dx = target["x"] - current["x"]
+        dy = target["y"] - current["y"]
+        dz = target["z"] - current["z"]
         distance_xy_m = math.sqrt(dx * dx + dy * dy)
         z_error_m = abs(dz)
         reached = (
@@ -106,7 +119,7 @@ class GotoWaypointAction(ActionModule):
         if self.reached_updates >= self.min_hold_updates:
             return ActionResult(done=True, reason="waypoint_reached", detail=detail)
         return ActionResult(
-            actions=[self._action_dict(arm_heading_yaw_rad, field_heading_yaw_rad)],
+            actions=[self._action_dict(target, arm_heading_yaw_rad, field_heading_yaw_rad)],
             reason="goto_active",
             detail=detail,
         )
@@ -121,6 +134,7 @@ class GotoWaypointAction(ActionModule):
         self.target_y = 0.0
         self.target_z = 0.0
         self.altitude_m = 0.0
+        self.waypoint_mode = "absolute"
         self.yaw_mode = "arm_heading"
         self.yaw_rad: float | None = None
         self.frame = 1
@@ -133,13 +147,15 @@ class GotoWaypointAction(ActionModule):
 
     def _action_dict(
         self,
+        target: dict[str, float] | None = None,
         arm_heading_yaw_rad: float | None = None,
         field_heading_yaw_rad: float | None = None,
     ) -> dict[str, Any]:
+        target_data = target or {"x": self.target_x, "y": self.target_y, "z": self.target_z}
         params: dict[str, Any] = {
-            "x": self.target_x,
-            "y": self.target_y,
-            "z": self.target_z,
+            "x": target_data["x"],
+            "y": target_data["y"],
+            "z": target_data["z"],
             "frame": self.frame,
         }
         if self.yaw_mode == "fixed":
@@ -176,7 +192,11 @@ class GotoWaypointAction(ActionModule):
             "z_error_m": z_error_m,
             "reached_updates": self.reached_updates,
             "yaw_mode": self.yaw_mode,
+            "waypoint_mode": self.waypoint_mode,
         }
+        local_target = self._local_target(context_data)
+        if local_target is not None:
+            detail["local_target"] = local_target
         arm_heading_yaw_rad = self._arm_heading_yaw(context_data)
         if arm_heading_yaw_rad is not None:
             detail["arm_heading_yaw_rad"] = arm_heading_yaw_rad
@@ -203,6 +223,37 @@ class GotoWaypointAction(ActionModule):
 
     def _field_heading_yaw(self, context: dict[str, Any]) -> float | None:
         value = context.get("field_heading_yaw_rad")
+        if value is None:
+            return None
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            return None
+        return result if math.isfinite(result) else None
+
+    def _local_target(self, context: dict[str, Any]) -> dict[str, float] | None:
+        if self.waypoint_mode == "absolute":
+            return {"x": self.target_x, "y": self.target_y, "z": self.target_z}
+
+        field_heading_yaw_rad = self._field_heading_yaw(context)
+        origin_x = self._float_context(context, "field_origin_local_x")
+        origin_y = self._float_context(context, "field_origin_local_y")
+        if field_heading_yaw_rad is None or origin_x is None or origin_y is None:
+            return None
+
+        cos_yaw = math.cos(field_heading_yaw_rad)
+        sin_yaw = math.sin(field_heading_yaw_rad)
+        dx_north = self.target_y * cos_yaw - self.target_x * sin_yaw
+        dy_east = self.target_y * sin_yaw + self.target_x * cos_yaw
+        return {
+            "x": origin_x + dx_north,
+            "y": origin_y + dy_east,
+            "z": self.target_z,
+        }
+
+    @staticmethod
+    def _float_context(context: dict[str, Any], name: str) -> float | None:
+        value = context.get(name)
         if value is None:
             return None
         try:

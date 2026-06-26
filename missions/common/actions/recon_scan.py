@@ -29,6 +29,9 @@ class ReconScanAction(ActionModule):
         if not isinstance(waypoints, list) or not waypoints:
             raise ValueError("waypoints must be a non-empty list")
         self.waypoints = [self._validated_waypoint(item) for item in waypoints]
+        self.waypoint_mode = str(data.get("waypoint_mode", "absolute")).strip().lower()
+        if self.waypoint_mode not in {"absolute", "field"}:
+            raise ValueError("waypoint_mode must be absolute or field")
 
         self.yaw_mode = str(data.get("yaw_mode", "arm_heading")).strip().lower()
         if self.yaw_mode not in {"hold", "fixed", "arm_heading", "field_heading"}:
@@ -121,6 +124,7 @@ class ReconScanAction(ActionModule):
 
     def reset(self) -> None:
         self.waypoints: list[dict[str, float]] = []
+        self.waypoint_mode = "absolute"
         self.yaw_mode = "arm_heading"
         self.yaw_rad: float | None = None
         self.frame = 1
@@ -411,6 +415,7 @@ class ReconScanAction(ActionModule):
             "x": waypoint["x"],
             "y": waypoint["y"],
             "altitude_m": waypoint["altitude_m"],
+            "waypoint_mode": self.waypoint_mode,
             "yaw_mode": self.yaw_mode,
             "frame": self.frame,
             "tolerance_xy_m": self.goto_tolerance_xy_m,

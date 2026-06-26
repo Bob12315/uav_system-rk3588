@@ -244,6 +244,11 @@ function num(value, digits = 2, unit = "") {
 function degNum(value, digits = 1) {
   return Number.isFinite(Number(value)) ? `${Number(value).toFixed(digits)}°` : "--";
 }
+function xyzText(x, y, z, digits = 2) {
+  return [x, y, z].every(value => Number.isFinite(Number(value)))
+    ? `${Number(x).toFixed(digits)} / ${Number(y).toFixed(digits)} / ${Number(z).toFixed(digits)}`
+    : "--";
+}
 function boolText(value, yes = "YES", no = "NO") {
   return value ? yes : no;
 }
@@ -370,6 +375,7 @@ function renderFieldHeading(next) {
   setOptionalText("fieldHeadingPreArmYaw", degNum(field.pre_arm_yaw_deg));
   setOptionalText("fieldHeadingConfirmedYaw", degNum(field.field_heading_yaw_deg));
   setOptionalText("fieldHeadingDelta", degNum(field.delta_current_to_field_deg));
+  setOptionalText("fieldHeadingOrigin", xyzText(field.origin_local_x, field.origin_local_y, field.origin_local_z));
   setOptionalText("fieldHeadingConfirmed", field.field_heading_confirmed ? "YES" : "NO");
   setOptionalText("fieldHeadingSource", field.field_heading_source || "--");
   setOptionalText("fieldHeadingTime", stamp(field.field_heading_time));
@@ -387,12 +393,14 @@ function renderFieldHeading(next) {
   if (hint) {
     if (!field.attitude_valid) {
       hint.textContent = "姿态 yaw 无效，无法确认场地方向。请检查 MAVLink ATTITUDE 数据。";
+    } else if (field.local_position_valid === false) {
+      hint.textContent = "无法确认原点：当前 LOCAL_NED 位置无效。请检查定位/LOCAL_POSITION_NED 数据。";
     } else if (!field.field_heading_confirmed) {
-      hint.textContent = "未确认：起飞前把机头对准场地方向，然后点击确认。程序起飞也会自动确认。确认只记录内部 yaw，不发 MAVLink。";
+      hint.textContent = "未确认：起飞前把机头对准场地方向，然后点击确认。程序起飞也会自动确认。确认只记录内部 yaw 和任务坐标原点，不发 MAVLink。";
     } else if (Number.isFinite(delta)) {
       hint.textContent = `已确认：当前 yaw 与场地方向偏差 ${delta.toFixed(1)}°。地面静止时建议接近 0°。`;
     } else {
-      hint.textContent = "已确认场地方向。确认只记录内部 yaw，不发 MAVLink。";
+      hint.textContent = "已确认场地方向/原点。确认只记录 app 内部状态，不发 MAVLink。";
     }
   }
 }
@@ -404,6 +412,7 @@ async function confirmFieldHeading() {
   }
   const confirmed = window.confirm(
     "确认将当前机头 yaw 记录为场地方向？\n"
+    + "并将当前 LOCAL_NED 位置记录为任务坐标原点。\n"
     + "请确保飞机放在地上，机头已经对准场地方向。\n"
     + `当前 yaw: ${degNum(field.current_yaw_deg)}`
   );
