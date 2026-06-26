@@ -1179,30 +1179,112 @@ function setupFieldMapInteractions() {
     renderFieldMap(state);
   }, {passive: false});
 
-  canvas.addEventListener("mousedown", event => {
-    fieldMapView.isDragging = true;
-    fieldMapView.dragStartX = event.clientX;
-    fieldMapView.dragStartY = event.clientY;
-    fieldMapView.dragStartCenterX = fieldMapView.centerX;
-    fieldMapView.dragStartCenterY = fieldMapView.centerY;
-    canvas.classList.add("dragging");
+  // Pointer Events: unify mouse + touch drag/pinch
+  const activePointers = new Map();
+
+  function pointerPoint(event) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      canvasX: event.clientX - rect.left,
+      canvasY: event.clientY - rect.top,
+    };
+  }
+
+  function pinchDistance(a, b) {
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
+
+  function pinchMidpoint(a, b) {
+    return {
+      x: (a.x + b.x) / 2,
+      y: (a.y + b.y) / 2,
+    };
+  }
+
+  fieldMapView.pinchStartDistance = 0;
+  fieldMapView.pinchStartScale = fieldMapView.scale;
+  fieldMapView.pinchStartWorld = null;
+
+  canvas.addEventListener("pointerdown", event => {
+    event.preventDefault();
+    canvas.setPointerCapture(event.pointerId);
+    activePointers.set(event.pointerId, pointerPoint(event));
+
+    if (activePointers.size === 1) {
+      fieldMapView.isDragging = true;
+      fieldMapView.dragStartX = event.clientX;
+      fieldMapView.dragStartY = event.clientY;
+      fieldMapView.dragStartCenterX = fieldMapView.centerX;
+      fieldMapView.dragStartCenterY = fieldMapView.centerY;
+      canvas.classList.add("dragging");
+    }
+
+    if (activePointers.size === 2) {
+      const points = Array.from(activePointers.values());
+      const rect = canvas.getBoundingClientRect();
+      const mid = pinchMidpoint(points[0], points[1]);
+      fieldMapView.pinchStartDistance = Math.max(1, pinchDistance(points[0], points[1]));
+      fieldMapView.pinchStartScale = fieldMapView.scale;
+      fieldMapView.pinchStartWorld = canvasToWorld(mid.x - rect.left, mid.y - rect.top, rect);
+    }
   });
 
-  window.addEventListener("mousemove", event => {
-    if (!fieldMapView.isDragging) return;
-    const dx = event.clientX - fieldMapView.dragStartX;
-    const dy = event.clientY - fieldMapView.dragStartY;
-    fieldMapView.centerX = fieldMapView.dragStartCenterX + dx / fieldMapView.scale;
-    fieldMapView.centerY = fieldMapView.dragStartCenterY + dy / fieldMapView.scale;
-    renderFieldMap(state);
+  canvas.addEventListener("pointermove", event => {
+    if (!activePointers.has(event.pointerId)) return;
+    event.preventDefault();
+    activePointers.set(event.pointerId, pointerPoint(event));
+
+    if (activePointers.size === 1 && fieldMapView.isDragging) {
+      const p = activePointers.get(event.pointerId);
+      const dx = p.x - fieldMapView.dragStartX;
+      const dy = p.y - fieldMapView.dragStartY;
+      fieldMapView.centerX = fieldMapView.dragStartCenterX + dx / fieldMapView.scale;
+      fieldMapView.centerY = fieldMapView.dragStartCenterY + dy / fieldMapView.scale;
+      renderFieldMap(state);
+      return;
+    }
+
+    if (activePointers.size >= 2) {
+      const points = Array.from(activePointers.values()).slice(0, 2);
+      const rect = canvas.getBoundingClientRect();
+      const mid = pinchMidpoint(points[0], points[1]);
+      const currentDistance = Math.max(1, pinchDistance(points[0], points[1]));
+      const before = fieldMapView.pinchStartWorld || canvasToWorld(mid.x - rect.left, mid.y - rect.top, rect);
+
+      fieldMapView.scale = Math.max(
+        fieldMapView.minScale,
+        Math.min(fieldMapView.maxScale, fieldMapView.pinchStartScale * currentDistance / fieldMapView.pinchStartDistance)
+      );
+
+      const after = canvasToWorld(mid.x - rect.left, mid.y - rect.top, rect);
+      fieldMapView.centerX += before.x - after.x;
+      fieldMapView.centerY += before.y - after.y;
+      renderFieldMap(state);
+    }
   });
 
-  window.addEventListener("mouseup", () => {
-    if (!fieldMapView.isDragging) return;
-    fieldMapView.isDragging = false;
-    const canvas2 = $("fieldMap");
-    if (canvas2) canvas2.classList.remove("dragging");
-  });
+  function endPointer(event) {
+    activePointers.delete(event.pointerId);
+    if (activePointers.size === 0) {
+      fieldMapView.isDragging = false;
+      fieldMapView.pinchStartWorld = null;
+      canvas.classList.remove("dragging");
+    } else if (activePointers.size === 1) {
+      const p = Array.from(activePointers.values())[0];
+      fieldMapView.isDragging = true;
+      fieldMapView.dragStartX = p.x;
+      fieldMapView.dragStartY = p.y;
+      fieldMapView.dragStartCenterX = fieldMapView.centerX;
+      fieldMapView.dragStartCenterY = fieldMapView.centerY;
+    }
+  }
+
+  canvas.addEventListener("pointerup", endPointer);
+  canvas.addEventListener("pointercancel", endPointer);
+  canvas.addEventListener("lostpointercapture", endPointer);
 
   // button handlers
   $("fieldMapZoomIn")?.addEventListener("click", () => {
