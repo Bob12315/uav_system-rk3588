@@ -7,9 +7,9 @@ from typing import Any, Iterable
 
 @dataclass(frozen=True)
 class MultiPhotoFusionConfig:
-    cluster_radius_m: float = 0.8
+    cluster_radius_m: float = 1.0
     outlier_radius_m: float = 0.8
-    min_cluster_size: int = 1
+    min_cluster_size: int = 3
     min_total_weight: float = 1e-6
     default_confidence: float = 1.0
     center_weight_power: float = 1.0
