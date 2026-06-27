@@ -126,6 +126,35 @@ def test_confirm_field_heading_rejects_invalid_local_position() -> None:
     assert builder.field_origin_confirmed is False
 
 
+def test_field_transform_heading_zero_and_action_context_position() -> None:
+    builder = RuntimeContextBuilder()
+    drone = {"local_position_valid": True, "local_x": 10.0, "local_y": 20.0, "local_z": -2.0}
+    assert builder.confirm_field_heading(yaw_rad=0.0, drone=drone, source="test")
+
+    assert builder.local_to_field_xy(10.0, 20.0) == pytest.approx((0.0, 0.0))
+    assert builder.local_to_field_xy(11.0, 20.0) == pytest.approx((0.0, 1.0))
+    assert builder.local_to_field_xy(10.0, 21.0) == pytest.approx((1.0, 0.0))
+    assert builder.field_to_local_xy(1.0, 2.0) == pytest.approx((12.0, 21.0))
+
+    context = builder.build_action_context({"drone": drone})
+    assert context["local_position"] == {"x": 10.0, "y": 20.0, "z": -2.0}
+    assert context["field_position"]["x"] == pytest.approx(0.0)
+    assert context["field_position"]["y"] == pytest.approx(0.0)
+    assert context["field_position"]["z"] == pytest.approx(-2.0)
+    assert context["field_transform"]["convention"] == "field_y_forward_field_x_right"
+    assert context["field_transform"]["confirmed"] is True
+
+
+def test_field_transform_heading_ninety_degrees_is_invertible() -> None:
+    builder = RuntimeContextBuilder()
+    drone = {"local_position_valid": True, "local_x": 10.0, "local_y": 20.0, "local_z": -1.0}
+    assert builder.confirm_field_heading(yaw_rad=math.pi / 2.0, drone=drone)
+
+    field = builder.local_to_field_xy(10.0, 21.0)
+    assert field == pytest.approx((0.0, 1.0))
+    assert builder.field_to_local_xy(*field) == pytest.approx((10.0, 21.0))
+
+
 def test_arm_heading_prefers_pre_arm_yaw_on_armed_transition() -> None:
     builder = RuntimeContextBuilder()
 

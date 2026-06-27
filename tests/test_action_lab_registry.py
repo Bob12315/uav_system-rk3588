@@ -101,6 +101,13 @@ def test_multi_view_localize_spec_defaults_to_drop_zone_field_waypoints() -> Non
     assert params["fusion"]["min_cluster_size"] == 2
 
 
+def test_all_manual_waypoint_specs_default_to_field_frame() -> None:
+    specs = {item["name"]: item["default_params"] for item in action_lab_specs()}
+    for name in ("goto_waypoint", "survey_area", "multi_view_localize", "recon_scan"):
+        assert specs[name]["waypoint_mode"] == "field"
+        assert specs[name]["yaw_mode"] == "field_heading"
+
+
 def test_align_descend_spec_defaults_to_low_altitude_descent_profile() -> None:
     spec = next(item for item in action_lab_specs() if item["name"] == "align_descend")
     params = spec["default_params"]

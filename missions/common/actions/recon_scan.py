@@ -29,11 +29,11 @@ class ReconScanAction(ActionModule):
         if not isinstance(waypoints, list) or not waypoints:
             raise ValueError("waypoints must be a non-empty list")
         self.waypoints = [self._validated_waypoint(item) for item in waypoints]
-        self.waypoint_mode = str(data.get("waypoint_mode", "absolute")).strip().lower()
+        self.waypoint_mode = str(data.get("waypoint_mode", "field")).strip().lower()
         if self.waypoint_mode not in {"absolute", "field"}:
             raise ValueError("waypoint_mode must be absolute or field")
 
-        self.yaw_mode = str(data.get("yaw_mode", "arm_heading")).strip().lower()
+        self.yaw_mode = str(data.get("yaw_mode", "field_heading")).strip().lower()
         if self.yaw_mode not in {"hold", "fixed", "arm_heading", "field_heading"}:
             raise ValueError("yaw_mode must be hold, fixed, arm_heading, or field_heading")
         self.yaw_rad = None
@@ -171,12 +171,24 @@ class ReconScanAction(ActionModule):
             return self._fail("goto_failed")
         result = self.goto_action.update(context)
         if result.failed:
-            return self._fail("goto_failed", {"goto_reason": result.reason, "goto": result.detail})
+            return self._fail("goto_failed", {
+                "goto_reason": result.reason, "goto": result.detail,
+                **{name: result.detail.get(name) for name in (
+                    "input_frame", "input_target", "local_target", "field_origin_local_x",
+                    "field_origin_local_y", "field_heading_yaw_rad",
+                )},
+            })
         if not result.done:
             return ActionResult(
                 actions=result.actions,
                 reason="recon_goto",
-                detail=self._detail({"goto_reason": result.reason, "goto": result.detail}),
+                detail=self._detail({
+                    "goto_reason": result.reason, "goto": result.detail,
+                    **{name: result.detail.get(name) for name in (
+                        "input_frame", "input_target", "local_target", "field_origin_local_x",
+                        "field_origin_local_y", "field_heading_yaw_rad",
+                    )},
+                }),
             )
         self.phase = "settle"
         self.settle_count = 0

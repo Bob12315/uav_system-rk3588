@@ -145,6 +145,7 @@ def _survey_params(**overrides: object) -> dict[str, object]:
         "capture_updates_per_waypoint": 3,
         "max_updates_per_waypoint": 200,
         "detection_source": "scene",
+        "waypoint_mode": "absolute",
         "yaw_mode": "hold",
     }
     data.update(overrides)
@@ -791,6 +792,13 @@ def test_goto_waypoint_arm_heading_dispatch_sent_includes_yaw() -> None:
     ]
     payload = runner.action_lab_status_payload()
     assert payload["dispatch"]["sent"][0]["yaw"] == pytest.approx(0.1)
+    assert payload["dispatch"]["sent"][0]["input_frame"] == "local_ned"
+    assert payload["dispatch"]["sent"][0]["input_target"] == {
+        "x": 1.0, "y": 0.0, "z": -1.5,
+    }
+    assert payload["dispatch"]["sent"][0]["local_target"] == {
+        "x": 1.0, "y": 0.0, "z": -1.5,
+    }
 
 
 def test_goto_waypoint_field_heading_dispatch_sent_includes_yaw() -> None:
@@ -840,6 +848,15 @@ def test_field_heading_status_reports_delta_and_manual_confirm_does_not_call_lin
     assert status["origin_local_x"] == pytest.approx(10.0)
     assert status["origin_local_y"] == pytest.approx(20.0)
     assert status["origin_local_z"] == pytest.approx(-1.0)
+    assert status["current_field_x"] == pytest.approx(0.0)
+    assert status["current_field_y"] == pytest.approx(0.0)
+    link_manager = runner.services.link_manager
+    runner.services.link_manager = None
+    snapshot = runner.web_status_snapshot()
+    runner.services.link_manager = link_manager
+    assert snapshot["field_position"]["x"] == pytest.approx(0.0)
+    assert snapshot["field_position"]["y"] == pytest.approx(0.0)
+    assert snapshot["field_transform"]["confirmed"] is True
     assert status["delta_current_to_field_deg"] == pytest.approx(0.0)
     assert runner.services.link_manager.calls == []
 

@@ -525,8 +525,11 @@ class ActionDispatcher:
             wrapper = getattr(link_manager, "goto_local_ned", None)
             if callable(wrapper):
                 self._logger.info(
-                    "action_lab dispatch goto_local_ned x_north_m=%s y_east_m=%s z_down_m=%s yaw_rad=%s priority=%s key=%s",
-                    x, y, z, yaw, priority, action.get("key"),
+                    "action_lab dispatch goto_local_ned input_frame=%s input_target=%s local_target=%s "
+                    "field_origin=(%s,%s) field_heading_yaw_rad=%s yaw_rad=%s priority=%s key=%s",
+                    action.get("input_frame"), action.get("input_target"), action.get("local_target"),
+                    action.get("field_origin_local_x"), action.get("field_origin_local_y"),
+                    action.get("field_heading_yaw_rad"), yaw, priority, action.get("key"),
                 )
                 wrapper(
                     x_north_m=x,
@@ -543,6 +546,12 @@ class ActionDispatcher:
                     "frame": frame,
                     "key": str(action.get("key") or ""),
                 }
+                for name in (
+                    "input_frame", "input_target", "local_target", "field_origin_local_x",
+                    "field_origin_local_y", "field_heading_yaw_rad",
+                ):
+                    if name in action:
+                        detail[name] = action[name]
                 if yaw is not None:
                     detail["yaw"] = yaw
                 return {"status": "sent", "detail": detail}
@@ -554,10 +563,14 @@ class ActionDispatcher:
         if yaw is not None and not self._callable_accepts_keyword(sender, "yaw"):
             return {"status": "skipped", "reason": "local_position_yaw_not_supported"}
         self._logger.info(
-            "action_lab dispatch local_position x=%s y=%s z=%s frame=%s yaw=%s priority=%s key=%s",
-            x,
-            y,
-            z,
+            "action_lab dispatch local_position input_frame=%s input_target=%s local_target=%s "
+            "field_origin=(%s,%s) field_heading_yaw_rad=%s frame=%s yaw=%s priority=%s key=%s",
+            action.get("input_frame"),
+            action.get("input_target"),
+            action.get("local_target"),
+            action.get("field_origin_local_x"),
+            action.get("field_origin_local_y"),
+            action.get("field_heading_yaw_rad"),
             frame,
             yaw,
             priority,
@@ -572,6 +585,12 @@ class ActionDispatcher:
             "frame": frame,
             "key": str(action.get("key") or ""),
         }
+        for name in (
+            "input_frame", "input_target", "local_target", "field_origin_local_x",
+            "field_origin_local_y", "field_heading_yaw_rad",
+        ):
+            if name in action:
+                detail[name] = action[name]
         if yaw is not None:
             detail["yaw"] = yaw
         return {"status": "sent", "detail": detail}

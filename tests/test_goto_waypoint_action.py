@@ -38,13 +38,14 @@ def test_default_arm_heading_yaw_outputs_context_yaw() -> None:
     result = action.update({"arm_heading_yaw_rad": 0.75})
 
     assert result.reason == "waiting_for_position"
-    assert result.actions[0] == {
-        "action_type": "local_position",
-        "params": {"x": 1.0, "y": 2.0, "z": -5.0, "frame": 1, "yaw": pytest.approx(0.75)},
-        "key": "goto_waypoint_1.00_2.00_5.00",
-        "once": False,
-        "priority": 4,
+    emitted = result.actions[0]
+    assert emitted["params"] == {
+        "x": 1.0, "y": 2.0, "z": -5.0, "frame": 1, "yaw": pytest.approx(0.75)
     }
+    assert emitted["input_frame"] == "local_ned"
+    assert emitted["input_target"] == {"x": 1.0, "y": 2.0, "z": -5.0}
+    assert emitted["local_target"] == {"x": 1.0, "y": 2.0, "z": -5.0}
+    assert emitted["key"] == "goto_waypoint_1.00_2.00_5.00"
 
 
 def test_default_arm_heading_yaw_missing_context_fails_without_action() -> None:
@@ -139,7 +140,8 @@ def test_field_waypoint_mode_transforms_to_local_ned_heading_zero() -> None:
             "field_origin_local_x": 10.0,
             "field_origin_local_y": 20.0,
             "field_origin_local_z": -1.0,
-            "field_origin_confirmed": True,
+                "field_origin_confirmed": True,
+                "field_heading_confirmed": True,
         }
     )
 
@@ -160,7 +162,8 @@ def test_field_waypoint_mode_transforms_to_local_ned_heading_90_deg() -> None:
             "field_origin_local_x": 10.0,
             "field_origin_local_y": 20.0,
             "field_origin_local_z": -1.0,
-            "field_origin_confirmed": True,
+                "field_origin_confirmed": True,
+                "field_heading_confirmed": True,
         }
     )
 
@@ -168,6 +171,58 @@ def test_field_waypoint_mode_transforms_to_local_ned_heading_90_deg() -> None:
     assert params["x"] == pytest.approx(9.0)
     assert params["y"] == pytest.approx(22.0)
     assert params["z"] == pytest.approx(-3.0)
+
+
+@pytest.mark.parametrize(
+    ("yaw", "field_x", "field_y", "expected_x", "expected_y"),
+    [
+        (0.0, 0.0, 1.0, 11.0, 20.0),
+        (0.0, 1.0, 0.0, 10.0, 21.0),
+        (math.pi / 2.0, 0.0, 1.0, 10.0, 21.0),
+        (math.pi / 2.0, 1.0, 0.0, 9.0, 20.0),
+    ],
+)
+def test_field_axes_convert_to_expected_local_ned(
+    yaw: float, field_x: float, field_y: float, expected_x: float, expected_y: float,
+) -> None:
+    action = GotoWaypointAction()
+    action.start({
+        "x": field_x, "y": field_y, "altitude_m": 3.0,
+        "waypoint_mode": "field", "yaw_mode": "field_heading",
+    })
+    result = action.update({
+        "field_heading_yaw_rad": yaw,
+        "field_heading_confirmed": True,
+        "field_origin_local_x": 10.0,
+        "field_origin_local_y": 20.0,
+        "field_origin_confirmed": True,
+    })
+
+    assert result.failed is False
+    assert result.actions[0]["params"]["x"] == pytest.approx(expected_x)
+    assert result.actions[0]["params"]["y"] == pytest.approx(expected_y)
+    assert result.detail["input_frame"] == "field"
+    assert result.detail["local_target"] == pytest.approx({
+        "x": expected_x, "y": expected_y, "z": -3.0,
+    })
+    assert result.detail["note"] == "field -> LOCAL_NED converted"
+
+
+def test_field_waypoint_without_confirmation_never_emits_action() -> None:
+    action = GotoWaypointAction()
+    action.start({
+        "x": 0.0, "y": 1.0, "altitude_m": 3.0,
+        "waypoint_mode": "field", "yaw_mode": "field_heading",
+    })
+    result = action.update({
+        "field_heading_yaw_rad": 0.0,
+        "field_origin_local_x": 10.0,
+        "field_origin_local_y": 20.0,
+    })
+
+    assert result.failed is True
+    assert result.actions == []
+    assert "confirm field heading/origin" in result.detail["note"]
 
 
 def test_field_waypoint_mode_missing_origin_fails() -> None:

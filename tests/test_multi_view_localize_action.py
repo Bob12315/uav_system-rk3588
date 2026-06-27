@@ -181,6 +181,24 @@ def test_goto_phase_returns_local_position_action() -> None:
     assert result.actions[0]["action_type"] == "local_position"
 
 
+def test_field_waypoint_preserves_frame_and_reports_local_target() -> None:
+    action = MultiViewLocalizeAction()
+    action.start(_params(
+        waypoint_mode="field", yaw_mode="field_heading",
+        waypoints=[{"x": 0.0, "y": 1.0, "altitude_m": 3.0}],
+    ))
+    result = action.update({
+        "local_position": {"x": 10.0, "y": 20.0, "z": -3.0},
+        "field_heading_yaw_rad": 0.0, "field_heading_confirmed": True,
+        "field_origin_local_x": 10.0, "field_origin_local_y": 20.0,
+        "field_origin_confirmed": True,
+    })
+
+    assert result.detail["input_frame"] == "field"
+    assert result.detail["local_target"] == pytest.approx({"x": 11.0, "y": 20.0, "z": -3.0})
+    assert action.goto_action.waypoint_mode == "field"
+
+
 def test_goto_completes_and_transitions_to_settle() -> None:
     action = MultiViewLocalizeAction()
     action.start(_params(

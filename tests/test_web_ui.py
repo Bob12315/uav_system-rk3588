@@ -249,10 +249,14 @@ def test_web_ui_exposes_field_heading_controls() -> None:
     assert 'id="fieldHeadingCurrentYaw"' in index
     assert 'id="fieldHeadingDelta"' in index
     assert 'id="fieldHeadingOrigin"' in index
+    assert 'id="fieldHeadingCurrentField"' in index
     assert '"/api/field-heading/confirm"' in script
     assert "function renderFieldHeading" in script
     assert "function confirmFieldHeading" in script
     assert "delta_current_to_field_deg" in script
+    assert "function localPointToField" in script
+    assert "const dronePosition = fieldPosition || missionPosition" in script
+    assert '"UAV LOCAL fallback"' in script
     assert ".field-heading-panel" in styles
 
 
@@ -324,7 +328,7 @@ def test_action_lab_start_uses_confirmation_instead_of_send_checkbox() -> None:
     assert "if (!confirmed) return;" in script
     assert "send_actions: Boolean(sendActions)" in script
     assert 'console.log("Action Lab start request body", requestBody);' in script
-    assert "?v=ui4-clear-localization" in index
+    assert "?v=ui7-field-control" in index
     assert "$(\"actionSendToggle\").checked" not in script
     assert "let actionParamCache = {};" in script
     assert "function cacheSelectedActionParams()" in script
@@ -343,7 +347,7 @@ def test_action_names_render_with_chinese_suffixes() -> None:
     index = (static_dir / "index.html").read_text(encoding="utf-8")
     script = (static_dir / "app.js").read_text(encoding="utf-8")
 
-    assert "/static/app.js?v=ui4-clear-localization" in index
+    assert "/static/app.js?v=ui7-field-control" in index
     assert "const ACTION_ZH_LABELS" in script
     for action_name, zh_label in {
         "takeoff": "起飞",

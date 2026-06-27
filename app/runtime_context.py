@@ -58,6 +58,7 @@ class RuntimeContextBuilder:
             context["field_origin_local_z"] = self.field_origin_local_z
             context["field_origin_time"] = self.field_origin_time
         context["field_origin_confirmed"] = bool(self.field_origin_confirmed)
+        context["field_transform"] = self.field_transform()
 
         drone = context["drone"]
         if isinstance(drone, dict):
@@ -89,6 +90,9 @@ class RuntimeContextBuilder:
                     "y": drone.get("local_y"),
                     "z": drone.get("local_z"),
                 }
+            field_position = self.field_position_from_drone(drone)
+            if field_position is not None:
+                context["field_position"] = field_position
 
             perception = context.get("perception")
             for source, target in (
@@ -114,6 +118,71 @@ class RuntimeContextBuilder:
                 context["relative_altitude"] = drone.get("relative_altitude")
 
         return self.json_safe(context)
+
+    def field_transform_ready(self) -> bool:
+        return bool(
+            self.field_heading_confirmed
+            and self.field_origin_confirmed
+            and self._float_or_none(self.field_heading_yaw_rad) is not None
+            and self._float_or_none(self.field_origin_local_x) is not None
+            and self._float_or_none(self.field_origin_local_y) is not None
+        )
+
+    def field_transform(self) -> dict[str, object]:
+        return {
+            "heading_yaw_rad": self.field_heading_yaw_rad,
+            "origin_local_x": self.field_origin_local_x,
+            "origin_local_y": self.field_origin_local_y,
+            "origin_local_z": self.field_origin_local_z,
+            "confirmed": self.field_transform_ready(),
+            "convention": "field_y_forward_field_x_right",
+        }
+
+    def local_to_field_xy(self, local_x: object, local_y: object) -> tuple[float, float] | None:
+        if not self.field_transform_ready():
+            return None
+        lx = self._float_or_none(local_x)
+        ly = self._float_or_none(local_y)
+        if lx is None or ly is None:
+            return None
+        ox = float(self.field_origin_local_x)
+        oy = float(self.field_origin_local_y)
+        yaw = float(self.field_heading_yaw_rad)
+        dx = lx - ox
+        dy = ly - oy
+        return (-dx * math.sin(yaw) + dy * math.cos(yaw),
+                dx * math.cos(yaw) + dy * math.sin(yaw))
+
+    def field_to_local_xy(self, field_x: object, field_y: object) -> tuple[float, float] | None:
+        if not self.field_transform_ready():
+            return None
+        fx = self._float_or_none(field_x)
+        fy = self._float_or_none(field_y)
+        if fx is None or fy is None:
+            return None
+        yaw = float(self.field_heading_yaw_rad)
+        local_dx = fy * math.cos(yaw) - fx * math.sin(yaw)
+        local_dy = fy * math.sin(yaw) + fx * math.cos(yaw)
+        return (float(self.field_origin_local_x) + local_dx,
+                float(self.field_origin_local_y) + local_dy)
+
+    def field_position_from_drone(self, drone: object) -> dict[str, object] | None:
+        if not isinstance(drone, dict) or not bool(drone.get("local_position_valid", False)):
+            return None
+        converted = self.local_to_field_xy(drone.get("local_x"), drone.get("local_y"))
+        if converted is None:
+            return None
+        field_x, field_y = converted
+        return {
+            "x": field_x,
+            "y": field_y,
+            "z": self._float_or_none(drone.get("local_z")),
+            "local_x": self._float_or_none(drone.get("local_x")),
+            "local_y": self._float_or_none(drone.get("local_y")),
+            "local_z": self._float_or_none(drone.get("local_z")),
+            "source": "field_heading",
+            "confirmed": True,
+        }
 
     def confirm_field_heading(
         self,

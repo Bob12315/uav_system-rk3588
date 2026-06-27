@@ -64,6 +64,22 @@ def test_action_mission_template_steps_have_name_and_params() -> None:
             assert isinstance(step.get("params", {}), dict)
 
 
+def test_action_mission_waypoint_frames_are_explicit_and_match_coordinate_source() -> None:
+    flight_actions = {"goto_waypoint", "multi_view_localize", "survey_area", "recon_scan"}
+    for path in TEMPLATE_PATHS:
+        for step in _template(path)["steps"]:
+            if step["name"] not in flight_actions:
+                continue
+            params = step["params"]
+            assert params["waypoint_mode"] in {"field", "absolute"}
+            assert params["yaw_mode"] == "field_heading"
+            if step["name"] == "goto_waypoint":
+                uses_localized_target = str(params.get("x", "")).endswith(".local_x")
+                assert params["waypoint_mode"] == ("absolute" if uses_localized_target else "field")
+            else:
+                assert params["waypoint_mode"] == "field"
+
+
 def test_action_mission_template_actions_are_registered() -> None:
     registered = set(create_action_lab_registry().list())
 

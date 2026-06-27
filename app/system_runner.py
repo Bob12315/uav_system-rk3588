@@ -651,6 +651,9 @@ class SystemRunner:
         manager = self.services.link_manager
         snapshot["active_source"] = manager.get_active_source() if manager is not None else "none"
         snapshot["field_heading"] = self.field_heading_status()
+        drone = snapshot.get("drone", {})
+        snapshot["field_position"] = self.runtime_context_builder.field_position_from_drone(drone)
+        snapshot["field_transform"] = self.runtime_context_builder.field_transform()
         return self._json_safe(snapshot)
 
     def action_lab_context(self) -> dict[str, object]:
@@ -674,6 +677,7 @@ class SystemRunner:
         field_yaw = builder.field_heading_yaw_rad
         pre_arm_yaw = builder.pre_arm_yaw_rad
         arm_yaw = builder.arm_heading_yaw_rad
+        field_position = builder.field_position_from_drone(drone)
 
         def deg(rad: float | None) -> float | None:
             return None if rad is None else math.degrees(float(rad))
@@ -709,7 +713,26 @@ class SystemRunner:
             "field_origin_local_y": builder.field_origin_local_y,
             "field_origin_local_z": builder.field_origin_local_z,
             "field_origin_time": builder.field_origin_time,
+            "current_field_x": field_position.get("x") if field_position else None,
+            "current_field_y": field_position.get("y") if field_position else None,
+            "current_field_z": field_position.get("z") if field_position else None,
+            "current_local_z": field_position.get("local_z") if field_position else None,
         }
+
+    def _with_field_coordinates(self, items: list[object]) -> list[object]:
+        enriched: list[object] = []
+        for item in items:
+            if not isinstance(item, dict):
+                enriched.append(item)
+                continue
+            copy = dict(item)
+            converted = self.runtime_context_builder.local_to_field_xy(
+                copy.get("local_x", copy.get("x")), copy.get("local_y", copy.get("y"))
+            )
+            if converted is not None:
+                copy["field_x"], copy["field_y"] = converted
+            enriched.append(copy)
+        return enriched
 
     def confirm_field_heading_manual(self) -> CommandResult:
         with self.control_command_log_lock:
@@ -800,7 +823,7 @@ class SystemRunner:
             "source": "multi_view_localize",
             "updated_at": time.time(),
             "run_id": detail.get("run_id", ""),
-            "objects": localized,
+            "objects": self._with_field_coordinates(localized),
             "object_count": detail.get("object_count", len(localized)),
             "raw_estimates_count": detail.get("raw_estimates_count", 0),
             "captures_count": detail.get("captures_count", 0),
@@ -836,7 +859,7 @@ class SystemRunner:
         self.latest_drop_targets_result = {
             "source": "select_drop_targets",
             "updated_at": time.time(),
-            "selected_targets": selected,
+            "selected_targets": self._with_field_coordinates(selected),
             "selected_count": detail.get("selected_count", len(selected)),
             "candidate_count": detail.get("candidate_count", 0),
         }

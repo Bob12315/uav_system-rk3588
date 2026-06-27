@@ -13,6 +13,7 @@ def _params(**overrides: object) -> dict[str, object]:
         "waypoints": [{"x": 1.0, "y": 2.0, "altitude_m": 5.0}],
         "capture_updates_per_waypoint": 1,
         "max_updates_per_waypoint": 10,
+        "waypoint_mode": "absolute",
         "yaw_mode": "hold",
     }
     params.update(overrides)
@@ -174,6 +175,24 @@ def test_goto_not_finished_returns_local_position_action() -> None:
     assert result.reason == "survey_goto"
     assert result.done is False
     assert result.actions[0]["action_type"] == "local_position"
+
+
+def test_field_survey_preserves_frame_and_reports_local_target() -> None:
+    action = SurveyAreaAction()
+    action.start(_params(
+        waypoint_mode="field", yaw_mode="field_heading",
+        waypoints=[{"x": 1.0, "y": 0.0, "altitude_m": 5.0}],
+    ))
+    result = action.update({
+        "local_position": {"x": 10.0, "y": 20.0, "z": -5.0},
+        "field_heading_yaw_rad": 0.0, "field_heading_confirmed": True,
+        "field_origin_local_x": 10.0, "field_origin_local_y": 20.0,
+        "field_origin_confirmed": True,
+    })
+
+    assert result.detail["input_frame"] == "field"
+    assert result.detail["local_target"] == pytest.approx({"x": 10.0, "y": 21.0, "z": -5.0})
+    assert action.goto_action.waypoint_mode == "field"
 
 
 def test_stop_makes_later_update_done_without_actions() -> None:

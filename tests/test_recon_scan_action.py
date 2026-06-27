@@ -8,6 +8,7 @@ from missions.common.actions.recon_scan import ReconScanAction
 def _params(**overrides):
     data = {
         "waypoints": [{"x": 0.0, "y": 50.0, "altitude_m": 2.2}],
+        "waypoint_mode": "absolute",
         "yaw_mode": "arm_heading",
         "capture_updates_per_waypoint": 1,
         "settle_updates_per_waypoint": 0,
@@ -63,6 +64,24 @@ def test_recon_scan_goto_outputs_local_position() -> None:
 
     assert result.reason == "recon_goto"
     assert result.actions[0]["action_type"] == "local_position"
+
+
+def test_field_recon_preserves_frame_and_reports_local_target() -> None:
+    action = ReconScanAction()
+    action.start(_params(
+        waypoint_mode="field", yaw_mode="field_heading",
+        waypoints=[{"x": 0.0, "y": 1.0, "altitude_m": 2.2}],
+    ))
+    result = action.update({
+        "local_position": {"x": 10.0, "y": 20.0, "z": -2.2},
+        "field_heading_yaw_rad": 0.0, "field_heading_confirmed": True,
+        "field_origin_local_x": 10.0, "field_origin_local_y": 20.0,
+        "field_origin_confirmed": True,
+    })
+
+    assert result.detail["input_frame"] == "field"
+    assert result.detail["local_target"] == pytest.approx({"x": 11.0, "y": 20.0, "z": -2.2})
+    assert action.goto_action.waypoint_mode == "field"
 
 
 def test_recon_scan_reaches_waypoint_then_enters_settle() -> None:

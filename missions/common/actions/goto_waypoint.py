@@ -76,7 +76,7 @@ class GotoWaypointAction(ActionModule):
             )
         if self.yaw_mode == "field_heading" and field_heading_yaw_rad is None:
             detail = self._detail(None, None, None, context_data)
-            detail["note"] = "yaw_mode field_heading requires field_heading_yaw_rad from vehicle context"
+            detail["note"] = "yaw_mode field_heading requires field_heading_yaw_rad from a confirmed field heading"
             return ActionResult(
                 failed=True,
                 reason="missing_field_heading_yaw",
@@ -85,7 +85,9 @@ class GotoWaypointAction(ActionModule):
         target = self._local_target(context_data)
         if target is None:
             detail = self._detail(None, None, None, context_data)
-            detail["note"] = "waypoint_mode field requires field_origin_local_x/y and field_heading_yaw_rad"
+            detail["note"] = (
+                "field waypoint rejected: confirm field heading/origin before field -> LOCAL_NED conversion"
+            )
             return ActionResult(
                 failed=True,
                 reason="missing_field_origin",
@@ -96,7 +98,7 @@ class GotoWaypointAction(ActionModule):
         if current is None:
             self.reached_updates = 0
             return ActionResult(
-                actions=[self._action_dict(target, arm_heading_yaw_rad, field_heading_yaw_rad)],
+                actions=[self._action_dict(target, arm_heading_yaw_rad, field_heading_yaw_rad, context_data)],
                 reason="waiting_for_position",
                 detail=self._detail(None, None, None, context_data),
             )
@@ -119,7 +121,7 @@ class GotoWaypointAction(ActionModule):
         if self.reached_updates >= self.min_hold_updates:
             return ActionResult(done=True, reason="waypoint_reached", detail=detail)
         return ActionResult(
-            actions=[self._action_dict(target, arm_heading_yaw_rad, field_heading_yaw_rad)],
+            actions=[self._action_dict(target, arm_heading_yaw_rad, field_heading_yaw_rad, context_data)],
             reason="goto_active",
             detail=detail,
         )
@@ -150,6 +152,7 @@ class GotoWaypointAction(ActionModule):
         target: dict[str, float] | None = None,
         arm_heading_yaw_rad: float | None = None,
         field_heading_yaw_rad: float | None = None,
+        context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         target_data = target or {"x": self.target_x, "y": self.target_y, "z": self.target_z}
         params: dict[str, Any] = {
@@ -164,13 +167,21 @@ class GotoWaypointAction(ActionModule):
             params["yaw"] = arm_heading_yaw_rad
         elif self.yaw_mode == "field_heading":
             params["yaw"] = field_heading_yaw_rad
-        return {
+        action = {
             "action_type": "local_position",
             "params": params,
+            "input_frame": "field" if self.waypoint_mode == "field" else "local_ned",
+            "input_target": {"x": self.target_x, "y": self.target_y, "z": self.target_z},
+            "local_target": dict(target_data),
             "key": self.key,
             "once": False,
             "priority": self.priority,
         }
+        context_data = context or {}
+        action["field_origin_local_x"] = self._float_context(context_data, "field_origin_local_x")
+        action["field_origin_local_y"] = self._float_context(context_data, "field_origin_local_y")
+        action["field_heading_yaw_rad"] = field_heading_yaw_rad
+        return action
 
     def _detail(
         self,
@@ -193,10 +204,18 @@ class GotoWaypointAction(ActionModule):
             "reached_updates": self.reached_updates,
             "yaw_mode": self.yaw_mode,
             "waypoint_mode": self.waypoint_mode,
+            "input_frame": "field" if self.waypoint_mode == "field" else "local_ned",
+            "input_target": {"x": self.target_x, "y": self.target_y, "z": self.target_z},
+            "field_origin_local_x": self._float_context(context_data, "field_origin_local_x"),
+            "field_origin_local_y": self._float_context(context_data, "field_origin_local_y"),
         }
         local_target = self._local_target(context_data)
         if local_target is not None:
             detail["local_target"] = local_target
+            detail["note"] = (
+                "field -> LOCAL_NED converted" if self.waypoint_mode == "field"
+                else "LOCAL_NED input used directly"
+            )
         arm_heading_yaw_rad = self._arm_heading_yaw(context_data)
         if arm_heading_yaw_rad is not None:
             detail["arm_heading_yaw_rad"] = arm_heading_yaw_rad
@@ -235,6 +254,10 @@ class GotoWaypointAction(ActionModule):
         if self.waypoint_mode == "absolute":
             return {"x": self.target_x, "y": self.target_y, "z": self.target_z}
 
+        if not bool(context.get("field_heading_confirmed", False)) or not bool(
+            context.get("field_origin_confirmed", False)
+        ):
+            return None
         field_heading_yaw_rad = self._field_heading_yaw(context)
         origin_x = self._float_context(context, "field_origin_local_x")
         origin_y = self._float_context(context, "field_origin_local_y")

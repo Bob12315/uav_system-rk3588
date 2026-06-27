@@ -19,8 +19,8 @@ let actionMissionAutoTickTimer = null;
 let latestCameraRecording = {recording: false, path: "", message: "未录制"};
 const fallbackStageModes = ["AUTO", "IDLE", "APPROACH_TRACK", "OVERHEAD_HOLD", "CORRIDOR_FOLLOW"];
 const ACTION_SAFETY_HINTS = {
-  goto_waypoint: "飞控移动命令：local_position / goto_local_ned，需要 SEND=ON 才实发。",
-  survey_area: "会连续发送 local_position / goto_local_ned，需要 SEND=ON 才实发。",
+  goto_waypoint: "默认输入 FIELD 坐标（x=右，y=前），转换为 LOCAL_NED 后下发；需要 SEND=ON 才实发。",
+  survey_area: "默认航点为 FIELD 坐标，转换为 LOCAL_NED 后连续下发；需要 SEND=ON 才实发。",
   target_lock: "YOLO 锁定命令，不需要 SEND=ON，但需要 Dispatch。",
   align_descend: "BODY_NED 速度控制，需要 SEND=ON 才实发。",
   payload_release: "舵机 PWM 输出，需要 SEND=ON 才实发；确认 SERVO 输出通道和 PWM。",
@@ -47,7 +47,8 @@ const DEFAULT_ACTION_MISSION_STEPS = [
       x: 0.0,
       y: 0.0,
       altitude_m: 1.5,
-      yaw_mode: "arm_heading",
+      waypoint_mode: "field",
+      yaw_mode: "field_heading",
     },
   },
   {
@@ -74,7 +75,8 @@ const actionMissionPresets = {
         x: 0.0,
         y: 0.0,
         altitude_m: 1.5,
-        yaw_mode: "arm_heading",
+        waypoint_mode: "field",
+        yaw_mode: "field_heading",
       },
     },
   ],
@@ -102,7 +104,8 @@ const actionMissionPresets = {
         x: 0.0,
         y: 0.0,
         altitude_m: 1.5,
-        yaw_mode: "arm_heading",
+        waypoint_mode: "field",
+        yaw_mode: "field_heading",
       },
     },
     {
@@ -129,7 +132,8 @@ const actionMissionPresets = {
           {x: 0.0, y: 0.0, altitude_m: 1.5},
           {x: 1.0, y: 0.0, altitude_m: 1.5},
         ],
-        yaw_mode: "arm_heading",
+        waypoint_mode: "field",
+        yaw_mode: "field_heading",
         capture_updates_per_waypoint: 1,
         max_updates_per_waypoint: 20,
         detection_source: "scene",
@@ -263,14 +267,42 @@ function actionNameWithZh(name) {
   return actionDisplayName(name, name);
 }
 function pointX(obj) {
+  if (Number.isFinite(Number(obj.field_x))) return Number(obj.field_x);
   if (Number.isFinite(Number(obj.local_x))) return Number(obj.local_x);
   if (Number.isFinite(Number(obj.x))) return Number(obj.x);
   return null;
 }
 function pointY(obj) {
+  if (Number.isFinite(Number(obj.field_y))) return Number(obj.field_y);
   if (Number.isFinite(Number(obj.local_y))) return Number(obj.local_y);
   if (Number.isFinite(Number(obj.y))) return Number(obj.y);
   return null;
+}
+function localPointToField(point, next) {
+  const tf = next.field_transform || {};
+  if (!tf.confirmed) return null;
+  const lx = finiteNumber(point.local_x ?? point.x);
+  const ly = finiteNumber(point.local_y ?? point.y);
+  const ox = finiteNumber(tf.origin_local_x);
+  const oy = finiteNumber(tf.origin_local_y);
+  const yaw = finiteNumber(tf.heading_yaw_rad);
+  if ([lx, ly, ox, oy, yaw].some(value => value === null)) return null;
+  const dx = lx - ox;
+  const dy = ly - oy;
+  return {
+    x: -dx * Math.sin(yaw) + dy * Math.cos(yaw),
+    y: dx * Math.cos(yaw) + dy * Math.sin(yaw),
+  };
+}
+function pointForFieldMap(point, next) {
+  const fieldX = finiteNumber(point.field_x);
+  const fieldY = finiteNumber(point.field_y);
+  if (fieldX !== null && fieldY !== null) return {...point, x: fieldX, y: fieldY, field: true};
+  const converted = localPointToField(point, next);
+  if (converted) return {...point, ...converted, field_x: converted.x, field_y: converted.y, field: true};
+  const x = pointX(point);
+  const y = pointY(point);
+  return x === null || y === null ? null : {...point, x, y};
 }
 function isSelectedDropTarget(obj, selectedTargets) {
   if (!Array.isArray(selectedTargets) || !selectedTargets.length) return false;
@@ -376,6 +408,7 @@ function renderFieldHeading(next) {
   setOptionalText("fieldHeadingConfirmedYaw", degNum(field.field_heading_yaw_deg));
   setOptionalText("fieldHeadingDelta", degNum(field.delta_current_to_field_deg));
   setOptionalText("fieldHeadingOrigin", xyzText(field.origin_local_x, field.origin_local_y, field.origin_local_z));
+  setOptionalText("fieldHeadingCurrentField", xyzText(field.current_field_x, field.current_field_y, field.current_field_z));
   setOptionalText("fieldHeadingConfirmed", field.field_heading_confirmed ? "YES" : "NO");
   setOptionalText("fieldHeadingSource", field.field_heading_source || "--");
   setOptionalText("fieldHeadingTime", stamp(field.field_heading_time));
@@ -784,9 +817,20 @@ function fieldMapModel(next) {
   const dropCenter = route.drop_area_center || {};
   const recceCenter = route.recce_area_center || {};
   const home = route.home || {};
+  const rawFieldPosition = next.field_position || null;
+  const fieldX = finiteNumber(rawFieldPosition?.x);
+  const fieldY = finiteNumber(rawFieldPosition?.y);
+  const fieldPosition = fieldX !== null && fieldY !== null ? {
+    x: fieldX,
+    y: fieldY,
+    z: finiteNumber(rawFieldPosition.z ?? rawFieldPosition.local_z),
+    local_x: finiteNumber(rawFieldPosition.local_x),
+    local_y: finiteNumber(rawFieldPosition.local_y),
+    field: true,
+  } : null;
   const missionPosition = detail.mission_position || null;
   const drone = next.drone || {};
-  const dronePosition = missionPosition || (
+  const dronePosition = fieldPosition || missionPosition || (
     drone.local_position_valid
       ? {x: Number(drone.local_x), y: Number(drone.local_y), z: Number(drone.local_z), fallback: true}
       : null
@@ -798,6 +842,11 @@ function fieldMapModel(next) {
   const localization = next.localization || {};
   const localizationObjects = Array.isArray(localization.objects) ? localization.objects : [];
   const singleViewLocalization = actionLocalizationTargets(next.action_lab || latestActionLab);
+  const fieldLocalizationObjects = localizationObjects.map(item => pointForFieldMap(item, next)).filter(Boolean);
+  const fieldSingleViewTargets = singleViewLocalization.targets.map(item => pointForFieldMap(item, next)).filter(Boolean);
+  const fieldSingleViewDrone = singleViewLocalization.drone
+    ? pointForFieldMap(singleViewLocalization.drone, next)
+    : null;
 
   // selected drop targets — priority: drop_targets.status, localization.selected_targets, action_lab detail fallback
   const dropTargetsStatus = next.drop_targets || {};
@@ -837,13 +886,13 @@ function fieldMapModel(next) {
     confirmedCount: recceResults.filter(item => item.status === "confirmed").length,
     requiredConfirmed: Math.max(1, Number(detail.recce_required_confirmed_count || 3)),
     hasMissionPosition: Boolean(missionPosition),
-    localizationTargets: localizationObjects.filter(item =>
+    localizationTargets: fieldLocalizationObjects.filter(item =>
       Number.isFinite(Number(item.x)) &&
       Number.isFinite(Number(item.y))
     ),
-    singleViewTargets: singleViewLocalization.targets,
-    singleViewDrone: singleViewLocalization.drone,
-    dropTargetsSelected: dropTargetsFromSelection,
+    singleViewTargets: fieldSingleViewTargets,
+    singleViewDrone: fieldSingleViewDrone,
+    dropTargetsSelected: dropTargetsFromSelection.map(item => pointForFieldMap(item, next)).filter(Boolean),
   };
 }
 function resizeFieldCanvas(canvas) {
@@ -1004,7 +1053,8 @@ function drawDrone(ctx, model) {
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
-  drawFieldLabel(ctx, `UAV ${num(model.drone.x, 1)}, ${num(model.drone.y, 1)}`, x + 46, y - 14, {align: "left"});
+  const label = model.drone.field ? "UAV field" : model.drone.fallback ? "UAV LOCAL fallback" : "UAV";
+  drawFieldLabel(ctx, `${label} ${num(model.drone.x, 1)}, ${num(model.drone.y, 1)}`, x + 46, y - 14, {align: "left"});
   drawFieldLabel(ctx, `z=${num(model.drone.z, 1)}`, x + 46, y + 2, {align: "left", color: "#93a8bf"});
 }
 function drawTargets(ctx, model) {
@@ -1502,8 +1552,11 @@ function selectAction(name) {
   let hint = spec.description || spec.label || spec.name;
   if (spec.name === "payload_release") {
     hint = `${hint} servo_outputs 是飞控 SERVO 输出通道配置，不是遥控器 RC 输入通道。舵机插在输出 8 就填 channel=8。`;
-  } else if (spec.name === "goto_waypoint") {
-    hint = `${hint} yaw_mode="arm_heading" 表示移动时机头保持解锁/ARM 时刻的朝向。`;
+  } else if (["goto_waypoint", "survey_area", "multi_view_localize", "recon_scan"].includes(spec.name)) {
+    let params = spec.default_params || {};
+    try { params = JSON.parse(actionParamCache[selectedActionName]); } catch (_error) { /* show default frame */ }
+    const frame = params.waypoint_mode === "field" ? "FIELD 坐标（x=右侧，y=前方）" : "LOCAL_NED 坐标";
+    hint = `${hint} 当前输入为 ${frame}；实发前会在 Action detail 中显示 local_target。`;
   }
   $("completionHint").textContent = hint;
   if ($("actionParamHint")) $("actionParamHint").textContent = hint;

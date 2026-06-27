@@ -64,7 +64,7 @@ def action_lab_specs() -> list[dict[str, Any]]:
         {
             "name": "goto_waypoint",
             "label": "Goto Waypoint",
-            "description": "Dry-run a local-position waypoint action.",
+            "description": "FIELD waypoint (x right, y forward), converted to LOCAL_NED before dispatch.",
             "default_params": {
                 "x": 0.0,
                 "y": 5.5,
@@ -81,13 +81,14 @@ def action_lab_specs() -> list[dict[str, Any]]:
         {
             "name": "survey_area",
             "label": "Survey Area",
-            "description": "Dry-run waypoint survey, localization, and fusion without sending vehicle commands.",
+            "description": "FIELD waypoint survey, converted to LOCAL_NED before dispatch.",
             "default_params": {
                 "waypoints": [
                     {"x": 1.0, "y": 2.0, "altitude_m": 5.0},
                     {"x": 3.0, "y": 4.0, "altitude_m": 5.0},
                 ],
-                "yaw_mode": "arm_heading",
+                "waypoint_mode": "field",
+                "yaw_mode": "field_heading",
                 "capture_updates_per_waypoint": 3,
                 "max_updates_per_waypoint": 200,
                 "detection_source": "scene",
@@ -294,7 +295,8 @@ def action_lab_specs() -> list[dict[str, Any]]:
                     {"x": -2.5, "y": 52.0, "altitude_m": 2.2},
                     {"x": 0.0, "y": 50.0, "altitude_m": 2.0},
                 ],
-                "yaw_mode": "arm_heading",
+                "waypoint_mode": "field",
+                "yaw_mode": "field_heading",
                 "capture_updates_per_waypoint": 4,
                 "settle_updates_per_waypoint": 2,
                 "max_updates_per_waypoint": 150,

@@ -211,13 +211,25 @@ class MultiViewLocalizeAction(ActionModule):
             return ActionResult(
                 failed=True,
                 reason="goto_failed",
-                detail=self._detail(extra={"goto": result.detail, "goto_reason": result.reason}),
+                detail=self._detail(extra={
+                    "goto": result.detail, "goto_reason": result.reason,
+                    **{name: result.detail.get(name) for name in (
+                        "input_frame", "input_target", "local_target", "field_origin_local_x",
+                        "field_origin_local_y", "field_heading_yaw_rad",
+                    )},
+                }),
             )
         if not result.done:
             return ActionResult(
                 actions=result.actions,
                 reason="multi_view_goto",
-                detail=self._detail(extra={"goto": result.detail, "goto_reason": result.reason}),
+                detail=self._detail(extra={
+                    "goto": result.detail, "goto_reason": result.reason,
+                    **{name: result.detail.get(name) for name in (
+                        "input_frame", "input_target", "local_target", "field_origin_local_x",
+                        "field_origin_local_y", "field_heading_yaw_rad",
+                    )},
+                }),
             )
 
         self.phase = "settle"
