@@ -2,7 +2,7 @@
 
 这是一个面向无人机视觉跟踪任务的 Python 工程。系统由 YOLO 感知进程、MAVLink 遥测链路、融合层、mission/stage 控制层和总控编排层组成，当前主要支持：
 
-- RK3588 NPU 上的 RKNN INT8 YOLO 目标检测与主目标选择。
+- RK3588 NPU 上的 RKNN YOLO 目标检测与主目标选择（支持 FP16/INT8 RKNN）。
 - MAVLink2 遥测接入、状态缓存、动作命令和连续控制命令发送。
 - 感知目标与飞控/云台状态融合。
 - 斜视接近 `APPROACH_TRACK`。
@@ -14,7 +14,7 @@
 
 ```text
 yolo_app/                    telemetry_link/
-RKNN INT8 YOLO (RK3588 NPU) MAVLink2 + state cache + command sender
+RKNN YOLO (RK3588 NPU)      MAVLink2 + state cache + command sender
         | UDP JSON                    |
         v                             v
 fusion/ ------------------------------------------------+
@@ -42,7 +42,7 @@ app/              系统入口、服务编排、任务状态机、健康检查
 missions/         mission、stage controller 和通用控制命令出口
 fusion/           感知与遥测融合
 telemetry_link/   MAVLink2 通讯、状态缓存、命令队列和发送
-yolo_app/         RK3588 RKNN INT8 感知进程
+yolo_app/         RK3588 RKNNLite NPU 感知进程
 uav_ui/           终端 UI 与人工命令分发
 web_ui/           浏览器控制台、配置编辑和操作审计
 config/           当前生效的系统配置与 RK3588 配置模板
@@ -73,7 +73,7 @@ bash scripts/install/install_yolo_env.sh
 `yolo` 环境需安装 OpenCV、PyYAML、NumPy 及匹配板端 Runtime 的 `rknn-toolkit-lite2==2.3.2`。仓库已包含部署模型：
 
 ```text
-data/models/best-int8-rk3588.rknn
+data/models/cuadc-fp16.rknn
 ```
 
 运行状态、日志、缓存和生成视频统一写入 `runtime/`，不提交到 Git。
@@ -98,7 +98,7 @@ bash scripts/healthcheck/check_rk3588.sh
 
 部署规则：
 1. 本项目只支持 Linux ARM64 RK3588。YOLO 只能使用 RKNNLite、RK3588 NPU
-   和 data/models/best-int8-rk3588.rknn，不要添加 x86、CUDA、PyTorch 或 GPU
+   和 data/models/cuadc-fp16.rknn，不要添加 x86、CUDA、PyTorch 或 GPU
    推理路径。
 2. 先阅读 AGENTS.md、docs/user/install.md、docs/user/running.md 和
    docs/reference/safety.md，再检查 git status。不要覆盖我已有的本地配置，

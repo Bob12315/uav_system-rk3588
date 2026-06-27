@@ -38,7 +38,7 @@ MissionStage -> FlightCommand -> CommandShaper
 ## 平台硬约束
 
 - 不新增 x86、CUDA、PyTorch 或 GPU YOLO 推理路径。
-- 部署模型固定在 `data/models/best-int8-rk3588.rknn`。
+- 当前部署模型固定在 `data/models/cuadc-fp16.rknn`；RKNN 可使用 FP16 或 INT8。
 - Python 保持 `3.10` 兼容。
 - `config/app.yaml` 中 `executor.send_commands` 默认必须为 `false`。
 - 日志、SITL 状态、视频和 blackbox 数据只能进入 `runtime/`。

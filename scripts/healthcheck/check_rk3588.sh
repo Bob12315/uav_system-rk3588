@@ -49,7 +49,7 @@ esac
 check_file "${REPO_ROOT}/config/app.yaml"
 check_file "${REPO_ROOT}/config/telemetry.yaml"
 check_file "${REPO_ROOT}/config/yolo.yaml"
-check_file "${REPO_ROOT}/data/models/best-int8-rk3588.rknn"
+check_file "${REPO_ROOT}/data/models/cuadc-fp16.rknn"
 
 echo
 if [[ -x "${APP_PYTHON}" ]]; then

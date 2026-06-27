@@ -165,7 +165,7 @@ MissionStage.update()
 职责：
 
 - 读取视频源。
-- 在 RK3588 NPU 上调用 RKNNLite 执行 RKNN INT8 推理。
+- 在 RK3588 NPU 上调用 RKNNLite 执行 RKNN FP16/INT8 推理。
 - 使用短时 IoU 关联维护跨帧 `track_id`。
 - 维护主目标。
 - 通过 UDP JSON 输出当前主目标。

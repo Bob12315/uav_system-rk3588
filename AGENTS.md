@@ -4,9 +4,9 @@ This repository targets Linux ARM64 boards with RK3588 only.
 
 ## Platform Rules
 
-- YOLO inference uses `RKNNLite` with an INT8 `.rknn` model on the RK3588 NPU.
+- YOLO inference uses `RKNNLite` with an RKNN `.rknn` model (FP16 or INT8) on the RK3588 NPU.
 - Do not add x86, CUDA, PyTorch, or GPU inference paths.
-- The tracked deployment model is `data/models/best-int8-rk3588.rknn`.
+- The tracked deployment model is `data/models/cuadc-fp16.rknn`.
 - Runtime state, logs, SITL files, generated videos, and blackbox data belong under `runtime/`.
 
 ## Safety Rules

@@ -1,6 +1,6 @@
 # RK3588 运行手册
 
-本项目仅面向 Linux ARM64 RK3588。`yolo_app` 使用 RKNN INT8 模型和
+本项目仅面向 Linux ARM64 RK3588。`yolo_app` 使用 RKNN FP16/INT8 模型和
 RK3588 NPU，不提供 x86、CUDA、PyTorch 或 GPU 推理路径。
 
 ## 1. 启动前确认
@@ -69,7 +69,7 @@ ls -l /dev/v4l/by-id/
 在 `config/yolo.yaml` 中配置板端模型和实际摄像头。例如：
 
 ```yaml
-model_path: "../data/models/best-int8-rk3588.rknn"
+model_path: "../data/models/cuadc-fp16.rknn"
 source: /dev/v4l/by-id/<usb-camera>-video-index0
 target_class: "bucket"
 ```
