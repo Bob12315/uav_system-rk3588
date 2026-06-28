@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any
+
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,13 +183,23 @@ class MissionOrchestrator:
                 self.detail = {"action_result": result}
                 return self.status()
 
+            previous_step = self.steps[self.current_index]
+            next_step = self.steps[self.current_index + 1]
+            hold_before_payload_release = (
+                previous_step.name == "align_descend"
+                and next_step.name == "payload_release"
+            )
             self.current_index += 1
             self.reason = "next_step"
             self.detail = {"previous_action_result": result}
             # Clear any stale LOCAL_POSITION before starting the next step
             clear_nav = getattr(self.runtime, "clear_navigation_queue", None)
             if callable(clear_nav):
-                clear_nav(link_manager)
+                if hold_before_payload_release:
+                    _log.info("hold current local position before payload_release")
+                    clear_nav(link_manager, hold_current=True)
+                else:
+                    clear_nav(link_manager)
             self._start_current_step(link_manager=link_manager)
 
         return self.status()

@@ -58,6 +58,7 @@ class FakeRuntime:
         self.runner = FakeRunner(results)
         self.last_result = None
         self.clear_nav_calls = 0
+        self.clear_nav_hold_values = []
 
     def start(self, name, params=None, *, send_actions=None, link_manager=None):
         self.runner.start(name, params)
@@ -75,6 +76,7 @@ class FakeRuntime:
 
     def clear_navigation_queue(self, link_manager=None, *, hold_current=False):
         self.clear_nav_calls += 1
+        self.clear_nav_hold_values.append(hold_current)
 
 
 # ── helpers ──────────────────────────────────────────────────────────
@@ -199,7 +201,33 @@ def test_step_transition_clears_navigation_queue() -> None:
     assert status.current_action == "payload_release"
     assert status.reason == "next_step"
     assert runtime.clear_nav_calls == 1
+    assert runtime.clear_nav_hold_values == [False]
     assert len(runtime.runner.sent_actions) == 2  # step1 started + step2 started
+
+
+def test_align_descend_to_payload_release_holds_current_position() -> None:
+    runtime = FakeRuntime([FakeActionResult(done=True, reason="finish_altitude_reached")])
+    orch = MissionOrchestrator(
+        runtime,
+        [MissionActionStep("align_descend"), MissionActionStep("payload_release")],
+    )
+
+    orch.start()
+    status = orch.tick({})
+
+    assert status.current_action == "payload_release"
+    assert runtime.clear_nav_hold_values == [True]
+
+
+def test_other_transition_to_payload_release_does_not_hold_current_position() -> None:
+    runtime = FakeRuntime([FakeActionResult(done=True, reason="waypoint_reached")])
+    orch = MissionOrchestrator(runtime, _steps())
+
+    orch.start()
+    status = orch.tick({})
+
+    assert status.current_action == "payload_release"
+    assert runtime.clear_nav_hold_values == [False]
 
 
 def test_stop_with_hold_passes_hold_current() -> None:

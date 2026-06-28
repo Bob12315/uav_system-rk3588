@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from missions.common.actions.runner import ActionRunner
 from app.action_dispatcher import ActionDispatcher
+
+
+_log = logging.getLogger(__name__)
 
 
 class ActionRuntimeService:
@@ -106,12 +110,18 @@ class ActionRuntimeService:
         """Clear continuous commands and pending LOCAL_POSITION; optionally send a hold.
 
         Order is important:
-        1. clear_continuous_commands() — stop any lingering BODY_NED velocity
-        2. clear_pending_local_position_actions() — remove stale position targets
-        3. hold_current_local_position() — overwrite FC's current target (if hold_current)
+        1. stop_body_velocity() — send a zero BODY_NED velocity to the FC
+        2. clear_continuous_commands() — clear any lingering continuous commands
+        3. clear_pending_local_position_actions() — remove stale position targets
+        4. hold_current_local_position() — overwrite FC's current target (if hold_current)
         """
         if link_manager is None:
             return
+
+        stop_body = getattr(link_manager, "stop_body_velocity", None)
+        if callable(stop_body):
+            _log.info("send stop BODY_NED velocity before clearing continuous commands")
+            stop_body()
 
         clear_continuous = getattr(link_manager, "clear_continuous_commands", None)
         if callable(clear_continuous):
