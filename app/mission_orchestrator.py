@@ -196,7 +196,9 @@ class MissionOrchestrator:
             clear_nav = getattr(self.runtime, "clear_navigation_queue", None)
             if callable(clear_nav):
                 if hold_before_payload_release:
-                    _log.info("hold current local position before payload_release")
+                    _log.info(
+                        "hold current local position before payload_release after align_descend"
+                    )
                     clear_nav(link_manager, hold_current=True)
                 else:
                     clear_nav(link_manager)
