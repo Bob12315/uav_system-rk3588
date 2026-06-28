@@ -55,7 +55,7 @@ def test_payload_release_spec_defaults_to_servo_output_8() -> None:
     payload_spec = next(item for item in action_lab_specs() if item["name"] == "payload_release")
 
     assert payload_spec["default_params"]["servo_outputs"] == [
-        {"channel": 8, "release_pwm": 1440, "hold_pwm": 1800},
+        {"channel": 8, "release_pwm": 1750, "hold_pwm": 1250},
     ]
     assert "SERVO output" in payload_spec["description"]
 
@@ -64,15 +64,15 @@ def test_localize_specs_default_to_flipped_image_y() -> None:
     specs = {item["name"]: item for item in action_lab_specs()}
     multi_view_params = specs["multi_view_localize"]["default_params"]
 
-    assert specs["single_view_localize"]["default_params"]["camera"]["fov_x_deg"] == 75.0
-    assert specs["single_view_localize"]["default_params"]["camera"]["fov_y_deg"] == 60.0
+    assert specs["single_view_localize"]["default_params"]["camera"]["fov_x_deg"] == 85.0
+    assert specs["single_view_localize"]["default_params"]["camera"]["fov_y_deg"] == 69.0
     assert specs["single_view_localize"]["default_params"]["camera"]["image_x_sign"] == 1.0
     assert specs["single_view_localize"]["default_params"]["camera"]["image_y_sign"] == -1.0
     assert "horizontal_fov_deg" not in specs["single_view_localize"]["default_params"]["camera"]
     assert "vertical_fov_deg" not in specs["single_view_localize"]["default_params"]["camera"]
     assert "model" not in specs["single_view_localize"]["default_params"]["camera"]
-    assert multi_view_params["camera"]["fov_x_deg"] == 75.0
-    assert multi_view_params["camera"]["fov_y_deg"] == 60.0
+    assert multi_view_params["camera"]["fov_x_deg"] == 85.0
+    assert multi_view_params["camera"]["fov_y_deg"] == 69.0
     assert multi_view_params["camera"]["image_x_sign"] == 1.0
     assert multi_view_params["camera"]["image_y_sign"] == -1.0
 
@@ -94,8 +94,8 @@ def test_multi_view_localize_spec_defaults_to_drop_zone_field_waypoints() -> Non
     ]
     for waypoint in params["waypoints"]:
         assert {"x", "y", "altitude_m"} <= waypoint.keys()
-    assert params["camera"]["fov_x_deg"] == 75.0
-    assert params["camera"]["fov_y_deg"] == 60.0
+    assert params["camera"]["fov_x_deg"] == 85.0
+    assert params["camera"]["fov_y_deg"] == 69.0
     assert params["camera"]["image_y_sign"] == -1.0
     assert params["fusion"]["cluster_radius_m"] == 0.8
     assert params["fusion"]["min_cluster_size"] == 2

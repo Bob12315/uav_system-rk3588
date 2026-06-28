@@ -60,8 +60,8 @@
         ],
         "min_confidence": 0.35,
         "camera": {
-          "fov_x_deg": 75.0,
-          "fov_y_deg": 60.0,
+          "fov_x_deg": 85.0,
+          "fov_y_deg": 69.0,
           "image_x_sign": 1.0,
           "image_y_sign": -1.0
         },
@@ -135,8 +135,8 @@
         ],
         "min_confidence": 0.35,
         "camera": {
-          "fov_x_deg": 75.0,
-          "fov_y_deg": 60.0,
+          "fov_x_deg": 85.0,
+          "fov_y_deg": 69.0,
           "image_x_sign": 1.0,
           "image_y_sign": -1.0
         },
@@ -196,8 +196,8 @@
           "payload_offset_enabled": true,
           "payload_forward_m": -0.06,
           "payload_right_m": 0.0,
-          "fov_x_deg": 75.0,
-          "fov_y_deg": 60.0,
+          "fov_x_deg": 85.0,
+          "fov_y_deg": 69.0,
           "image_x_sign": 1.0,
           "image_y_sign": -1.0,
           "max_payload_offset_ex_cam": 0.8,
@@ -211,8 +211,8 @@
         "servo_outputs": [
           {
             "channel": 8,
-            "release_pwm": 1440,
-            "hold_pwm": 1800
+            "release_pwm": 1750,
+            "hold_pwm": 1250
           }
         ],
         "payload_id": "payload_1",
@@ -269,8 +269,8 @@
         ],
         "min_confidence": 0.35,
         "camera": {
-          "fov_x_deg": 75.0,
-          "fov_y_deg": 60.0,
+          "fov_x_deg": 85.0,
+          "fov_y_deg": 69.0,
           "image_x_sign": 1.0,
           "image_y_sign": -1.0
         },
@@ -330,8 +330,8 @@
           "payload_offset_enabled": true,
           "payload_forward_m": 0.06,
           "payload_right_m": 0.0,
-          "fov_x_deg": 75.0,
-          "fov_y_deg": 60.0,
+          "fov_x_deg": 85.0,
+          "fov_y_deg": 69.0,
           "image_x_sign": 1.0,
           "image_y_sign": -1.0,
           "max_payload_offset_ex_cam": 0.8,
@@ -345,8 +345,8 @@
         "servo_outputs": [
           {
             "channel": 9,
-            "release_pwm": 1850,
-            "hold_pwm": 1280
+            "release_pwm": 1815,
+            "hold_pwm": 1185
           }
         ],
         "payload_id": "payload_2",

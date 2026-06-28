@@ -104,8 +104,8 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
                 "min_confidence": 0.35,
                 "camera": {
-                    "fov_x_deg": 75.0,
-                    "fov_y_deg": 60.0,
+                    "fov_x_deg": 85.0,
+                    "fov_y_deg": 69.0,
                     "image_x_sign": 1.0,
                     "image_y_sign": -1.0,
                 },
@@ -122,8 +122,8 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
                 "min_confidence": 0.35,
                 "camera": {
-                    "fov_x_deg": 75.0,
-                    "fov_y_deg": 60.0,
+                    "fov_x_deg": 85.0,
+                    "fov_y_deg": 69.0,
                     "image_x_sign": 1.0,
                     "image_y_sign": -1.0,
                 },
@@ -170,8 +170,8 @@ def action_lab_specs() -> list[dict[str, Any]]:
                     "payload_offset_enabled": True,
                     "payload_forward_m": -0.06,
                     "payload_right_m": 0.0,
-                    "fov_x_deg": 75.0,
-                    "fov_y_deg": 60.0,
+                    "fov_x_deg": 85.0,
+                    "fov_y_deg": 69.0,
                     "image_x_sign": 1.0,
                     "image_y_sign": -1.0,
                     "max_payload_offset_ex_cam": 0.8,
@@ -185,13 +185,13 @@ def action_lab_specs() -> list[dict[str, Any]]:
             "description": (
                 "Dispatch MAV_CMD_DO_SET_SERVO to flight-controller SERVO outputs. "
                 "servo_outputs are per-SERVO output channel/PWM settings, not RC input channels. "
-                "ch8 = rear payload, SERVO8, hold_pwm=1800, release_pwm=1440. "
-                "ch9 = front payload, SERVO9, hold_pwm=1280, release_pwm=1850. "
+                "ch8 = rear payload, SERVO8, hold_pwm=1250, release_pwm=1750. "
+                "ch9 = front payload, SERVO9, hold_pwm=1185, release_pwm=1815. "
                 "Action Lab default only releases ch8 for safety; use Action Mission template for dual-target release."
             ),
             "default_params": {
                 "servo_outputs": [
-                    {"channel": 8, "release_pwm": 1440, "hold_pwm": 1800},
+                    {"channel": 8, "release_pwm": 1750, "hold_pwm": 1250},
                 ],
                 "payload_id": "payload_1",
                 "target_id": "target_debug",
@@ -228,8 +228,8 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
                 "min_confidence": 0.35,
                 "camera": {
-                    "fov_x_deg": 75.0,
-                    "fov_y_deg": 60.0,
+                    "fov_x_deg": 85.0,
+                    "fov_y_deg": 69.0,
                     "image_x_sign": 1.0,
                     "image_y_sign": -1.0,
                 },
