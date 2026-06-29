@@ -711,6 +711,7 @@ button.active-choice {
   color: var(--accent);
   margin-bottom: 3px;
 }
+.recon-inspection-results > div { margin: 4px 0; font-family: Consolas, monospace; }
 .mission-detail-json {
   min-height: 280px;
 }

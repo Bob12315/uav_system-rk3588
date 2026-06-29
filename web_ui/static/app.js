@@ -39,6 +39,8 @@ const ACTION_ZH_LABELS = {
   payload_release: "载荷投放",
   select_drop_targets: "选择投放目标",
   recon_scan: "侦察扫描",
+  select_recon_targets: "选择侦察目标",
+  recon_inspect_targets: "逐筒侦察识别",
 };
 const DEFAULT_ACTION_MISSION_STEPS = [
   {
@@ -704,6 +706,19 @@ function renderDashboardSummaries(next) {
     ["errors", JSON.stringify(dispatch.errors ?? "--"), dispatch.errors ? "danger" : ""],
     ["note", actionLab.note || dispatch.note || "--"],
   ]);
+  renderReconInspection(next.recon_inspection || {});
+}
+function renderReconInspection(result) {
+  const element = $("reconInspectionResults");
+  if (!element) return;
+  const report = Array.isArray(result.report) ? result.report : [];
+  element.innerHTML = report.length ? report.map((item, index) => {
+    const x = pointX(item), y = pointY(item);
+    const status = item.status === "detected"
+      ? `${item.sign_class || "--"} ${num(item.confidence, 2)}`
+      : item.status === "no_sign" ? "无标识" : "识别失败";
+    return `<div>#${index + 1} &nbsp; x=${num(x, 2)} y=${num(y, 2)} &nbsp; ${escapeHtml(status)}</div>`;
+  }).join("") : `<div class="hint">暂无侦察识别结果。</div>`;
 }
 function pointList(items, fallback, prefix) {
   return Array.isArray(items) && items.length
@@ -847,6 +862,9 @@ function fieldMapModel(next) {
   const fieldSingleViewDrone = singleViewLocalization.drone
     ? pointForFieldMap(singleViewLocalization.drone, next)
     : null;
+  const reconInspection = next.recon_inspection || {};
+  const reconInspectionTargets = (Array.isArray(reconInspection.report) ? reconInspection.report : [])
+    .map(item => pointForFieldMap(item, next)).filter(Boolean);
 
   // selected drop targets — priority: drop_targets.status, localization.selected_targets, action_lab detail fallback
   const dropTargetsStatus = next.drop_targets || {};
@@ -893,6 +911,7 @@ function fieldMapModel(next) {
     singleViewTargets: fieldSingleViewTargets,
     singleViewDrone: fieldSingleViewDrone,
     dropTargetsSelected: dropTargetsFromSelection.map(item => pointForFieldMap(item, next)).filter(Boolean),
+    reconInspectionTargets,
   };
 }
 function resizeFieldCanvas(canvas) {
@@ -1107,6 +1126,26 @@ function drawLocalizationTargets(ctx, model) {
       color: "#93a8bf",
       font: "11px Consolas, monospace",
     });
+  });
+}
+function drawReconInspectionTargets(ctx, model) {
+  model.reconInspectionTargets.forEach((target, index) => {
+    const tx = pointX(target), ty = pointY(target);
+    if (tx === null || ty === null) return;
+    const [x, y] = worldToCanvas(tx, ty, model.rect);
+    const detected = target.status === "detected";
+    const noSign = target.status === "no_sign";
+    const color = detected ? "#ffb347" : noSign ? "#93a8bf" : "#ff5b5b";
+    const label = detected ? `${target.sign_class || "--"} ${num(target.confidence, 2)}`
+      : noSign ? "无标识" : "识别失败";
+    ctx.beginPath();
+    ctx.arc(x, y, 7, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.strokeStyle = "#e6edf6";
+    ctx.lineWidth = 2;
+    ctx.fill();
+    ctx.stroke();
+    drawFieldLabel(ctx, `I${index + 1} ${label}`, x + 10, y - 10, {align: "left", color});
   });
 }
 function drawSingleViewTargets(ctx, model) {
@@ -1369,6 +1408,7 @@ function renderFieldMap(next) {
   drawSurveyPoints(ctx, model);
   drawTargets(ctx, model);
   drawLocalizationTargets(ctx, model);
+  drawReconInspectionTargets(ctx, model);
   drawSingleViewTargets(ctx, model);
   drawDrone(ctx, model);
   drawTargetCoordinateList(ctx, model);
@@ -1381,6 +1421,7 @@ function renderFieldMap(next) {
     `Recce confirmed: ${model.confirmedCount}/${model.requiredConfirmed}`,
     `Localization: ${model.localizationTargets.length}`,
     `SingleView: ${model.singleViewTargets.length}`,
+    `Recon inspect: ${model.reconInspectionTargets.length}`,
     model.hasMissionPosition ? "Coord: mission" : "Coord: local fallback",
   ].map(item => `<span>${item}</span>`).join("");
 }

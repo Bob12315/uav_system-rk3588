@@ -6,7 +6,7 @@
       "name": "takeoff",
       "params": {
         "mode": "GUIDED",
-        "altitude_m": 5.0,
+        "altitude_m": 4.5,
         "altitude_tolerance_m": 0.35,
         "require_armed": true,
         "max_updates": 150,
@@ -21,28 +21,28 @@
       "save_as": "drop_scan",
       "params": {
         "waypoint_mode": "field",
-        "altitude_m": 5.0,
+        "altitude_m": 4.5,
         "yaw_mode": "field_heading",
         "waypoints": [
           {
-            "x": -1.0,
-            "y": 4.8,
-            "altitude_m": 5.0
+            "x": -1.5,
+            "y": 4,
+            "altitude_m": 4.5
           },
           {
-            "x": 1.0,
-            "y": 4.8,
-            "altitude_m": 5.0
+            "x": 1.5,
+            "y": 4,
+            "altitude_m": 4.5
           },
           {
-            "x": 1.0,
-            "y": 6.2,
-            "altitude_m": 5.0
+            "x": 1.5,
+            "y": 6,
+            "altitude_m": 4.5
           },
           {
-            "x": -1.0,
-            "y": 6.2,
-            "altitude_m": 5.0
+            "x": -1.5,
+            "y": 6,
+            "altitude_m": 4.5
           }
         ],
         "capture_updates_per_waypoint": 3,
@@ -162,7 +162,7 @@
           "height_gain_mode": "points",
           "height_scale_points": [
             {
-              "altitude_m": 1.1,
+              "altitude_m": 1.2,
               "scale": 0.20
             },
             {
@@ -178,7 +178,7 @@
               "scale": 0.55
             },
             {
-              "altitude_m": 5.0,
+              "altitude_m": 4.5,
               "scale": 0.55
             }
           ],
@@ -191,7 +191,7 @@
           "slow_descend_max_ey_cam": 0.28,
           "deadband_ex_cam": 0.04,
           "deadband_ey_cam": 0.04,
-          "min_altitude_m": 1.1,
+          "min_altitude_m": 1.2,
           "require_target_locked": false,
           "payload_offset_enabled": true,
           "payload_forward_m": -0.06,
@@ -296,7 +296,7 @@
           "height_gain_mode": "points",
           "height_scale_points": [
             {
-              "altitude_m": 1.1,
+              "altitude_m": 1.2,
               "scale": 0.20
             },
             {
@@ -312,7 +312,7 @@
               "scale": 0.55
             },
             {
-              "altitude_m": 5.0,
+              "altitude_m": 4.5,
               "scale": 0.55
             }
           ],

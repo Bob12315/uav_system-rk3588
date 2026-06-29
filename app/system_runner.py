@@ -148,6 +148,7 @@ class SystemRunner:
         self.latest_snapshot: dict[str, object] = {}
         self.latest_localization_result: dict[str, object] = {}
         self.latest_drop_targets_result: dict[str, object] = {}
+        self.latest_recon_inspection_result: dict[str, object] = {}
         self.camera_recording: dict[str, object] = {
             "recording": False,
             "path": "",
@@ -646,6 +647,7 @@ class SystemRunner:
                     "action_mission": self.action_mission_status_payload(),
                     "localization": self.latest_localization_result,
                     "drop_targets": self.latest_drop_targets_result,
+                    "recon_inspection": self.latest_recon_inspection_result,
                 }
             )
         manager = self.services.link_manager
@@ -791,6 +793,7 @@ class SystemRunner:
             )
             self._maybe_save_localization_result()
             self._maybe_save_drop_targets_result()
+            self._maybe_save_recon_inspection_result()
             self.logger.info(
                 "action_lab_tick called current_action=%s dispatch=%s",
                 self.action_runtime.action_name,
@@ -862,6 +865,31 @@ class SystemRunner:
             "selected_targets": self._with_field_coordinates(selected),
             "selected_count": detail.get("selected_count", len(selected)),
             "candidate_count": detail.get("candidate_count", 0),
+        }
+
+    def _maybe_save_recon_inspection_result(self) -> None:
+        name = getattr(self.action_runtime, "action_name", None)
+        last = getattr(self.action_runtime, "last_result", None)
+        if last is None:
+            return
+        detail = last.get("detail") if isinstance(last, dict) else getattr(last, "detail", None)
+        if not isinstance(detail, dict):
+            detail = {}
+        done = last.get("done") if isinstance(last, dict) else getattr(last, "done", False)
+        if not done:
+            return
+        report = detail.get("recon_report")
+        if not isinstance(report, list):
+            report = []
+        if name != "recon_inspect_targets" and not report:
+            return
+        self.latest_recon_inspection_result = {
+            "source": "recon_inspect_targets", "updated_at": time.time(),
+            "report": self._with_field_coordinates(report),
+            "inspected_count": detail.get("inspected_count", len(report)),
+            "detected_sign_count": detail.get("detected_sign_count", 0),
+            "no_sign_count": detail.get("no_sign_count", 0),
+            "failed_count": detail.get("failed_count", 0),
         }
 
     def manual_step_move(self, direction: str, step_m: float) -> CommandResult:
@@ -1106,6 +1134,7 @@ class SystemRunner:
             )
             self._maybe_save_localization_result()
             self._maybe_save_drop_targets_result()
+            self._maybe_save_recon_inspection_result()
             return self.action_mission_status_payload()
 
     def action_mission_skip_current(self) -> dict[str, object]:

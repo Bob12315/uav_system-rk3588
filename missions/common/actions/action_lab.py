@@ -8,8 +8,10 @@ from .land import LandAction
 from .multi_view_localize import MultiViewLocalizeAction
 from .payload_release import PayloadReleaseAction
 from .recon_scan import ReconScanAction
+from .recon_inspect_targets import ReconInspectTargetsAction
 from .registry import ActionRegistry
 from .select_drop_targets import SelectDropTargetsAction
+from .select_recon_targets import SelectReconTargetsAction
 from .single_view_localize import SingleViewLocalizeAction
 from .survey_area import SurveyAreaAction
 from .takeoff import TakeoffAction
@@ -28,6 +30,8 @@ def create_action_lab_registry() -> ActionRegistry:
     registry.register("align_descend", AlignDescendAction)
     registry.register("payload_release", PayloadReleaseAction)
     registry.register("select_drop_targets", SelectDropTargetsAction)
+    registry.register("select_recon_targets", SelectReconTargetsAction)
+    registry.register("recon_inspect_targets", ReconInspectTargetsAction)
     registry.register("recon_scan", ReconScanAction)
     return registry
 
@@ -316,6 +320,40 @@ def action_lab_specs() -> list[dict[str, Any]]:
                     "image_x_sign": 1.0,
                     "image_y_sign": -1.0,
                 },
+            },
+        },
+        {
+            "name": "select_recon_targets",
+            "label": "Select Recon Targets",
+            "description": "Select and deduplicate up to five localized buckets; fewer targets are allowed.",
+            "default_params": {
+                "objects": [], "target_count": 5, "allow_fewer": True,
+                "min_seen_count": 1, "min_raw_count": 0, "min_weight": 0.0,
+                "deduplicate_radius_m": 0.45,
+                "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket", "recon_bucket", "white_bucket"],
+                "zone_center": {"x": 0.0, "y": 5.0},
+            },
+        },
+        {
+            "name": "recon_inspect_targets",
+            "label": "Recon Inspect Targets",
+            "description": "Visit localized buckets, align to 2m, and capture danger signs without payload release.",
+            "default_params": {
+                "targets": [], "max_targets": 5, "inspect_altitude_m": 3.0,
+                "align_finish_altitude_m": 2.0, "waypoint_mode": "absolute", "yaw_mode": "field_heading",
+                "goto_tolerance_xy_m": 0.35, "goto_tolerance_z_m": 0.35, "goto_min_hold_updates": 1,
+                "target_lock": {"max_match_distance_m": 1.2, "detection_source": "scene",
+                    "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket", "recon_bucket", "white_bucket"],
+                    "min_confidence": 0.25, "max_updates": 25},
+                "align_descend": {"expected_dt_s": 0.1, "lost_timeout_updates": 8,
+                    "hold_updates_required": 1, "max_retries": 1, "max_updates": 140,
+                    "finish_altitude_m": 2.0, "config": {"min_altitude_m": 1.8, "require_target_locked": False,
+                    "payload_offset_enabled": False}},
+                "capture_sign": {"detection_source": "scene", "capture_updates": 8,
+                    "min_sign_confidence": 0.35,
+                    "sign_class_names": ["danger_1", "danger_2", "danger_3", "baozha", "shenghua", "yiran",
+                                         "fangshe", "buran", "fushi", "youdu", "yushi", "ziran", "ciji"]},
+                "continue_on_target_failed": True, "continue_when_no_sign": True, "priority": 5,
             },
         },
     ]
