@@ -59,6 +59,7 @@ class FakeRuntime:
         self.last_result = None
         self.clear_nav_calls = 0
         self.clear_nav_hold_values = []
+        self.clear_nav_leave_stop_values = []
 
     def start(
         self,
@@ -82,9 +83,16 @@ class FakeRuntime:
         self.runner.reset()
         self.last_result = None
 
-    def clear_navigation_queue(self, link_manager=None, *, hold_current=False):
+    def clear_navigation_queue(
+        self,
+        link_manager=None,
+        *,
+        hold_current=False,
+        leave_stop_queued=False,
+    ):
         self.clear_nav_calls += 1
         self.clear_nav_hold_values.append(hold_current)
+        self.clear_nav_leave_stop_values.append(leave_stop_queued)
 
 
 # ── helpers ──────────────────────────────────────────────────────────
@@ -225,6 +233,7 @@ def test_align_descend_to_payload_release_holds_current_position() -> None:
 
     assert status.current_action == "payload_release"
     assert runtime.clear_nav_hold_values == [True]
+    assert runtime.clear_nav_leave_stop_values == [True]
 
 
 def test_other_transition_to_payload_release_does_not_hold_current_position() -> None:

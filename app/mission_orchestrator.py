@@ -199,7 +199,11 @@ class MissionOrchestrator:
                     _log.info(
                         "hold current local position before payload_release after align_descend"
                     )
-                    clear_nav(link_manager, hold_current=True)
+                    clear_nav(
+                        link_manager,
+                        hold_current=True,
+                        leave_stop_queued=True,
+                    )
                 else:
                     clear_nav(link_manager)
             self._start_current_step(link_manager=link_manager, clear_navigation=False)

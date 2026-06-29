@@ -108,30 +108,42 @@ class ActionRuntimeService:
         return self.runner.status()
 
     @staticmethod
-    def clear_navigation_queue(link_manager: object | None, *, hold_current: bool = False) -> None:
+    def clear_navigation_queue(
+        link_manager: object | None,
+        *,
+        hold_current: bool = False,
+        leave_stop_queued: bool = False,
+    ) -> None:
         """Clear continuous commands and pending LOCAL_POSITION; optionally send a hold.
 
         Order is important:
-        1. clear_continuous_commands() — remove the stale velocity setpoint
-        2. clear_pending_local_position_actions() — remove stale position targets
-        3. stop_body_velocity() — leave a zero BODY_NED setpoint queued for transmission
-        4. hold_current_local_position() — overwrite FC's current target (if hold_current)
+        By default the STOP sample is cleared too, so starting takeoff or a
+        position action cannot inherit a persistent zero-velocity override.
+        Only the align_descend -> payload_release transition opts into leaving
+        STOP queued until payload_release starts refreshing its own zero command.
         """
         if link_manager is None:
             return
 
-        clear_continuous = getattr(link_manager, "clear_continuous_commands", None)
-        if callable(clear_continuous):
-            clear_continuous()
-
-        clear_nav = getattr(link_manager, "clear_pending_local_position_actions", None)
-        if callable(clear_nav):
-            clear_nav()
-
         stop_body = getattr(link_manager, "stop_body_velocity", None)
-        if callable(stop_body):
-            _log.info("queue stop BODY_NED velocity after clearing stale commands")
-            stop_body()
+        clear_continuous = getattr(link_manager, "clear_continuous_commands", None)
+        clear_nav = getattr(link_manager, "clear_pending_local_position_actions", None)
+        if leave_stop_queued:
+            if callable(clear_continuous):
+                clear_continuous()
+            if callable(clear_nav):
+                clear_nav()
+            if callable(stop_body):
+                _log.info("queue persistent stop BODY_NED velocity for payload transition")
+                stop_body()
+        else:
+            if callable(stop_body):
+                _log.info("queue transient stop BODY_NED velocity before clearing")
+                stop_body()
+            if callable(clear_continuous):
+                clear_continuous()
+            if callable(clear_nav):
+                clear_nav()
 
         if hold_current:
             hold = getattr(link_manager, "hold_current_local_position", None)
