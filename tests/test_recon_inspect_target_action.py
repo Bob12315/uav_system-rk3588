@@ -36,8 +36,12 @@ def test_complete_flow_detects_best_sign_and_zeroes_first_observe_frame():
     assert result.done and not result.failed
     assert result.detail["status"] == "detected"
     assert result.detail["sign_class"] == "yiran"
-    assert result.actions[0]["frame"] == "BODY_NED"
-    assert (result.actions[0]["vx_mps"], result.actions[0]["vy_mps"], result.actions[0]["vz_mps"]) == (0.0, 0.0, 0.0)
+    zero_action = result.actions[0]
+    assert zero_action["action_type"] == "flight_command"
+    assert zero_action["params"]["frame"] == "BODY_NED"
+    assert zero_action["once"] is False
+    assert (zero_action["params"]["vx_cmd"], zero_action["params"]["vy_cmd"],
+            zero_action["params"]["vz_cmd"]) == (0.0, 0.0, 0.0)
 
 
 def test_missing_target_index_is_successful_skip():
@@ -56,8 +60,12 @@ def test_observe_without_sign_is_normal_and_zeroes_every_update():
     assert not first.done and second.done
     assert second.detail["status"] == "no_sign" and second.detail["confidence"] == 0.0
     for result in (first, second):
-        command = result.actions[0]
-        assert command["vx_mps"] == command["vy_mps"] == command["vz_mps"] == 0.0
+        action_envelope = result.actions[0]
+        assert action_envelope["action_type"] == "flight_command"
+        assert isinstance(action_envelope["params"], dict)
+        command = action_envelope["params"]
+        assert command["vx_cmd"] == command["vy_cmd"] == command["vz_cmd"] == 0.0
+        assert action_envelope["once"] is False
 
 
 def test_lock_failure_finishes_current_target_without_failing_mission():

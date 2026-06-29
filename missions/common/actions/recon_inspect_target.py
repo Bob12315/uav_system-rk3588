@@ -237,14 +237,35 @@ class ReconInspectTargetAction(ActionModule):
             return None
         return (x, y) if math.isfinite(x) and math.isfinite(y) else None
 
-    @staticmethod
-    def _zero_velocity_action() -> dict[str, Any]:
-        return {"type": "flight_command", "frame": "BODY_NED", "vx_mps": 0.0, "vy_mps": 0.0, "vz_mps": 0.0,
-                "vx_cmd": 0.0, "vy_cmd": 0.0, "vz_cmd": 0.0, "yaw_rate_cmd": 0.0,
-                "gimbal_yaw_rate_cmd": 0.0, "gimbal_pitch_rate_cmd": 0.0,
-                "gimbal_yaw_angle_cmd": None, "gimbal_pitch_angle_cmd": None,
-                "enable_body": True, "enable_gimbal": False, "enable_gimbal_angle": False,
-                "enable_approach": False, "active": True, "valid": True}
+    def _zero_velocity_action(self) -> dict[str, Any]:
+        return {
+            "action_type": "flight_command",
+            "params": {
+                "type": "flight_command",
+                "frame": "BODY_NED",
+                "vx_mps": 0.0,
+                "vy_mps": 0.0,
+                "vz_mps": 0.0,
+                "vx_cmd": 0.0,
+                "vy_cmd": 0.0,
+                "vz_cmd": 0.0,
+                "yaw_rate_cmd": 0.0,
+                "gimbal_yaw_rate_cmd": 0.0,
+                "gimbal_pitch_rate_cmd": 0.0,
+                "gimbal_yaw_angle_cmd": None,
+                "gimbal_pitch_angle_cmd": None,
+                "enable_body": True,
+                "enable_gimbal": False,
+                "enable_gimbal_angle": False,
+                "enable_approach": False,
+                "active": True,
+                "valid": True,
+                "priority": self.priority,
+            },
+            "key": f"recon_inspect_observe_zero_{self.target_index}",
+            "once": False,
+            "priority": self.priority,
+        }
 
     @staticmethod
     def _target_lock_defaults() -> dict[str, Any]:

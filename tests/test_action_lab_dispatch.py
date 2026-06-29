@@ -8,6 +8,7 @@ import pytest
 
 from app.app_config import build_arg_parser, load_app_config
 from app.system_runner import SystemRunner
+from missions.common.actions.recon_inspect_target import ReconInspectTargetAction
 from web_ui.server import ActionStartRequest, create_app
 
 
@@ -182,6 +183,27 @@ def _align_result(command: dict[str, object]) -> dict[str, object]:
         "actions": [],
         "detail": {"command": command},
     }
+
+
+def test_recon_observe_zero_action_dispatches_as_continuous_flight_command() -> None:
+    runner = _runner()
+    dispatcher = runner.action_runtime.dispatcher
+    dispatcher.send_actions = True
+    action = ReconInspectTargetAction()
+    action.start({"targets": [{"local_x": 0.0, "local_y": 5.0}], "target_index": 0})
+
+    dispatch = dispatcher.dispatch_actions(
+        [action._zero_velocity_action()],
+        action_name="recon_inspect_target",
+        send_commands=True,
+        link_manager=runner.services.link_manager,
+    )
+
+    assert dispatch["errors"] == []
+    assert dispatch["skipped"] == []
+    assert dispatch["sent"][0]["action_type"] == "flight_command"
+    assert runner.services.link_manager.calls[-1][0] == "send_body_velocity"
+    assert runner.services.link_manager.calls[-1][1][:3] == (0.0, 0.0, 0.0)
 
 
 def _set_drone_snapshot(runner: SystemRunner, **drone: object) -> None:
