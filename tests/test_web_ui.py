@@ -508,7 +508,11 @@ def test_action_mission_template_api_lists_competition_templates() -> None:
 
     assert response["ok"] is True
     names = {template["name"] for template in response["templates"]}
-    assert {"drop_two_targets_v1", "rescue_2026_full_auto"} <= names
+    assert {
+        "drop_two_targets_v1",
+        "rescue_2026_full_auto",
+        "recon_inspect_5_targets_v1",
+    } <= names
     assert all(template["path"].startswith("config/action_missions/") for template in response["templates"])
 
 
@@ -529,6 +533,29 @@ def test_action_mission_template_api_returns_template_and_rejects_unknown() -> N
 
     with pytest.raises(HTTPException):
         endpoint("missing_template")
+
+
+def test_action_mission_api_returns_recon_inspection_template() -> None:
+    app = create_app(_FakeRunner(), UiConfig(True, False, "127.0.0.1", 8080, "runtime/test-audit.jsonl"))
+    endpoint = next(route.endpoint for route in app.routes if getattr(route, "path", "") == "/api/action-mission/template/{name}")
+
+    response = endpoint("recon_inspect_5_targets_v1")
+
+    assert response["ok"] is True
+    assert response["template"]["name"] == "recon_inspect_5_targets_v1"
+    assert [step["name"] for step in response["template"]["steps"]] == [
+        "takeoff",
+        "multi_view_localize",
+        "select_recon_targets",
+        "recon_inspect_targets",
+        "goto_waypoint",
+    ]
+
+
+def test_action_mission_frontend_has_recon_template_button() -> None:
+    index = (Path(__file__).parents[1] / "web_ui" / "static" / "index.html").read_text(encoding="utf-8")
+
+    assert 'data-action-mission-template="recon_inspect_5_targets_v1"' in index
 
 
 def test_action_mission_frontend_parses_array_and_object_inputs() -> None:

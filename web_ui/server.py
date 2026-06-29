@@ -57,6 +57,7 @@ ACTION_MISSION_TEMPLATE_DIR = ROOT_DIR / "config" / "action_missions"
 ACTION_MISSION_TEMPLATE_NAMES = {
     "drop_two_targets_v1": "Two Drop Targets v1",
     "rescue_2026_full_auto": "Full Rescue 2026",
+    "recon_inspect_5_targets_v1": "Recon Inspect 5 Targets v1",
 }
 
 
