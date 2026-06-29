@@ -638,7 +638,8 @@ function updateActionMissionAutoTickButton() {
   const button = $("actionMissionAutoTick");
   if (!button) return;
   const enabled = Boolean(actionMissionAutoTickTimer);
-  button.textContent = enabled ? "自动推进 开" : "自动推进 关";
+  const running = Boolean(lastActionMissionStatus?.running);
+  button.textContent = enabled ? (running ? "自动推进 开" : "自动推进 待命") : "自动推进 关";
   button.classList.toggle("warning", enabled);
 }
 function stopActionMissionAutoTick() {
@@ -680,7 +681,8 @@ function renderActionMissionStatus(actionMission) {
   renderBlackboardKeys(payload);
   renderActionMissionSummary(payload);
   renderActionMissionTimeline(payload, currentActionMissionSteps);
-  if (!payload.running || payload.done || payload.failed) stopActionMissionAutoTick();
+  if (payload.done || payload.failed) stopActionMissionAutoTick();
+  else updateActionMissionAutoTickButton();
 }
 function renderDashboardSummaries(next) {
   const actionLab = next.action_lab || latestActionLab || {};
@@ -1893,12 +1895,19 @@ async function toggleActionMissionAutoTick() {
     return;
   }
   actionMissionAutoTickTimer = setInterval(() => {
+    if (!lastActionMissionStatus?.running) {
+      updateActionMissionAutoTickButton();
+      return;
+    }
     tickActionMission().catch(error => {
       stopActionMissionAutoTick();
       $("completionHint").textContent = error.message;
     });
   }, 500);
   updateActionMissionAutoTickButton();
+  $("completionHint").textContent = lastActionMissionStatus?.running
+    ? "自动推进已开启"
+    : "自动推进已待命，启动任务后会自动推进";
 }
 function loadActionMissionPreset(name) {
   const preset = actionMissionPresets[name];

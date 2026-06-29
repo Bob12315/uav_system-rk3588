@@ -558,6 +558,15 @@ def test_action_mission_frontend_has_recon_template_button() -> None:
     assert 'data-action-mission-template="recon_inspect_5_targets_v1"' in index
 
 
+def test_action_mission_auto_tick_can_wait_before_start() -> None:
+    script = (Path(__file__).parents[1] / "web_ui" / "static" / "app.js").read_text(encoding="utf-8")
+
+    assert '"自动推进 待命"' in script
+    assert "if (!lastActionMissionStatus?.running)" in script
+    assert "if (payload.done || payload.failed) stopActionMissionAutoTick();" in script
+    assert "if (!payload.running || payload.done || payload.failed)" not in script
+
+
 def test_action_mission_frontend_parses_array_and_object_inputs() -> None:
     node = shutil.which("node")
     if node is None:
