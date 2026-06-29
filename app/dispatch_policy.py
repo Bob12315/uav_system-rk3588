@@ -16,19 +16,19 @@ class DispatchRule:
 
 ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
     "local_position": DispatchRule(
-        allowed_actions={"goto_waypoint", "survey_area", "multi_view_localize", "recon_scan", "recon_inspect_targets"},
+        allowed_actions={"goto_waypoint", "survey_area", "multi_view_localize", "recon_scan", "recon_inspect_target"},
         requires_send_actions=True,
         requires_send_commands=True,
     ),
     "flight_command": DispatchRule(
-        allowed_actions={"align_descend", "recon_inspect_targets", "payload_release"},
+        allowed_actions={"align_descend", "recon_inspect_target", "payload_release"},
         requires_send_actions=True,
         requires_send_commands=True,
         continuous=True,
         once_respected=False,
     ),
     "body_velocity": DispatchRule(
-        allowed_actions={"align_descend", "recon_inspect_targets"},
+        allowed_actions={"align_descend", "recon_inspect_target"},
         requires_send_actions=True,
         requires_send_commands=True,
         continuous=True,
@@ -65,7 +65,7 @@ ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
         requires_send_commands=True,
     ),
     "yolo_lock_target": DispatchRule(
-        allowed_actions={"target_lock", "recon_inspect_targets"},
+        allowed_actions={"target_lock", "recon_inspect_target"},
         requires_send_actions=True,
         requires_send_commands=False,
     ),

@@ -40,7 +40,7 @@ const ACTION_ZH_LABELS = {
   select_drop_targets: "选择投放目标",
   recon_scan: "侦察扫描",
   select_recon_targets: "选择侦察目标",
-  recon_inspect_targets: "逐筒侦察识别",
+  recon_inspect_target: "单筒侦察识别",
 };
 const DEFAULT_ACTION_MISSION_STEPS = [
   {
@@ -718,7 +718,8 @@ function renderReconInspection(result) {
     const x = pointX(item), y = pointY(item);
     const status = item.status === "detected"
       ? `${item.sign_class || "--"} ${num(item.confidence, 2)}`
-      : item.status === "no_sign" ? "无标识" : "识别失败";
+      : item.status === "no_sign" ? "无标识"
+        : item.status === "skipped_missing_target" ? "跳过" : "识别失败";
     return `<div>#${index + 1} &nbsp; x=${num(x, 2)} y=${num(y, 2)} &nbsp; ${escapeHtml(status)}</div>`;
   }).join("") : `<div class="hint">暂无侦察识别结果。</div>`;
 }

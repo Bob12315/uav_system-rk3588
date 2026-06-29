@@ -16,7 +16,7 @@ def test_create_action_lab_registry_lists_supported_actions() -> None:
         "land",
         "multi_view_localize",
         "payload_release",
-        "recon_inspect_targets",
+        "recon_inspect_target",
         "recon_scan",
         "select_drop_targets",
         "select_recon_targets",
@@ -51,7 +51,7 @@ def test_action_lab_specs_are_json_serializable() -> None:
         "select_drop_targets",
         "recon_scan",
         "select_recon_targets",
-        "recon_inspect_targets",
+        "recon_inspect_target",
     ]
 
 
@@ -155,7 +155,7 @@ def test_action_lab_does_not_auto_register_default_registry() -> None:
         "select_drop_targets",
         "recon_scan",
         "select_recon_targets",
-        "recon_inspect_targets",
+        "recon_inspect_target",
     ):
         assert name not in default_registry.list()
 

@@ -869,6 +869,8 @@ class SystemRunner:
 
     def _maybe_save_recon_inspection_result(self) -> None:
         name = getattr(self.action_runtime, "action_name", None)
+        if name != "recon_inspect_target":
+            return
         last = getattr(self.action_runtime, "last_result", None)
         if last is None:
             return
@@ -878,18 +880,21 @@ class SystemRunner:
         done = last.get("done") if isinstance(last, dict) else getattr(last, "done", False)
         if not done:
             return
-        report = detail.get("recon_report")
-        if not isinstance(report, list):
-            report = []
-        if name != "recon_inspect_targets" and not report:
+        target_index = detail.get("target_index")
+        if not isinstance(target_index, int):
             return
+        existing = self.latest_recon_inspection_result.get("report", [])
+        by_index = {item.get("target_index"): item for item in existing if isinstance(item, dict)}
+        by_index[target_index] = detail
+        report = [by_index[index] for index in sorted(by_index) if isinstance(index, int)]
+        detected = sum(item.get("status") == "detected" for item in report)
+        no_sign = sum(item.get("status") == "no_sign" for item in report)
+        failed = sum(item.get("status") in {"goto_failed", "lock_failed", "align_failed"} for item in report)
         self.latest_recon_inspection_result = {
-            "source": "recon_inspect_targets", "updated_at": time.time(),
+            "source": "recon_inspect_target", "updated_at": time.time(),
             "report": self._with_field_coordinates(report),
-            "inspected_count": detail.get("inspected_count", len(report)),
-            "detected_sign_count": detail.get("detected_sign_count", 0),
-            "no_sign_count": detail.get("no_sign_count", 0),
-            "failed_count": detail.get("failed_count", 0),
+            "inspected_count": len(report), "detected_sign_count": detected,
+            "no_sign_count": no_sign, "failed_count": failed,
         }
 
     def manual_step_move(self, direction: str, step_m: float) -> CommandResult:
@@ -1098,6 +1103,7 @@ class SystemRunner:
         if self.action_mission_orchestrator is None:
             return self.action_mission_status_payload()
         with self.action_runtime_lock:
+            self.latest_recon_inspection_result = {}
             self.action_mission_orchestrator.start(
                 link_manager=self.services.link_manager,
             )
@@ -1117,6 +1123,7 @@ class SystemRunner:
         if self.action_mission_orchestrator is None:
             return self.action_mission_status_payload()
         with self.action_runtime_lock:
+            self.latest_recon_inspection_result = {}
             self.action_mission_orchestrator.reset(
                 link_manager=self.services.link_manager,
                 hold_current=True,

@@ -1,0 +1,38 @@
+{
+  "name": "recon_inspect_5_targets_stepwise_v1",
+  "description": "Recon-only mission: four-point localization, then inspect each selected bucket with target_lock + align_descend to 1.5m + 2s observe.",
+  "steps": [
+    {
+      "name": "takeoff",
+      "params": {"mode": "GUIDED", "altitude_m": 4.5, "altitude_tolerance_m": 0.35, "require_armed": true, "max_updates": 150, "priority": 2, "arm_priority": 1, "mode_priority": 2, "auto_confirm_field_heading": true}
+    },
+    {
+      "name": "multi_view_localize", "label": "recon_scan", "save_as": "recon_scan",
+      "on_failed": {"action": "jump_to", "target": "return_home", "max_attempts": 1},
+      "params": {
+        "waypoint_mode": "field", "altitude_m": 4.5, "yaw_mode": "field_heading",
+        "waypoints": [{"x": -1.5, "y": 4.0, "altitude_m": 4.5}, {"x": 1.5, "y": 4.0, "altitude_m": 4.5}, {"x": 1.5, "y": 6.0, "altitude_m": 4.5}, {"x": -1.5, "y": 6.0, "altitude_m": 4.5}],
+        "capture_updates_per_waypoint": 4, "settle_updates_per_waypoint": 2, "max_updates_per_waypoint": 120,
+        "tolerance_xy_m": 0.35, "tolerance_z_m": 0.35, "goto_min_hold_updates": 1,
+        "detection_source": "scene", "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket", "recon_bucket", "white_bucket"], "min_confidence": 0.25,
+        "camera": {"fov_x_deg": 85.0, "fov_y_deg": 69.0, "image_x_sign": 1.0, "image_y_sign": -1.0},
+        "fusion": {"cluster_radius_m": 0.8, "outlier_radius_m": 0.8, "min_cluster_size": 1, "center_weight_power": 1.0},
+        "save_result": true, "priority": 5
+      }
+    },
+    {
+      "name": "select_recon_targets", "label": "select_recon_targets", "save_as": "recon_targets",
+      "on_failed": {"action": "jump_to", "target": "return_home", "max_attempts": 1},
+      "params": {"objects": "$recon_scan.localized_objects", "target_count": 5, "allow_fewer": true, "min_seen_count": 1, "min_raw_count": 0, "min_weight": 0.0, "deduplicate_radius_m": 0.45, "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket", "recon_bucket", "white_bucket"], "zone_center": {"x": 0.0, "y": 5.0}}
+    },
+    {"name": "recon_inspect_target", "label": "inspect_target_0", "save_as": "inspect_target_0", "params": {"targets": "$recon_targets.selected_targets", "target_index": 0}},
+    {"name": "recon_inspect_target", "label": "inspect_target_1", "save_as": "inspect_target_1", "params": {"targets": "$recon_targets.selected_targets", "target_index": 1}},
+    {"name": "recon_inspect_target", "label": "inspect_target_2", "save_as": "inspect_target_2", "params": {"targets": "$recon_targets.selected_targets", "target_index": 2}},
+    {"name": "recon_inspect_target", "label": "inspect_target_3", "save_as": "inspect_target_3", "params": {"targets": "$recon_targets.selected_targets", "target_index": 3}},
+    {"name": "recon_inspect_target", "label": "inspect_target_4", "save_as": "inspect_target_4", "params": {"targets": "$recon_targets.selected_targets", "target_index": 4}},
+    {
+      "name": "goto_waypoint", "label": "return_home",
+      "params": {"x": 0.0, "y": 0.0, "altitude_m": 3.0, "waypoint_mode": "field", "yaw_mode": "field_heading", "tolerance_xy_m": 0.5, "tolerance_z_m": 0.5, "min_hold_updates": 2, "priority": 5, "key": "return_home_after_recon"}
+    }
+  ]
+}

@@ -8,7 +8,7 @@ from .land import LandAction
 from .multi_view_localize import MultiViewLocalizeAction
 from .payload_release import PayloadReleaseAction
 from .recon_scan import ReconScanAction
-from .recon_inspect_targets import ReconInspectTargetsAction
+from .recon_inspect_target import ReconInspectTargetAction
 from .registry import ActionRegistry
 from .select_drop_targets import SelectDropTargetsAction
 from .select_recon_targets import SelectReconTargetsAction
@@ -31,7 +31,7 @@ def create_action_lab_registry() -> ActionRegistry:
     registry.register("payload_release", PayloadReleaseAction)
     registry.register("select_drop_targets", SelectDropTargetsAction)
     registry.register("select_recon_targets", SelectReconTargetsAction)
-    registry.register("recon_inspect_targets", ReconInspectTargetsAction)
+    registry.register("recon_inspect_target", ReconInspectTargetAction)
     registry.register("recon_scan", ReconScanAction)
     return registry
 
@@ -335,25 +335,25 @@ def action_lab_specs() -> list[dict[str, Any]]:
             },
         },
         {
-            "name": "recon_inspect_targets",
-            "label": "Recon Inspect Targets",
-            "description": "Visit localized buckets, align to 2m, and capture danger signs without payload release.",
+            "name": "recon_inspect_target",
+            "label": "Recon Inspect Target",
+            "description": "Visit one selected bucket, align to 1.5m, and observe danger signs without payload release.",
             "default_params": {
-                "targets": [], "max_targets": 5, "inspect_altitude_m": 3.0,
-                "align_finish_altitude_m": 2.0, "waypoint_mode": "absolute", "yaw_mode": "field_heading",
+                "targets": [], "target_index": 0, "inspect_altitude_m": 3.0,
+                "align_finish_altitude_m": 1.5, "waypoint_mode": "absolute", "yaw_mode": "field_heading",
                 "goto_tolerance_xy_m": 0.35, "goto_tolerance_z_m": 0.35, "goto_min_hold_updates": 1,
                 "target_lock": {"max_match_distance_m": 1.2, "detection_source": "scene",
                     "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket", "recon_bucket", "white_bucket"],
                     "min_confidence": 0.25, "max_updates": 25},
                 "align_descend": {"expected_dt_s": 0.1, "lost_timeout_updates": 8,
-                    "hold_updates_required": 1, "max_retries": 1, "max_updates": 140,
-                    "finish_altitude_m": 2.0, "config": {"min_altitude_m": 1.8, "require_target_locked": False,
+                    "hold_updates_required": 1, "max_retries": 1, "max_updates": 160,
+                    "finish_altitude_m": 1.5, "config": {"min_altitude_m": 1.3, "require_target_locked": False,
                     "payload_offset_enabled": False}},
-                "capture_sign": {"detection_source": "scene", "capture_updates": 8,
+                "observe": {"detection_source": "scene", "observe_time_s": 2.0, "expected_dt_s": 0.1,
                     "min_sign_confidence": 0.35,
                     "sign_class_names": ["danger_1", "danger_2", "danger_3", "baozha", "shenghua", "yiran",
                                          "fangshe", "buran", "fushi", "youdu", "yushi", "ziran", "ciji"]},
-                "continue_on_target_failed": True, "continue_when_no_sign": True, "priority": 5,
+                "continue_on_lock_failed": False, "continue_on_align_failed": False, "priority": 5,
             },
         },
     ]
