@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from app.action_dispatcher import ActionDispatcher
 from missions.common.actions.payload_release import PayloadReleaseAction
 
 
@@ -212,6 +213,52 @@ def test_wait_phase_does_not_repeat_release() -> None:
     assert second.reason == "release_waiting"
     assert second.actions == []
     assert second.detail["wait_updates"] == 1
+
+
+def test_release_and_wait_continuously_publish_zero_velocity_command() -> None:
+    action = PayloadReleaseAction()
+    action.start(_params(release_wait_updates=3))
+
+    release = action.update({"field_heading_yaw_rad": 1.2})
+    waiting = action.update({"field_heading_yaw_rad": 1.2})
+
+    for result in (release, waiting):
+        command = result.detail["command"]
+        assert command["type"] == "flight_command"
+        assert command["vx_cmd"] == 0.0
+        assert command["vy_cmd"] == 0.0
+        assert command["vz_cmd"] == 0.0
+        assert command["valid"] is True
+        assert command["enable_body"] is True
+        assert command["yaw_hold_rad"] == pytest.approx(1.2)
+
+
+def test_dispatch_release_sends_servo_and_zero_velocity_same_result() -> None:
+    calls = []
+
+    class FakeLink:
+        def set_servo_output_pwm(self, *, servo_output, pwm, priority):
+            calls.append(("servo", servo_output, pwm, priority))
+
+        def send_velocity_command(self, vx, vy, vz, *, frame, yaw_rad=None):
+            calls.append(("velocity", vx, vy, vz, frame, yaw_rad))
+
+    action = PayloadReleaseAction()
+    action.start(_params())
+    result = action.update({"field_heading_yaw_rad": 1.2}).to_dict()
+    dispatcher = ActionDispatcher()
+    dispatcher.send_actions = True
+
+    dispatch = dispatcher.dispatch_result(
+        result,
+        action_name="payload_release",
+        send_commands=True,
+        link_manager=FakeLink(),
+    )
+
+    assert [item["action_type"] for item in dispatch["sent"]] == ["set_servo", "flight_command"]
+    assert calls[0][:3] == ("servo", 8, 1200)
+    assert calls[1][0:4] == ("velocity", 0.0, 0.0, 0.0)
 
 
 def test_wait_completion_sends_hold_pwm_once_and_finishes() -> None:

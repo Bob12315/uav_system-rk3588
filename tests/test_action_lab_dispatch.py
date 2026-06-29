@@ -912,11 +912,14 @@ def test_payload_release_dispatches_release_pwm_to_servo_output_8() -> None:
     runner.action_lab_start_action("payload_release", _payload_params(), send_actions=True)
     runner.action_lab_tick()
 
-    assert runner.services.link_manager.calls == [("set_servo_output_pwm", (8, 1200), 3)]
+    assert runner.services.link_manager.calls == [
+        ("set_servo_output_pwm", (8, 1200), 3),
+        ("send_body_velocity", (0.0, 0.0, 0.0), 0),
+    ]
     payload = runner.action_lab_status_payload()
     assert payload["send_actions_requested"] is True
     assert payload["send_actions_effective"] is True
-    assert payload["note"] == "payload_set_servo_dispatch_enabled"
+    assert payload["note"] == "action_dispatch_enabled"
     assert payload["dispatch"]["sent"][0]["action_type"] == "set_servo"
     assert payload["dispatch"]["sent"][0]["channel"] == 8
     assert payload["dispatch"]["sent"][0]["pwm"] == 1200
@@ -960,10 +963,12 @@ def test_payload_release_dual_servo_outputs_dispatch() -> None:
     assert runner.services.link_manager.calls == [
         ("set_servo_output_pwm", (8, 1200), 3),
         ("set_servo_output_pwm", (9, 1700), 3),
+        ("send_body_velocity", (0.0, 0.0, 0.0), 0),
     ]
     payload = runner.action_lab_status_payload()
-    assert [item["channel"] for item in payload["dispatch"]["sent"]] == [8, 9]
-    assert [item["pwm"] for item in payload["dispatch"]["sent"]] == [1200, 1700]
+    servo_sent = [item for item in payload["dispatch"]["sent"] if item["action_type"] == "set_servo"]
+    assert [item["channel"] for item in servo_sent] == [8, 9]
+    assert [item["pwm"] for item in servo_sent] == [1200, 1700]
     assert set(payload["dispatch"]) == {"sent", "skipped", "errors"}
 
 
@@ -1112,7 +1117,8 @@ def test_fallback_set_servo_still_dispatches_when_wrappers_absent() -> None:
     runner.action_lab_start_action("payload_release", _payload_params(), send_actions=True)
     runner.action_lab_tick()
     assert runner.services.link_manager.calls == [
-        ("set_servo", (8, 1200), 3)
+        ("set_servo", (8, 1200), 3),
+        ("send_velocity_command", (0.0, 0.0, 0.0, 8), 0),
     ]
 
 

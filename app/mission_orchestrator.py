@@ -202,7 +202,7 @@ class MissionOrchestrator:
                     clear_nav(link_manager, hold_current=True)
                 else:
                     clear_nav(link_manager)
-            self._start_current_step(link_manager=link_manager)
+            self._start_current_step(link_manager=link_manager, clear_navigation=False)
 
         return self.status()
 
@@ -339,7 +339,12 @@ class MissionOrchestrator:
             detail=detail,
         )
 
-    def _start_current_step(self, *, link_manager: object | None = None) -> None:
+    def _start_current_step(
+        self,
+        *,
+        link_manager: object | None = None,
+        clear_navigation: bool = True,
+    ) -> None:
         step = self.steps[self.current_index]
         start = getattr(self.runtime, "start", None)
         if callable(start):
@@ -357,7 +362,13 @@ class MissionOrchestrator:
                 }
                 return
             self.step_attempts[self.current_index] = self.step_attempts.get(self.current_index, 0) + 1
-            start(step.name, resolved_params, send_actions=True, link_manager=link_manager)
+            start(
+                step.name,
+                resolved_params,
+                send_actions=True,
+                link_manager=link_manager,
+                clear_navigation=clear_navigation,
+            )
 
     def _handle_step_failed(
         self,

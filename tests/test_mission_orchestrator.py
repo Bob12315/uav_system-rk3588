@@ -60,7 +60,15 @@ class FakeRuntime:
         self.clear_nav_calls = 0
         self.clear_nav_hold_values = []
 
-    def start(self, name, params=None, *, send_actions=None, link_manager=None):
+    def start(
+        self,
+        name,
+        params=None,
+        *,
+        send_actions=None,
+        link_manager=None,
+        clear_navigation=True,
+    ):
         self.runner.start(name, params)
 
     def tick(self, context, *, link_manager=None, send_commands=False):

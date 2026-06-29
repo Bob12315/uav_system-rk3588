@@ -21,7 +21,7 @@ ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
         requires_send_commands=True,
     ),
     "flight_command": DispatchRule(
-        allowed_actions={"align_descend", "recon_inspect_targets"},
+        allowed_actions={"align_descend", "recon_inspect_targets", "payload_release"},
         requires_send_actions=True,
         requires_send_commands=True,
         continuous=True,

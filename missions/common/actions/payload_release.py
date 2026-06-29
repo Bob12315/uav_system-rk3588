@@ -51,7 +51,7 @@ class PayloadReleaseAction(ActionModule):
             self.release_sent = True
             self.state = "wait"
             self.wait_updates = 0
-            detail = self._detail()
+            detail = self._detail(context)
             self.last_detail = detail
             return ActionResult(
                 actions=self._servo_actions("release"),
@@ -62,14 +62,14 @@ class PayloadReleaseAction(ActionModule):
         if self.state == "wait":
             self.wait_updates += 1
             if self.wait_updates < self.release_wait_updates:
-                detail = self._detail()
+                detail = self._detail(context)
                 self.last_detail = detail
                 return ActionResult(actions=[], reason="release_waiting", detail=detail)
 
             self.hold_sent = True
             self.state = "done"
             self.done = True
-            detail = self._detail()
+            detail = self._detail(context)
             self.last_detail = detail
             return ActionResult(
                 actions=self._servo_actions("hold"),
@@ -118,7 +118,7 @@ class PayloadReleaseAction(ActionModule):
             for item in self.servo_outputs
         ]
 
-    def _detail(self) -> dict[str, Any]:
+    def _detail(self, context: dict[str, Any] | None = None) -> dict[str, Any]:
         return {
             "state": self.state,
             "channels": list(self.channels),
@@ -136,7 +136,44 @@ class PayloadReleaseAction(ActionModule):
             "hold_sent": bool(self.hold_sent),
             "wait_updates": int(self.wait_updates),
             "release_wait_updates": int(self.release_wait_updates),
+            # Keep refreshing a valid zero-velocity setpoint while the servo
+            # release/hold sequence runs. This replaces the preceding
+            # align_descend setpoint without adding a separate hover delay.
+            "command": self._zero_velocity_command(context or {}),
         }
+
+    def _zero_velocity_command(self, context: dict[str, Any]) -> dict[str, Any]:
+        yaw_hold = self._context_float(context, "field_heading_yaw_rad")
+        if yaw_hold is None:
+            yaw_hold = self._context_float(context, "arm_heading_yaw_rad")
+        command: dict[str, Any] = {
+            "type": "flight_command",
+            "vx_cmd": 0.0,
+            "vy_cmd": 0.0,
+            "vz_cmd": 0.0,
+            "yaw_rate_cmd": 0.0,
+            "enable_body": True,
+            "enable_gimbal": False,
+            "enable_gimbal_angle": False,
+            "enable_approach": False,
+            "active": False,
+            "valid": True,
+            "priority": self.priority,
+        }
+        if yaw_hold is not None:
+            command["yaw_hold_rad"] = yaw_hold
+            command["velocity_yaw_rad"] = yaw_hold
+        return command
+
+    @staticmethod
+    def _context_float(context: dict[str, Any], name: str) -> float | None:
+        value = context.get(name)
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     def _servo_outputs(self, params: dict[str, Any]) -> list[dict[str, int]]:
         if params.get("servo_outputs") is not None:

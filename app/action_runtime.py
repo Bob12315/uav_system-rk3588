@@ -49,8 +49,10 @@ class ActionRuntimeService:
         *,
         send_actions: bool | None = None,
         link_manager: object | None = None,
+        clear_navigation: bool = True,
     ):
-        self.clear_navigation_queue(link_manager)
+        if clear_navigation:
+            self.clear_navigation_queue(link_manager)
         if send_actions is not None:
             self.dispatcher.send_actions = bool(send_actions)
         # Switch-running action: stop the current one first.
@@ -110,18 +112,13 @@ class ActionRuntimeService:
         """Clear continuous commands and pending LOCAL_POSITION; optionally send a hold.
 
         Order is important:
-        1. stop_body_velocity() — send a zero BODY_NED velocity to the FC
-        2. clear_continuous_commands() — clear any lingering continuous commands
-        3. clear_pending_local_position_actions() — remove stale position targets
+        1. clear_continuous_commands() — remove the stale velocity setpoint
+        2. clear_pending_local_position_actions() — remove stale position targets
+        3. stop_body_velocity() — leave a zero BODY_NED setpoint queued for transmission
         4. hold_current_local_position() — overwrite FC's current target (if hold_current)
         """
         if link_manager is None:
             return
-
-        stop_body = getattr(link_manager, "stop_body_velocity", None)
-        if callable(stop_body):
-            _log.info("send stop BODY_NED velocity before clearing continuous commands")
-            stop_body()
 
         clear_continuous = getattr(link_manager, "clear_continuous_commands", None)
         if callable(clear_continuous):
@@ -130,6 +127,11 @@ class ActionRuntimeService:
         clear_nav = getattr(link_manager, "clear_pending_local_position_actions", None)
         if callable(clear_nav):
             clear_nav()
+
+        stop_body = getattr(link_manager, "stop_body_velocity", None)
+        if callable(stop_body):
+            _log.info("queue stop BODY_NED velocity after clearing stale commands")
+            stop_body()
 
         if hold_current:
             hold = getattr(link_manager, "hold_current_local_position", None)

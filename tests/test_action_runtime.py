@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.action_runtime import ActionRuntimeService
 
 
-def test_clear_navigation_queue_stops_body_velocity_before_clearing() -> None:
+def test_clear_navigation_queue_leaves_zero_velocity_after_clearing() -> None:
     calls: list[str] = []
 
     class FakeLink:
@@ -19,7 +19,7 @@ def test_clear_navigation_queue_stops_body_velocity_before_clearing() -> None:
     ActionRuntimeService.clear_navigation_queue(FakeLink())
 
     assert calls == [
-        "stop_body_velocity",
         "clear_continuous_commands",
         "clear_pending_local_position_actions",
+        "stop_body_velocity",
     ]
