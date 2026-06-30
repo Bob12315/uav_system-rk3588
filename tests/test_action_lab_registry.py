@@ -59,7 +59,7 @@ def test_takeoff_spec_exposes_safe_confirmation_and_yaw_hold_defaults() -> None:
     spec = next(item for item in action_lab_specs() if item["name"] == "takeoff")
 
     assert spec["default_params"]["auto_confirm_field_heading"] == "if_missing"
-    assert spec["default_params"]["hold_yaw_during_takeoff"] is True
+    assert spec["default_params"]["hold_yaw_during_takeoff"] is False
     assert spec["default_params"]["takeoff_yaw_mode"] == "field_heading"
 
 
@@ -132,15 +132,16 @@ def test_align_descend_spec_defaults_to_low_altitude_descent_profile() -> None:
     assert params["max_updates"] == 160
     assert config["max_vx_mps"] == 0.20
     assert config["max_vy_mps"] == 0.20
-    assert config["descend_speed_mps"] == 0.30
-    assert config["slow_descend_speed_mps"] == 0.18
+    assert params["hold_updates_required"] == 3
+    assert config["descend_speed_mps"] == 0.12
+    assert config["slow_descend_speed_mps"] == 0.08
     assert config["max_ex_cam"] == 0.20
     assert config["max_ey_cam"] == 0.20
     assert config["slow_descend_max_ex_cam"] == 0.28
     assert config["slow_descend_max_ey_cam"] == 0.28
     assert config["deadband_ex_cam"] == 0.04
     assert config["deadband_ey_cam"] == 0.04
-    assert config["min_altitude_m"] == 1.1
+    assert config["min_altitude_m"] == 1.0
     assert config["require_target_locked"] is False
     assert config["height_gain_enabled"] is True
     assert config["height_gain_mode"] == "points"

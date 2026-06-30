@@ -222,7 +222,19 @@ def test_step_transition_clears_navigation_queue() -> None:
 
 
 def test_align_descend_to_payload_release_holds_current_position() -> None:
-    runtime = FakeRuntime([FakeActionResult(done=True, reason="finish_altitude_reached")])
+    runtime = FakeRuntime([
+        FakeActionResult(
+            done=True,
+            reason="aligned_and_reached_finish_altitude",
+            detail={
+                "aligned": True,
+                "hold_updates": 3,
+                "hold_updates_required": 3,
+                "current_altitude_m": 1.3,
+                "finish_altitude_m": 1.3,
+            },
+        )
+    ])
     orch = MissionOrchestrator(
         runtime,
         [MissionActionStep("align_descend"), MissionActionStep("payload_release")],
@@ -234,6 +246,70 @@ def test_align_descend_to_payload_release_holds_current_position() -> None:
     assert status.current_action == "payload_release"
     assert runtime.clear_nav_hold_values == [True]
     assert runtime.clear_nav_leave_stop_values == [True]
+
+
+@pytest.mark.parametrize("reason", ["min_altitude_reached", "finish_altitude_reached"])
+def test_payload_release_is_blocked_after_unsafe_align_descend_completion(reason) -> None:
+    runtime = FakeRuntime([
+        FakeActionResult(
+            done=True,
+            reason=reason,
+            detail={
+                "aligned": False,
+                "hold_updates": 0,
+                "hold_updates_required": 3,
+                "current_altitude_m": 1.0,
+                "finish_altitude_m": 1.3,
+            },
+        )
+    ])
+    orch = MissionOrchestrator(
+        runtime,
+        [MissionActionStep("align_descend"), MissionActionStep("payload_release")],
+    )
+
+    orch.start()
+    status = orch.tick({})
+
+    assert status.failed is True
+    assert status.reason == "payload_release_blocked"
+    assert status.current_action == "align_descend"
+    assert runtime.runner.sent_actions == [("align_descend", {})]
+
+
+def test_failed_align_descend_cannot_continue_into_payload_release() -> None:
+    runtime = FakeRuntime([
+        FakeActionResult(failed=True, reason="not_aligned_at_min_altitude")
+    ])
+    orch = MissionOrchestrator(
+        runtime,
+        [
+            MissionActionStep("align_descend", on_failed={"action": "continue"}),
+            MissionActionStep("payload_release"),
+        ],
+    )
+
+    orch.start()
+    status = orch.tick({})
+
+    assert status.failed is True
+    assert status.reason == "payload_release_blocked"
+    assert runtime.runner.sent_actions == [("align_descend", {})]
+
+
+def test_manual_skip_cannot_advance_from_align_descend_to_payload_release() -> None:
+    runtime = FakeRuntime([])
+    orch = MissionOrchestrator(
+        runtime,
+        [MissionActionStep("align_descend"), MissionActionStep("payload_release")],
+    )
+
+    orch.start()
+    status = orch.skip_current_step()
+
+    assert status.failed is True
+    assert status.reason == "payload_release_blocked"
+    assert runtime.runner.sent_actions == [("align_descend", {})]
 
 
 def test_other_transition_to_payload_release_does_not_hold_current_position() -> None:

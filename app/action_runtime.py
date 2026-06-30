@@ -79,6 +79,20 @@ class ActionRuntimeService:
         result = self.runner.update(context)
         result_dict = result.to_dict()
         self.last_result = result_dict
+        if self.runner.action_name == "align_descend" and (result.done or result.failed):
+            _log.info(
+                "align_descend ended reason=%s aligned=%s hold_updates=%s/%s "
+                "current_altitude_m=%s finish_altitude_m=%s min_altitude_m=%s "
+                "payload_release_allowed=%s",
+                result.reason,
+                result.detail.get("aligned"),
+                result.detail.get("hold_updates"),
+                result.detail.get("hold_updates_required"),
+                result.detail.get("current_altitude_m"),
+                result.detail.get("finish_altitude_m"),
+                result.detail.get("min_altitude_m"),
+                result.reason == "aligned_and_reached_finish_altitude",
+            )
         self.dispatcher.last_dispatch = self.dispatcher.dispatch_result(
             result.to_dict(),
             action_name=self.runner.action_name,

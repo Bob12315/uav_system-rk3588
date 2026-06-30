@@ -20,7 +20,7 @@ class AlignDescendConfig:
     max_ey_cam: float = 0.06
     slow_descend_max_ex_cam: float | None = None
     slow_descend_max_ey_cam: float | None = None
-    min_altitude_m: float = 2.0
+    min_altitude_m: float = 1.0
     deadband_ex_cam: float = 0.015
     deadband_ey_cam: float = 0.015
     vx_sign: float = -1.0
@@ -269,11 +269,15 @@ def compute_align_descend_command(
             max_vy_eff,
         )
         if aligned:
-            vz = config.descend_speed_mps
+            vz = _descent_speed_for_altitude(altitude_m, config)
             reason = "descending"
         elif slow_descend_aligned:
-            vz = config.slow_descend_speed_mps
-            reason = "descending_slow"
+            if altitude_m is None or altitude_m >= 1.3:
+                vz = min(config.slow_descend_speed_mps, 0.12)
+                reason = "descending_slow"
+            else:
+                vz = 0.0
+                reason = "aligning_below_finish_altitude"
         else:
             vz = 0.0
             reason = "aligning"
@@ -306,6 +310,7 @@ def compute_align_descend_command(
         "kp_vy_eff": kp_vy_eff,
         "max_vx_eff": max_vx_eff,
         "max_vy_eff": max_vy_eff,
+        "descent_speed_mps": vz,
         **offset_detail,
     }
     return command, detail
@@ -356,8 +361,8 @@ class AlignDescendAction(ActionModule):
             raise ValueError("max_updates must be at least 1")
 
         self.finish_altitude_m = self._finish_altitude(data)
-        if self.finish_altitude_m is not None and self.finish_altitude_m < self.config.min_altitude_m:
-            self.finish_altitude_m = self.config.min_altitude_m
+        if self.finish_altitude_m < self.config.min_altitude_m:
+            raise ValueError("finish_altitude_m must be >= min_altitude_m")
         self.yaw_hold_rad = None
         self.yaw_hold_source = None
         self.started = True
@@ -469,26 +474,33 @@ class AlignDescendAction(ActionModule):
         elif target_ok:
             self.hold_updates = 0
 
-        if altitude.value_m <= self.config.min_altitude_m:
-            self.done = True
+        release_ready = (
+            target_ok
+            and command_detail["aligned"] is True
+            and self.hold_updates >= self.hold_updates_required
+            and altitude.value_m <= self.finish_altitude_m
+        )
+
+        if altitude.value_m <= self.config.min_altitude_m and not release_ready:
+            self.failed = True
+            self.failure_reason = "not_aligned_at_min_altitude"
             detail = self._detail(
                 command=self._command_with_yaw_hold(_inactive_command(), data),
-                command_detail={**command_detail, "hold_reason": "min_altitude_reached"},
+                command_detail={**command_detail, "hold_reason": "not_aligned_at_min_altitude"},
                 height_m=altitude.value_m,
                 altitude_source=altitude.source,
             )
             self.last_detail = detail
-            return ActionResult(actions=[], done=True, reason="min_altitude_reached", detail=detail)
-
-        if self.finish_altitude_m is not None and altitude.value_m <= self.finish_altitude_m:
-            self.done = True
-            done_reason = (
-                "aligned_at_finish_altitude"
-                if target_ok
-                and command_detail["aligned"] is True
-                and self.hold_updates >= self.hold_updates_required
-                else "finish_altitude_reached"
+            return ActionResult(
+                actions=[],
+                failed=True,
+                reason="not_aligned_at_min_altitude",
+                detail=detail,
             )
+
+        if release_ready:
+            self.done = True
+            done_reason = "aligned_and_reached_finish_altitude"
             detail = self._detail(
                 command=self._command_with_yaw_hold(_inactive_command(), data),
                 command_detail={**command_detail, "hold_reason": done_reason},
@@ -498,7 +510,20 @@ class AlignDescendAction(ActionModule):
             self.last_detail = detail
             return ActionResult(actions=[], done=True, reason=done_reason, detail=detail)
 
-        reason = "align_descending" if target_ok and command_detail["aligned"] else command_detail["hold_reason"]
+        if altitude.value_m <= self.finish_altitude_m:
+            command = {**command, "vz_cmd": 0.0}
+            if target_ok and command_detail["aligned"]:
+                command_detail = {
+                    **command_detail,
+                    "hold_reason": "holding_alignment_at_finish_altitude",
+                    "slow_descending": False,
+                    "descent_speed_mps": 0.0,
+                }
+        reason = "align_descending" if (
+            target_ok
+            and command_detail["aligned"]
+            and altitude.value_m > self.finish_altitude_m
+        ) else command_detail["hold_reason"]
         command = self._command_with_yaw_hold(command, data)
         detail = self._detail(
             command=command,
@@ -518,7 +543,7 @@ class AlignDescendAction(ActionModule):
         self.hold_updates_required = 3
         self.max_retries = 1
         self.max_updates = 300
-        self.finish_altitude_m: float | None = None
+        self.finish_altitude_m = 1.3
         self.started = False
         self.stopped = False
         self.done = False
@@ -727,6 +752,7 @@ class AlignDescendAction(ActionModule):
             "reached_finish_altitude": bool(reached_finish_altitude),
             "lost_updates": int(self.lost_updates),
             "hold_updates": int(self.hold_updates),
+            "hold_updates_required": int(self.hold_updates_required),
             "retries": int(self.retries),
             "update_count": int(self.update_count),
         }
@@ -764,18 +790,11 @@ class AlignDescendAction(ActionModule):
         return int(data.get(count_name, default_count))
 
     @staticmethod
-    def _finish_altitude(data: dict[str, Any]) -> float | None:
-        values = []
-        for name in ("finish_altitude_m", "min_altitude_m"):
-            if data.get(name) is None:
-                continue
-            value = float(data[name])
-            if value <= 0.0:
-                raise ValueError(f"{name} must be positive")
-            values.append(value)
-        if not values:
-            return None
-        return max(values)
+    def _finish_altitude(data: dict[str, Any]) -> float:
+        value = float(data.get("finish_altitude_m", 1.3))
+        if value <= 0.0:
+            raise ValueError("finish_altitude_m must be positive")
+        return value
 
     @staticmethod
     def _first_float(candidates: list[dict[str, Any]], name: str) -> float | None:
@@ -834,6 +853,19 @@ def _inactive_command() -> dict[str, Any]:
 
 def _clamp(value: float, low: float, high: float) -> float:
     return min(high, max(low, value))
+
+
+def _descent_speed_for_altitude(
+    altitude_m: float | None,
+    config: AlignDescendConfig,
+) -> float:
+    if altitude_m is None:
+        return config.descend_speed_mps
+    if altitude_m > 2.0:
+        return min(config.descend_speed_mps, 0.25)
+    if altitude_m >= 1.3:
+        return min(config.descend_speed_mps, 0.12)
+    return min(config.descend_speed_mps, 0.08)
 
 
 def _height_gain_scale(altitude_m: float | None, config: AlignDescendConfig) -> float:

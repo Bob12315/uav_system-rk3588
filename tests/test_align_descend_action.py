@@ -219,6 +219,42 @@ def test_helper_descends_only_when_aligned() -> None:
     assert unaligned_command["vz_cmd"] == pytest.approx(0.0)
 
 
+@pytest.mark.parametrize(
+    ("altitude_m", "expected_vz_mps"),
+    [(2.5, 0.25), (1.6, 0.12), (1.2, 0.08)],
+)
+def test_aligned_descent_speed_is_limited_by_altitude_band(
+    altitude_m: float,
+    expected_vz_mps: float,
+) -> None:
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.0, ey_cam=0.0),
+        AlignDescendConfig(descend_speed_mps=0.3),
+        altitude_m=altitude_m,
+    )
+
+    assert detail["aligned"] is True
+    assert command["vz_cmd"] == pytest.approx(expected_vz_mps)
+
+
+def test_unaligned_vehicle_does_not_slow_descend_below_finish_altitude() -> None:
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.08, ey_cam=0.02),
+        AlignDescendConfig(
+            max_ex_cam=0.05,
+            max_ey_cam=0.05,
+            slow_descend_speed_mps=0.08,
+            slow_descend_max_ex_cam=0.10,
+            slow_descend_max_ey_cam=0.10,
+        ),
+        altitude_m=1.2,
+    )
+
+    assert detail["aligned"] is False
+    assert detail["hold_reason"] == "aligning_below_finish_altitude"
+    assert command["vz_cmd"] == pytest.approx(0.0)
+
+
 def test_helper_allows_configured_slow_descent_near_alignment() -> None:
     command, detail = compute_align_descend_command(
         _valid_inputs(ex_cam=0.08, ey_cam=0.02),
@@ -341,26 +377,24 @@ def test_normal_aligned_update_descends_without_finishing_when_no_altitude_thres
     assert result.reason == "align_descending"
 
 
-def test_aligned_low_altitude_finishes_after_required_hold() -> None:
+def test_aligned_low_altitude_fails_when_required_hold_is_incomplete() -> None:
     action = AlignDescendAction()
     action.start({"finish_altitude_m": 1.0, "hold_updates_required": 2})
 
     first = action.update(_active_context(ex_cam=0.02, ey_cam=0.02, drone={"relative_altitude": 0.9}))
 
-    assert first.done is True
-    assert first.reason == "min_altitude_reached"
+    assert first.done is False
+    assert first.failed is True
+    assert first.reason == "not_aligned_at_min_altitude"
     assert first.detail["command"]["active"] is False
     assert first.detail["command"]["vz_cmd"] == pytest.approx(0.0)
 
 
-def test_finish_altitude_uses_safer_max_of_finish_and_min_altitude() -> None:
+def test_finish_altitude_below_min_altitude_is_rejected() -> None:
     action = AlignDescendAction()
-    action.start({"finish_altitude_m": 0.8, "min_altitude_m": 1.2, "hold_updates_required": 1})
 
-    result = action.update(_active_context(ex_cam=0.0, ey_cam=0.0, drone={"relative_altitude": 1.0}))
-
-    assert action.finish_altitude_m == pytest.approx(1.2)
-    assert result.done is True
+    with pytest.raises(ValueError, match="finish_altitude_m must be >= min_altitude_m"):
+        action.start({"finish_altitude_m": 0.8, "min_altitude_m": 1.2})
 
 
 def test_hold_counter_resets_when_alignment_is_lost() -> None:
@@ -594,45 +628,66 @@ def test_above_finish_altitude_allows_descent_when_aligned() -> None:
     assert result.detail["command"]["vz_cmd"] == pytest.approx(0.2)
 
 
-def test_finish_altitude_reached_stops_and_done() -> None:
+def test_finish_altitude_reached_without_alignment_keeps_aligning() -> None:
     action = AlignDescendAction()
     action.start({"finish_altitude_m": 3.0, "config": {"min_altitude_m": 2.5}})
 
     result = action.update(_active_context(ex_cam=0.2, ey_cam=0.0, relative_altitude=3.0))
 
-    assert result.done is True
-    assert result.reason == "finish_altitude_reached"
+    assert result.done is False
+    assert result.failed is False
+    assert result.reason == "aligning"
     assert result.detail["current_altitude_m"] == pytest.approx(3.0)
     assert result.detail["finish_altitude_m"] == pytest.approx(3.0)
     assert result.detail["min_altitude_m"] == pytest.approx(2.5)
     assert result.detail["altitude_source"] == "relative_altitude"
     assert result.detail["reached_finish_altitude"] is True
-    assert result.detail["command"]["active"] is False
-    assert result.detail["command"]["enable_approach"] is False
+    assert result.detail["command"]["active"] is True
+    assert result.detail["command"]["enable_approach"] is True
     assert result.detail["command"]["vx_cmd"] == pytest.approx(0.0)
-    assert result.detail["command"]["vy_cmd"] == pytest.approx(0.0)
+    assert result.detail["command"]["vy_cmd"] == pytest.approx(0.16)
     assert result.detail["command"]["vz_cmd"] == pytest.approx(0.0)
 
 
-def test_aligned_at_finish_altitude_uses_specific_reason() -> None:
+def test_aligned_and_held_at_finish_altitude_uses_release_ready_reason() -> None:
     action = AlignDescendAction()
     action.start({"finish_altitude_m": 3.0, "hold_updates_required": 1, "config": {"min_altitude_m": 2.5}})
 
     result = action.update(_active_context(ex_cam=0.0, ey_cam=0.0, relative_altitude=3.0))
 
     assert result.done is True
-    assert result.reason == "aligned_at_finish_altitude"
+    assert result.reason == "aligned_and_reached_finish_altitude"
+    assert result.detail["hold_updates"] == 1
+    assert result.detail["hold_updates_required"] == 1
     assert result.detail["command"]["vz_cmd"] == pytest.approx(0.0)
 
 
-def test_min_altitude_reached_stops_and_done() -> None:
+def test_finish_altitude_holds_vertical_speed_until_alignment_hold_is_complete() -> None:
+    action = AlignDescendAction()
+    action.start({"finish_altitude_m": 1.3, "hold_updates_required": 2})
+    context = _active_context(ex_cam=0.0, ey_cam=0.0, relative_altitude=1.3)
+
+    first = action.update(context)
+    second = action.update(context)
+
+    assert first.done is False
+    assert first.reason == "holding_alignment_at_finish_altitude"
+    assert first.detail["command"]["vz_cmd"] == pytest.approx(0.0)
+    assert first.detail["hold_updates"] == 1
+    assert second.done is True
+    assert second.reason == "aligned_and_reached_finish_altitude"
+    assert second.detail["hold_updates"] == 2
+
+
+def test_not_aligned_at_min_altitude_stops_and_fails() -> None:
     action = AlignDescendAction()
     action.start({"finish_altitude_m": 3.0, "config": {"min_altitude_m": 2.5}})
 
-    result = action.update(_active_context(ex_cam=0.0, ey_cam=0.0, relative_altitude=2.4))
+    result = action.update(_active_context(ex_cam=0.2, ey_cam=0.0, relative_altitude=2.4))
 
-    assert result.done is True
-    assert result.reason == "min_altitude_reached"
+    assert result.done is False
+    assert result.failed is True
+    assert result.reason == "not_aligned_at_min_altitude"
     assert result.detail["current_altitude_m"] == pytest.approx(2.4)
     assert result.detail["min_altitude_m"] == pytest.approx(2.5)
     assert result.detail["command"]["active"] is False
@@ -651,8 +706,8 @@ def test_missing_altitude_fails_without_descent() -> None:
     assert result.failed is True
     assert result.reason == "missing_altitude"
     assert result.detail["current_altitude_m"] is None
-    assert result.detail["finish_altitude_m"] is None
-    assert result.detail["min_altitude_m"] == pytest.approx(2.0)
+    assert result.detail["finish_altitude_m"] == pytest.approx(1.3)
+    assert result.detail["min_altitude_m"] == pytest.approx(1.0)
     assert result.detail["altitude_source"] == ""
     assert result.detail["reached_finish_altitude"] is False
     assert result.detail["command"]["active"] is False
@@ -663,12 +718,12 @@ def test_missing_altitude_fails_without_descent() -> None:
 
 def test_local_z_altitude_source_prevents_descent_below_min_altitude() -> None:
     action = AlignDescendAction()
-    action.start({"config": {"min_altitude_m": 2.5}})
+    action.start({"finish_altitude_m": 3.0, "config": {"min_altitude_m": 2.5}})
 
-    result = action.update(_active_context(ex_cam=0.0, ey_cam=0.0, local_z=-2.0))
+    result = action.update(_active_context(ex_cam=0.2, ey_cam=0.0, local_z=-2.0))
 
-    assert result.done is True
-    assert result.reason == "min_altitude_reached"
+    assert result.failed is True
+    assert result.reason == "not_aligned_at_min_altitude"
     assert result.detail["altitude_source"] == "local_z"
     assert result.detail["command"]["vz_cmd"] == pytest.approx(0.0)
 
@@ -687,7 +742,7 @@ def test_vehicle_relative_altitude_source_is_supported() -> None:
     assert result.detail["command"]["vz_cmd"] == pytest.approx(0.2)
 
 
-def test_vehicle_local_z_source_stops_at_finish_altitude() -> None:
+def test_vehicle_local_z_at_finish_without_alignment_keeps_aligning() -> None:
     action = AlignDescendAction()
     action.start({"finish_altitude_m": 3.0, "config": {"min_altitude_m": 2.5}})
 
@@ -695,19 +750,19 @@ def test_vehicle_local_z_source_stops_at_finish_altitude() -> None:
         _valid_inputs(ex_cam=0.2, ey_cam=0.0, vehicle={"local_z": -3.0})
     )
 
-    assert result.done is True
-    assert result.reason == "finish_altitude_reached"
+    assert result.done is False
+    assert result.reason == "aligning"
     assert result.detail["current_altitude_m"] == pytest.approx(3.0)
     assert result.detail["altitude_source"] == "vehicle.local_z"
     assert result.detail["reached_finish_altitude"] is True
     assert result.detail["command"]["vz_cmd"] == pytest.approx(0.0)
 
 
-def test_invalid_finish_below_min_altitude_is_clamped() -> None:
+def test_invalid_finish_below_min_altitude_is_not_clamped() -> None:
     action = AlignDescendAction()
-    action.start({"finish_altitude_m": 1.0, "config": {"min_altitude_m": 2.5}})
 
-    assert action.finish_altitude_m == pytest.approx(2.5)
+    with pytest.raises(ValueError, match="finish_altitude_m must be >= min_altitude_m"):
+        action.start({"finish_altitude_m": 1.0, "config": {"min_altitude_m": 2.5}})
 
 
 # ── payload offset compensation tests ─────────────────────────────────
@@ -809,7 +864,7 @@ def test_corrected_error_controls_aligned_judgment() -> None:
     )
 
     assert detail["aligned"] is True
-    assert command["vz_cmd"] == pytest.approx(0.3)
+    assert command["vz_cmd"] == pytest.approx(0.08)
     # corrected should be near zero, raw nonzero
     assert abs(detail["corrected_ex_cam"]) < 1e-6
     assert abs(detail["corrected_ey_cam"]) < 1e-6

@@ -547,6 +547,13 @@ function actionMissionStatusLabel(status) {
     continued: "已继续",
   }[status] || status;
 }
+function alignDescendReasonLabel(reason) {
+  return {
+    aligned_and_reached_finish_altitude: "aligned_and_reached_finish_altitude：已对准并到达正常投弹高度，允许投弹",
+    min_altitude_reached: "min_altitude_reached：已触发最低高度保护，禁止投弹",
+    not_aligned_at_min_altitude: "not_aligned_at_min_altitude：最低高度仍未对准，对准失败，禁止投弹",
+  }[reason] || reason;
+}
 function renderActionMissionTimeline(actionMission, configuredSteps) {
   const element = $("actionMissionTimeline");
   if (!element) return [];
@@ -558,7 +565,7 @@ function renderActionMissionTimeline(actionMission, configuredSteps) {
   const statuses = steps.map((step, index) => inferActionMissionStepStatus(actionMission || {}, index, steps.length));
   element.innerHTML = steps.map((step, index) => {
     const status = statuses[index];
-    const reason = index === current ? (actionMission?.reason || "-")
+    const reason = index === current ? alignDescendReasonLabel(actionMission?.reason || "-")
       : skippedSet.has(index) ? "manual skip"
       : "-";
     return `<tr class="${index === current ? "current-step" : ""}" data-step-status="${status}">
@@ -663,7 +670,14 @@ function renderActionMissionStatus(actionMission) {
   setOptionalText("actionMissionFailed", boolText(Boolean(payload.failed), "是", "否"));
   setOptionalText("actionMissionIndex", payload.current_index ?? "--");
   setOptionalText("actionMissionCurrent", actionNameWithZh(payload.current_action));
-  setOptionalText("actionMissionReason", payload.reason || "--");
+  const terminalActionReason = actionResult?.reason ? alignDescendReasonLabel(actionResult.reason) : "";
+  const missionReason = alignDescendReasonLabel(payload.reason || "--");
+  setOptionalText(
+    "actionMissionReason",
+    terminalActionReason && terminalActionReason !== missionReason
+      ? `${missionReason} / ${terminalActionReason}`
+      : missionReason,
+  );
   const warning = $("actionMissionSendWarning");
   if (warning) {
     warning.textContent = sendEnabled
@@ -693,7 +707,7 @@ function renderDashboardSummaries(next) {
   renderSummaryRows("dashboardActionSummary", [
     ["Action", actionNameWithZh(actionStatus.action_name), actionStatus.running ? "active" : ""],
     ["State", actionStatus.state || "--"],
-    ["Reason", actionLast.reason || "--"],
+    ["Reason", alignDescendReasonLabel(actionLast.reason || "--")],
     ["Done / Failed", `${Boolean(actionLast.done)} / ${Boolean(actionLast.failed)}`, actionLast.failed ? "danger" : ""],
   ]);
   renderSummaryRows("dashboardMissionSummary", [
@@ -1639,7 +1653,9 @@ function renderActionLabStatus(actionLab) {
   $("actionSelected").textContent = actionNameWithZh(selectedActionName);
   $("actionRunningAction").textContent = actionNameWithZh(runningAction);
   $("actionRunning").textContent = String(Boolean(status?.running));
-  $("actionReason").textContent = last.reason || "--";
+  $("actionReason").textContent = typeof alignDescendReasonLabel === "function"
+    ? alignDescendReasonLabel(last.reason || "--")
+    : (last.reason || "--");
   $("actionDone").textContent = String(Boolean(last.done));
   $("actionFailed").textContent = String(Boolean(last.failed));
   if ($("actionRunToggle")) {

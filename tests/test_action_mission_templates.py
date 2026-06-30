@@ -175,6 +175,38 @@ def test_full_rescue_template_contains_recon_scan_after_two_drops() -> None:
     assert land_index == len(steps) - 1
 
 
+def test_all_drop_align_steps_use_separate_finish_and_hard_minimum_altitudes() -> None:
+    paths = [
+        *TEMPLATE_PATHS,
+        Path("config/profiles/rk3588-sitl/action_missions/drop_two_targets_v1.json"),
+        Path("config/profiles/rk3588-sitl/action_missions/rescue_2026_full_auto.json"),
+    ]
+
+    for path in paths:
+        align_steps = [step for step in _template(path)["steps"] if step["name"] == "align_descend"]
+        assert len(align_steps) == 2
+        for step in align_steps:
+            params = step["params"]
+            assert params["finish_altitude_m"] == 1.3
+            assert params["hold_updates_required"] == 3
+            assert params["config"]["min_altitude_m"] == 1.0
+            assert params["config"]["descend_speed_mps"] == 0.12
+            assert params["config"]["slow_descend_speed_mps"] == 0.08
+
+
+def test_all_drop_mission_takeoff_steps_disable_takeoff_yaw_hold() -> None:
+    paths = [
+        *TEMPLATE_PATHS,
+        Path("config/profiles/rk3588-sitl/action_missions/drop_two_targets_v1.json"),
+        Path("config/profiles/rk3588-sitl/action_missions/rescue_2026_full_auto.json"),
+    ]
+
+    for path in paths:
+        takeoff_steps = [step for step in _template(path)["steps"] if step["name"] == "takeoff"]
+        assert len(takeoff_steps) == 1
+        assert takeoff_steps[0]["params"]["hold_yaw_during_takeoff"] is False
+
+
 def test_full_rescue_template_save_as_names() -> None:
     data = _template(FULL_TEMPLATE_PATH)
     by_name = {step["name"]: step for step in data["steps"]}

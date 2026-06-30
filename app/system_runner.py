@@ -1761,6 +1761,8 @@ def _result_name_is_align_descend(result: object) -> bool:
         "descending",
         "descending_slow",
         "min_altitude_reached",
+        "not_aligned_at_min_altitude",
+        "aligned_and_reached_finish_altitude",
         "finish_altitude_reached",
     }:
         return True

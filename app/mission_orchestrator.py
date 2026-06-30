@@ -159,6 +159,19 @@ class MissionOrchestrator:
 
         if bool(result.get("done")):
             step = self.steps[self.current_index]
+            next_step = (
+                self.steps[self.current_index + 1]
+                if self.current_index + 1 < len(self.steps)
+                else None
+            )
+            if (
+                step.name == "align_descend"
+                and next_step is not None
+                and next_step.name == "payload_release"
+                and not _align_descend_release_ready(result)
+            ):
+                self._block_unsafe_payload_release(result, link_manager=link_manager)
+                return self.status()
             if step.save_as:
                 try:
                     detail = result.get("detail") if isinstance(result.get("detail"), dict) else {}
@@ -278,6 +291,17 @@ class MissionOrchestrator:
         clear_nav = getattr(self.runtime, "clear_navigation_queue", None)
         if callable(clear_nav):
             clear_nav(link_manager, hold_current=hold_current)
+
+        if (
+            skipped_name == "align_descend"
+            and self.current_index + 1 < len(self.steps)
+            and self.steps[self.current_index + 1].name == "payload_release"
+        ):
+            self._block_unsafe_payload_release(
+                {"reason": reason, "detail": {"aligned": False}},
+                link_manager=link_manager,
+            )
+            return self.status()
 
         # 3. record the skipped step for the UI timeline
         self.skipped_steps.append(
@@ -427,6 +451,12 @@ class MissionOrchestrator:
         if target not in self.labels:
             self._fail_mission(result, reason="jump_target_not_found")
             return
+        if (
+            self.steps[self.current_index].name == "align_descend"
+            and self.steps[self.labels[target]].name == "payload_release"
+        ):
+            self._block_unsafe_payload_release(result, link_manager=link_manager)
+            return
         max_attempts = int(policy.get("max_attempts", 1))
         key = f"{self.current_index}:jump_to:{target}"
         count = self.failure_policy_counts.get(key, 0)
@@ -453,6 +483,12 @@ class MissionOrchestrator:
             self.reason = "mission_done_after_failed_continue"
             self.detail = {"failed_action_result": result}
             return
+        if (
+            self.steps[self.current_index].name == "align_descend"
+            and self.steps[self.current_index + 1].name == "payload_release"
+        ):
+            self._block_unsafe_payload_release(result, link_manager=link_manager)
+            return
         self.current_index += 1
         self.reason = "continue_after_failed_step"
         self.detail = {"failed_action_result": result}
@@ -464,6 +500,34 @@ class MissionOrchestrator:
         self.running = False
         self.reason = reason
         self.detail = {"action_result": result}
+
+    def _block_unsafe_payload_release(
+        self,
+        result: dict[str, Any],
+        *,
+        link_manager: object | None,
+    ) -> None:
+        self.failed = True
+        self.running = False
+        self.reason = "payload_release_blocked"
+        self.detail = {
+            "step_index": self.current_index,
+            "step_name": self.steps[self.current_index].name,
+            "next_step_name": "payload_release",
+            "failed_action_result": result,
+            "note": (
+                "payload_release requires aligned_and_reached_finish_altitude "
+                "with alignment hold satisfied"
+            ),
+        }
+        clear_nav = getattr(self.runtime, "clear_navigation_queue", None)
+        if callable(clear_nav):
+            clear_nav(link_manager, hold_current=True)
+        _log.error(
+            "payload_release blocked after align_descend reason=%s detail=%s",
+            result.get("reason"),
+            result.get("detail"),
+        )
 
     def _clear_runtime_before_retry(self, link_manager: object | None = None) -> None:
         clear_nav = getattr(self.runtime, "clear_navigation_queue", None)
@@ -485,3 +549,23 @@ class MissionOrchestrator:
                 raise ValueError(f"duplicate mission step label: {label}")
             labels[label] = index
         return labels
+
+
+def _align_descend_release_ready(result: dict[str, Any]) -> bool:
+    if str(result.get("reason") or "") != "aligned_and_reached_finish_altitude":
+        return False
+    detail = result.get("detail")
+    if not isinstance(detail, dict) or not bool(detail.get("aligned", False)):
+        return False
+    try:
+        hold_updates = int(detail.get("hold_updates", 0))
+        hold_updates_required = int(detail.get("hold_updates_required", 0))
+        current_altitude_m = float(detail["current_altitude_m"])
+        finish_altitude_m = float(detail["finish_altitude_m"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return (
+        hold_updates_required >= 1
+        and hold_updates >= hold_updates_required
+        and current_altitude_m <= finish_altitude_m
+    )

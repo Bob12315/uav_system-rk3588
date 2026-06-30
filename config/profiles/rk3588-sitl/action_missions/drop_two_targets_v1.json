@@ -13,7 +13,8 @@
         "priority": 2,
         "arm_priority": 1,
         "mode_priority": 2,
-        "auto_confirm_field_heading": true
+        "auto_confirm_field_heading": true,
+        "hold_yaw_during_takeoff": false
       }
     },
     {
@@ -149,7 +150,7 @@
       "params": {
         "expected_dt_s": 0.1,
         "lost_timeout_updates": 10,
-        "hold_updates_required": 1,
+        "hold_updates_required": 3,
         "max_retries": 1,
         "max_updates": 160,
         "finish_altitude_m": 1.3,
@@ -183,15 +184,15 @@
             }
           ],
           "scale_max_velocity_with_height": true,
-          "descend_speed_mps": 0.30,
-          "slow_descend_speed_mps": 0.18,
+          "descend_speed_mps": 0.12,
+          "slow_descend_speed_mps": 0.08,
           "max_ex_cam": 0.20,
           "max_ey_cam": 0.20,
           "slow_descend_max_ex_cam": 0.28,
           "slow_descend_max_ey_cam": 0.28,
           "deadband_ex_cam": 0.04,
           "deadband_ey_cam": 0.04,
-          "min_altitude_m": 1.1,
+          "min_altitude_m": 1.0,
           "require_target_locked": false,
           "payload_offset_enabled": true,
           "payload_forward_m": -0.06,
@@ -283,7 +284,7 @@
       "params": {
         "expected_dt_s": 0.1,
         "lost_timeout_updates": 10,
-        "hold_updates_required": 1,
+        "hold_updates_required": 3,
         "max_retries": 1,
         "max_updates": 160,
         "finish_altitude_m": 1.3,
@@ -317,15 +318,15 @@
             }
           ],
           "scale_max_velocity_with_height": true,
-          "descend_speed_mps": 0.30,
-          "slow_descend_speed_mps": 0.18,
+          "descend_speed_mps": 0.12,
+          "slow_descend_speed_mps": 0.08,
           "max_ex_cam": 0.20,
           "max_ey_cam": 0.20,
           "slow_descend_max_ex_cam": 0.28,
           "slow_descend_max_ey_cam": 0.28,
           "deadband_ex_cam": 0.04,
           "deadband_ey_cam": 0.04,
-          "min_altitude_m": 1.1,
+          "min_altitude_m": 1.0,
           "require_target_locked": false,
           "payload_offset_enabled": true,
           "payload_forward_m": 0.06,

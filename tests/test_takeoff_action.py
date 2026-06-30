@@ -14,7 +14,7 @@ def test_takeoff_start_uses_default_params() -> None:
     assert action.mode == "GUIDED"
     assert action.phase == "confirm_field_heading"
     assert action.auto_confirm_field_heading == "if_missing"
-    assert action.hold_yaw_during_takeoff is True
+    assert action.hold_yaw_during_takeoff is False
     assert action.takeoff_yaw_mode == "field_heading"
 
 
@@ -75,6 +75,7 @@ def test_takeoff_wait_altitude_until_target_reached() -> None:
 
     assert waiting.done is False
     assert waiting.reason == "waiting_for_takeoff_altitude"
+    assert waiting.actions == []
     assert reached.done is True
     assert reached.reason == "takeoff_altitude_reached"
 
@@ -169,7 +170,7 @@ def test_takeoff_skips_auto_confirm_when_field_heading_and_origin_already_confir
     assert result.detail["note"] == "field heading/origin already confirmed; skip takeoff auto confirm"
 
 
-def test_takeoff_wait_altitude_holds_start_position_and_field_heading_yaw() -> None:
+def test_takeoff_wait_altitude_does_not_hold_position_by_default() -> None:
     action = TakeoffAction()
     action.start({"altitude_m": 3.0, "auto_confirm_field_heading": False})
     context = {
@@ -189,17 +190,81 @@ def test_takeoff_wait_altitude_holds_start_position_and_field_heading_yaw() -> N
     )
 
     assert result.reason == "waiting_for_takeoff_altitude"
-    hold = result.actions[0]
-    assert hold["action_type"] == "local_position"
-    assert hold["params"] == {
-        "x": pytest.approx(4.0),
-        "y": pytest.approx(-2.0),
-        "z": pytest.approx(-3.0),
-        "frame": 1,
-        "yaw": pytest.approx(0.75),
+    assert result.actions == []
+
+
+def test_takeoff_wait_altitude_does_not_hold_position_when_explicitly_disabled() -> None:
+    action = TakeoffAction()
+    action.start(
+        {
+            "altitude_m": 3.0,
+            "auto_confirm_field_heading": False,
+            "hold_yaw_during_takeoff": False,
+        }
+    )
+    context = {
+        "relative_altitude": 0.5,
+        "local_position": {"x": 1.0, "y": 2.0, "z": -0.5},
+        "field_heading_yaw_rad": 0.75,
     }
-    assert hold["once"] is False
-    assert hold["key"] == "takeoff_yaw_hold"
+    action.update(context)
+    action.update(context)
+    takeoff = action.update(context)
+    waiting = action.update(context)
+
+    assert takeoff.reason == "takeoff_sent"
+    assert takeoff.actions[0]["action_type"] == "takeoff"
+    assert waiting.reason == "waiting_for_takeoff_altitude"
+    assert waiting.actions == []
+
+
+def test_takeoff_wait_altitude_never_emits_local_position_even_if_legacy_hold_enabled() -> None:
+    action = TakeoffAction()
+    action.start(
+        {
+            "altitude_m": 3.0,
+            "auto_confirm_field_heading": False,
+            "hold_yaw_during_takeoff": True,
+        }
+    )
+    context = {
+        "relative_altitude": 0.5,
+        "local_position": {"x": 1.0, "y": 2.0, "z": -0.5},
+        "field_heading_yaw_rad": 0.75,
+    }
+    action.update(context)
+    action.update(context)
+    action.update(context)
+
+    waiting = action.update(context)
+
+    assert waiting.reason == "waiting_for_takeoff_altitude"
+    assert waiting.actions == []
+
+
+def test_takeoff_default_flow_waits_without_continuous_actions_after_takeoff() -> None:
+    action = TakeoffAction()
+    action.start({"altitude_m": 3.0})
+    context = {
+        "field_heading_confirmed": True,
+        "field_origin_confirmed": True,
+        "field_heading_source": "manual_web",
+        "field_heading_yaw_rad": 0.5,
+        "relative_altitude": 0.2,
+    }
+
+    set_mode = action.update(context)
+    arm = action.update(context)
+    takeoff = action.update(context)
+    waiting = action.update(context)
+
+    assert [set_mode.actions[0]["action_type"], arm.actions[0]["action_type"]] == [
+        "set_mode",
+        "arm",
+    ]
+    assert takeoff.actions[0]["action_type"] == "takeoff"
+    assert waiting.reason == "waiting_for_takeoff_altitude"
+    assert waiting.actions == []
 
 
 def test_takeoff_after_confirm_outputs_set_mode_next() -> None:
