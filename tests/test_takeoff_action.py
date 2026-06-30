@@ -13,6 +13,9 @@ def test_takeoff_start_uses_default_params() -> None:
     assert action.altitude_m == 3.0
     assert action.mode == "GUIDED"
     assert action.phase == "confirm_field_heading"
+    assert action.auto_confirm_field_heading == "if_missing"
+    assert action.hold_yaw_during_takeoff is True
+    assert action.takeoff_yaw_mode == "field_heading"
 
 
 def test_takeoff_update_before_start_fails() -> None:
@@ -147,6 +150,56 @@ def test_takeoff_default_auto_confirm_outputs_field_heading_action_first() -> No
     assert result.actions[0]["params"]["drone"]["local_y"] == pytest.approx(20)
     assert result.actions[0]["params"]["drone"]["local_z"] == pytest.approx(-1)
     assert action.phase == "set_mode"
+
+
+def test_takeoff_skips_auto_confirm_when_field_heading_and_origin_already_confirmed() -> None:
+    action = TakeoffAction()
+    action.start({"altitude_m": 3.0})
+
+    result = action.update(
+        {
+            "field_heading_confirmed": True,
+            "field_origin_confirmed": True,
+            "field_heading_yaw_rad": 0.8,
+        }
+    )
+
+    assert result.reason == "set_mode_sent"
+    assert result.actions[0]["action_type"] == "set_mode"
+    assert result.detail["note"] == "field heading/origin already confirmed; skip takeoff auto confirm"
+
+
+def test_takeoff_wait_altitude_holds_start_position_and_field_heading_yaw() -> None:
+    action = TakeoffAction()
+    action.start({"altitude_m": 3.0, "auto_confirm_field_heading": False})
+    context = {
+        "local_position": {"x": 4.0, "y": -2.0, "z": 0.0},
+        "field_heading_yaw_rad": 0.75,
+    }
+    action.update(context)
+    action.update(context)
+    action.update(context)
+
+    result = action.update(
+        {
+            "relative_altitude": 1.0,
+            "local_position": {"x": 4.2, "y": -1.8, "z": -1.0},
+            "field_heading_yaw_rad": 1.1,
+        }
+    )
+
+    assert result.reason == "waiting_for_takeoff_altitude"
+    hold = result.actions[0]
+    assert hold["action_type"] == "local_position"
+    assert hold["params"] == {
+        "x": pytest.approx(4.0),
+        "y": pytest.approx(-2.0),
+        "z": pytest.approx(-3.0),
+        "frame": 1,
+        "yaw": pytest.approx(0.75),
+    }
+    assert hold["once"] is False
+    assert hold["key"] == "takeoff_yaw_hold"
 
 
 def test_takeoff_after_confirm_outputs_set_mode_next() -> None:

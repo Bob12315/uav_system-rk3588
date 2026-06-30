@@ -46,12 +46,20 @@ class TakeoffAction(ActionModule):
         self.arm_priority = int(data.get("arm_priority", 1))
         self.mode_priority = int(data.get("mode_priority", 2))
         self.key = str(data.get("key") or "takeoff")
-        self.auto_confirm_field_heading = self._bool_param(
-            data.get("auto_confirm_field_heading", True),
-            "auto_confirm_field_heading",
+        self.auto_confirm_field_heading = self._auto_confirm_mode(
+            data.get("auto_confirm_field_heading", "if_missing")
         )
+        self.hold_yaw_during_takeoff = self._bool_param(
+            data.get("hold_yaw_during_takeoff", True),
+            "hold_yaw_during_takeoff",
+        )
+        self.takeoff_yaw_mode = str(data.get("takeoff_yaw_mode", "field_heading")).strip().lower()
+        if self.takeoff_yaw_mode not in {"field_heading", "arm_heading", "pre_arm", "drone_yaw"}:
+            raise ValueError(
+                "takeoff_yaw_mode must be field_heading, arm_heading, pre_arm, or drone_yaw"
+            )
 
-        self.phase = "confirm_field_heading" if self.auto_confirm_field_heading else "set_mode"
+        self.phase = "confirm_field_heading" if self.auto_confirm_field_heading == "if_missing" else "set_mode"
         self.started = True
         self.stopped = False
         self.done = False
@@ -61,6 +69,11 @@ class TakeoffAction(ActionModule):
         self.mode_sent = False
         self.arm_sent = False
         self.takeoff_sent = False
+        self.takeoff_local_x: float | None = None
+        self.takeoff_local_y: float | None = None
+        self.takeoff_hold_yaw_rad: float | None = None
+        self.takeoff_hold_yaw_source = ""
+        self.skipped_auto_confirm = False
         self.last_detail = self._detail()
 
     def update(self, context: dict[str, Any] | None = None) -> ActionResult:
@@ -83,8 +96,16 @@ class TakeoffAction(ActionModule):
             return ActionResult(failed=True, reason="takeoff_timeout", detail=detail)
 
         if self.phase == "confirm_field_heading":
+            if bool(context_data.get("field_heading_confirmed", False)) and bool(
+                context_data.get("field_origin_confirmed", False)
+            ):
+                self.phase = "set_mode"
+                self.skipped_auto_confirm = True
+                detail = self._detail(altitude, phase="set_mode", context=context_data)
+                detail["note"] = "field heading/origin already confirmed; skip takeoff auto confirm"
+                self.last_detail = detail
             yaw = self._current_yaw_rad(context_data)
-            if yaw is None:
+            if self.phase == "confirm_field_heading" and yaw is None:
                 self.phase = "failed"
                 self.failed = True
                 self.failure_reason = "missing_field_heading_yaw"
@@ -97,8 +118,8 @@ class TakeoffAction(ActionModule):
                     reason="missing_field_heading_yaw",
                     detail=detail,
                 )
-            drone = self._field_heading_drone(context_data, yaw)
-            if drone is None:
+            drone = self._field_heading_drone(context_data, yaw) if yaw is not None else None
+            if self.phase == "confirm_field_heading" and drone is None:
                 self.phase = "failed"
                 self.failed = True
                 self.failure_reason = "missing_field_origin"
@@ -111,22 +132,23 @@ class TakeoffAction(ActionModule):
                     reason="missing_field_origin",
                     detail=detail,
                 )
-            action = {
-                "action_type": "confirm_field_heading",
-                "params": {"yaw_rad": yaw, "source": "takeoff_auto", "drone": drone},
-                "key": f"{self.key}_confirm_field_heading",
-                "once": True,
-                "priority": self.mode_priority,
-            }
-            detail = self._detail(altitude, phase="confirm_field_heading", context=context_data)
-            detail["confirm_field_heading_yaw_rad"] = yaw
-            self.last_detail = detail
-            self.phase = "set_mode"
-            return ActionResult(
-                actions=[action],
-                reason="field_heading_confirm_sent",
-                detail=detail,
-            )
+            if self.phase == "confirm_field_heading":
+                action = {
+                    "action_type": "confirm_field_heading",
+                    "params": {"yaw_rad": yaw, "source": "takeoff_auto", "drone": drone},
+                    "key": f"{self.key}_confirm_field_heading",
+                    "once": True,
+                    "priority": self.mode_priority,
+                }
+                detail = self._detail(altitude, phase="confirm_field_heading", context=context_data)
+                detail["confirm_field_heading_yaw_rad"] = yaw
+                self.last_detail = detail
+                self.phase = "set_mode"
+                return ActionResult(
+                    actions=[action],
+                    reason="field_heading_confirm_sent",
+                    detail=detail,
+                )
 
         if self.phase == "set_mode":
             action = {
@@ -138,6 +160,8 @@ class TakeoffAction(ActionModule):
             }
             self.mode_sent = True
             detail = self._detail(altitude, phase="set_mode", context=context_data)
+            if self.skipped_auto_confirm:
+                detail["note"] = "field heading/origin already confirmed; skip takeoff auto confirm"
             self.last_detail = detail
             self.phase = "arm"
             return ActionResult(actions=[action], reason="set_mode_sent", detail=detail)
@@ -174,7 +198,11 @@ class TakeoffAction(ActionModule):
                 self.done = True
                 self.phase = "done"
                 return ActionResult(done=True, reason="takeoff_altitude_reached", detail=detail)
-            return ActionResult(reason="waiting_for_takeoff_altitude", detail=detail)
+            actions = []
+            hold_action = self._takeoff_yaw_hold_action()
+            if hold_action is not None:
+                actions.append(hold_action)
+            return ActionResult(actions=actions, reason="waiting_for_takeoff_altitude", detail=detail)
 
         return ActionResult(failed=True, reason="invalid_takeoff_phase", detail=self._detail(altitude, context=context_data))
 
@@ -201,10 +229,22 @@ class TakeoffAction(ActionModule):
         self.arm_priority = 1
         self.mode_priority = 2
         self.key = "takeoff"
-        self.auto_confirm_field_heading = True
+        self.auto_confirm_field_heading = "if_missing"
+        self.hold_yaw_during_takeoff = True
+        self.takeoff_yaw_mode = "field_heading"
+        self.takeoff_local_x: float | None = None
+        self.takeoff_local_y: float | None = None
+        self.takeoff_hold_yaw_rad: float | None = None
+        self.takeoff_hold_yaw_source = ""
+        self.skipped_auto_confirm = False
         self.last_detail: dict[str, Any] = {}
 
     def _takeoff_result(self, altitude: _AltitudeSample | None, context: dict[str, Any] | None = None) -> ActionResult:
+        context_data = context or {}
+        position = self._current_local_xy(context_data)
+        if position is not None:
+            self.takeoff_local_x, self.takeoff_local_y = position
+        self.takeoff_hold_yaw_rad, self.takeoff_hold_yaw_source = self._takeoff_hold_yaw(context_data)
         action = {
             "action_type": "takeoff",
             "params": {"altitude_m": self.altitude_m},
@@ -217,6 +257,25 @@ class TakeoffAction(ActionModule):
         self.last_detail = detail
         self.phase = "wait_altitude"
         return ActionResult(actions=[action], reason="takeoff_sent", detail=detail)
+
+    def _takeoff_yaw_hold_action(self) -> dict[str, Any] | None:
+        if not self.hold_yaw_during_takeoff:
+            return None
+        if self.takeoff_local_x is None or self.takeoff_local_y is None or self.takeoff_hold_yaw_rad is None:
+            return None
+        return {
+            "action_type": "local_position",
+            "params": {
+                "x": self.takeoff_local_x,
+                "y": self.takeoff_local_y,
+                "z": -self.altitude_m,
+                "frame": 1,
+                "yaw": self.takeoff_hold_yaw_rad,
+            },
+            "key": "takeoff_yaw_hold",
+            "once": False,
+            "priority": 3,
+        }
 
     def _current_altitude(self, context: dict[str, Any]) -> _AltitudeSample | None:
         for name in ("relative_altitude", "relative_altitude_m", "altitude_m"):
@@ -312,6 +371,12 @@ class TakeoffAction(ActionModule):
             "arm_sent": self.arm_sent,
             "takeoff_sent": self.takeoff_sent,
             "auto_confirm_field_heading": self.auto_confirm_field_heading,
+            "hold_yaw_during_takeoff": self.hold_yaw_during_takeoff,
+            "takeoff_yaw_mode": self.takeoff_yaw_mode,
+            "takeoff_local_x": self.takeoff_local_x,
+            "takeoff_local_y": self.takeoff_local_y,
+            "takeoff_hold_yaw_rad": self.takeoff_hold_yaw_rad,
+            "takeoff_hold_yaw_source": self.takeoff_hold_yaw_source,
         }
         for name in (
             "field_heading_confirmed",
@@ -322,6 +387,49 @@ class TakeoffAction(ActionModule):
             if name in context_data:
                 detail[name] = context_data[name]
         return detail
+
+    def _current_local_xy(self, context: dict[str, Any]) -> tuple[float, float] | None:
+        local_position = context.get("local_position")
+        if isinstance(local_position, dict):
+            x = self._finite_float(local_position.get("x"))
+            y = self._finite_float(local_position.get("y"))
+            if x is not None and y is not None:
+                return x, y
+        drone = context.get("drone")
+        if isinstance(drone, dict):
+            x = self._finite_float(drone.get("local_x"))
+            y = self._finite_float(drone.get("local_y"))
+            if x is not None and y is not None:
+                return x, y
+            local_position = drone.get("local_position")
+            if isinstance(local_position, dict):
+                x = self._finite_float(local_position.get("x"))
+                y = self._finite_float(local_position.get("y"))
+                if x is not None and y is not None:
+                    return x, y
+        return None
+
+    def _takeoff_hold_yaw(self, context: dict[str, Any]) -> tuple[float | None, str]:
+        resolvers = {
+            "field_heading": ("field_heading_yaw_rad", context.get("field_heading_yaw_rad")),
+            "arm_heading": ("arm_heading_yaw_rad", context.get("arm_heading_yaw_rad")),
+            "pre_arm": ("pre_arm_yaw_rad", context.get("pre_arm_yaw_rad")),
+            "drone_yaw": ("drone.yaw", self._drone_yaw(context)),
+        }
+        order = ["field_heading", "arm_heading", "pre_arm", "drone_yaw"]
+        if self.takeoff_yaw_mode != "field_heading":
+            order.remove(self.takeoff_yaw_mode)
+            order.insert(0, self.takeoff_yaw_mode)
+        for mode in order:
+            source, raw_value = resolvers[mode]
+            value = self._finite_float(raw_value)
+            if value is not None:
+                return value, source
+        return None, ""
+
+    def _drone_yaw(self, context: dict[str, Any]) -> Any:
+        drone = context.get("drone")
+        return drone.get("yaw") if isinstance(drone, dict) else None
 
     def _current_yaw_rad(self, context: dict[str, Any]) -> float | None:
         drone = context.get("drone")
@@ -375,3 +483,18 @@ class TakeoffAction(ActionModule):
             if normalized in {"false", "0", "no", "off"}:
                 return False
         raise ValueError(f"{name} must be a bool")
+
+    def _auto_confirm_mode(self, value: Any) -> str:
+        if value is True:
+            return "if_missing"
+        if value is False:
+            return "disabled"
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized == "if_missing":
+                return normalized
+            if normalized in {"false", "0", "no", "off", "disabled"}:
+                return "disabled"
+            if normalized in {"true", "1", "yes", "on"}:
+                return "if_missing"
+        raise ValueError("auto_confirm_field_heading must be if_missing or a bool")

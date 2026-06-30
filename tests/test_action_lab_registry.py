@@ -55,6 +55,14 @@ def test_action_lab_specs_are_json_serializable() -> None:
     ]
 
 
+def test_takeoff_spec_exposes_safe_confirmation_and_yaw_hold_defaults() -> None:
+    spec = next(item for item in action_lab_specs() if item["name"] == "takeoff")
+
+    assert spec["default_params"]["auto_confirm_field_heading"] == "if_missing"
+    assert spec["default_params"]["hold_yaw_during_takeoff"] is True
+    assert spec["default_params"]["takeoff_yaw_mode"] == "field_heading"
+
+
 def test_payload_release_spec_defaults_to_servo_output_8() -> None:
     payload_spec = next(item for item in action_lab_specs() if item["name"] == "payload_release")
 

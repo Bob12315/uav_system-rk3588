@@ -294,6 +294,21 @@ def test_goto_waypoint_local_position_dispatches_when_gates_enabled() -> None:
     assert payload["dispatch"]["sent"][0]["frame"] == 1
 
 
+def test_takeoff_local_position_is_allowed_by_dispatch_policy() -> None:
+    runner = _runner()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_runtime.dispatcher.send_actions = True
+
+    allowed, note = runner.action_runtime.dispatcher.gate(
+        send_commands=True,
+        action_type="local_position",
+        action_name="takeoff",
+    )
+
+    assert allowed is True
+    assert note == "local_position_dispatch_enabled"
+
+
 def test_survey_area_local_position_dispatches_like_goto_waypoint(caplog) -> None:
     runner = _runner()
     runner.controller_switches.set_send_commands(True)

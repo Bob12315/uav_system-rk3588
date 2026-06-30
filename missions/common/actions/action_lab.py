@@ -51,7 +51,9 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "priority": 2,
                 "arm_priority": 1,
                 "mode_priority": 2,
-                "auto_confirm_field_heading": True,
+                "auto_confirm_field_heading": "if_missing",
+                "hold_yaw_during_takeoff": True,
+                "takeoff_yaw_mode": "field_heading",
             },
         },
         {
