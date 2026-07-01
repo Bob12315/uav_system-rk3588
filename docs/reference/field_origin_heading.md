@@ -56,6 +56,13 @@ A → B 的方位角 = FIELD +Y heading
 ## 当前实现与后续边界
 
 当前 `app/runtime_context.py` 保存 LOCAL_NED 原点、yaw heading 和确认状态，并提供
-FIELD↔LOCAL_NED 转换；Web UI 提供“确认场地方向/原点”按钮。后续应把现有逻辑
-迁移到 `FieldReference`、`CoordinateTransform` 和 `FieldReferenceService`，而不是
-建立平行实现。转换公式见 [coordinate_frames.md](coordinate_frames.md)。
+FIELD↔LOCAL_NED 转换；Web UI 提供“确认场地方向/原点”按钮。新增的纯逻辑模块：
+
+- `app/field_reference.py` — `FieldReference` 数据结构、验证、GPS A/B 计算和生命周期。
+- `app/coordinate_transform.py` — `CoordinateTransform`（`field_to_local_ned` /
+  `local_ned_to_field`），FIELD↔LOCAL_NED 的唯一实现源。
+- `app/field_reference_service.py` — `FieldReferenceService`，轻量业务封装，不依赖
+  Web UI/飞控/MAVLink。
+
+后续应将 `runtime_context.py` 中的 FIELD 状态逐步迁移到 `FieldReference` /
+`FieldReferenceService`，而不是建立平行实现。转换公式见 [coordinate_frames.md](coordinate_frames.md)。
