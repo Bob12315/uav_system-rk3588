@@ -13,9 +13,9 @@ from missions.common.actions.multi_photo_fusion import (
 def test_config_defaults_are_valid() -> None:
     config = MultiPhotoFusionConfig()
 
-    assert config.cluster_radius_m == 0.8
+    assert config.cluster_radius_m == 1.0
     assert config.outlier_radius_m == 0.8
-    assert config.min_cluster_size == 1
+    assert config.min_cluster_size == 3
     assert config.min_total_weight == 1e-6
     assert config.default_confidence == 1.0
     assert config.center_weight_power == 1.0
@@ -47,7 +47,7 @@ def test_config_rejects_invalid_values() -> None:
 
 
 def test_single_point_fuses_to_same_position() -> None:
-    fusion = MultiPhotoFusion()
+    fusion = MultiPhotoFusion(MultiPhotoFusionConfig(min_cluster_size=1))
 
     fused = fusion.fuse([{"x": 1.0, "y": 2.0, "z": 0.0, "confidence": 0.9}])
 
@@ -60,7 +60,9 @@ def test_single_point_fuses_to_same_position() -> None:
 
 
 def test_nearby_points_cluster_and_use_weighted_average() -> None:
-    fusion = MultiPhotoFusion(MultiPhotoFusionConfig(cluster_radius_m=1.0))
+    fusion = MultiPhotoFusion(
+        MultiPhotoFusionConfig(cluster_radius_m=1.0, min_cluster_size=1)
+    )
 
     fused = fusion.fuse(
         [
@@ -76,7 +78,9 @@ def test_nearby_points_cluster_and_use_weighted_average() -> None:
 
 
 def test_far_points_form_separate_clusters() -> None:
-    fusion = MultiPhotoFusion(MultiPhotoFusionConfig(cluster_radius_m=0.5))
+    fusion = MultiPhotoFusion(
+        MultiPhotoFusionConfig(cluster_radius_m=0.5, min_cluster_size=1)
+    )
 
     fused = fusion.fuse(
         [
@@ -95,6 +99,7 @@ def test_confidence_weight_affects_fused_position() -> None:
             cluster_radius_m=20.0,
             outlier_radius_m=20.0,
             max_cluster_radius_m=20.0,
+            min_cluster_size=1,
         )
     )
 
@@ -110,7 +115,9 @@ def test_confidence_weight_affects_fused_position() -> None:
 
 
 def test_center_weight_reduces_edge_detections() -> None:
-    fusion = MultiPhotoFusion(MultiPhotoFusionConfig(cluster_radius_m=20.0))
+    fusion = MultiPhotoFusion(
+        MultiPhotoFusionConfig(cluster_radius_m=20.0, min_cluster_size=1)
+    )
 
     fused = fusion.fuse(
         [
@@ -132,6 +139,7 @@ def test_center_weight_power_zero_disables_center_weighting() -> None:
             outlier_radius_m=20.0,
             max_cluster_radius_m=20.0,
             center_weight_power=0.0,
+            min_cluster_size=1,
         )
     )
 
@@ -149,7 +157,11 @@ def test_center_weight_power_zero_disables_center_weighting() -> None:
 
 def test_outlier_rejection_removes_points_far_from_weighted_center() -> None:
     fusion = MultiPhotoFusion(
-        MultiPhotoFusionConfig(cluster_radius_m=20.0, outlier_radius_m=1.0)
+        MultiPhotoFusionConfig(
+            cluster_radius_m=20.0,
+            outlier_radius_m=1.0,
+            min_cluster_size=1,
+        )
     )
 
     fused = fusion.fuse(
@@ -185,7 +197,10 @@ def test_min_total_weight_drops_low_weight_clusters() -> None:
 
 
 def test_class_names_filter_is_applied() -> None:
-    fusion = MultiPhotoFusion(class_names={"cylinder"})
+    fusion = MultiPhotoFusion(
+        MultiPhotoFusionConfig(min_cluster_size=1),
+        class_names={"cylinder"},
+    )
 
     fused = fusion.fuse(
         [
@@ -199,7 +214,7 @@ def test_class_names_filter_is_applied() -> None:
 
 
 def test_bad_inputs_are_skipped() -> None:
-    fusion = MultiPhotoFusion()
+    fusion = MultiPhotoFusion(MultiPhotoFusionConfig(min_cluster_size=1))
 
     fused = fusion.fuse(
         [
@@ -216,7 +231,9 @@ def test_bad_inputs_are_skipped() -> None:
 
 
 def test_majority_class_and_track_ids_are_reported() -> None:
-    fusion = MultiPhotoFusion(MultiPhotoFusionConfig(cluster_radius_m=5.0))
+    fusion = MultiPhotoFusion(
+        MultiPhotoFusionConfig(cluster_radius_m=5.0, min_cluster_size=1)
+    )
 
     fused = fusion.fuse(
         [
@@ -257,7 +274,9 @@ def test_majority_class_and_track_ids_are_reported() -> None:
 
 
 def test_majority_ties_use_first_seen_value() -> None:
-    fusion = MultiPhotoFusion(MultiPhotoFusionConfig(cluster_radius_m=5.0))
+    fusion = MultiPhotoFusion(
+        MultiPhotoFusionConfig(cluster_radius_m=5.0, min_cluster_size=1)
+    )
 
     fused = fusion.fuse(
         [
@@ -271,7 +290,9 @@ def test_majority_ties_use_first_seen_value() -> None:
 
 
 def test_mixed_track_id_types_do_not_crash() -> None:
-    fusion = MultiPhotoFusion(MultiPhotoFusionConfig(cluster_radius_m=5.0))
+    fusion = MultiPhotoFusion(
+        MultiPhotoFusionConfig(cluster_radius_m=5.0, min_cluster_size=1)
+    )
 
     fused = fusion.fuse(
         [
@@ -286,7 +307,9 @@ def test_mixed_track_id_types_do_not_crash() -> None:
 
 
 def test_unhashable_class_values_do_not_crash() -> None:
-    fusion = MultiPhotoFusion(MultiPhotoFusionConfig(cluster_radius_m=5.0))
+    fusion = MultiPhotoFusion(
+        MultiPhotoFusionConfig(cluster_radius_m=5.0, min_cluster_size=1)
+    )
 
     fused = fusion.fuse(
         [
@@ -302,7 +325,7 @@ def test_unhashable_class_values_do_not_crash() -> None:
 
 
 def test_member_track_id_values_are_json_safe() -> None:
-    fusion = MultiPhotoFusion()
+    fusion = MultiPhotoFusion(MultiPhotoFusionConfig(min_cluster_size=1))
 
     fused = fusion.fuse([{"x": 0.0, "y": 0.0, "track_id": ("cam", 1)}])
 
@@ -312,7 +335,7 @@ def test_member_track_id_values_are_json_safe() -> None:
 
 
 def test_output_is_plain_json_serializable_dict() -> None:
-    fusion = MultiPhotoFusion()
+    fusion = MultiPhotoFusion(MultiPhotoFusionConfig(min_cluster_size=1))
 
     fused = fusion.fuse(
         [

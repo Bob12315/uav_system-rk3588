@@ -14,10 +14,10 @@ from missions.common.actions.target_localization import (
 def test_camera_projection_config_defaults_are_valid() -> None:
     config = CameraProjectionConfig()
 
-    assert config.fov_x_deg == 75.0
-    assert config.fov_y_deg == 75.0
+    assert config.fov_x_deg == 76.0
+    assert config.fov_y_deg == 61.0
     assert config.image_x_sign == 1.0
-    assert config.image_y_sign == 1.0
+    assert config.image_y_sign == -1.0
     assert config.min_altitude_m == 0.1
 
 
@@ -134,7 +134,7 @@ def test_yaw_zero_maps_ex_to_local_y_and_ey_to_local_x() -> None:
     expected_offset = 10.0 * math.tan(math.radians(90.0) / 4.0)
     assert ex_estimate["x"] == pytest.approx(0.0)
     assert ex_estimate["y"] == pytest.approx(expected_offset)
-    assert ey_estimate["x"] == pytest.approx(expected_offset)
+    assert ey_estimate["x"] == pytest.approx(-expected_offset)
     assert ey_estimate["y"] == pytest.approx(0.0)
 
 
@@ -149,7 +149,7 @@ def test_yaw_pi_over_two_rotates_body_offsets() -> None:
     assert ex_estimate["x"] == pytest.approx(-expected_offset)
     assert ex_estimate["y"] == pytest.approx(0.0, abs=1e-12)
     assert ey_estimate["x"] == pytest.approx(0.0, abs=1e-12)
-    assert ey_estimate["y"] == pytest.approx(expected_offset)
+    assert ey_estimate["y"] == pytest.approx(-expected_offset)
 
 
 def test_image_x_sign_reverses_lateral_offset() -> None:

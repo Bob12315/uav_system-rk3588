@@ -24,6 +24,19 @@ MAVLink frame 常量统一从 `telemetry_link/frames.py` 导入，不得在 Acti
 
 BODY_NED 速度不经过 FIELD 坐标转换。
 
+## 下视相机图像误差
+
+目标定位使用未镜像的检测输入，约定如下：
+
+- `pixel_x` 向右为正，`pixel_y` 向下为正。
+- `ex_norm`：目标在画面右侧为正。
+- `ey_norm`：目标在画面下方为正。
+- 当前下视相机默认 `image_x_sign = 1.0`、`image_y_sign = -1.0`。
+
+因此在机体 yaw 为 0 时，正 `ex_norm` 映射到机体右方/LOCAL_NED 东向偏移；正
+`ey_norm` 经 `image_y_sign=-1` 映射到机体后方/LOCAL_NED 南向偏移。不要恢复只影响
+显示的 mirror、输入层 mirror 或历史 `vy_sign=-1.0` 修正。
+
 ## FIELD
 
 FIELD 是比赛场地坐标系：

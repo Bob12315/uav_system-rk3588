@@ -1,5 +1,9 @@
 # Phase 2 collected-failure baseline
 
+> Phase 2.5 resolution: all five groups below were resolved by aligning test
+> expectations and fixtures with the current production contracts. No production
+> code or deployment configuration was changed. The full suite now passes.
+
 After retiring the 12 import-failing legacy modules, pytest collects 684 tests and
 reports 656 passed / 28 failed. Phase 2 intentionally does not change production
 behavior or rewrite these expectations.
@@ -12,6 +16,14 @@ behavior or rewrite these expectations.
 | `test_target_localization.py` | 3 | Test defaults/sign expectations are stale versus current `76/61` FOV and `image_y_sign=-1`; Action Lab/templates also use flipped image Y | Confirm calibrated camera convention, then update expected values/signs in a dedicated localization test change | Coordinate-sensitive, but not a blocker for pure FIELD/LOCAL_NED extraction |
 | `test_telemetry_link.py` | 1 | Environment/config expectation mismatch: tracked root config selects `real`, test expects `sitl` | Make the test assert parser consistency without assuming deployment profile, or use an explicit fixture config | No |
 
-The recent model/config update commit changed the fusion and camera defaults, which supports
-the stale-expectation diagnosis, but the Action integration defaults still require an explicit
-product decision before tests or production code are changed.
+## Phase 2.5 decisions
+
+- Camera localization uses unmirrored input, `ex_norm` right-positive,
+  `ey_norm` down-positive, `image_x_sign=1`, and `image_y_sign=-1`.
+- Current camera defaults remain 76° horizontal and 61° vertical FOV.
+- Production fusion defaults remain `cluster_radius_m=1.0` and
+  `min_cluster_size=3`; unit tests that exercise one-point mechanics now request
+  `min_cluster_size=1` explicitly.
+- Multi-view and survey single-observation fixtures declare the same explicit test policy.
+- The tracked root telemetry config remains `real`; SITL expectations load
+  `config/profiles/rk3588-sitl/telemetry.yaml` explicitly.
