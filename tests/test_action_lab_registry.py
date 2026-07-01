@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from app.dispatch_policy import ACTION_DISPATCH_POLICY
+from app.dispatch.policy import ACTION_DISPATCH_POLICY
 from missions.common.actions.action_lab import action_lab_specs, create_action_lab_registry
 from missions.common.actions.registry import default_registry
 
