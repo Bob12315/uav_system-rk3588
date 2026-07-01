@@ -30,6 +30,10 @@ class ConfigWriteRequest(BaseModel):
     action: str = "save"
 
 
+class ManualHeadingRequest(BaseModel):
+    yaw_deg: float
+
+
 class ActionStartRequest(BaseModel):
     name: str
     params: dict = Field(default_factory=dict)
@@ -330,6 +334,66 @@ def create_app(runner, config: UiConfig) -> FastAPI:
             }
         except Exception as exc:
             return {"ok": False, "message": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Field Reference API (Phase 4C-1) — coexists with legacy field-heading
+    # ------------------------------------------------------------------
+
+    @app.get("/api/field-reference/status")
+    def field_reference_status():
+        try:
+            return runner.field_reference_status()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/field-reference/mark-origin")
+    def field_reference_mark_origin():
+        try:
+            return runner.field_reference_mark_origin()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/field-reference/mark-forward")
+    def field_reference_mark_forward():
+        try:
+            return runner.field_reference_mark_forward()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/field-reference/use-current-yaw")
+    def field_reference_use_current_yaw():
+        try:
+            return runner.field_reference_use_current_yaw()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/field-reference/set-manual-heading")
+    def field_reference_set_manual_heading(request: ManualHeadingRequest):
+        try:
+            return runner.field_reference_set_manual_heading(request.yaw_deg)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/field-reference/confirm")
+    def field_reference_confirm():
+        try:
+            return runner.field_reference_confirm()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/field-reference/reset")
+    def field_reference_reset():
+        try:
+            return runner.field_reference_reset()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/field-reference/freeze")
+    def field_reference_freeze():
+        try:
+            return runner.field_reference_freeze()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     @app.post("/api/localization/clear")
     def clear_localization():

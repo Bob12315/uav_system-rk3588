@@ -567,3 +567,53 @@ def test_lifecycle_confirm_freeze_reset() -> None:
     assert ref.is_confirmed is False
     assert ref.is_frozen is False
     assert ref.origin_source is None
+
+
+# ---------------------------------------------------------------------------
+# Phase 4C-1: service handler parity tests
+# ---------------------------------------------------------------------------
+
+def test_service_mark_gps_origin_without_snapshot_not_ready() -> None:
+    """mark_gps_origin without local_n_m/local_e_m leaves is_ready() False."""
+    svc = FieldReferenceService()
+    assert svc.mark_gps_origin(30.0, 120.0)["ok"] is True
+    assert svc.set_manual_heading(0.0)["ok"] is True
+    assert svc.confirm()["ok"] is True
+    s = svc.status()
+    assert s["is_ready"] is False
+    assert s["origin_lat"] == 30.0
+    assert s["origin_local_n_m"] is None
+
+
+def test_service_set_manual_heading_degrees() -> None:
+    """set_manual_heading accepts radians; confirm it handles 90° correctly."""
+    svc = FieldReferenceService()
+    svc.mark_local_origin(0.0, 0.0)
+    svc.set_manual_heading(math.radians(90.0))
+    assert svc.confirm()["ok"] is True
+    s = svc.status()
+    assert s["field_heading_yaw_rad"] == pytest.approx(math.pi / 2.0)
+
+
+def test_service_freeze_unconfirmed_fails() -> None:
+    """freeze before confirm returns error."""
+    svc = FieldReferenceService()
+    svc.mark_local_origin(0.0, 0.0)
+    svc.set_manual_heading(0.0)
+    result = svc.freeze()
+    assert result["ok"] is False
+    assert "not confirmed" in result.get("error", "")
+
+
+def test_old_field_heading_api_still_works() -> None:
+    """Existing RuntimeContextBuilder.confirm_field_heading() is unchanged."""
+    from app.runtime_context import RuntimeContextBuilder
+    builder = RuntimeContextBuilder()
+    drone = {
+        "local_position_valid": True,
+        "local_x": 10.0, "local_y": 20.0, "local_z": -1.0,
+    }
+    ok = builder.confirm_field_heading(yaw_rad=0.5, drone=drone, source="manual")
+    assert ok is True
+    assert builder.field_heading_confirmed is True
+    assert builder.field_origin_confirmed is True

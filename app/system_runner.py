@@ -23,6 +23,7 @@ from app.action_runtime import ActionRuntimeService
 from app.blackbox_recorder import BlackboxRecorder
 from app.mission_orchestrator import MissionActionStep, MissionOrchestrator
 from app.runtime_context import RuntimeContextBuilder
+from app.field_reference_service import FieldReferenceService
 from app.debug_runtime import DebugRuntime
 from app.health_monitor import HealthMonitor
 from app.service_manager import ServiceManager
@@ -159,6 +160,7 @@ class SystemRunner:
         self.action_lab_enabled = True
         self.action_runtime_lock = threading.RLock()
         self.runtime_context_builder = RuntimeContextBuilder(logger=self.logger)
+        self.field_reference_service = FieldReferenceService()
         self.action_runtime = ActionRuntimeService(
             runner=ActionRunner(create_action_lab_registry()),
             dispatcher=ActionDispatcher(
@@ -720,6 +722,141 @@ class SystemRunner:
             "current_field_z": field_position.get("z") if field_position else None,
             "current_local_z": field_position.get("local_z") if field_position else None,
         }
+
+    # ------------------------------------------------------------------
+    # Field Reference API handlers (Phase 4C-1)
+    # ------------------------------------------------------------------
+
+    def field_reference_status(self) -> dict[str, object]:
+        """Return FieldReference state and relevant telemetry snippet."""
+        with self.control_command_log_lock:
+            snapshot = dict(self.latest_snapshot)
+        drone = snapshot.get("drone", {})
+        if not isinstance(drone, dict):
+            drone = {}
+
+        svc = self.field_reference_service
+        status = svc.status()
+
+        # Compute GPS A/B distance if possible
+        distance_m = None
+        if status["origin_lat"] is not None and status["forward_marker_lat"] is not None:
+            from app.field_reference import _gps_distance_m
+            distance_m = _gps_distance_m(
+                status["origin_lat"], status["origin_lon"],
+                status["forward_marker_lat"], status["forward_marker_lon"],
+            )
+
+        telemetry = {
+            "global_position_valid": bool(drone.get("global_position_valid", False)),
+            "gps_fix_type": drone.get("gps_fix_type", 0),
+            "satellites_visible": drone.get("satellites_visible", 0),
+            "gps_eph": drone.get("gps_eph", -1.0),
+            "gps_epv": drone.get("gps_epv", -1.0),
+            "has_local_position": bool(drone.get("local_position_valid", False)),
+            "has_yaw": bool(drone.get("attitude_valid", False)),
+        }
+
+        field_heading_deg = None
+        if status["field_heading_yaw_rad"] is not None:
+            field_heading_deg = math.degrees(float(status["field_heading_yaw_rad"]))
+
+        return {
+            "ok": True,
+            "field_reference": {
+                "is_confirmed": status["is_confirmed"],
+                "is_frozen": status["is_frozen"],
+                "origin_source": status["origin_source"],
+                "heading_source": status["heading_source"],
+                "field_heading_yaw_rad": status["field_heading_yaw_rad"],
+                "field_heading_deg": field_heading_deg,
+                "origin_local_n_m": status["origin_local_n_m"],
+                "origin_local_e_m": status["origin_local_e_m"],
+                "origin_lat": status["origin_lat"],
+                "origin_lon": status["origin_lon"],
+                "forward_marker_lat": status["forward_marker_lat"],
+                "forward_marker_lon": status["forward_marker_lon"],
+                "distance_m": distance_m,
+                "warnings": [],
+            },
+            "telemetry": telemetry,
+        }
+
+    def _drone_snapshot(self) -> dict[str, object]:
+        with self.control_command_log_lock:
+            return dict(self.latest_snapshot).get("drone", {}) or {}
+
+    def field_reference_mark_origin(self) -> dict[str, object]:
+        drone = self._drone_snapshot()
+        if not isinstance(drone, dict):
+            return {"ok": False, "error": "drone state unavailable"}
+
+        if not bool(drone.get("global_position_valid", False)):
+            return {"ok": False, "error": "no valid GPS position"}
+        gps_fix = drone.get("gps_fix_type", 0)
+        if not isinstance(gps_fix, (int, float)) or int(gps_fix) < 3:
+            return {"ok": False, "error": f"GPS fix type {gps_fix} < 3"}
+        lat = RuntimeContextBuilder._float_or_none(drone.get("lat"))
+        lon = RuntimeContextBuilder._float_or_none(drone.get("lon"))
+        if lat is None or lon is None:
+            return {"ok": False, "error": "GPS lat/lon not available"}
+
+        local_x = RuntimeContextBuilder._float_or_none(drone.get("local_x"))
+        local_y = RuntimeContextBuilder._float_or_none(drone.get("local_y"))
+        if not bool(drone.get("local_position_valid", False)) or local_x is None or local_y is None:
+            return {"ok": False, "error": "no valid LOCAL_NED position"}
+
+        result = self.field_reference_service.mark_gps_origin(
+            lat, lon, local_n_m=local_x, local_e_m=local_y,
+        )
+        return result
+
+    def field_reference_mark_forward(self) -> dict[str, object]:
+        drone = self._drone_snapshot()
+        if not isinstance(drone, dict):
+            return {"ok": False, "error": "drone state unavailable"}
+
+        if not bool(drone.get("global_position_valid", False)):
+            return {"ok": False, "error": "no valid GPS position"}
+        gps_fix = drone.get("gps_fix_type", 0)
+        if not isinstance(gps_fix, (int, float)) or int(gps_fix) < 3:
+            return {"ok": False, "error": f"GPS fix type {gps_fix} < 3"}
+        lat = RuntimeContextBuilder._float_or_none(drone.get("lat"))
+        lon = RuntimeContextBuilder._float_or_none(drone.get("lon"))
+        if lat is None or lon is None:
+            return {"ok": False, "error": "GPS lat/lon not available"}
+
+        return self.field_reference_service.mark_gps_forward(lat, lon)
+
+    def field_reference_use_current_yaw(self) -> dict[str, object]:
+        drone = self._drone_snapshot()
+        if not isinstance(drone, dict):
+            return {"ok": False, "error": "drone state unavailable"}
+        if not bool(drone.get("attitude_valid", False)):
+            return {"ok": False, "error": "attitude yaw not valid"}
+        yaw = RuntimeContextBuilder._float_or_none(drone.get("yaw"))
+        if yaw is None:
+            return {"ok": False, "error": "attitude yaw not valid"}
+
+        return self.field_reference_service.set_compass_heading(yaw)
+
+    def field_reference_set_manual_heading(self, yaw_deg: float) -> dict[str, object]:
+        try:
+            yaw_rad = math.radians(float(yaw_deg))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "yaw_deg must be a number"}
+        return self.field_reference_service.set_manual_heading(yaw_rad)
+
+    def field_reference_confirm(self) -> dict[str, object]:
+        return self.field_reference_service.confirm()
+
+    def field_reference_reset(self) -> dict[str, object]:
+        return self.field_reference_service.reset()
+
+    def field_reference_freeze(self) -> dict[str, object]:
+        return self.field_reference_service.freeze()
+
+    # ------------------------------------------------------------------
 
     def _with_field_coordinates(self, items: list[object]) -> list[object]:
         enriched: list[object] = []
