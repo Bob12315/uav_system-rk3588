@@ -24,6 +24,9 @@ from app.blackbox_recorder import BlackboxRecorder
 from app.mission_orchestrator import MissionActionStep, MissionOrchestrator
 from app.runtime_context import RuntimeContextBuilder
 from app.field_reference_service import FieldReferenceService
+from app.field_reference_controller import FieldReferenceController
+from app.web_status_service import WebStatusService
+from app.command_pipeline import CommandPipeline
 from app.debug_runtime import DebugRuntime
 from app.health_monitor import HealthMonitor
 from app.service_manager import ServiceManager
@@ -161,6 +164,37 @@ class SystemRunner:
         self.action_runtime_lock = threading.RLock()
         self.runtime_context_builder = RuntimeContextBuilder(logger=self.logger)
         self.field_reference_service = FieldReferenceService()
+        self.field_reference_controller = FieldReferenceController(
+            field_reference_service=self.field_reference_service,
+            runtime_context_builder=self.runtime_context_builder,
+            get_drone_snapshot=self._drone_snapshot_raw,
+        )
+        self.web_status_service = WebStatusService(
+            runtime_context_builder=self.runtime_context_builder,
+            get_snapshot=lambda: self.latest_snapshot,
+            lock=self.control_command_log_lock,
+            mission_runner=self.mission_runner,
+            mission_stage_selections=self.mission_stage_selections,
+            debug_runtime=self.debug_runtime,
+            controller_switches=self.controller_switches,
+            control_command_log=self.control_command_log,
+            system_events=self.system_events,
+            action_lab_enabled=self.action_lab_enabled,
+            action_lab_specs=self.action_lab_specs,
+            get_action_mission_status_payload=self.action_mission_status_payload,
+            get_link_manager=lambda: self.services.link_manager,
+            get_action_runtime=lambda: self.action_runtime,
+            latest_mission_name=self.latest_mission_name,
+            latest_mission_stage=self.latest_mission_stage,
+            latest_stage_controller=self.latest_stage_controller,
+            latest_hold_reason=self.latest_hold_reason,
+        )
+        self.command_pipeline = CommandPipeline(
+            yolo_command_config=self.config.yolo_command,
+            camera_recording=self.camera_recording,
+            external_processes=self.external_processes,
+            record_event=self._record_event,
+        )
         self.action_runtime = ActionRuntimeService(
             runner=ActionRunner(create_action_lab_registry()),
             dispatcher=ActionDispatcher(
@@ -597,35 +631,7 @@ class SystemRunner:
             )
 
     def web_status_snapshot(self) -> dict[str, object]:
-        with self.control_command_log_lock:
-            snapshot = dict(self.latest_snapshot)
-            snapshot.update(
-                {
-                    "mission": self.latest_mission_name,
-                    "stage": self.latest_mission_stage,
-                    "stage_controller": self.latest_stage_controller,
-                    "stage_override": self.debug_runtime.config.force_mode,
-                    "mission_stage_selection": self._active_mission_stage_selection(),
-                    "stage_modes": self._web_stage_modes(),
-                    "hold_reason": self.latest_hold_reason,
-                    "controllers": asdict(self.controller_switches.snapshot()),
-                    "control_commands": list(self.control_command_log)[:40],
-                    "events": list(self.system_events)[:40],
-                    "actions": self._mission_action_log_lines()[:20],
-                    "action_lab": self._action_lab_snapshot(),
-                    "action_mission": self.action_mission_status_payload(),
-                    "localization": self.latest_localization_result,
-                    "drop_targets": self.latest_drop_targets_result,
-                    "recon_inspection": self.latest_recon_inspection_result,
-                }
-            )
-        manager = self.services.link_manager
-        snapshot["active_source"] = manager.get_active_source() if manager is not None else "none"
-        snapshot["field_heading"] = self.field_heading_status()
-        drone = snapshot.get("drone", {})
-        snapshot["field_position"] = self.runtime_context_builder.field_position_from_drone(drone)
-        snapshot["field_transform"] = self.runtime_context_builder.field_transform()
-        return self._json_safe(snapshot)
+        return self.web_status_service.snapshot()
 
     def action_lab_context(self) -> dict[str, object]:
         with self.control_command_log_lock:
@@ -633,241 +639,39 @@ class SystemRunner:
         return self.runtime_context_builder.build_action_context(snapshot)
 
     def field_heading_status(self) -> dict[str, object]:
-        builder = self.runtime_context_builder
-        with self.control_command_log_lock:
-            snapshot = dict(self.latest_snapshot)
-        drone = snapshot.get("drone", {})
-        current_yaw = None
-        attitude_valid = False
-        local_position_valid = False
-        if isinstance(drone, dict):
-            attitude_valid = bool(drone.get("attitude_valid", False))
-            local_position_valid = bool(drone.get("local_position_valid", False))
-            current_yaw = RuntimeContextBuilder._float_or_none(drone.get("yaw"))
-
-        field_yaw = builder.field_heading_yaw_rad
-        pre_arm_yaw = builder.pre_arm_yaw_rad
-        arm_yaw = builder.arm_heading_yaw_rad
-        field_position = builder.field_position_from_drone(drone)
-
-        def deg(rad: float | None) -> float | None:
-            return None if rad is None else math.degrees(float(rad))
-
-        def yaw_delta_deg(a: float | None, b: float | None) -> float | None:
-            if a is None or b is None:
-                return None
-            delta = math.atan2(math.sin(float(a) - float(b)), math.cos(float(a) - float(b)))
-            return math.degrees(delta)
-
-        return {
-            "attitude_valid": attitude_valid,
-            "local_position_valid": local_position_valid,
-            "current_yaw_rad": current_yaw,
-            "current_yaw_deg": deg(current_yaw),
-            "pre_arm_yaw_rad": pre_arm_yaw,
-            "pre_arm_yaw_deg": deg(pre_arm_yaw),
-            "arm_heading_yaw_rad": arm_yaw,
-            "arm_heading_yaw_deg": deg(arm_yaw),
-            "arm_heading_fallback": bool(builder.arm_heading_fallback),
-            "field_heading_yaw_rad": field_yaw,
-            "field_heading_yaw_deg": deg(field_yaw),
-            "field_heading_confirmed": bool(builder.field_heading_confirmed),
-            "field_heading_source": builder.field_heading_source,
-            "field_heading_time": builder.field_heading_time,
-            "delta_current_to_field_deg": yaw_delta_deg(current_yaw, field_yaw),
-            "origin_confirmed": bool(builder.field_origin_confirmed),
-            "field_origin_confirmed": bool(builder.field_origin_confirmed),
-            "origin_local_x": builder.field_origin_local_x,
-            "origin_local_y": builder.field_origin_local_y,
-            "origin_local_z": builder.field_origin_local_z,
-            "field_origin_local_x": builder.field_origin_local_x,
-            "field_origin_local_y": builder.field_origin_local_y,
-            "field_origin_local_z": builder.field_origin_local_z,
-            "field_origin_time": builder.field_origin_time,
-            "current_field_x": field_position.get("x") if field_position else None,
-            "current_field_y": field_position.get("y") if field_position else None,
-            "current_field_z": field_position.get("z") if field_position else None,
-            "current_local_z": field_position.get("local_z") if field_position else None,
-        }
+        return self.web_status_service.field_heading_status()
 
     # ------------------------------------------------------------------
     # Field Reference API handlers (Phase 4C-1)
     # ------------------------------------------------------------------
 
     def field_reference_status(self) -> dict[str, object]:
-        """Return FieldReference state and relevant telemetry snippet."""
-        with self.control_command_log_lock:
-            snapshot = dict(self.latest_snapshot)
-        drone = snapshot.get("drone", {})
-        if not isinstance(drone, dict):
-            drone = {}
+        return self.field_reference_controller.status()
 
-        svc = self.field_reference_service
-        status = svc.status()
-
-        # Compute GPS A/B distance if possible
-        distance_m = None
-        if status["origin_lat"] is not None and status["forward_marker_lat"] is not None:
-            from app.field_reference import _gps_distance_m
-            distance_m = _gps_distance_m(
-                status["origin_lat"], status["origin_lon"],
-                status["forward_marker_lat"], status["forward_marker_lon"],
-            )
-
-        telemetry = {
-            "global_position_valid": bool(drone.get("global_position_valid", False)),
-            "gps_fix_type": drone.get("gps_fix_type", 0),
-            "satellites_visible": drone.get("satellites_visible", 0),
-            "gps_eph": drone.get("gps_eph", -1.0),
-            "gps_epv": drone.get("gps_epv", -1.0),
-            "has_local_position": bool(drone.get("local_position_valid", False)),
-            "has_yaw": bool(drone.get("attitude_valid", False)),
-        }
-
-        field_heading_deg = None
-        if status["field_heading_yaw_rad"] is not None:
-            field_heading_deg = math.degrees(float(status["field_heading_yaw_rad"]))
-
-        return {
-            "ok": True,
-            "field_reference": {
-                "is_confirmed": status["is_confirmed"],
-                "is_frozen": status["is_frozen"],
-                "origin_source": status["origin_source"],
-                "heading_source": status["heading_source"],
-                "field_heading_yaw_rad": status["field_heading_yaw_rad"],
-                "field_heading_deg": field_heading_deg,
-                "origin_local_n_m": status["origin_local_n_m"],
-                "origin_local_e_m": status["origin_local_e_m"],
-                "origin_local_z_m": status["origin_local_z_m"],
-                "origin_lat": status["origin_lat"],
-                "origin_lon": status["origin_lon"],
-                "forward_marker_lat": status["forward_marker_lat"],
-                "forward_marker_lon": status["forward_marker_lon"],
-                "distance_m": distance_m,
-                "warnings": [],
-            },
-            "telemetry": telemetry,
-        }
-        # Add synced status
-        builder = self.runtime_context_builder
-        result["field_reference"]["active_source"] = (
-            "legacy_field_heading" if builder.field_heading_confirmed and not status["is_confirmed"]
-            else "field_reference" if status["is_confirmed"]
-            else "none"
-        )
-        result["field_reference"]["synced_to_runtime"] = (
-            builder.field_heading_confirmed
-            and builder.field_origin_confirmed
-            and status["is_confirmed"]
-            and builder.field_heading_yaw_rad == status.get("field_heading_yaw_rad")
-        )
-        return result
-
-    def _drone_snapshot(self) -> dict[str, object]:
+    def _drone_snapshot_raw(self) -> dict[str, object]:
         with self.control_command_log_lock:
             return dict(self.latest_snapshot).get("drone", {}) or {}
 
     def field_reference_mark_origin(self) -> dict[str, object]:
-        drone = self._drone_snapshot()
-        if not isinstance(drone, dict):
-            return {"ok": False, "error": "drone state unavailable"}
-
-        if not bool(drone.get("global_position_valid", False)):
-            return {"ok": False, "error": "no valid GPS position"}
-        gps_fix = drone.get("gps_fix_type", 0)
-        if not isinstance(gps_fix, (int, float)) or int(gps_fix) < 3:
-            return {"ok": False, "error": f"GPS fix type {gps_fix} < 3"}
-        lat = RuntimeContextBuilder._float_or_none(drone.get("lat"))
-        lon = RuntimeContextBuilder._float_or_none(drone.get("lon"))
-        if lat is None or lon is None:
-            return {"ok": False, "error": "GPS lat/lon not available"}
-
-        local_x = RuntimeContextBuilder._float_or_none(drone.get("local_x"))
-        local_y = RuntimeContextBuilder._float_or_none(drone.get("local_y"))
-        local_z = RuntimeContextBuilder._float_or_none(drone.get("local_z"))
-        if not bool(drone.get("local_position_valid", False)) or local_x is None or local_y is None:
-            return {"ok": False, "error": "no valid LOCAL_NED position"}
-
-        result = self.field_reference_service.mark_gps_origin(
-            lat, lon, local_n_m=local_x, local_e_m=local_y, local_z_m=local_z,
-        )
-        return result
+        return self.field_reference_controller.mark_origin()
 
     def field_reference_mark_forward(self) -> dict[str, object]:
-        drone = self._drone_snapshot()
-        if not isinstance(drone, dict):
-            return {"ok": False, "error": "drone state unavailable"}
-
-        if not bool(drone.get("global_position_valid", False)):
-            return {"ok": False, "error": "no valid GPS position"}
-        gps_fix = drone.get("gps_fix_type", 0)
-        if not isinstance(gps_fix, (int, float)) or int(gps_fix) < 3:
-            return {"ok": False, "error": f"GPS fix type {gps_fix} < 3"}
-        lat = RuntimeContextBuilder._float_or_none(drone.get("lat"))
-        lon = RuntimeContextBuilder._float_or_none(drone.get("lon"))
-        if lat is None or lon is None:
-            return {"ok": False, "error": "GPS lat/lon not available"}
-
-        return self.field_reference_service.mark_gps_forward(lat, lon)
+        return self.field_reference_controller.mark_forward()
 
     def field_reference_use_current_yaw(self) -> dict[str, object]:
-        drone = self._drone_snapshot()
-        if not isinstance(drone, dict):
-            return {"ok": False, "error": "drone state unavailable"}
-        if not bool(drone.get("attitude_valid", False)):
-            return {"ok": False, "error": "attitude yaw not valid"}
-        yaw = RuntimeContextBuilder._float_or_none(drone.get("yaw"))
-        if yaw is None:
-            return {"ok": False, "error": "attitude yaw not valid"}
-
-        return self.field_reference_service.set_compass_heading(yaw)
+        return self.field_reference_controller.use_current_yaw()
 
     def field_reference_set_manual_heading(self, yaw_deg: float) -> dict[str, object]:
-        try:
-            yaw_rad = math.radians(float(yaw_deg))
-        except (TypeError, ValueError):
-            return {"ok": False, "error": "yaw_deg must be a number"}
-        return self.field_reference_service.set_manual_heading(yaw_rad)
+        return self.field_reference_controller.set_manual_heading(yaw_deg)
 
     def field_reference_confirm(self) -> dict[str, object]:
-        result = self.field_reference_service.confirm()
-        if not result.get("ok"):
-            return result
-
-        ref = self.field_reference_service.reference
-        yaw = ref.field_heading_yaw_rad
-        ox = ref.origin_local_n_m
-        oy = ref.origin_local_e_m
-        oz = ref.origin_local_z_m
-        if yaw is None or ox is None or oy is None:
-            return {"ok": False, "error": "confirm succeeded but missing heading or LOCAL_NED origin"}
-
-        # Build source label
-        hs = ref.heading_source or ""
-        source = f"field_reference:{hs}" if hs else "field_reference"
-
-        ok = self.runtime_context_builder.confirm_field_reference(
-            field_heading_yaw_rad=yaw,
-            origin_local_x=ox,
-            origin_local_y=oy,
-            origin_local_z=oz,
-            source=source,
-            timestamp=ref.confirmed_at_s,
-        )
-        if not ok:
-            return {"ok": False, "error": "confirm succeeded but failed to sync to runtime context"}
-
-        result["synced_to_runtime"] = True
-        return result
+        return self.field_reference_controller.confirm()
 
     def field_reference_reset(self) -> dict[str, object]:
-        result = self.field_reference_service.reset()
-        self.runtime_context_builder.clear_field_heading()
-        return result
+        return self.field_reference_controller.reset()
 
     def field_reference_freeze(self) -> dict[str, object]:
-        return self.field_reference_service.freeze()
+        return self.field_reference_controller.freeze()
 
     # ------------------------------------------------------------------
 
@@ -1157,37 +961,10 @@ class SystemRunner:
         )
 
     def camera_recording_status(self) -> dict[str, object]:
-        return dict(self.camera_recording)
+        return self.command_pipeline.camera_recording_status()
 
     def camera_recording_toggle(self) -> CommandResult:
-        recording = bool(self.camera_recording.get("recording"))
-        client = YoloCommandClient(self.config.yolo_command)
-        try:
-            if recording:
-                client.stop_recording()
-                self.camera_recording = {
-                    **self.camera_recording,
-                    "recording": False,
-                    "message": "录制停止请求已发送",
-                }
-                message = "camera recording stop sent"
-            else:
-                client.start_recording()
-                self.camera_recording = {
-                    "recording": True,
-                    "path": "~/uav_recordings/camera_*.mp4",
-                    "message": "录制开始请求已发送",
-                }
-                message = "camera recording start sent"
-        except Exception as exc:
-            message = f"camera recording command failed: {exc}"
-            self.camera_recording = {**self.camera_recording, "message": message}
-            result = CommandResult(False, message)
-            self._record_event("ERROR", result.message)
-            return result
-        result = CommandResult(True, message)
-        self._record_event("OK", result.message)
-        return result
+        return self.command_pipeline.camera_recording_toggle()
 
     def action_lab_start_action(
         self,
@@ -1312,13 +1089,35 @@ class SystemRunner:
             self._record_event("WARN", "action mission current step skipped manually")
             return self.action_mission_status_payload()
 
-    def _action_lab_snapshot(self) -> dict[str, object]:
-        return self.action_runtime.status_payload(
-            send_commands=bool(self.controller_switches.snapshot().send_commands),
-        ) | {
-            "enabled": bool(self.action_lab_enabled),
-            "specs": list(self.action_lab_specs),
-        }
+    def web_execute_command(self, command: str) -> CommandResult:
+        stripped = command.strip()
+        if not stripped:
+            return CommandResult(False, "empty command")
+        if stripped.startswith("switch_source "):
+            self.disable_automatic_sending("source_switch")
+        manager = self.services.link_manager
+        if manager is None:
+            if stripped.startswith("target "):
+                return self.command_pipeline.execute_yolo_command(stripped)
+            return CommandResult(False, "telemetry is not connected")
+        handler = build_ui_command_handler(
+            manager,
+            controller_switches=self.controller_switches,
+            yolo_client=YoloCommandClient(self.config.yolo_command),
+            mission_command_handler=self._handle_mission_command,
+            stage_override_handler=self._set_stage_override,
+            stage_config_reload_handler=self._reload_mission_stage_config,
+        )
+        result = handler(stripped)
+        self._record_event("OK" if result.ok else "ERROR", result.message)
+        return result
+
+    def _execute_yolo_command(self, command: str) -> CommandResult:
+        return self.command_pipeline.execute_yolo_command(command)
+
+    # ------------------------------------------------------------------
+    # action lab dispatch helpers
+    # ------------------------------------------------------------------
 
     def _action_lab_dispatch_gate(self, action_type: str | None = None) -> tuple[bool, str]:
         return self.action_runtime.dispatcher.gate(
@@ -1365,75 +1164,6 @@ class SystemRunner:
             for parameter in signature.parameters.values()
         )
 
-    def _web_stage_modes(self) -> list[str]:
-        if self.mission_runner is None:
-            return ["NO_MISSION"]
-        mission_name = self.mission_runner.mission.name
-        if mission_name == "rescue_competition":
-            from missions.rescue_competition.mission import RescueStage
-
-            return list(dict.fromkeys(["AUTO", *[stage.value for stage in RescueStage]]))
-        if mission_name == "visual_tracking":
-            return ["AUTO", "IDLE", "APPROACH_TRACK", "OVERHEAD_HOLD", "CORRIDOR_FOLLOW"]
-        return ["AUTO", "IDLE"]
-
-    def _active_mission_stage_selection(self) -> str:
-        if self.mission_runner is None:
-            return "NO_MISSION"
-        return self.mission_stage_selections.get(self.mission_runner.mission.name, "AUTO")
-
-    def _mission_action_log_lines(self) -> list[str]:
-        if self.mission_runner is None:
-            return []
-        return self.mission_runner.get_action_log_lines()
-
-    @classmethod
-    def _json_safe(cls, value):
-        return RuntimeContextBuilder.json_safe(value)
-
-    def web_execute_command(self, command: str) -> CommandResult:
-        stripped = command.strip()
-        if not stripped:
-            return CommandResult(False, "empty command")
-        if stripped.startswith("switch_source "):
-            self.disable_automatic_sending("source_switch")
-        manager = self.services.link_manager
-        if manager is None:
-            if stripped.startswith("target "):
-                return self._execute_yolo_command(stripped)
-            return CommandResult(False, "telemetry is not connected")
-        handler = build_ui_command_handler(
-            manager,
-            controller_switches=self.controller_switches,
-            yolo_client=YoloCommandClient(self.config.yolo_command),
-            mission_command_handler=self._handle_mission_command,
-            stage_override_handler=self._set_stage_override,
-            stage_config_reload_handler=self._reload_mission_stage_config,
-        )
-        result = handler(stripped)
-        self._record_event("OK" if result.ok else "ERROR", result.message)
-        return result
-
-    def _execute_yolo_command(self, command: str) -> CommandResult:
-        parts = command.split()
-        client = YoloCommandClient(self.config.yolo_command)
-        try:
-            if parts[1] == "lock" and len(parts) == 3:
-                client.lock_target(int(parts[2]))
-            elif parts[1] == "unlock":
-                client.unlock_target()
-            elif parts[1] == "next":
-                client.send("switch_next")
-            elif parts[1] in {"prev", "previous"}:
-                client.send("switch_prev")
-            else:
-                return CommandResult(False, "format: target <next|prev|lock <track_id>|unlock>")
-        except Exception as exc:
-            return CommandResult(False, f"target command failed: {exc}")
-        result = CommandResult(True, f"{command} sent")
-        self._record_event("OK", result.message)
-        return result
-
     def web_missions(self) -> list[dict[str, object]]:
         if self.mission_runner is None:
             return [
@@ -1459,15 +1189,9 @@ class SystemRunner:
         ]
 
     def _web_stage_modes_for_mission(self, mission_name: str) -> list[str]:
-        if self.mission_runner is None:
+        if self.web_status_service is None:
             return ["NO_MISSION"]
-        if mission_name == "rescue_competition":
-            from missions.rescue_competition.mission import RescueStage
-
-            return list(dict.fromkeys([stage.value for stage in RescueStage]))
-        if mission_name == "visual_tracking":
-            return ["IDLE", "APPROACH_TRACK", "OVERHEAD_HOLD", "CORRIDOR_FOLLOW"]
-        return []
+        return self.web_status_service.web_stage_modes_for_mission(mission_name)
 
     def apply_active_mission_config(self, relative_path: str) -> CommandResult:
         if self.mission_runner is None:
@@ -1520,31 +1244,13 @@ class SystemRunner:
             return CommandResult(False, f"{service} restart command is not configured")
         if service == "app":
             self.disable_automatic_sending("app_restart")
-        try:
-            self._stop_external_process(service)
-            process = subprocess.Popen(command, start_new_session=True)
-        except OSError as exc:
-            return CommandResult(False, f"failed to restart {service}: {exc}")
-        self.external_processes[service] = process
-        self._record_event("SERVICE", f"{service} restart requested")
-        return CommandResult(True, f"{service} restart requested pid={process.pid}")
+        return self.command_pipeline.restart_external_service(service, command)
 
     def _stop_external_processes(self) -> None:
-        for service in list(self.external_processes):
-            self._stop_external_process(service)
+        self.command_pipeline.stop_all_external_processes()
 
     def _stop_external_process(self, service: str) -> None:
-        process = self.external_processes.pop(service, None)
-        if process is None or process.poll() is not None:
-            return
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-            process.wait(timeout=3.0)
-        except (OSError, subprocess.TimeoutExpired):
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except OSError:
-                pass
+        self.command_pipeline.stop_external_process(service)
 
     def _get_mission_control_lines(self) -> list[str]:
         with self.control_command_log_lock:
