@@ -65,9 +65,7 @@ data/models/cuadc-fp16.rknn
 model_path: "../data/models/cuadc-fp16.rknn"
 ```
 
-已知冲突：根 `config/yolo.yaml` 当前仍指向不存在的
-`cuadc2026-fp16.rknn`，而 real profile 和部署文件使用 `cuadc-fp16.rknn`。该 YAML
-修改留到后续配置清理阶段。
+根 `config/yolo.yaml` 和各 profile 现已统一为 `cuadc-fp16.rknn`。
 
 RK3588/RKNN 可以支持 INT8，但本项目当前 INT8 模型已废弃。除非重新量化、校准并
 验证检测正常，否则不得切回 INT8 默认部署。

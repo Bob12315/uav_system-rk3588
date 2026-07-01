@@ -23,7 +23,7 @@ class Detection:
 
 
 class RknnDetector:
-    """RK3588 RKNN YOLO INT8 detector for supported model-zoo and flat layouts."""
+    """RK3588 RKNN YOLO detector for supported model-zoo and flat layouts."""
 
     def __init__(
         self,

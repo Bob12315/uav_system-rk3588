@@ -58,7 +58,7 @@ class Annotator:
         latency_ms: float,
     ) -> None:
         rows = [
-            f"NPU INT8: {fps:.1f} FPS  {latency_ms:.1f} ms",
+            f"NPU RKNN: {fps:.1f} FPS  {latency_ms:.1f} ms",
             f"state: {current_target.tracking_state}",
             f"locked_track_id: {locked_track_id if locked_track_id is not None else -1}",
             f"lost_count: {current_target.lost_count}",

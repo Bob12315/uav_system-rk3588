@@ -12,8 +12,7 @@
   进入 `action_lab_only`
 - `uav_ui`：terminal/curses UI deprecated，但 app 仍导入 runtime switches、命令
   分发和 YOLO client，不能直接删除
-- 模型：部署文件是 `data/models/cuadc-fp16.rknn`；`config/yolo.yaml` 仍指向不存在的
-  `cuadc2026-fp16.rknn`，旧 YOLO 文档仍有 INT8 默认描述
+- 模型：部署文件是 `data/models/cuadc-fp16.rknn`（已统一，旧 `cuadc2026-fp16.rknn` 路径已修正）
 
 ## 大文件快照
 
