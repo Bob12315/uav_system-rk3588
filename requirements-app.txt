@@ -3,4 +3,5 @@ pyyaml
 numpy
 fastapi
 uvicorn
+websockets
 httpx
