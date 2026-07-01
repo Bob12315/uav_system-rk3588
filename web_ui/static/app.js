@@ -1,4 +1,3 @@
-const $ = id => document.getElementById(id);
 let state = {};
 let completions = [];
 let history = [];
@@ -177,12 +176,24 @@ const FIELD_DEFAULTS = {
 };
 
 const json = window.UavApi.request;
-function stamp(seconds) {
-  return seconds ? new Date(seconds * 1000).toLocaleTimeString() : "--";
-}
-function escapeHtml(text) {
-  return String(text ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-}
+
+const {
+  stamp,
+  escapeHtml,
+  num,
+  degNum,
+  xyzText,
+  boolText,
+} = window.UavFormat;
+
+const {
+  $,
+  setOptionalText,
+  cards,
+  infoRows,
+  renderSummaryRows,
+} = window.UavDom;
+
 async function execute(command, source = "BUTTON") {
   if (!command) return;
   const result = await json("/api/commands/execute", {
@@ -229,29 +240,6 @@ async function clearLocalization() {
 function setBadge(element, text, cls) {
   element.textContent = text;
   element.className = `badge ${cls || ""}`;
-}
-function cards(target, values) {
-  target.innerHTML = Object.entries(values).map(([label, value]) =>
-    `<div class="card"><label>${escapeHtml(label)}</label>${escapeHtml(value)}</div>`).join("");
-}
-function infoRows(target, rows) {
-  target.innerHTML = rows.map(([label, value]) =>
-    `<div class="info-label">${escapeHtml(label)}</div><div class="info-value">${escapeHtml(value)}</div>`
-  ).join("");
-}
-function num(value, digits = 2, unit = "") {
-  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(digits)}${unit}` : "--";
-}
-function degNum(value, digits = 1) {
-  return Number.isFinite(Number(value)) ? `${Number(value).toFixed(digits)}°` : "--";
-}
-function xyzText(x, y, z, digits = 2) {
-  return [x, y, z].every(value => Number.isFinite(Number(value)))
-    ? `${Number(x).toFixed(digits)} / ${Number(y).toFixed(digits)} / ${Number(z).toFixed(digits)}`
-    : "--";
-}
-function boolText(value, yes = "YES", no = "NO") {
-  return value ? yes : no;
 }
 function actionDisplayName(name, fallback = "") {
   const base = String(fallback || name || "--");
@@ -537,17 +525,6 @@ function renderMissionSteps(next) {
   }).join("");
   $("missionSteps").querySelectorAll("[data-stage-mode]").forEach(button => button.onclick = () =>
     execute(button.dataset.command, "STAGE"));
-}
-function setOptionalText(id, value) {
-  const element = $(id);
-  if (element) element.textContent = value;
-}
-function renderSummaryRows(id, rows) {
-  const element = $(id);
-  if (!element) return;
-  element.innerHTML = rows.map(([label, value, tone]) =>
-    `<div class="summary-row ${tone || ""}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`
-  ).join("");
 }
 function dispatchFromActionLab(actionLab) {
   const payload = actionLab || latestActionLab || {};
