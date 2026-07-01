@@ -21,9 +21,6 @@ data/models/cuadc-fp16.rknn
 RK3588/RKNN 本身可以支持 INT8，但本项目当前 INT8 模型已废弃。除非重新完成量化
 校准并验证类别、置信度和检测结果正常，否则不要切回 INT8 默认部署。
 
-已知 TODO：根 `config/yolo.yaml` 目前仍指向不存在的
-`cuadc2026-fp16.rknn`；该配置将在后续清理阶段修正。
-
 ## 流程
 
 ```text

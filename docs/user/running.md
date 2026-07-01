@@ -1,6 +1,6 @@
 # RK3588 运行手册
 
-本项目仅面向 Linux ARM64 RK3588。`yolo_app` 使用 RKNN FP16/INT8 模型和
+本项目仅面向 Linux ARM64 RK3588。`yolo_app` 使用 RKNN FP16 模型和
 RK3588 NPU，不提供 x86、CUDA、PyTorch 或 GPU 推理路径。
 
 ## 1. 启动前确认

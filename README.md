@@ -53,8 +53,7 @@ data/models/cuadc-fp16.rknn
 ```
 
 RK3588/RKNN 本身可以支持 INT8，但本项目当前 INT8 模型已废弃。除非重新完成量化
-校准并验证检测正常，否则不要切回 INT8。当前 `config/yolo.yaml` 仍存在模型文件名
-不一致 TODO，将在后续配置清理阶段修复。
+校准并验证检测正常，否则不要切回 INT8。
 
 ## 安装
 
