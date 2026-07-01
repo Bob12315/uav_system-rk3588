@@ -8,6 +8,8 @@ from typing import Any
 
 
 from app.dispatch.policy import ACTION_DISPATCH_POLICY, DispatchRule, SafetyGate
+from app.dispatch.types import empty_dispatch
+from app.dispatch.normalizer import get_action_params, optional_float, format_log_float
 from telemetry_link.frames import BODY_NED, LOCAL_NED
 
 
@@ -146,10 +148,7 @@ class ActionDispatcher:
 
     @staticmethod
     def _format_log_float(value: object) -> str:
-        try:
-            return f"{float(value):.3f}"
-        except (TypeError, ValueError):
-            return "None"
+        return format_log_float(value)
 
     # ------------------------------------------------------------------
     # dispatch_actions — mirrors _dispatch_action_lab_actions
@@ -291,19 +290,11 @@ class ActionDispatcher:
 
     @staticmethod
     def _action_params(action: dict[str, object]) -> dict[str, object]:
-        params = action.get("params")
-        if not isinstance(params, dict):
-            raise ValueError("missing_params")
-        return params
+        return get_action_params(action)
 
     @staticmethod
     def _optional_float(value: object) -> float | None:
-        if value is None:
-            return None
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
+        return optional_float(value)
 
     def _dispatch_set_servo(
         self,
@@ -822,7 +813,7 @@ class ActionDispatcher:
 
     @staticmethod
     def empty_dispatch() -> dict[str, list[dict[str, object]]]:
-        return {"sent": [], "skipped": [], "errors": []}
+        return empty_dispatch()
 
     def reset_keys(self) -> None:
         self.dispatched_keys.clear()
