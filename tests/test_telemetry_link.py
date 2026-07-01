@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -235,12 +236,22 @@ def test_build_arg_parser_defaults_to_root_telemetry_config(monkeypatch) -> None
     assert args.config == str(DEFAULT_CONFIG_PATH)
 
 
-def test_load_config_file_uses_same_root_telemetry_parser() -> None:
+def test_load_config_file_uses_tracked_real_root_profile() -> None:
     cfg = load_config_file(DEFAULT_CONFIG_PATH)
+
+    assert cfg.data_source == "real"
+    assert cfg.active_source == "real"
+    assert cfg.real.connection_type == "eth"
+
+
+def test_load_config_file_uses_explicit_sitl_profile() -> None:
+    profile = Path(__file__).resolve().parents[1] / "config" / "profiles" / "rk3588-sitl" / "telemetry.yaml"
+
+    cfg = load_config_file(profile)
 
     assert cfg.data_source == "sitl"
     assert cfg.active_source == "sitl"
-    assert cfg.real.connection_type == "eth"
+    assert cfg.sitl.connection_type == "udp"
 
 
 def test_load_config_parses_eth_endpoint(tmp_path, monkeypatch) -> None:

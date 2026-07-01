@@ -19,6 +19,9 @@ def _params(**overrides: object) -> dict[str, object]:
         "settle_updates_per_waypoint": 1,
         "max_updates_per_waypoint": 10,
         "yaw_mode": "hold",
+        # These tests exercise single-observation Action flow, not the production
+        # multi-observation rejection policy.
+        "fusion": {"min_cluster_size": 1},
     }
     params.update(overrides)
     return params

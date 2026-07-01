@@ -1,5 +1,6 @@
-from app.app_config import build_arg_parser, load_app_config
+from app.app_config import build_arg_parser, load_app_config, load_telemetry_config
 from app.system_runner import SystemRunner
+from telemetry_link.config import DEFAULT_CONFIG_PATH, load_config_file
 from web_ui.server import create_app
 
 
@@ -11,6 +12,24 @@ def test_app_config_falls_back_when_legacy_missions_are_unavailable():
     assert config.mission_enabled is False
     assert config.mission_name == "action_lab_only"
     assert config.mission_config_path is None
+
+
+def test_app_config_loads_current_web_and_terminal_ui_settings() -> None:
+    args = build_arg_parser().parse_args(["--send-commands", "false"])
+
+    config = load_app_config(args)
+
+    assert config.ui.web_enabled is True
+    assert config.ui.terminal_enabled is False
+    assert config.ui.web_port == 8080
+
+
+def test_app_config_reuses_telemetry_link_config_parser() -> None:
+    assert load_telemetry_config(DEFAULT_CONFIG_PATH) == load_config_file(DEFAULT_CONFIG_PATH)
+
+
+def test_app_help_does_not_expose_removed_control_config() -> None:
+    assert "--control-config" not in build_arg_parser().format_help()
 
 
 def test_system_runner_snapshot_works_without_mission_runtime():

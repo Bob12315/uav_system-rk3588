@@ -331,3 +331,79 @@ def test_action_output_is_plain_dict_not_mission_action() -> None:
     result = action.update({})
 
     assert isinstance(result.actions[0], dict)
+
+
+# ---------------------------------------------------------------------------
+# Phase 4B parity: adapter matches direct field_to_local_ned() call
+# ---------------------------------------------------------------------------
+
+def test_local_target_matches_direct_field_to_local_ned() -> None:
+    """The _local_target() adapter must produce the same result as calling
+    field_to_local_ned() directly with an equivalent FieldReference."""
+    from app.coordinate_transform import field_to_local_ned as direct_convert
+    from app.field_reference import FieldReference
+
+    action = GotoWaypointAction()
+    action.start({
+        "x": 3.0, "y": 4.0, "altitude_m": 5.0,
+        "waypoint_mode": "field", "yaw_mode": "field_heading",
+    })
+
+    context = {
+        "field_heading_yaw_rad": 0.5,
+        "field_heading_confirmed": True,
+        "field_origin_local_x": 10.0,
+        "field_origin_local_y": 20.0,
+        "field_origin_confirmed": True,
+    }
+
+    # via adapter
+    target = action._local_target(context)
+    assert target is not None
+
+    # via direct call
+    ref = FieldReference()
+    ref.is_confirmed = True
+    ref.origin_local_n_m = 10.0
+    ref.origin_local_e_m = 20.0
+    ref.field_heading_yaw_rad = 0.5
+    expected = direct_convert(3.0, 4.0, 5.0, reference=ref)
+
+    assert target["x"] == pytest.approx(expected.north_m)
+    assert target["y"] == pytest.approx(expected.east_m)
+    assert target["z"] == pytest.approx(expected.z_down_m)
+
+
+@pytest.mark.parametrize("yaw_rad", [0.0, math.pi / 2.0, math.pi])
+def test_local_target_matches_direct_at_cardinal_yaws(yaw_rad: float) -> None:
+    """Adapter parity at cardinal yaw angles."""
+    from app.coordinate_transform import field_to_local_ned as direct_convert
+    from app.field_reference import FieldReference
+
+    action = GotoWaypointAction()
+    action.start({
+        "x": 2.0, "y": 3.0, "altitude_m": 2.0,
+        "waypoint_mode": "field", "yaw_mode": "field_heading",
+    })
+
+    context = {
+        "field_heading_yaw_rad": yaw_rad,
+        "field_heading_confirmed": True,
+        "field_origin_local_x": 0.0,
+        "field_origin_local_y": 0.0,
+        "field_origin_confirmed": True,
+    }
+
+    target = action._local_target(context)
+    assert target is not None
+
+    ref = FieldReference()
+    ref.is_confirmed = True
+    ref.origin_local_n_m = 0.0
+    ref.origin_local_e_m = 0.0
+    ref.field_heading_yaw_rad = yaw_rad
+    expected = direct_convert(2.0, 3.0, 2.0, reference=ref)
+
+    assert target["x"] == pytest.approx(expected.north_m)
+    assert target["y"] == pytest.approx(expected.east_m)
+    assert target["z"] == pytest.approx(expected.z_down_m)

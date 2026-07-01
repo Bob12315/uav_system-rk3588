@@ -3,6 +3,9 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from app.coordinate_transform import field_to_local_ned
+from app.field_reference import FieldReference
+
 from .base import ActionModule
 from .result import ActionResult
 
@@ -264,15 +267,16 @@ class GotoWaypointAction(ActionModule):
         if field_heading_yaw_rad is None or origin_x is None or origin_y is None:
             return None
 
-        cos_yaw = math.cos(field_heading_yaw_rad)
-        sin_yaw = math.sin(field_heading_yaw_rad)
-        dx_north = self.target_y * cos_yaw - self.target_x * sin_yaw
-        dy_east = self.target_y * sin_yaw + self.target_x * cos_yaw
-        return {
-            "x": origin_x + dx_north,
-            "y": origin_y + dy_east,
-            "z": self.target_z,
-        }
+        ref = FieldReference()
+        ref.is_confirmed = True  # guarded by the checks above
+        ref.origin_local_n_m = origin_x
+        ref.origin_local_e_m = origin_y
+        ref.field_heading_yaw_rad = field_heading_yaw_rad
+
+        result = field_to_local_ned(
+            self.target_x, self.target_y, self.altitude_m, reference=ref,
+        )
+        return {"x": result.north_m, "y": result.east_m, "z": result.z_down_m}
 
     @staticmethod
     def _float_context(context: dict[str, Any], name: str) -> float | None:

@@ -15,6 +15,8 @@ def _params(**overrides: object) -> dict[str, object]:
         "max_updates_per_waypoint": 10,
         "waypoint_mode": "absolute",
         "yaw_mode": "hold",
+        # These tests exercise single-observation survey flow explicitly.
+        "fusion": {"min_cluster_size": 1},
     }
     params.update(overrides)
     return params

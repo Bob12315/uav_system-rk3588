@@ -1,206 +1,59 @@
-# 控制数据流
+# 当前控制与数据流
 
-本文描述从一帧 YOLO 输出到 MAVLink 命令的完整链路。
-
-## 1. YOLO 输出
-
-`yolo_app` 读取视频源，在 RK3588 NPU 上调用 RKNNLite 执行 RKNN FP16/INT8 推理，
-使用短时 IoU 关联维护 `track_id`，选择主目标，并通过 UDP JSON 输出。
-
-典型字段：
+## 感知和状态
 
 ```text
-timestamp
-frame_id
-target_valid
-tracking_state
-track_id
-class_name
-confidence
-cx/cy/w/h
-image_width/image_height
-target_size
-ex/ey
-lost_count
+camera → yolo_app/RKNNLite → UDP target + scene
+                                  ↓
+telemetry_link → Drone/Gimbal ─→ fusion → SystemRunner snapshot/context
 ```
 
-## 2. app 接收 YOLO
+YOLO 只负责感知；telemetry_link 只负责飞控通讯；fusion 不生成控制命令。
 
-`app.service_manager.YoloUdpReceiver` 监听 `config/app.yaml` 中的：
-
-```yaml
-yolo_udp_ip
-yolo_udp_port
-```
-
-并将 JSON 解码为 `fusion.models.PerceptionTarget`。
-
-如果超时未收到 YOLO，`target_valid` 会置为 false。
-
-## 3. telemetry 状态
-
-`telemetry_link.LinkManager` 提供：
-
-```python
-get_latest_drone_state()
-get_latest_gimbal_state()
-get_link_status()
-```
-
-状态来自 `TelemetryReceiver -> StateCache`。
-
-## 4. fusion
-
-`FusionManager.update(perception, drone, gimbal)` 输出 `FusedState`。
-
-融合层负责：
-
-- 数据有效性。
-- 目标状态。
-- 云台状态。
-- 机体姿态和速度。
-- `control_allowed`。
-- 相机误差和机体系误差。
-
-融合层不负责：
-
-- 任务切换。
-- 速度控制。
-- MAVLink 发送。
-
-## 5. input adapter
-
-`StageInputAdapter.adapt(fused)` 输出 `MissionStageInput`。
-
-它负责：
-
-- 计算 dt。
-- 计算 source age。
-- 判断 track switched。
-- 判断 target stable。
-- 对误差、云台角、目标尺度做一阶低通。
-
-## 6. health monitor
-
-`HealthMonitor.update(inputs)` 输出健康状态。
-
-它负责：
-
-- vision 是否 fresh。
-- drone 是否 fresh。
-- gimbal 是否 fresh。
-- fusion 是否 ready。
-- control 是否 ready。
-- hold reason。
-
-## 7. mission
-
-`SystemRunner` 构造 `MissionContext`，再调用 `MissionRunner.update(context)`。当前 mission 输出 `MissionOutput`：
-
-- `active_mode`：当前 mission 内 stage controller 的名字。
-- `actions`：一次性或重复任务动作请求，例如 `takeoff`、`local_position`、
-  `set_servo`、`set_relay`。
-- `stage` / `hold_reason` / `detail`：任务阶段和诊断信息。
-
-典型流转：
+## Action Lab
 
 ```text
-IDLE
-  -> APPROACH_TRACK
-  -> OVERHEAD_HOLD
-  -> APPROACH_TRACK
+Web UI request
+→ SystemRunner
+→ ActionRuntimeService.start/tick
+→ ActionRunner
+→ missions/common/actions/<action>
+→ ActionResult/action requests
+→ ActionDispatcher
+→ LinkManager
+→ CommandSender
+→ MAVLink
 ```
 
-`visual_tracking` mission 保留上述视觉跟踪流转。`rescue_competition` mission
-按阶段请求解锁、起飞、航点、目标搜索、下降投放、侦察、返航和降落动作。
-比赛任务按 YAML 中的投放区和侦察区显式扫描航点逐点运行；扫描结束仍无目标时
-进入后续流程，不强行进入视觉对准。
+## Action Mission
 
-mission 只决定流程、active stage 和通用 action，不直接发送 MAVLink。
-
-## 8. mission stage controller
-
-`StageRegistry.get(active_mode)` 取得当前 mission 对应阶段控制器，然后：
-
-```python
-raw_command, mode_status = mode.update(inputs)
+```text
+config/action_missions/*.json
+→ MissionOrchestrator
+→ current Action step
+→ ActionRuntimeService
+→ same dispatcher/send path as Action Lab
 ```
 
-`APPROACH_TRACK`：
+MissionOrchestrator 负责编排、黑板、重试和失败跳转；不会绕过 ActionRuntimeService。
 
-- `ex_cam/ey_cam -> gimbal yaw/pitch rate`
-- `ex_body -> vy`
-- `gimbal_yaw -> yaw_rate`
-- `target_size_ref - target_size -> vx`
+## SEND 双门控
 
-`OVERHEAD_HOLD`：
+实发至少同时要求：
 
-- gimbal 进入模式后发送一次性 pitch 角度目标到正下方，yaw 保持当前角度。
-- gimbal 到位后不再输出云台控制。
-- `ex_cam -> vy`
-- `ey_cam -> vx`
+1. 系统 `send_commands`/SEND 开启；
+2. Action 的 send-actions 请求开启。
 
-`DOWNWARD_ALIGN_DESCEND`：
+配置任务、加载模板和 Field Reference UI 操作本身不应产生飞行运动命令。停止连续
+BODY_NED 动作时必须发送 zero/stop 并清理旧连续命令。
 
-- 仅供 `rescue_competition` 使用。
-- 固定下视相机，不发送云台角度或速率命令。
-- 不要求云台反馈。
-- 不输出偏航，`yaw_rate_cmd=0`。
-- `ex_cam -> vy`
-- `ey_cam -> vx`
-- 目标对准后输出慢速 `vz` 下降；未对准时保持高度，只做水平微调。
+## Field Reference
 
-## 9. debug runtime
+当前 SystemRunner 通过 RuntimeContextBuilder 提供 yaw-based FIELD 原点和方向；
+FIELD Action 转为 LOCAL_NED 后才进入 dispatcher。后续将收敛为唯一
+CoordinateTransform。未确认 Field Reference 时不得实发 FIELD 航点。
 
-`DebugRuntime` 可覆盖：
+## 已废弃流程
 
-- active mode。
-- gimbal/body/approach 通道。
-- command dry-run 语义。
-
-## 10. command shaper
-
-`CommandShaper.update(raw_command, dt)` 输出 shaped command。
-
-它负责：
-
-- 限幅。
-- slew rate 平滑。
-- disabled 通道归零。
-- NaN/inf 归零。
-
-## 11. executor
-
-`FlightCommandExecutor.execute(shaped)` 将命令交给 `telemetry_link`。
-
-body 通道：
-
-```python
-LinkManager.submit_control_command(ControlCommand(...))
-```
-
-gimbal 通道：
-
-```python
-LinkManager.send_gimbal_rate(...)
-```
-
-gimbal angle 动作通道：
-
-```python
-LinkManager.send_gimbal_angle(...)
-```
-
-如果 `send_commands=false`，只打印 dry-run 日志，不发送。
-
-## 12. telemetry_link 发送
-
-`CommandSender` 从队列取命令并发送：
-
-- `ControlCommand` -> `SET_POSITION_TARGET_LOCAL_NED`
-- `ActionCommand(GIMBAL_ANGLE)` -> `MAV_CMD_DO_MOUNT_CONTROL`
-- `ActionCommand(SET_SERVO/SET_RELAY/RELEASE_PAYLOAD)` -> 通用动作封装
-- `GimbalRateCommand` -> `MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW`
-- `ActionCommand` -> `COMMAND_LONG` 或 `COMMAND_INT`
-
-断线时清空连续控制命令，避免恢复连接后发送旧命令。
+MissionRunner/StageRegistry/FlightCommand/CommandShaper/FlightCommandExecutor 不是当前
+可运行流程。不得为了让旧文档或旧测试通过而恢复该链路。
