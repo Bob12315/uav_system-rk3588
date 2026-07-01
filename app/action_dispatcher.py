@@ -10,6 +10,7 @@ from typing import Any
 from app.dispatch.policy import ACTION_DISPATCH_POLICY, DispatchRule, SafetyGate
 from app.dispatch.types import empty_dispatch
 from app.dispatch.normalizer import get_action_params, optional_float, format_log_float
+from app.dispatch.servo_handler import dispatch_set_servo
 from telemetry_link.frames import BODY_NED, LOCAL_NED
 
 
@@ -302,56 +303,19 @@ class ActionDispatcher:
         *,
         link_manager: object | None,
     ) -> dict[str, object]:
-        if link_manager is None:
-            params = action.get("params") if isinstance(action.get("params"), dict) else {}
-            self.last_servo_command = {
-                "channel": params.get("channel"),
-                "pwm": params.get("pwm"),
-                "priority": action.get("priority", 3),
-                "time": time.time(),
-                "key": str(action.get("key") or ""),
-                "ack": None,
-                "error": "telemetry_not_connected",
-            }
-            return {"status": "error", "reason": "telemetry_not_connected"}
-        params = self._action_params(action)
-        channel = int(params.get("servo_output", params.get("channel")))
-        pwm = int(params["pwm"])
-        priority = int(action.get("priority", 3))
-        self._logger.info(
-            "action_lab dispatch set_servo channel=%s pwm=%s priority=%s key=%s",
-            channel,
-            pwm,
-            priority,
-            action.get("key"),
-        )
-        # prefer semantic wrapper (T4)
-        wrapper = getattr(link_manager, "set_servo_output_pwm", None)
-        if callable(wrapper):
-            wrapper(servo_output=channel, pwm=pwm, priority=priority)
-        else:
-            set_servo = getattr(link_manager, "set_servo", None)
-            if not callable(set_servo):
-                return {"status": "error", "reason": "set_servo_not_callable"}
-            set_servo(channel, pwm, priority=priority)
-        self.last_servo_command = {
-            "channel": channel,
-            "pwm": pwm,
-            "priority": priority,
-            "time": time.time(),
-            "key": str(action.get("key") or ""),
-            "ack": None,
-            "error": None,
-        }
-        return {
-            "status": "sent",
-            "detail": {
-                "action_type": "set_servo",
-                "channel": channel,
-                "pwm": pwm,
-                "key": str(action.get("key") or ""),
-            },
-        }
+        result, sc = dispatch_set_servo(action, link_manager=link_manager)
+        if sc is not None:
+            self.last_servo_command = sc
+        if result.get("status") == "sent":
+            detail = result.get("detail", {})
+            self._logger.info(
+                "action_lab dispatch set_servo channel=%s pwm=%s priority=%s key=%s",
+                detail.get("channel"),
+                detail.get("pwm"),
+                action.get("priority", 3),
+                action.get("key"),
+            )
+        return result
 
     def _dispatch_set_mode(
         self,
