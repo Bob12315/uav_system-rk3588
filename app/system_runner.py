@@ -26,6 +26,7 @@ from app.runtime_context import RuntimeContextBuilder
 from app.field_reference_service import FieldReferenceService
 from app.field_reference_controller import FieldReferenceController
 from app.web_status_service import WebStatusService
+from app.command_pipeline import CommandPipeline
 from app.debug_runtime import DebugRuntime
 from app.health_monitor import HealthMonitor
 from app.service_manager import ServiceManager
@@ -187,6 +188,12 @@ class SystemRunner:
             latest_mission_stage=self.latest_mission_stage,
             latest_stage_controller=self.latest_stage_controller,
             latest_hold_reason=self.latest_hold_reason,
+        )
+        self.command_pipeline = CommandPipeline(
+            yolo_command_config=self.config.yolo_command,
+            camera_recording=self.camera_recording,
+            external_processes=self.external_processes,
+            record_event=self._record_event,
         )
         self.action_runtime = ActionRuntimeService(
             runner=ActionRunner(create_action_lab_registry()),
@@ -954,37 +961,10 @@ class SystemRunner:
         )
 
     def camera_recording_status(self) -> dict[str, object]:
-        return dict(self.camera_recording)
+        return self.command_pipeline.camera_recording_status()
 
     def camera_recording_toggle(self) -> CommandResult:
-        recording = bool(self.camera_recording.get("recording"))
-        client = YoloCommandClient(self.config.yolo_command)
-        try:
-            if recording:
-                client.stop_recording()
-                self.camera_recording = {
-                    **self.camera_recording,
-                    "recording": False,
-                    "message": "录制停止请求已发送",
-                }
-                message = "camera recording stop sent"
-            else:
-                client.start_recording()
-                self.camera_recording = {
-                    "recording": True,
-                    "path": "~/uav_recordings/camera_*.mp4",
-                    "message": "录制开始请求已发送",
-                }
-                message = "camera recording start sent"
-        except Exception as exc:
-            message = f"camera recording command failed: {exc}"
-            self.camera_recording = {**self.camera_recording, "message": message}
-            result = CommandResult(False, message)
-            self._record_event("ERROR", result.message)
-            return result
-        result = CommandResult(True, message)
-        self._record_event("OK", result.message)
-        return result
+        return self.command_pipeline.camera_recording_toggle()
 
     def action_lab_start_action(
         self,
@@ -1109,6 +1089,7 @@ class SystemRunner:
             self._record_event("WARN", "action mission current step skipped manually")
             return self.action_mission_status_payload()
 
+    def web_execute_command(self, command: str) -> CommandResult:
         stripped = command.strip()
         if not stripped:
             return CommandResult(False, "empty command")
@@ -1117,7 +1098,7 @@ class SystemRunner:
         manager = self.services.link_manager
         if manager is None:
             if stripped.startswith("target "):
-                return self._execute_yolo_command(stripped)
+                return self.command_pipeline.execute_yolo_command(stripped)
             return CommandResult(False, "telemetry is not connected")
         handler = build_ui_command_handler(
             manager,
@@ -1132,24 +1113,7 @@ class SystemRunner:
         return result
 
     def _execute_yolo_command(self, command: str) -> CommandResult:
-        parts = command.split()
-        client = YoloCommandClient(self.config.yolo_command)
-        try:
-            if parts[1] == "lock" and len(parts) == 3:
-                client.lock_target(int(parts[2]))
-            elif parts[1] == "unlock":
-                client.unlock_target()
-            elif parts[1] == "next":
-                client.send("switch_next")
-            elif parts[1] in {"prev", "previous"}:
-                client.send("switch_prev")
-            else:
-                return CommandResult(False, "format: target <next|prev|lock <track_id>|unlock>")
-        except Exception as exc:
-            return CommandResult(False, f"target command failed: {exc}")
-        result = CommandResult(True, f"{command} sent")
-        self._record_event("OK", result.message)
-        return result
+        return self.command_pipeline.execute_yolo_command(command)
 
     # ------------------------------------------------------------------
     # action lab dispatch helpers
@@ -1200,7 +1164,7 @@ class SystemRunner:
             for parameter in signature.parameters.values()
         )
 
-    def web_execute_command(self, command: str) -> CommandResult:
+    def web_missions(self) -> list[dict[str, object]]:
         if self.mission_runner is None:
             return [
                 {
@@ -1280,31 +1244,13 @@ class SystemRunner:
             return CommandResult(False, f"{service} restart command is not configured")
         if service == "app":
             self.disable_automatic_sending("app_restart")
-        try:
-            self._stop_external_process(service)
-            process = subprocess.Popen(command, start_new_session=True)
-        except OSError as exc:
-            return CommandResult(False, f"failed to restart {service}: {exc}")
-        self.external_processes[service] = process
-        self._record_event("SERVICE", f"{service} restart requested")
-        return CommandResult(True, f"{service} restart requested pid={process.pid}")
+        return self.command_pipeline.restart_external_service(service, command)
 
     def _stop_external_processes(self) -> None:
-        for service in list(self.external_processes):
-            self._stop_external_process(service)
+        self.command_pipeline.stop_all_external_processes()
 
     def _stop_external_process(self, service: str) -> None:
-        process = self.external_processes.pop(service, None)
-        if process is None or process.poll() is not None:
-            return
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-            process.wait(timeout=3.0)
-        except (OSError, subprocess.TimeoutExpired):
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except OSError:
-                pass
+        self.command_pipeline.stop_external_process(service)
 
     def _get_mission_control_lines(self) -> list[str]:
         with self.control_command_log_lock:
