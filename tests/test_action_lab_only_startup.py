@@ -52,6 +52,39 @@ def test_system_runner_snapshot_works_without_mission_runtime():
     assert snapshot["action_mission"]["reason"] == "not_configured"
 
 
+def test_system_runner_run_starts_web_ui_without_mission_runtime(monkeypatch) -> None:
+    args = build_arg_parser().parse_args(["--run-seconds", "0", "--no-yolo-udp"])
+    config = load_app_config(args)
+    runner = SystemRunner(config)
+    started = []
+
+    class FakeWebUiServer:
+        def __init__(self, web_runner, ui_config) -> None:
+            assert web_runner.web_status_service is not None
+            app = create_app(web_runner, ui_config)
+            status_route = next(
+                route
+                for route in app.routes
+                if getattr(route, "path", "") == "/api/status"
+            )
+            assert status_route.endpoint()["mission"] == "action_lab_only"
+
+        def start(self) -> None:
+            started.append(True)
+
+        def stop(self) -> None:
+            return None
+
+    monkeypatch.setattr("web_ui.server.WebUiServer", FakeWebUiServer)
+    monkeypatch.setattr(runner.services, "start", lambda: None)
+    monkeypatch.setattr(runner.services, "stop", lambda: None)
+
+    runner.run()
+
+    assert runner.mission_enabled is False
+    assert started == [True]
+
+
 def test_action_mission_status_payload_not_configured_by_default() -> None:
     args = build_arg_parser().parse_args(["--run-seconds", "0.1", "--no-yolo-udp"])
     config = load_app_config(args)

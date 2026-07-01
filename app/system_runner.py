@@ -237,6 +237,7 @@ class SystemRunner:
         self._stop_external_processes()
         self.logger.info("app runtime stopped")
 
+    def _action_lab_only_loop(self) -> None:
         loop_sleep_sec = 1.0 / max(self.config.runtime.loop_hz, 0.1)
         print_sleep_sec = 1.0 / max(self.config.runtime.print_rate_hz, 0.1)
         started_at = time.time()
