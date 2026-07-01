@@ -484,6 +484,10 @@ function renderFieldReference(data) {
   setOptionalText("frGpsEphEpv", num(tele.gps_eph, 1) + " / " + num(tele.gps_epv, 1));
   setOptionalText("frGpsValid", tele.global_position_valid ? "YES" : "NO");
   setOptionalText("frHasLocal", tele.has_local_position ? "YES" : "NO");
+  setOptionalText("frOriginLocal", xyzText(fr.origin_local_n_m, fr.origin_local_e_m, fr.origin_local_z_m));
+  var active = fr.active_source || "none";
+  setOptionalText("frActiveSource", active);
+  setOptionalText("frSynced", fr.synced_to_runtime ? "YES" : "NO");
 }
 async function frPost(url) {
   try {

@@ -73,6 +73,7 @@ class FieldReference:
     # LOCAL_NED origin (required for field_to_local_ned)
     origin_local_n_m: Optional[float] = None
     origin_local_e_m: Optional[float] = None
+    origin_local_z_m: Optional[float] = None  # stored for status display, not used in XY transform
 
     # GPS origin (for gps_marker / manual_gps_input sources)
     origin_lat: Optional[float] = None
@@ -159,6 +160,7 @@ class FieldReference:
 
     def set_origin_gps_with_local_snapshot(
         self, lat: float, lon: float, local_n_m: float, local_e_m: float,
+        local_z_m: float | None = None,
     ) -> None:
         """Record the GPS origin point **and** its LOCAL_NED position
         snapshot at the time of marking.
@@ -166,6 +168,7 @@ class FieldReference:
         The GPS lat/lon define the geographic reference; the LOCAL_NED
         snapshot defines the coordinate origin usable by the flight
         controller for ``field_to_local_ned`` / ``local_ned_to_field``.
+        *local_z_m* is stored for status display (not used in XY transform).
         """
         self._guard_not_frozen()
         self.origin_source = OriginSource.GPS_MARKER.value
@@ -173,6 +176,8 @@ class FieldReference:
         self.origin_lon = float(lon)
         self.origin_local_n_m = float(local_n_m)
         self.origin_local_e_m = float(local_e_m)
+        if local_z_m is not None:
+            self.origin_local_z_m = float(local_z_m)
 
     def set_origin_manual_gps(self, lat: float, lon: float) -> None:
         self._guard_not_frozen()
@@ -325,6 +330,7 @@ class FieldReference:
         self.heading_source = None
         self.origin_local_n_m = None
         self.origin_local_e_m = None
+        self.origin_local_z_m = None
         self.origin_lat = None
         self.origin_lon = None
         self.forward_marker_lat = None

@@ -40,6 +40,7 @@ class FieldReferenceService:
         *,
         local_n_m: float | None = None,
         local_e_m: float | None = None,
+        local_z_m: float | None = None,
     ) -> dict[str, Any]:
         """Record the GPS origin point (marker A).
 
@@ -51,7 +52,7 @@ class FieldReferenceService:
         try:
             if local_n_m is not None and local_e_m is not None:
                 self._ref.set_origin_gps_with_local_snapshot(
-                    lat, lon, local_n_m, local_e_m,
+                    lat, lon, local_n_m, local_e_m, local_z_m=local_z_m,
                 )
             else:
                 self._ref.set_origin_gps(lat, lon)
@@ -131,6 +132,7 @@ class FieldReferenceService:
             "heading_source": self._ref.heading_source,
             "origin_local_n_m": self._ref.origin_local_n_m,
             "origin_local_e_m": self._ref.origin_local_e_m,
+            "origin_local_z_m": self._ref.origin_local_z_m,
             "origin_lat": self._ref.origin_lat,
             "origin_lon": self._ref.origin_lon,
             "forward_marker_lat": self._ref.forward_marker_lat,

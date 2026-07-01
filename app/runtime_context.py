@@ -221,6 +221,58 @@ class RuntimeContextBuilder:
         )
         return True
 
+    def confirm_field_reference(
+        self,
+        field_heading_yaw_rad: float,
+        origin_local_x: float,
+        origin_local_y: float,
+        origin_local_z: float | None = None,
+        source: str = "field_reference",
+        timestamp: float | None = None,
+    ) -> bool:
+        """Write FieldReference sync result into legacy RuntimeContextBuilder fields.
+
+        This is the bridge from the new FieldReferenceService back to the
+        existing Action context / GotoWaypoint / CoordinateTransform chain.
+        ``origin_local_z`` is stored only for status display; it is not used
+        by the XY FIELD→LOCAL_NED transform.
+        """
+        yaw = self._float_or_none(field_heading_yaw_rad)
+        ox = self._float_or_none(origin_local_x)
+        oy = self._float_or_none(origin_local_y)
+        if yaw is None or ox is None or oy is None:
+            return False
+        now = timestamp if timestamp is not None else time.time()
+        self.field_heading_yaw_rad = self._normalize_yaw(yaw)
+        self.field_heading_time = now
+        self.field_heading_confirmed = True
+        self.field_heading_source = source
+        self.field_origin_local_x = ox
+        self.field_origin_local_y = oy
+        self.field_origin_local_z = self._float_or_none(origin_local_z)
+        self.field_origin_time = now
+        self.field_origin_confirmed = True
+        self.logger.info(
+            "field reference synced yaw_rad=%s origin=(%s,%s,%s) source=%s",
+            self.field_heading_yaw_rad,
+            ox, oy, self.field_origin_local_z,
+            source,
+        )
+        return True
+
+    def clear_field_heading(self) -> None:
+        """Clear all legacy field-heading fields (used by FieldReference reset)."""
+        self.field_heading_yaw_rad = None
+        self.field_heading_time = None
+        self.field_heading_confirmed = False
+        self.field_heading_source = ""
+        self.field_origin_local_x = None
+        self.field_origin_local_y = None
+        self.field_origin_local_z = None
+        self.field_origin_time = None
+        self.field_origin_confirmed = False
+        self.logger.info("field heading cleared via FieldReference reset")
+
     # ------------------------------------------------------------------
     # arm-heading tracking
     # ------------------------------------------------------------------

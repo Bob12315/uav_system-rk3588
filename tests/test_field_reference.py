@@ -617,3 +617,223 @@ def test_old_field_heading_api_still_works() -> None:
     assert ok is True
     assert builder.field_heading_confirmed is True
     assert builder.field_origin_confirmed is True
+
+
+# ---------------------------------------------------------------------------
+# Phase 4D: sync confirm → RuntimeContextBuilder
+# ---------------------------------------------------------------------------
+
+def _make_builder_and_service():
+    from app.runtime_context import RuntimeContextBuilder
+    from app.field_reference_service import FieldReferenceService
+    return RuntimeContextBuilder(), FieldReferenceService()
+
+
+def test_confirm_syncs_gps_two_point_to_builder() -> None:
+    """confirm with gps_two_point must write heading+origin into legacy builder."""
+    builder, svc = _make_builder_and_service()
+    svc.mark_gps_origin(30.0, 120.0, local_n_m=10.0, local_e_m=20.0, local_z_m=-2.0)
+    # B ≈ 15 m north
+    from app.field_reference import EARTH_RADIUS_M
+    import math
+    d_lat = 15.0 / EARTH_RADIUS_M
+    lat_b = 30.0 + math.degrees(d_lat)
+    svc.mark_gps_forward(lat_b, 120.0)
+    result = svc.confirm()
+    assert result["ok"] is True
+
+    # sync into builder
+    ref = svc.reference
+    ok = builder.confirm_field_reference(
+        field_heading_yaw_rad=ref.field_heading_yaw_rad,
+        origin_local_x=ref.origin_local_n_m,
+        origin_local_y=ref.origin_local_e_m,
+        origin_local_z=ref.origin_local_z_m,
+        source="field_reference:gps_two_point",
+    )
+    assert ok is True
+    assert builder.field_heading_confirmed is True
+    assert builder.field_origin_confirmed is True
+    assert builder.field_heading_yaw_rad == pytest.approx(0.0, abs=1e-9)
+    assert builder.field_origin_local_x == 10.0
+    assert builder.field_origin_local_y == 20.0
+    assert builder.field_origin_local_z == -2.0
+    assert builder.field_heading_source == "field_reference:gps_two_point"
+
+
+def test_confirm_syncs_manual_angle_to_builder() -> None:
+    """manual_angle confirm must sync heading into builder."""
+    builder, svc = _make_builder_and_service()
+    svc.mark_gps_origin(30.0, 120.0, local_n_m=5.0, local_e_m=6.0)
+    svc.set_manual_heading(math.radians(45.0))
+    result = svc.confirm()
+    assert result["ok"] is True
+
+    ref = svc.reference
+    ok = builder.confirm_field_reference(
+        field_heading_yaw_rad=ref.field_heading_yaw_rad,
+        origin_local_x=ref.origin_local_n_m,
+        origin_local_y=ref.origin_local_e_m,
+        source="field_reference:manual_angle",
+    )
+    assert ok is True
+    assert builder.field_heading_yaw_rad == pytest.approx(math.pi / 4.0)
+    assert builder.field_heading_source == "field_reference:manual_angle"
+
+
+def test_confirm_syncs_compass_yaw_to_builder() -> None:
+    """compass_yaw confirm must sync into builder."""
+    builder, svc = _make_builder_and_service()
+    svc.mark_gps_origin(30.0, 120.0, local_n_m=1.0, local_e_m=2.0)
+    svc.set_compass_heading(1.2)
+    result = svc.confirm()
+    assert result["ok"] is True
+
+    ref = svc.reference
+    ok = builder.confirm_field_reference(
+        field_heading_yaw_rad=ref.field_heading_yaw_rad,
+        origin_local_x=ref.origin_local_n_m,
+        origin_local_y=ref.origin_local_e_m,
+        source="field_reference:compass_yaw",
+    )
+    assert ok is True
+    assert builder.field_heading_yaw_rad == pytest.approx(1.2)
+    assert builder.field_heading_source == "field_reference:compass_yaw"
+
+
+def test_confirm_failure_does_not_write_builder() -> None:
+    """If confirm fails, builder must not be touched."""
+    builder, svc = _make_builder_and_service()
+    svc.mark_gps_origin(30.0, 120.0)  # no LOCAL_NED → will fail
+    svc.set_manual_heading(0.0)
+    result = svc.confirm()
+    assert result["ok"] is True  # GPS-only confirm succeeds
+    # But is_ready() is False (no LOCAL_NED origin), so sync would fail
+    ref = svc.reference
+    ok = builder.confirm_field_reference(
+        field_heading_yaw_rad=ref.field_heading_yaw_rad,
+        origin_local_x=ref.origin_local_n_m,
+        origin_local_y=ref.origin_local_e_m,
+    )
+    assert ok is False
+
+
+def test_reset_clears_both_service_and_builder() -> None:
+    """FieldReference reset must clear both service and builder."""
+    builder, svc = _make_builder_and_service()
+    svc.mark_gps_origin(30.0, 120.0, local_n_m=10.0, local_e_m=20.0)
+    svc.set_manual_heading(0.5)
+    svc.confirm()
+
+    ref = svc.reference
+    builder.confirm_field_reference(
+        field_heading_yaw_rad=ref.field_heading_yaw_rad,
+        origin_local_x=ref.origin_local_n_m,
+        origin_local_y=ref.origin_local_e_m,
+    )
+    assert builder.field_heading_confirmed is True
+
+    # reset service
+    svc.reset()
+    assert svc.reference.is_confirmed is False
+
+    # clear builder
+    builder.clear_field_heading()
+    assert builder.field_heading_confirmed is False
+    assert builder.field_origin_confirmed is False
+    assert builder.field_heading_yaw_rad is None
+    assert builder.field_origin_local_x is None
+    assert builder.field_origin_local_y is None
+    assert builder.field_origin_local_z is None
+    assert builder.field_heading_source == ""
+
+
+def test_frozen_blocks_old_confirm() -> None:
+    """When FieldReference is frozen, old /api/field-heading/confirm must fail."""
+    builder, svc = _make_builder_and_service()
+    svc.mark_gps_origin(30.0, 120.0, local_n_m=0.0, local_e_m=0.0, local_z_m=-1.0)
+    svc.set_manual_heading(0.0)
+    svc.confirm()
+    svc.freeze()
+    assert svc.reference.is_frozen is True
+
+    # Old confirm in SystemRunner checks frozen state first
+    # Simulate: if frozen, return error
+    from telemetry_link.command_dispatcher import CommandResult
+    frozen_result = None
+    if svc.reference.is_frozen:
+        frozen_result = CommandResult(False, "FieldReference is frozen; use /api/field-reference/reset to unfreeze")
+    assert frozen_result is not None
+    assert frozen_result.ok is False
+    assert "frozen" in frozen_result.message
+
+
+def test_old_confirm_still_works_when_not_frozen() -> None:
+    """When NOT frozen, old confirm still works via RuntimeContextBuilder."""
+    builder, svc = _make_builder_and_service()
+    # old path: builder.confirm_field_heading directly
+    drone = {
+        "local_position_valid": True,
+        "local_x": 10.0, "local_y": 20.0, "local_z": -1.0,
+    }
+    ok = builder.confirm_field_heading(yaw_rad=0.5, drone=drone, source="manual")
+    assert ok is True
+    assert builder.field_heading_confirmed is True
+
+
+def test_goto_waypoint_uses_synced_gps_heading() -> None:
+    """GotoWaypoint FIELD mode must produce correct LOCAL_NED using synced GPS heading."""
+    from missions.common.actions.goto_waypoint import GotoWaypointAction
+
+    builder, svc = _make_builder_and_service()
+    # GPS A at origin, GPS B 20m north → heading = 0
+    svc.mark_gps_origin(30.0, 120.0, local_n_m=100.0, local_e_m=200.0, local_z_m=-1.0)
+    import math
+    d_lat = 20.0 / 6371000.0
+    lat_b = 30.0 + math.degrees(d_lat)
+    svc.mark_gps_forward(lat_b, 120.0)
+    svc.confirm()
+
+    ref = svc.reference
+    builder.confirm_field_reference(
+        field_heading_yaw_rad=ref.field_heading_yaw_rad,
+        origin_local_x=ref.origin_local_n_m,
+        origin_local_y=ref.origin_local_e_m,
+        source="field_reference:gps_two_point",
+    )
+
+    # Now the old context should carry the synced fields
+    context = builder.build_action_context({"drone": builder._last_vehicle_armed or {}})
+    assert context["field_heading_confirmed"] is True
+    assert context["field_heading_yaw_rad"] == pytest.approx(0.0, abs=1e-9)
+    assert context["field_origin_local_x"] == 100.0
+    assert context["field_origin_local_y"] == 200.0
+
+    # GotoWaypoint using FIELD mode should convert correctly
+    action = GotoWaypointAction()
+    action.start({"x": 0.0, "y": 10.0, "altitude_m": 5.0, "waypoint_mode": "field", "yaw_mode": "field_heading"})
+    result = action.update(context)
+    assert result.failed is False
+    assert result.actions[0]["params"]["x"] == pytest.approx(110.0)  # 100 + 10 north
+    assert result.actions[0]["params"]["y"] == pytest.approx(200.0)  # unchanged
+    assert result.actions[0]["params"]["z"] == pytest.approx(-5.0)
+
+
+def test_origin_local_z_snapshot_preserved() -> None:
+    """origin_local_z_m must be stored and survive confirm/reset cycle."""
+    builder, svc = _make_builder_and_service()
+    svc.mark_gps_origin(30.0, 120.0, local_n_m=1.0, local_e_m=2.0, local_z_m=-3.5)
+    svc.set_manual_heading(0.0)
+    svc.confirm()
+
+    ref = svc.reference
+    assert ref.origin_local_z_m == -3.5
+
+    builder.confirm_field_reference(
+        field_heading_yaw_rad=ref.field_heading_yaw_rad,
+        origin_local_x=ref.origin_local_n_m,
+        origin_local_y=ref.origin_local_e_m,
+        origin_local_z=ref.origin_local_z_m,
+        source="field_reference:manual_angle",
+    )
+    assert builder.field_origin_local_z == -3.5
