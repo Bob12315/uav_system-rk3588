@@ -389,122 +389,21 @@ function updateControlHighlights(next, drone, controls) {
     });
   }
 }
-function renderFieldHeading(next) {
-  const field = next.field_heading || {};
-  setOptionalText("fieldHeadingCurrentYaw", degNum(field.current_yaw_deg));
-  setOptionalText("fieldHeadingPreArmYaw", degNum(field.pre_arm_yaw_deg));
-  setOptionalText("fieldHeadingConfirmedYaw", degNum(field.field_heading_yaw_deg));
-  setOptionalText("fieldHeadingDelta", degNum(field.delta_current_to_field_deg));
-  setOptionalText("fieldHeadingOrigin", xyzText(field.origin_local_x, field.origin_local_y, field.origin_local_z));
-  setOptionalText("fieldHeadingCurrentField", xyzText(field.current_field_x, field.current_field_y, field.current_field_z));
-  setOptionalText("fieldHeadingConfirmed", field.field_heading_confirmed ? "YES" : "NO");
-  setOptionalText("fieldHeadingSource", field.field_heading_source || "--");
-  setOptionalText("fieldHeadingTime", stamp(field.field_heading_time));
-  setOptionalText("fieldHeadingAttitudeValid", field.attitude_valid ? "YES" : "NO");
+// Field Heading / Field Reference moved to field_reference.js
+//   confirmFieldHeading calls "/api/field-heading/confirm"
+//   renderFieldHeading uses delta_current_to_field_deg
+//   Field Reference uses /api/field-reference/*
+const {
+  gpsText,
+  fetchFieldReferenceStatus,
+  renderFieldReference,
+  frPost,
+  frSetManualHeading,
+} = window.UavFieldRef;
 
-  const delta = Number(field.delta_current_to_field_deg);
-  const deltaElement = $("fieldHeadingDelta");
-  if (deltaElement) {
-    deltaElement.classList.toggle("ok-text", Number.isFinite(delta) && Math.abs(delta) <= 2.0);
-    deltaElement.classList.toggle("warning-text", Number.isFinite(delta) && Math.abs(delta) > 2.0 && Math.abs(delta) <= 8.0);
-    deltaElement.classList.toggle("danger-text", Number.isFinite(delta) && Math.abs(delta) > 8.0);
-  }
+function renderFieldHeading(next) { window.UavFieldRef.renderFieldHeading(next); }
+async function confirmFieldHeading() { return window.UavFieldRef.confirmFieldHeading(); }
 
-  const hint = $("fieldHeadingHint");
-  if (hint) {
-    if (!field.attitude_valid) {
-      hint.textContent = "姿态 yaw 无效，无法确认场地方向。请检查 MAVLink ATTITUDE 数据。";
-    } else if (field.local_position_valid === false) {
-      hint.textContent = "无法确认原点：当前 LOCAL_NED 位置无效。请检查定位/LOCAL_POSITION_NED 数据。";
-    } else if (!field.field_heading_confirmed) {
-      hint.textContent = "未确认：起飞前把机头对准场地方向，然后点击确认。程序起飞也会自动确认。确认只记录内部 yaw 和任务坐标原点，不发 MAVLink。";
-    } else if (Number.isFinite(delta)) {
-      hint.textContent = `已确认：当前 yaw 与场地方向偏差 ${delta.toFixed(1)}°。地面静止时建议接近 0°。`;
-    } else {
-      hint.textContent = "已确认场地方向/原点。确认只记录 app 内部状态，不发 MAVLink。";
-    }
-  }
-}
-async function confirmFieldHeading() {
-  const field = state.field_heading || {};
-  if (!field.attitude_valid) {
-    $("completionHint").textContent = "姿态 yaw 无效，无法确认场地方向";
-    return;
-  }
-  const confirmed = window.confirm(
-    "确认将当前机头 yaw 记录为场地方向？\n"
-    + "并将当前 LOCAL_NED 位置记录为任务坐标原点。\n"
-    + "请确保飞机放在地上，机头已经对准场地方向。\n"
-    + `当前 yaw: ${degNum(field.current_yaw_deg)}`
-  );
-  if (!confirmed) return;
-  const result = await json("/api/field-heading/confirm", {method: "POST", body: "{}"});
-  $("completionHint").textContent = result.message || (result.ok ? "field heading confirmed" : "field heading confirm failed");
-  if (result.field_heading) {
-    state.field_heading = result.field_heading;
-    renderFieldHeading(state);
-  }
-  await loadAudit();
-}
-async function fetchFieldReferenceStatus() {
-  try {
-    const data = await json("/api/field-reference/status");
-    if (data && data.field_reference) renderFieldReference(data);
-  } catch { /* ignore */ }
-}
-function renderFieldReference(data) {
-  const fr = data.field_reference || {};
-  const tele = data.telemetry || {};
-  setOptionalText("frConfirmed", fr.is_confirmed ? "YES" : "NO");
-  setOptionalText("frFrozen", fr.is_frozen ? "YES" : "NO");
-  setOptionalText("frOriginSource", fr.origin_source || "--");
-  setOptionalText("frHeadingSource", fr.heading_source || "--");
-  setOptionalText("frHeadingDeg", degNum(fr.field_heading_deg));
-  setOptionalText("frOriginLocal", xyzText(fr.origin_local_n_m, fr.origin_local_e_m, null));
-  setOptionalText("frOriginGps", gpsText(fr.origin_lat, fr.origin_lon));
-  setOptionalText("frForwardGps", gpsText(fr.forward_marker_lat, fr.forward_marker_lon));
-  setOptionalText("frDistance", fr.distance_m != null ? Number(fr.distance_m).toFixed(2) + " m" : "--");
-  var w = fr.warnings || [];
-  setOptionalText("frWarnings", w.length ? w.join("; ") : "--");
-  setOptionalText("frGpsFix", (tele.gps_fix_type || 0) + " / " + (tele.satellites_visible || 0) + " sats");
-  setOptionalText("frGpsEphEpv", num(tele.gps_eph, 1) + " / " + num(tele.gps_epv, 1));
-  setOptionalText("frGpsValid", tele.global_position_valid ? "YES" : "NO");
-  setOptionalText("frHasLocal", tele.has_local_position ? "YES" : "NO");
-  setOptionalText("frOriginLocal", xyzText(fr.origin_local_n_m, fr.origin_local_e_m, fr.origin_local_z_m));
-  var active = fr.active_source || "none";
-  setOptionalText("frActiveSource", active);
-  setOptionalText("frSynced", fr.synced_to_runtime ? "YES" : "NO");
-}
-async function frPost(url) {
-  try {
-    var result = await json(url, {method: "POST", body: "{}"});
-    $("frHint").textContent = result.ok
-      ? (result.message || "OK") + (result.warnings && result.warnings.length ? " Warnings: " + result.warnings.join("; ") : "")
-      : result.error || "failed";
-    fetchFieldReferenceStatus();
-  } catch (e) {
-    $("frHint").textContent = "request failed: " + e.message;
-  }
-}
-async function frSetManualHeading() {
-  var deg = parseFloat($("frManualHeadingDeg").value);
-  if (!Number.isFinite(deg)) { $("frHint").textContent = "enter valid degrees"; return; }
-  try {
-    var result = await json("/api/field-reference/set-manual-heading", {
-      method: "POST",
-      body: JSON.stringify({yaw_deg: deg}),
-      headers: {"Content-Type": "application/json"},
-    });
-    $("frHint").textContent = result.ok ? "manual heading set" : result.error || "failed";
-    fetchFieldReferenceStatus();
-  } catch (e) {
-    $("frHint").textContent = "request failed: " + e.message;
-  }
-}
-function gpsText(lat, lon) {
-  if (lat == null || lon == null) return "--";
-  return Number(lat).toFixed(6) + " / " + Number(lon).toFixed(6);
-}
 function renderMissionSteps(next) {
   if (!$("missionSelect") || !$("stageOverride") || !$("missionSteps")) return;
   const selectedMission = $("missionSelect")?.value || next.mission || "";
@@ -2129,13 +2028,7 @@ async function init() {
   };
   if ($("missionSwitch")) $("missionSwitch").onclick = () => execute(`mission switch ${$("missionSelect").value}`, "BUTTON").then(loadMissions);
   if ($("missionSelect")) $("missionSelect").onchange = () => renderMissionSteps(state || {});
-  if ($("frMarkOrigin")) $("frMarkOrigin").onclick = () => frPost("/api/field-reference/mark-origin");
-  if ($("frMarkForward")) $("frMarkForward").onclick = () => frPost("/api/field-reference/mark-forward");
-  if ($("frUseCurrentYaw")) $("frUseCurrentYaw").onclick = () => frPost("/api/field-reference/use-current-yaw");
-  if ($("frSetManualHeading")) $("frSetManualHeading").onclick = frSetManualHeading;
-  if ($("frConfirm")) $("frConfirm").onclick = () => frPost("/api/field-reference/confirm");
-  if ($("frReset")) $("frReset").onclick = () => frPost("/api/field-reference/reset");
-  if ($("frFreeze")) $("frFreeze").onclick = () => frPost("/api/field-reference/freeze");
+  window.UavFieldRef.init();
   $("sendCommand").onclick = () => {
     const input = $("commandInput");
     execute(input.value, "CLI"); history.unshift(input.value); input.value = ""; historyIndex = -1;
@@ -2193,12 +2086,6 @@ async function init() {
     });
     refreshCameraRecordingStatus().catch(() => {});
   }
-  $("confirmFieldHeading")?.addEventListener("click", () => {
-    confirmFieldHeading().catch(error => {
-      $("completionHint").textContent = `确认场地方向失败: ${error.message}`;
-    });
-  });
-
   document.querySelectorAll(".tab").forEach(tab => tab.onclick = () => {
     document.querySelectorAll(".tab").forEach(item => item.classList.toggle("active", item === tab));
     document.querySelectorAll(".page").forEach(page => page.classList.toggle("active", page.id === `${tab.dataset.page}Page`));
