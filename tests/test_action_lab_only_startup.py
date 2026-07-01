@@ -189,3 +189,22 @@ def test_action_lab_api_status_reports_dry_run_only():
     assert response["action_lab"]["send_actions"] is False
     assert response["action_lab"]["requested_send_actions"] is False
     assert response["action_lab"]["dry_run_only"] is True
+
+
+def test_no_uav_ui_imports_in_app_startup() -> None:
+    """Verify that app startup does not import uav_ui (terminal UI removed)."""
+    import subprocess, sys
+
+    code = (
+        "from app.system_runner import SystemRunner; "
+        "from app.app_config import build_arg_parser, load_app_config; "
+        "args = build_arg_parser().parse_args(['--run-seconds', '0.1', '--no-yolo-udp']); "
+        "config = load_app_config(args); "
+        "runner = SystemRunner(config); "
+        "print('STARTUP_OK')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert "STARTUP_OK" in result.stdout, f"Startup failed: {result.stderr}"
