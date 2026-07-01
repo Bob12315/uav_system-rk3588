@@ -1,39 +1,38 @@
 # 文档索引
 
-文档按读者和用途分组。第一次使用项目时，从 [user/README.md](user/README.md)
-开始；AI 或开发者接管代码时，从 [ai/README.md](ai/README.md) 开始。
+## 当前权威入口
+
+| 文档 | 用途 |
+| --- | --- |
+| [ai/README.md](ai/README.md) | AI/开发者接管入口 |
+| [ai/current_architecture.md](ai/current_architecture.md) | 当前 Action 主线与架构裁决 |
+| [ai/action_contracts.md](ai/action_contracts.md) | Action 边界和参数迁移方向 |
+| [ai/deprecated_paths.md](ai/deprecated_paths.md) | 禁止恢复的旧路径与删除前置条件 |
+| [reference/coordinate_frames.md](reference/coordinate_frames.md) | 坐标系唯一规范源 |
+| [reference/field_origin_heading.md](reference/field_origin_heading.md) | Field Reference 与 GPS A/B 设计 |
+| [reference/safety.md](reference/safety.md) | 当前发送链路与安全边界 |
+| [refactor/phase0_baseline.md](refactor/phase0_baseline.md) | 重构分支基线快照 |
 
 ## 用户文档
 
 | 文档 | 用途 |
 | --- | --- |
-| [user/README.md](user/README.md) | 最短上手路径、常用命令和示例 |
-| [user/install.md](user/install.md) | RK3588 环境安装 |
-| [user/running.md](user/running.md) | 真机运行、服务管理和排查 |
-| [user/sitl_start.md](user/sitl_start.md) | PC Gazebo/SITL 与 RK3588 联调 |
-| [user/rescue_competition_sitl.md](user/rescue_competition_sitl.md) | 救援比赛任务仿真专题 |
+| [user/README.md](user/README.md) | 用户入口 |
+| [user/install.md](user/install.md) | RK3588 安装 |
+| [user/running.md](user/running.md) | 运行和服务管理 |
+| [user/sitl_start.md](user/sitl_start.md) | SITL 联调 |
+| [user/rescue_competition_sitl.md](user/rescue_competition_sitl.md) | 历史比赛/SITL 资料；使用前核对 deprecated 清单 |
 
-## AI 与开发文档
-
-| 文档 | 用途 |
-| --- | --- |
-| [ai/README.md](ai/README.md) | AI 快速接管入口 |
-| [ai/architecture.md](ai/architecture.md) | 模块职责、允许依赖和禁止事项 |
-| [ai/interfaces.md](ai/interfaces.md) | 核心 dataclass、接口和单位 |
-| [ai/control_flow.md](ai/control_flow.md) | 从 YOLO 到 MAVLink 的完整数据流 |
-| [ai/development_rules.md](ai/development_rules.md) | 修改规则和验证要求 |
-| [ai/task_checklist.md](ai/task_checklist.md) | 按任务选择需要阅读的文件 |
-
-## 参考文档
+## AI 与参考文档
 
 | 文档 | 用途 |
 | --- | --- |
-| [reference/configuration.md](reference/configuration.md) | 所有 YAML 配置说明 |
-| [reference/ui_commands.md](reference/ui_commands.md) | 终端 UI 命令全集 |
-| [reference/safety.md](reference/safety.md) | SITL 和实机安全边界 |
-| [reference/sitl_test_plan.md](reference/sitl_test_plan.md) | 从低风险到高风险的 SITL 验证顺序 |
+| [ai/architecture.md](ai/architecture.md) | 当前模块边界 |
+| [ai/interfaces.md](ai/interfaces.md) | 当前 Action/runtime/telemetry 接口 |
+| [ai/control_flow.md](ai/control_flow.md) | 当前数据和命令流 |
+| [ai/development_rules.md](ai/development_rules.md) | 开发规则 |
+| [ai/task_checklist.md](ai/task_checklist.md) | 按任务追加阅读 |
+| [reference/configuration.md](reference/configuration.md) | 当前配置说明 |
 
-## 历史文档
-
-`archive/` 保存已经完成或仅用于追溯的设计计划。它们不是当前运行手册。
-
+`archive/` 保存历史材料，不是当前实现依据。旧 mission/stage 文档若未标注更新，均按
+[deprecated_paths.md](ai/deprecated_paths.md) 处理。

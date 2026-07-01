@@ -1,124 +1,87 @@
 # RK3588 YOLO App
 
-本目录是无人机项目的板端视觉感知进程，仅支持 RK3588 NPU 上的 RKNN INT8 模型。
-它不连接飞控，也不生成控制命令；目标状态通过 UDP JSON 交给上层系统。
+`yolo_app` 是板端视觉感知进程，只在 Linux ARM64 RK3588 上使用 RKNNLite/NPU。
+它不连接飞控、不读取 MAVLink，也不生成飞行命令；检测和目标状态通过 UDP JSON
+发送给 app。
+
+## 当前模型策略
+
+默认部署模型：
+
+```text
+data/models/cuadc-fp16.rknn
+```
+
+从 `config/yolo.yaml` 引用时，正确相对路径为：
+
+```text
+../data/models/cuadc-fp16.rknn
+```
+
+RK3588/RKNN 本身可以支持 INT8，但本项目当前 INT8 模型已废弃。除非重新完成量化
+校准并验证类别、置信度和检测结果正常，否则不要切回 INT8 默认部署。
+
+已知 TODO：根 `config/yolo.yaml` 目前仍指向不存在的
+`cuadc2026-fp16.rknn`；该配置将在后续清理阶段修正。
 
 ## 流程
 
 ```text
-/dev/video41 (MJPG 640x480)
--> latest-frame capture
--> RKNNLite / NPU_CORE_0_1_2
--> 9-output score_sum + DFL + NMS postprocess
--> short-lived track_id association
--> TargetManager
--> UDP JSON + fullscreen annotation
+camera/video/stream
+→ latest-frame capture
+→ RKNNLite / RK3588 NPU
+→ model-specific decode + NMS
+→ short-lived track_id association
+→ TargetManager
+→ UDP target + scene
+→ optional MJPEG annotation / raw recording
 ```
 
-## 模型
-
-默认模型路径：
-
-```text
-../data/models/best-int8-rk3588.rknn
-```
-
-模型约定：
-
-- 类别：`Target`、`bucket`、`class_2`
-- 输入：RGB `uint8`，形状固定为 `(1, 640, 640, 3)`
-- NPU：`RKNNLite.NPU_CORE_0_1_2`
-- 输出：三个尺度、每尺度 `position / class_scores / score_sum`，共 9 个张量
-
-`rknn_detector.py` 先用各分支的 `score_sum` 筛选位置，再执行 DFL 解码、letterbox
-坐标还原和 NMS。该路径不使用普通单输出 YOLO 的后处理。
+输入与输出张量布局必须以当前 FP16 RKNN 模型的实际导出结果为准，不要因为历史
+INT8 文档假设而修改后处理。
 
 ## 模块
 
-```text
-yolo_app/
-  main.py                 主循环、显示和 FPS 日志
-  config.py               配置与命令行覆盖
-  video_source.py         相机、UDP/RTSP/视频输入
-  rknn_detector.py        RKNN 推理和后处理
-  tracker_runner.py       检测结果短时 ID 关联
-  target_manager.py       主目标锁定、切换、丢失管理
-  annotator.py            全屏画面标注
-  udp_publisher.py        UDP JSON 输出
-  command_receiver.py     目标选择命令输入
-  raw_frame_recorder.py   Web UI 控制的原始帧 mp4 录制
-```
-
-默认配置文件位于 `../config/yolo.yaml`。
+| 文件 | 职责 |
+| --- | --- |
+| `main.py` | 主循环和服务生命周期 |
+| `config.py` | YAML/CLI 配置 |
+| `video_source.py` | 相机、UDP/RTSP、视频输入 |
+| `rknn_detector.py` | RKNNLite 推理和后处理 |
+| `tracker_runner.py` | 短时 track_id 关联 |
+| `target_manager.py` | 主目标选择、锁定和丢失管理 |
+| `udp_publisher.py` | UDP JSON 输出 |
+| `command_receiver.py` | Web UI 目标选择命令 |
+| `mjpeg_stream.py` | 浏览器标注流 |
+| `raw_frame_recorder.py` | 原始画面录像 |
 
 ## 环境
 
-板端已验证环境：
-
-- Ubuntu 22.04.4 LTS, aarch64, RK3588 / NanoPC-T6
-- Python `3.10.20`
-- `rknn-toolkit-lite2==2.3.2`
-- RKNN Runtime `2.3.2`
-- RKNN Driver `0.9.8`
-
-`yolo` conda 环境至少需要：
+使用匹配板端 Runtime/Driver 的 `rknn-toolkit-lite2`。安装：
 
 ```bash
 conda activate yolo
 bash scripts/install/install_yolo_env.sh
 ```
 
-## 屏幕运行
+禁止新增 x86、CUDA、PyTorch 或 GPU 推理路径。
 
-默认配置已设置模型、`/dev/video41`、MJPG `640x480@30`、最新帧采集和全屏显示。
-从板载 GNOME 桌面会话启动：
-
-```bash
-cd ~/uav_project/uav_system-rk3588
-DISPLAY=:0 \
-XDG_RUNTIME_DIR=/run/user/1000 \
-WAYLAND_DISPLAY=wayland-0 \
-DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus \
-conda run --no-capture-output -n yolo python -u -m yolo_app.main
-```
-
-无窗口性能测试：
+## 运行
 
 ```bash
-conda run --no-capture-output -n yolo python -u -m yolo_app.main \
-  --show false --command-enabled false
+conda activate yolo
+python -m yolo_app.main
 ```
 
-日志每 60 帧报告一次管线 FPS、摄像到输出的延迟以及当前检测数量。
-
-## 配置要点
-
-- `model_path`：RKNN INT8 模型路径
-- `source`：默认板端相机 `/dev/video41`
-- `conf_thres` / `iou_thres`：检测与 NMS 阈值
-- `class_names`：模型类别顺序
-- `selection_mode` / `target_class`：自动选择主目标策略
-- `udp_ip` / `udp_port`：向控制进程发布的目的地址
-- `fullscreen`：板载屏幕全屏显示
-- `latest_frame`：丢弃已积压相机帧以控制延迟
-- `recording_dir`：Web UI 原始摄像头录制目录，默认 `~/uav_recordings`
-
-## 原始画面录制
-
-Web UI 的“开始录制 / 停止录制”按钮会通过 YOLO command UDP 控制本进程录制。
-录制发生在画框标注之前，写入当前实际读取到的原始帧，默认文件名：
-
-```text
-~/uav_recordings/camera_YYYYmmdd_HHMMSS_microseconds.mp4
-```
-
-该录制不包含 YOLO bbox、锁定框或文字叠加。
+显示、录像、视频源、UDP 目的地址和 Web stream 均由 `config/yolo.yaml` 管理。运行
+录像属于产物，应写入 `runtime/`；当前 `recording_dir` 若配置为仓库外路径，需要在
+后续配置清理阶段统一评审。
 
 ## UDP 输出
 
-每帧发送一个包含 `target` 和 `scene` 的 JSON 包：
+每帧发送包含 `target` 和 `scene` 的 JSON：
 
-- `target`：当前锁定主目标及 `tracking_state`、误差和尺寸
-- `scene.detections`：当前所有检测结果
+- `target`：当前主目标、tracking_state、误差和尺寸。
+- `scene.detections`：当前全部检测。
 
-`track_id` 是 RKNN 检测结果的跨帧关联标识，供目标锁定与切换业务使用。
+协议字段变化必须同步更新 app receiver、fusion、Web UI 和测试。

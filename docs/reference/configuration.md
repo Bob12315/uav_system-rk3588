@@ -1,260 +1,91 @@
 # 配置说明
 
-配置分成两层：`config/` 只放系统配置；每个 mission 的任务参数和阶段参数放在自己的 `missions/<mission_name>/config.yaml`。
+## 当前配置分层
 
-## config/app.yaml
+| 路径 | 用途 |
+| --- | --- |
+| `config/app.yaml` | app 生命周期、服务、Web UI、blackbox 和系统 SEND 默认值 |
+| `config/telemetry.yaml` | MAVLink 数据源、端点、频率、超时和发送参数 |
+| `config/yolo.yaml` | RKNN 模型、视频源、UDP、显示和录像 |
+| `config/action_missions/*.json` | 当前 Action Mission 模板 |
+| `config/profiles/rk3588-real/` | 实机 profile |
+| `config/profiles/rk3588-sitl/` | SITL profile |
 
-进程运行、服务开关、mission 选择和 executor 安全出口。
+旧 `missions/<mission_name>/config.yaml` 属于 deprecated mission/stage 架构，不再作为
+新任务配置位置。
+
+## app.yaml
+
+关键安全项：
 
 ```yaml
-runtime:
-  yolo_udp_ip: "0.0.0.0"
-  yolo_udp_port: 5005
-  loop_hz: 20.0
-  perception_timeout_sec: 1.0
-  print_rate_hz: 2.0
-  require_gimbal_feedback: true
-  run_seconds: null
-  log_level: INFO
-
-services:
-  connect_telemetry: true
-  start_yolo_udp: true
-
 ui:
   web_enabled: true
   terminal_enabled: false
-  web_host: "0.0.0.0"
-  web_port: 8080
-  audit_log_path: "runtime/logs/web_ui/audit.jsonl"
-
-mission:
-  name: visual_tracking
 
 executor:
   send_commands: false
 ```
 
-- `connect_telemetry`：是否在 app 启动时连接 telemetry；命令行
-  `--connect-telemetry` 也可临时打开。
-- `ui.web_enabled`：是否随 app 启动网页控制台。
-- `ui.terminal_enabled`：是否启动 curses UI；命令行 `--ui` 仍可临时打开。
-- `start_yolo_udp`：是否监听 YOLO UDP。
-- `send_commands`：默认必须为 false；实发时必须显式打开。
-- `run_seconds`：自动退出秒数，适合 smoke test。
-- `mission.name`：当前运行的 mission 名称，默认 `visual_tracking`。
+- Web UI 是正式操作入口。
+- terminal/curses UI deprecated，虽然配置开关和代码尚待迁移清理。
+- `send_commands` 默认必须为 false；连接 telemetry 不等于允许实发。
+- `mission.name: visual_tracking` 是旧配置残留；当前依赖缺失时运行时降级为
+  `action_lab_only`。后续配置清理阶段再修改 YAML，本阶段只记录事实。
 
-网页上的外部进程重启按钮由 service manager 命令驱动，建议使用用户级 `systemd`：
+## Action Mission JSON
 
-```yaml
-services_control:
-  restart_app_command: ["systemctl", "--user", "restart", "uav-app.service"]
-  restart_yolo_command: ["systemctl", "--user", "restart", "uav-yolo.service"]
+模板由 Web UI 加载并交给 MissionOrchestrator。步骤引用
+`missions/common/actions/` 注册的 Action，可包含 params、label、save_as、失败策略和
+重试。修改后运行：
+
+```bash
+python scripts/validate_action_missions.py
 ```
 
-## missions/visual_tracking/config.yaml
+新坐标参数方向见 [../ai/action_contracts.md](../ai/action_contracts.md)。
 
-视觉跟踪 mission 的模式切换条件、正常恢复策略，以及该 mission 使用的阶段控制参数。
+## telemetry.yaml
 
-```yaml
-initial_mode: "APPROACH_TRACK"
-auto_switch_enabled: true
+根配置选择 `real` 或 `sitl` 数据源；具体端点必须按硬件/仿真环境确认。
+`control_send_rate_hz` 限制连续命令发送频率。断线时必须清空连续控制和云台速率
+命令。切换数据源或重连后系统 SEND 保持关闭。
 
-freshness:
-  max_vision_age_s: 0.3
-  max_drone_age_s: 0.3
-  max_gimbal_age_s: 0.3
+## yolo.yaml
 
-transitions:
-  approach_track_to_overhead_hold:
-    target_size_thresh: 10.0
-    gimbal_pitch_rad: -1.5707963267948966
-    gimbal_pitch_tol_rad: 0.20
-    gimbal_yaw_tol_rad: 0.15
-    hold_s: 0.5
-  overhead_hold_to_approach_track:
-    target_size_drop: 0.06
+当前部署模型是：
 
-recovery:
-  lost_target:
-    recenter_gimbal_enabled: false
-    recenter_after_s: 10.0
-    recenter_pitch_deg: 0.0
-    recenter_yaw_deg: 0.0
+```text
+data/models/cuadc-fp16.rknn
 ```
 
-- `initial_mode`：任务状态机启动后的默认模式。
-- `auto_switch_enabled`：是否允许自动切换模式。
-- `freshness`：各数据源最大允许年龄。
-- `transitions`：模式间切换阈值。
-- `recovery.lost_target`：丢目标后的可选恢复动作，默认不自动控制云台回中。
-
-## missions/rescue_competition/config.yaml
-
-比赛任务配置。流程包含起飞、前往投放区、目标搜索、对准、下降、投放、上升、
-侦察、返航和降落。实机使用前仍需在 SITL 中逐阶段验证。
-
-常用项：
+配置相对路径应为：
 
 ```yaml
-name: rescue_competition
-initial_stage: PREPARE
-auto_start: false
-takeoff_altitude_m: 5.0
-local_position_frame: 1
-align_mode: DOWNWARD_ALIGN_DESCEND
-land_complete_altitude_m: 0.3
-route:
-  home: {x: 0.0, y: 0.0}
-  drop_area_center: {x: 30.0, y: 0.0}
-  recce_area_center: {x: 55.0, y: 0.0}
-payload_slots: []
+model_path: "../data/models/cuadc-fp16.rknn"
 ```
 
-- `auto_start`：默认 false，避免加载 rescue mission 后自动起飞。
-- `route`：任务相对本地坐标航点。mission 会在解锁后记录 EKF local origin 和机头
-  朝向；路线 `x` 正方向为解锁时机头方向。
-- `payload_slots`：投放载荷列表，当前按舵机通道配置 `hold_pwm` 和 `release_pwm`。
-- `drop`：投放区 5m 扫描、3m 转场、1m 投放和扫描点参数。
-- `recce`：侦察区 5m 扫描、3m 转场、2m 识别和结果输出参数。
-- `vision`：圆筒/危险品类别、相机视场角、图像到地面估算和聚类参数。
-- `align`：固定下视微调下降参数；对准阶段不持续控制云台、不输出偏航。
-- `land_complete_altitude_m`：降落完成的相对高度阈值。
+已知冲突：根 `config/yolo.yaml` 当前仍指向不存在的
+`cuadc2026-fp16.rknn`，而 real profile 和部署文件使用 `cuadc-fp16.rknn`。该 YAML
+修改留到后续配置清理阶段。
 
-## missions/<mission_name>/config.yaml
+RK3588/RKNN 可以支持 INT8，但本项目当前 INT8 模型已废弃。除非重新量化、校准并
+验证检测正常，否则不得切回 INT8 默认部署。
 
-mission 阶段控制器和通用控制参数。
-
-主要分区：
-
-- `input_adapter`：dt、age、低通滤波、target stable。
-- `approach_track.gates`：斜视接近各控制通道放行条件。
-- `approach_track.gimbal`：斜视接近云台控制参数。
-- `approach_track.body`：斜视接近横移和机体偏航参数，`yaw_rate_damping` 用当前飞机 yaw 速率给偏航速率指令加阻尼，减小延迟导致的冲过。
-- `approach_track.forward`：斜视接近前向速度参数。
-- `overhead_hold.gates`：正上方悬停各控制通道放行条件。
-- `overhead_hold.gimbal`：正上方悬停云台角度目标。
-- `overhead_hold.lateral`：正上方悬停横向平移参数。
-- `overhead_hold.longitudinal`：正上方悬停前后平移参数。
-- `shaper`：最终命令限幅和 slew rate。
-
-app 带 UI 运行时，修改本文件后可以在 UI 输入 `pid reload` 或 `stage reload`，
-将上述 mission stage 参数重载进当前进程。重载会更新 input adapter、健康监控
-阈值、正在运行的 controller 和 command shaper，并重置积分/微分历史；不会修改
-YAML 文件。
-
-## config/telemetry.yaml
-
-MAVLink 连接、消息频率、超时和 UI 配置。
-
-常用项：
-
-```yaml
-data_source: sitl
-active_source: sitl
-
-sitl:
-  connection_type: tcp
-  tcp_host: 127.0.0.1
-  tcp_port: 5762
-
-real:
-  connection_type: eth
-  serial_port: /dev/ttyUSB0
-  baudrate: 57600
-  eth_mode: udpin
-  eth_host: 0.0.0.0
-  eth_port: 15001
-```
-
-- SITL 端口需要和实际 `sim_vehicle.py` 输出一致。
-- 实机可使用 `serial` 或 `eth`；ETH 直连 RK3588 网口时，通常让 RK3588 侧监听 `udpin:0.0.0.0:15001`，也可按飞控配置切到 `udpout` 或 `tcp`。
-- `control_send_rate_hz` 控制连续命令最高发送频率。
-- `request_message_intervals` 为 true 时会请求常用 MAVLink 消息频率。
-
-## config/yolo.yaml
-
-YOLO 感知配置，包含模型路径、视频源、UDP 输出目标、目标选择策略、显示和保存选项。
-
-本地窗口和浏览器标注画面可独立启用：
-
-```yaml
-display:
-  local_window_enabled: false
-  fullscreen: false
-
-web_stream:
-  enabled: true
-  host: "0.0.0.0"
-  port: 8081
-  jpeg_quality: 75
-  max_fps: 20
-```
-
-注意保持 UDP 端口与 `config/app.yaml` 一致。
-
-## Web 配置编辑
-
-配置页只开放 `config/app.yaml`、`config/telemetry.yaml`、
-`config/yolo.yaml` 和 `missions/*/config.yaml`。每次保存会写入同路径
-`.bak` 作为上一次版本。
-
-- 当前 mission 的“保存并应用”先关闭 `SEND`、清空连续命令，再热重载任务配置。
-- telemetry 的“保存并重连”先关闭 `SEND`，再按新配置重建通信连接。
-- YOLO 与 app 的“保存并重启”调用 `services_control` 中配置的命令。
-- 应用、重连或重启之后 `SEND` 均保持关闭，必须人工重新开启。
-
-## bool 配置规则
-
-必须使用 YAML 原生 bool：
-
-```yaml
-true
-false
-```
-
-不要写：
-
-```yaml
-"true"
-"false"
-ture
-```
-
-新 loader 对错误 bool 应明确报错，避免实机时误解配置。
-
-## RK3588 真机与 SITL 切换
-
-`config/*.yaml` 是程序直接读取并提交到 Git 的当前生效配置。切换运行环境时，
-使用显式脚本覆盖 `config/telemetry.yaml` 和 `config/yolo.yaml`：
+## profile 切换
 
 ```bash
 bash scripts/config/apply_rk3588_real.sh
 bash scripts/config/apply_rk3588_sitl.sh
-```
-
-调好当前生效配置后，可以保存回对应 profile：
-
-```bash
 bash scripts/config/save_rk3588_real.sh
 bash scripts/config/save_rk3588_sitl.sh
 ```
 
-模板位于：
+脚本执行前必须确认 `executor.send_commands: false`。不要把运行日志、录像或 SITL
+产物写入 config/data；它们属于 `runtime/`。
 
-```text
-config/profiles/rk3588-real/
-config/profiles/rk3588-sitl/
-```
+## Web 配置编辑
 
-保存/应用脚本会管理：
-
-```text
-config/telemetry.yaml
-config/yolo.yaml
-config/action_missions/*.json
-missions/*/config.yaml（如果这些 mission 配置文件存在）
-```
-
-两个脚本都会先检查 `config/app.yaml` 中 `executor.send_commands` 是否严格为
-`false`。如果自动发送已开启，脚本拒绝切换配置。
+Web UI 可以预览、保存和恢复允许的配置文件。应用/重连/重启前必须关闭 SEND，完成
+后也不得自动重新开启。配置中的 bool 必须使用 YAML 原生 `true/false`，不能使用
+字符串。

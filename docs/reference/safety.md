@@ -1,134 +1,92 @@
 # 安全边界
 
-本文用于 SITL 和实机前检查。任何改动如果影响这里的安全假设，必须更新本文。
+本文描述当前真实发送链路和仍未解决的安全架构缺口。任何影响发送、限幅、停止、
+队列或门控的修改都必须单独评审并先在 SITL 验证。
 
-## 默认安全策略
-
-- `send_commands` 默认 false。
-- telemetry 连接和命令发送是两个独立开关。是否连接由
-  `services.connect_telemetry` 或 `--connect-telemetry` 决定。
-- 不传 `--send-commands true` 时不发送连续控制命令。
-- telemetry 断线时清空连续控制和云台速率命令。
-- 数据不新鲜时 `HealthMonitor` 应阻止控制放行。
-- `FlightCommandExecutor` 是唯一控制发送出口。
-
-## 必须经过的控制链路
+## 当前实际 Action 链路
 
 ```text
-MissionStage
-  -> raw FlightCommand
-  -> CommandShaper
-  -> shaped FlightCommand
-  -> FlightCommandExecutor
-  -> LinkManager
-  -> CommandSender
-  -> MAVLink
+Action output
+  → ActionRuntimeService
+  → ActionDispatcher
+  → LinkManager
+  → telemetry_link CommandSender
+  → MAVLink
 ```
 
-任何绕过这条链路的改动都需要重新评审。
+旧 `MissionStage → FlightCommand → CommandShaper → FlightCommandExecutor` 不再是当前
+可运行 Action 链路，不能继续把 FlightCommandExecutor 写成当前唯一出口。
 
-## send_commands
+## 已知安全架构缺口
 
-实机前必须确认：
+旧文档依赖 CommandShaper/FlightCommandExecutor，但该管线不服务当前 Action 主线。
+连续 BODY_NED/`flight_command` 需要新的 Action-compatible safety pipeline，或经过
+评审并文档化的 dispatcher 层等价限幅、slew、NaN 防护和停止策略。
+
+在明确裁决前：
+
+- 不得恢复已删除的旧 control 栈。
+- 不得声称当前连续命令已经拥有旧 shaper 的全部保证。
+- 不得借重构改变飞控实发行为。
+
+## SEND 双门控
+
+系统默认：
 
 ```yaml
 executor:
   send_commands: false
 ```
 
-实发只能通过明确命令打开：
+Action 实发至少同时要求：
 
-```bash
-python -m app.main --connect-telemetry --send-commands true
+1. 系统 SEND/`send_commands` 开启；
+2. Action send-actions 请求开启。
+
+加载模板、配置任务、查看状态和记录/确认 Field Reference 本身不得产生飞行运动
+命令。连接 telemetry 不代表允许发送。
+
+## 连续命令停止
+
+- 停止、切换或失败退出连续 BODY_NED Action 时必须发送明确 zero/stop。
+- 必须清理旧 continuous command 和 pending LOCAL_POSITION，避免恢复连接后重放。
+- telemetry 断线、状态 stale 或控制不允许时必须停止连续发送。
+- 丢失视觉目标不得沿用旧速度继续飞行。
+
+## Field Reference
+
+- 未确认 Field Reference 时必须拒绝实发 FIELD 航点。
+- mission 执行中 FIELD origin/heading 冻结。
+- yaw、GPS Home 或 EKF Origin 变化不能自动改写已确认 reference。
+- GPS A/B 只辅助场地大方向；最终投放依赖视觉对准和激光高度。
+
+## 投放
+
+唯一允许主线：
+
+```text
+payload_release Action → set_servo → MAV_CMD_DO_SET_SERVO
 ```
 
-## Action Lab payload release
+SERVO 输出通道不是遥控器 RC 输入通道。禁止 `release_payload()`、RC override 和
+直接 pymavlink。Action send-actions 开启但系统 SEND 关闭时仍不得调用 servo 实发。
 
-Action Lab 的 `payload_release` 使用 `MAV_CMD_DO_SET_SERVO`，推荐参数
-`servo_outputs` 表示飞控 `SERVO` 输出通道和每通道 PWM，不是遥控器 RC 输入通道号。
+## YOLO 与 telemetry 失效
 
-如果遥控器 CH13/CH14 当前映射到飞控物理输出 8/9，且两个抛投舵机方向相反，
-则 payload release 应配置：
+- YOLO 超时：目标无效，跟踪/对准命令停止，不保留旧速度。
+- telemetry heartbeat/RX 超时：connected=false、stale=true、control_allowed=false，
+  CommandSender 停止连续控制。
+- gimbal feedback 丢失时，依赖云台反馈的 Action 不得误放行。
 
-```json
-{
-  "servo_outputs": [
-    {"channel": 8, "release_pwm": 1200, "hold_pwm": 1700},
-    {"channel": 9, "release_pwm": 1700, "hold_pwm": 1200}
-  ]
-}
-```
+## 实机前检查
 
-UI 勾选 `Send actions` 只表示请求下发；系统级 `send_commands=false` 时仍不会调用
-`LinkManager.set_servo()`。
+- 已完成 dry-run 和 SITL 低速实发。
+- `send_commands` 默认 false，双门控状态清楚。
+- 坐标 frame、单位、正负号和 Field Reference 已确认。
+- 速度、下降率和偏航参数保守。
+- stop/zero、断线、丢目标和 stale 路径均已验证。
+- payload SERVO 输出通道/PWM 已空载验证。
+- 遥控器/地面站接管、场地和人员安全准备完成。
 
-## control_allowed
-
-`control_allowed` 来自 telemetry/fusion 对飞控模式的判断。它必须只在安全控制模式下为 true。
-
-如果飞控模式不允许控制：
-
-- body 不应放行。
-- approach 不应放行。
-- shaped command 应归零或 disabled。
-
-## YOLO 丢失
-
-当 YOLO 超时或目标无效：
-
-- `target_valid=false`。
-- mode 不应输出有效跟踪命令。
-- 默认不触发云台回中；如需搜索策略，必须显式配置打开。
-
-需要确认：
-
-- 丢目标不会继续前进。
-- 丢目标不会保留旧速度。
-- 丢目标不会自动把云台转到预设角度，除非已显式启用恢复动作。
-
-## telemetry 丢失
-
-当 heartbeat 或 RX 超时：
-
-- `DroneState.connected=false`
-- `DroneState.stale=true`
-- `control_allowed=false`
-- `GimbalState.gimbal_valid=false`
-- `CommandSender` 停止发送连续控制。
-
-## gimbal feedback 丢失
-
-根据配置：
-
-- gimbal 控制可不要求 gimbal fresh。
-- body/approach 默认要求 gimbal fresh。
-
-实机前确认对应 mode gating 配置保持保守，默认要求：
-
-```yaml
-require_gimbal_fresh_for_body: true
-require_gimbal_fresh_for_approach: true
-```
-
-## 实机前 checklist
-
-- 已在 SITL 中完成 dry-run。
-- 已在 SITL 中完成低速实发。
-- `max_vx/max_vy/max_yaw_rate` 已调成保守值。
-- `send_commands` 默认 false。
-- UI 或命令行能立即关闭控制发送。
-- YOLO 断开时命令归零。
-- telemetry 断开时命令停止。
-- gimbal feedback 丢失时 body/approach 不误放行。
-- 飞控处于正确模式。
-- 螺旋桨/场地/遥控接管准备完成。
-
-## 紧急处理
-
-优先使用遥控器或地面站接管。软件侧可：
-
-- 停止 app 进程。
-- 在 UI 中关闭 send_commands。
-- 发送 `mode LOITER`、`mode RTL`、`land` 等人工命令，前提是 telemetry 可用。
-
-不要依赖单一软件停止路径作为唯一安全手段。
+紧急情况优先使用遥控器或地面站接管；停止 app 只能作为辅助路径，不能成为唯一
+安全手段。

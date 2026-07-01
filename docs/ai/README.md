@@ -1,90 +1,39 @@
 # AI 快速接管
 
-本目录专门用于 AI 和开发者快速理解、修改、验证和部署项目。项目仅面向
-Linux ARM64 RK3588；YOLO 必须使用 RKNNLite 在 NPU 上推理。
+本项目只面向 Linux ARM64 RK3588。开始工作前按顺序阅读：
 
-## 先读什么
+1. [current_architecture.md](current_architecture.md)
+2. [action_contracts.md](action_contracts.md)
+3. [deprecated_paths.md](deprecated_paths.md)
+4. [../reference/coordinate_frames.md](../reference/coordinate_frames.md)
+5. [../reference/field_origin_heading.md](../reference/field_origin_heading.md)
+6. [../reference/safety.md](../reference/safety.md)
+7. [task_checklist.md](task_checklist.md)
 
-任何修改前依次阅读：
-
-1. [architecture.md](architecture.md)
-2. [interfaces.md](interfaces.md)
-3. [control_flow.md](control_flow.md)
-4. [development_rules.md](development_rules.md)
-5. [../reference/safety.md](../reference/safety.md)
-
-然后根据任务类型从 [task_checklist.md](task_checklist.md) 选择追加文件。
-
-## 一句话边界
+当前主线：
 
 ```text
-yolo_app       只负责 RKNN NPU 感知与 UDP 输出
-telemetry_link 只负责 MAVLink 状态和发送
-fusion         只负责融合感知与遥测
-missions       只负责任务流程和 stage controller
-app            只负责编排服务与运行循环
-uav_ui/web_ui  只负责人工交互
-config         保存当前生效的系统配置
-runtime        保存不提交 Git 的运行产物
+Web UI → Action Lab / Action Mission → ActionRuntimeService → ActionRunner
+→ missions/common/actions/* → ActionDispatcher → LinkManager → telemetry_link
 ```
 
-任何连续控制命令必须经过：
+不要恢复旧 mission/stage/control 栈。不要删除整个 `uav_ui/`，其共用工具尚未迁出。
+不要让 Action 直接调用 MAVLink/LinkManager。不要使用 `release_payload` 或 RC override。
 
-```text
-MissionStage -> FlightCommand -> CommandShaper
-  -> FlightCommandExecutor -> LinkManager -> MAVLink
-```
+平台硬约束：
 
-## 平台硬约束
+- RKNNLite + RK3588 NPU。
+- 默认模型 `data/models/cuadc-fp16.rknn`。
+- 不新增 x86、CUDA、PyTorch 或 GPU 推理路径。
+- `executor.send_commands` 默认 false。
+- 运行产物只进入 `runtime/`。
 
-- 不新增 x86、CUDA、PyTorch 或 GPU YOLO 推理路径。
-- 当前部署模型固定在 `data/models/cuadc-fp16.rknn`；RKNN 可使用 FP16 或 INT8。
-- Python 保持 `3.10` 兼容。
-- `config/app.yaml` 中 `executor.send_commands` 默认必须为 `false`。
-- 日志、SITL 状态、视频和 blackbox 数据只能进入 `runtime/`。
-
-## 常用操作
-
-检查工作区：
+验证：
 
 ```bash
-git status --short --branch
-```
-
-运行测试：
-
-```bash
-python -m pip install -r requirements-dev.txt
+python -m compileall app missions telemetry_link fusion yolo_app web_ui scripts
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
+python scripts/validate_action_missions.py
 ```
 
-安全 smoke test：
-
-```bash
-python -m app.main \
-  --no-yolo-udp \
-  --no-ui \
-  --run-seconds 1 \
-  --send-commands false \
-  --blackbox-enabled false
-```
-
-检查 CLI：
-
-```bash
-python -m app.main --help
-python -m telemetry_link.main --help
-python -m yolo_app.main --help
-```
-
-## 修改后最少说明
-
-完成任务时说明：
-
-```text
-修改了哪些文件
-影响哪个模块边界
-是否影响 send_commands 或 MAVLink
-运行了哪些测试
-是否仍有未处理问题
-```
+已知测试基线见 [../refactor/phase0_baseline.md](../refactor/phase0_baseline.md)。

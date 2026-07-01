@@ -1,175 +1,59 @@
-# AI 开发规则
+# 当前开发规则
 
-本文给 AI 和开发者使用。修改代码前先判断任务属于哪个边界，再进入对应目录。
+## 通用
 
-## 总原则
+- Python 3.10 兼容；配置 YAML 严格解析 bool 并转 dataclass。
+- 只支持 Linux ARM64 RK3588、RKNNLite 和 NPU。
+- 默认模型 `data/models/cuadc-fp16.rknn`。
+- `executor.send_commands` 默认 false。
+- 运行产物只进入 `runtime/`。
+- 不恢复 deprecated mission/stage/control 栈。
+- 不直接删除 `uav_ui/`；先迁出 app 共用组件。
 
-- 保持 Python 3.10 兼容。
-- 不使用 `StrEnum`，枚举用 `class X(str, Enum)`。
-- dataclass 优先使用 `slots=True`。
-- 配置从 YAML 加载后必须转换成 dataclass。
-- bool 配置必须严格解析，禁止 `bool("false")` 这种写法。
-- 控制量单位必须明确：速度 `m/s`，角速度 `rad/s`。
-- 不要把控制算法、MAVLink 发送、UI 和服务启动混在一个文件里。
-- 不要为了短期方便绕过 `CommandShaper` 和 `FlightCommandExecutor`。
+## 修改 Action
 
-## 修改控制算法时
+主要修改 `missions/common/actions/`、对应测试和必要的 Action Mission JSON。
+Action 返回结构化 result/request，不直接调用 LinkManager/pymavlink。坐标参数遵守
+[action_contracts.md](action_contracts.md)。模板改动必须运行 validator。
 
-应该改：
+## 修改 Action Mission
 
-- `missions/<mission_name>/stages/<stage_name>/`
-- `missions/common/control/`
-- `missions/<mission_name>/config.yaml`
-- 对应 `tests/test_*.py`
+主要修改 `app/mission_orchestrator.py`、`config/action_missions/*.json` 和编排测试。
+不在 orchestrator 中计算控制律或构造 MAVLink。
 
-不应该碰：
+## 修改派发或 telemetry
 
-- `telemetry_link/command_sender.py`
-- `telemetry_link/mavlink_client.py`
-- `app/system_runner.py`，除非接口真的变了。
-- `yolo_app/`。
+ActionDispatcher 负责路由和双门控；LinkManager/CommandSender 负责通讯。连续命令
+改动属于高风险，必须保留 stop/zero、队列清理、断线停止和 SEND 门控，并单独评审。
+不得用恢复旧 Executor 作为快捷修复。
 
-要求：
+## 修改坐标和 Field Reference
 
-- stage controller 输出 `FlightCommand`。
-- 新参数放到对应 config dataclass 和 `missions/<mission_name>/config.yaml`。
-- 添加或更新单元测试。
+先读坐标唯一规范和 Field Reference 设计。复用 `runtime_context.py` 现有逻辑并逐步
+迁移到唯一 CoordinateTransform，不建立平行转换。字段语义变化必须覆盖 0/90/180°、
+正反变换、未确认拒绝、GPS 短基线和冻结测试。
 
-## 修改任务流程时
+## 修改 UI
 
-应该改：
+Web UI 是正式入口。UI 经 API/SystemRunner 进入业务层，不直接访问 pymavlink。
+Field Reference 的记录/确认/清除操作本身不得产生飞行动作。
 
-- `missions/`
-- `app/mission_runner.py`
-- `app/system_runner.py`，仅当调度接口变化。
-- `missions/<mission_name>/config.yaml`
-- `tests/test_*mission*.py`
+## 修改 YOLO
 
-不应该碰：
+只改 `yolo_app/`、`config/yolo.yaml` 和协议相关文档/测试。保持 RKNNLite/NPU，禁止
+x86/CUDA/PyTorch 路径；YOLO 不连接 MAVLink。
 
-- 具体控制公式。
-- MAVLink 发送逻辑。
-- YOLO tracking 逻辑。
+## 投放
 
-要求：
+唯一链路：`payload_release` Action → `set_servo`。禁止 `release_payload`、RC
+override 和直接 pymavlink。
 
-- mission 只选择阶段、active mode 和通用 action，不计算速度。
-- 任务动作必须用 `MissionAction`，由 `MissionRunner` 转发。
-- 新状态必须有清晰进入/退出条件。
-
-## 修改 MAVLink 或飞控通讯时
-
-应该改：
-
-- `telemetry_link/`
-- `config/telemetry.yaml`
-- `telemetry_link/COMMAND_AUDIT.md`
-- 必要时更新 `docs/ai/interfaces.md`
-
-不应该碰：
-
-- `missions/<mission_name>/stages/<stage_name>/` 控制算法。
-- `fusion/`。
-- `yolo_app/`。
-
-要求：
-
-- 保持 `LinkManager` 公开接口稳定。
-- action 命令走 `ActionCommand`。
-- 连续机体命令走 `ControlCommand`。
-- 云台速率命令走 `GimbalRateCommand`。
-- 断线时不应继续发送连续控制命令。
-
-## 修改 YOLO 时
-
-应该改：
-
-- `yolo_app/`
-- `config/yolo.yaml`
-- 必要时更新 UDP JSON 协议文档。
-
-不应该碰：
-
-- `telemetry_link/`
-- `missions/<mission_name>/stages/`
-- `missions/`
-
-要求：
-
-- 保持 UDP JSON 字段兼容，尤其是 `target_valid`、`track_id`、`target_size`、`ex`、`ey`。
-- 不在 YOLO 进程内连接 MAVLink。
-
-## 修改 fusion 时
-
-应该改：
-
-- `fusion/`
-- `tests/` 中相关融合测试。
-
-不应该碰：
-
-- MAVLink 发送器。
-- mission stage controller 控制律，除非输出字段语义变化。
-
-要求：
-
-- `FusedState` 字段语义变化必须更新 [interfaces.md](interfaces.md)。
-- 坐标系或单位变化必须全链路说明。
-
-## 修改 UI 时
-
-应该改：
-
-- `uav_ui/`
-- `app/system_runner.py` 中 UI 挂接部分，必要时。
-
-不应该碰：
-
-- 控制公式。
-- MAVLink message 构造。
-
-要求：
-
-- UI 命令必须通过已有 manager/client 分发。
-- UI 不直接访问底层 pymavlink。
-
-## 新增 mission stage 流程
-
-1. 在 `missions/<mission_name>/stages/<new_stage>/` 新建 `config.py` 和 `mode.py`。
-2. 实现 `MissionStage` 接口。
-3. 在 `app/stage_registry.py` 注册。
-4. 在对应 mission 中增加进入/退出条件。
-5. 在 `missions/<mission_name>/config.yaml` 和必要的 app 配置中加配置。
-6. 增加 `tests/test_<new_mode>.py`。
-7. 更新 [docs/ai/interfaces.md](interfaces.md) 和 [docs/ai/architecture.md](architecture.md)。
-
-## 日志风格
-
-- 主循环日志写 active mode、health、raw command、shaped command。
-- telemetry 日志写 source、connection、target_system/component、reconnect 原因。
-- dry-run 必须明确出现 `DRY` 或 `send_commands=false`。
-- 不在高频循环中打印过长对象。
-
-## 测试要求
-
-每次结构性修改后运行：
+## 验证
 
 ```bash
+python -m compileall app missions telemetry_link fusion yolo_app web_ui scripts
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
-python -m app.main --no-yolo-udp --run-seconds 1 --send-commands false
+python scripts/validate_action_missions.py
 ```
 
-涉及 telemetry 嵌入时运行：
-
-```bash
-python -m app.main --connect-telemetry --no-yolo-udp --run-seconds 1 --send-commands false
-python -m telemetry_link.main --help
-```
-
-## 禁止清单
-
-- 禁止 mission stage controller 直接调用 `LinkManager`。
-- 禁止绕过 `CommandShaper`。
-- 禁止默认打开真实控制发送。
-- 禁止把 `.pt`、日志、`__pycache__` 作为功能变更提交。
-- 禁止用单元测试依赖真实飞控、相机、GPU。
+已有失败必须如实记录，不能通过永久 ignore 或恢复旧架构掩盖。
