@@ -325,6 +325,41 @@
         </div>
       </article>
 
+      <article class="panel safety-panel field-reference-panel">
+        <div class="panel-title">Field Reference 新面板</div>
+        <div class="field-reference-status-grid" id="fieldReferenceStatus">
+          <div><span>confirmed</span><strong id="frConfirmed">--</strong></div>
+          <div><span>frozen</span><strong id="frFrozen">--</strong></div>
+          <div><span>origin source</span><strong id="frOriginSource">--</strong></div>
+          <div><span>heading source</span><strong id="frHeadingSource">--</strong></div>
+          <div><span>field heading deg</span><strong id="frHeadingDeg">--</strong></div>
+          <div><span>origin local N / E</span><strong id="frOriginLocal">--</strong></div>
+          <div><span>origin GPS lat / lon</span><strong id="frOriginGps">--</strong></div>
+          <div><span>forward GPS lat / lon</span><strong id="frForwardGps">--</strong></div>
+          <div><span>A-B distance</span><strong id="frDistance">--</strong></div>
+          <div><span>warnings</span><strong id="frWarnings">--</strong></div>
+          <div><span>GPS fix / sats</span><strong id="frGpsFix">--</strong></div>
+          <div><span>EPH / EPV</span><strong id="frGpsEphEpv">--</strong></div>
+          <div><span>GPS valid</span><strong id="frGpsValid">--</strong></div>
+          <div><span>has local pos</span><strong id="frHasLocal">--</strong></div>
+        </div>
+        <div class="button-row">
+          <button id="frMarkOrigin">记录原点 A</button>
+          <button id="frMarkForward">记录前向点 B</button>
+          <button id="frUseCurrentYaw">使用当前 yaw</button>
+          <span style="display:inline-flex;gap:4px;align-items:center">
+            <input id="frManualHeadingDeg" type="number" step="0.1" placeholder="deg" style="width:70px">
+            <button id="frSetManualHeading">手动 heading</button>
+          </span>
+          <button id="frConfirm" class="warning">确认</button>
+          <button id="frReset">Reset</button>
+          <button id="frFreeze">Freeze</button>
+        </div>
+        <div id="frHint" class="hint">
+          Field Reference 面板 — 操作只修改后端状态，不发送 MAVLink。
+        </div>
+      </article>
+
       <article class="panel safety-panel">
         <div class="panel-title">Payload Release Action</div>
         <div class="payload-release-zone">

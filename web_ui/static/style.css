@@ -165,6 +165,31 @@ button.active-choice {
   color: var(--text);
   font-family: Consolas, monospace;
 }
+.field-reference-panel {
+  border-color: rgba(147, 168, 191, 0.35);
+}
+.field-reference-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+.field-reference-status-grid div {
+  background: rgba(8, 17, 26, 0.55);
+  border: 1px solid rgba(147, 168, 191, 0.25);
+  border-radius: 6px;
+  padding: 8px;
+}
+.field-reference-status-grid span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.field-reference-status-grid strong {
+  color: var(--text);
+  font-family: Consolas, monospace;
+}
 .ok-text { color: var(--accent) !important; }
 .warning-text { color: #ffbf66 !important; }
 .danger-text { color: #ff5b5b !important; }

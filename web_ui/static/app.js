@@ -460,6 +460,61 @@ async function confirmFieldHeading() {
   }
   await loadAudit();
 }
+async function fetchFieldReferenceStatus() {
+  try {
+    const data = await json("/api/field-reference/status");
+    if (data && data.field_reference) renderFieldReference(data);
+  } catch { /* ignore */ }
+}
+function renderFieldReference(data) {
+  const fr = data.field_reference || {};
+  const tele = data.telemetry || {};
+  setOptionalText("frConfirmed", fr.is_confirmed ? "YES" : "NO");
+  setOptionalText("frFrozen", fr.is_frozen ? "YES" : "NO");
+  setOptionalText("frOriginSource", fr.origin_source || "--");
+  setOptionalText("frHeadingSource", fr.heading_source || "--");
+  setOptionalText("frHeadingDeg", degNum(fr.field_heading_deg));
+  setOptionalText("frOriginLocal", xyzText(fr.origin_local_n_m, fr.origin_local_e_m, null));
+  setOptionalText("frOriginGps", gpsText(fr.origin_lat, fr.origin_lon));
+  setOptionalText("frForwardGps", gpsText(fr.forward_marker_lat, fr.forward_marker_lon));
+  setOptionalText("frDistance", fr.distance_m != null ? Number(fr.distance_m).toFixed(2) + " m" : "--");
+  var w = fr.warnings || [];
+  setOptionalText("frWarnings", w.length ? w.join("; ") : "--");
+  setOptionalText("frGpsFix", (tele.gps_fix_type || 0) + " / " + (tele.satellites_visible || 0) + " sats");
+  setOptionalText("frGpsEphEpv", num(tele.gps_eph, 1) + " / " + num(tele.gps_epv, 1));
+  setOptionalText("frGpsValid", tele.global_position_valid ? "YES" : "NO");
+  setOptionalText("frHasLocal", tele.has_local_position ? "YES" : "NO");
+}
+async function frPost(url) {
+  try {
+    var result = await json(url, {method: "POST", body: "{}"});
+    $("frHint").textContent = result.ok
+      ? (result.message || "OK") + (result.warnings && result.warnings.length ? " Warnings: " + result.warnings.join("; ") : "")
+      : result.error || "failed";
+    fetchFieldReferenceStatus();
+  } catch (e) {
+    $("frHint").textContent = "request failed: " + e.message;
+  }
+}
+async function frSetManualHeading() {
+  var deg = parseFloat($("frManualHeadingDeg").value);
+  if (!Number.isFinite(deg)) { $("frHint").textContent = "enter valid degrees"; return; }
+  try {
+    var result = await json("/api/field-reference/set-manual-heading", {
+      method: "POST",
+      body: JSON.stringify({yaw_deg: deg}),
+      headers: {"Content-Type": "application/json"},
+    });
+    $("frHint").textContent = result.ok ? "manual heading set" : result.error || "failed";
+    fetchFieldReferenceStatus();
+  } catch (e) {
+    $("frHint").textContent = "request failed: " + e.message;
+  }
+}
+function gpsText(lat, lon) {
+  if (lat == null || lon == null) return "--";
+  return Number(lat).toFixed(6) + " / " + Number(lon).toFixed(6);
+}
 function renderMissionSteps(next) {
   if (!$("missionSelect") || !$("stageOverride") || !$("missionSteps")) return;
   const selectedMission = $("missionSelect")?.value || next.mission || "";
@@ -1991,18 +2046,23 @@ function startStatusUpdates() {
       $("completionHint").textContent = `Action Lab 刷新失败: ${error.message}`;
     }), 1000);
   };
+  const startFrPolling = () => {
+    fetchFieldReferenceStatus();
+    setInterval(fetchFieldReferenceStatus, 2000);
+  };
   const startFallback = () => {
     if (fallbackTimer !== null) return;
     pollStatus();
     fallbackTimer = setInterval(pollStatus, 500);
     startActionTimer();
+    startFrPolling();
   };
   try {
     const socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/status`);
     socket.onmessage = event => renderStatus(JSON.parse(event.data));
     socket.onerror = startFallback;
     socket.onclose = startFallback;
-    socket.onopen = startActionTimer;
+    socket.onopen = () => { startActionTimer(); startFrPolling(); };
   } catch {
     startFallback();
   }
@@ -2090,6 +2150,13 @@ async function init() {
   };
   if ($("missionSwitch")) $("missionSwitch").onclick = () => execute(`mission switch ${$("missionSelect").value}`, "BUTTON").then(loadMissions);
   if ($("missionSelect")) $("missionSelect").onchange = () => renderMissionSteps(state || {});
+  if ($("frMarkOrigin")) $("frMarkOrigin").onclick = () => frPost("/api/field-reference/mark-origin");
+  if ($("frMarkForward")) $("frMarkForward").onclick = () => frPost("/api/field-reference/mark-forward");
+  if ($("frUseCurrentYaw")) $("frUseCurrentYaw").onclick = () => frPost("/api/field-reference/use-current-yaw");
+  if ($("frSetManualHeading")) $("frSetManualHeading").onclick = frSetManualHeading;
+  if ($("frConfirm")) $("frConfirm").onclick = () => frPost("/api/field-reference/confirm");
+  if ($("frReset")) $("frReset").onclick = () => frPost("/api/field-reference/reset");
+  if ($("frFreeze")) $("frFreeze").onclick = () => frPost("/api/field-reference/freeze");
   $("sendCommand").onclick = () => {
     const input = $("commandInput");
     execute(input.value, "CLI"); history.unshift(input.value); input.value = ""; historyIndex = -1;
