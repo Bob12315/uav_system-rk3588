@@ -176,12 +176,7 @@ const FIELD_DEFAULTS = {
   ],
 };
 
-async function json(url, options = {}) {
-  const response = await fetch(url, {headers: {"Content-Type": "application/json"}, ...options});
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.detail || "request failed");
-  return data;
-}
+const json = window.UavApi.request;
 function stamp(seconds) {
   return seconds ? new Date(seconds * 1000).toLocaleTimeString() : "--";
 }
