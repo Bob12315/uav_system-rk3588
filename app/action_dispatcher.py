@@ -11,6 +11,7 @@ from app.dispatch.policy import ACTION_DISPATCH_POLICY, DispatchRule, SafetyGate
 from app.dispatch.types import empty_dispatch
 from app.dispatch.normalizer import get_action_params, optional_float, format_log_float
 from app.dispatch.servo_handler import dispatch_set_servo
+from app.dispatch.local_position_handler import dispatch_local_position
 from telemetry_link.frames import BODY_NED, LOCAL_NED
 
 
@@ -466,88 +467,10 @@ class ActionDispatcher:
         *,
         link_manager: object | None,
     ) -> dict[str, object]:
-        params = self._action_params(action)
-        x = float(params["x"])
-        y = float(params["y"])
-        z = float(params["z"])
-        frame = int(params.get("frame", LOCAL_NED))
-        yaw = None if params.get("yaw") is None else float(params["yaw"])
-        priority = int(action.get("priority", 4))
-
-        # prefer semantic wrapper when frame matches (T4)
-        if frame == LOCAL_NED:
-            wrapper = getattr(link_manager, "goto_local_ned", None)
-            if callable(wrapper):
-                self._logger.info(
-                    "action_lab dispatch goto_local_ned input_frame=%s input_target=%s local_target=%s "
-                    "field_origin=(%s,%s) field_heading_yaw_rad=%s yaw_rad=%s priority=%s key=%s",
-                    action.get("input_frame"), action.get("input_target"), action.get("local_target"),
-                    action.get("field_origin_local_x"), action.get("field_origin_local_y"),
-                    action.get("field_heading_yaw_rad"), yaw, priority, action.get("key"),
-                )
-                wrapper(
-                    x_north_m=x,
-                    y_east_m=y,
-                    z_down_m=z,
-                    yaw_rad=yaw,
-                    priority=priority,
-                )
-                detail: dict[str, object] = {
-                    "action_type": "local_position",
-                    "x": x,
-                    "y": y,
-                    "z": z,
-                    "frame": frame,
-                    "key": str(action.get("key") or ""),
-                }
-                for name in (
-                    "input_frame", "input_target", "local_target", "field_origin_local_x",
-                    "field_origin_local_y", "field_heading_yaw_rad",
-                ):
-                    if name in action:
-                        detail[name] = action[name]
-                if yaw is not None:
-                    detail["yaw"] = yaw
-                return {"status": "sent", "detail": detail}
-
-        # fallback: original local_position
-        sender = getattr(link_manager, "local_position", None)
-        if not callable(sender):
-            return {"status": "skipped", "reason": "local_position_dispatch_not_available"}
-        if yaw is not None and not self._callable_accepts_keyword(sender, "yaw"):
-            return {"status": "skipped", "reason": "local_position_yaw_not_supported"}
-        self._logger.info(
-            "action_lab dispatch local_position input_frame=%s input_target=%s local_target=%s "
-            "field_origin=(%s,%s) field_heading_yaw_rad=%s frame=%s yaw=%s priority=%s key=%s",
-            action.get("input_frame"),
-            action.get("input_target"),
-            action.get("local_target"),
-            action.get("field_origin_local_x"),
-            action.get("field_origin_local_y"),
-            action.get("field_heading_yaw_rad"),
-            frame,
-            yaw,
-            priority,
-            action.get("key"),
-        )
-        sender(x, y, z, frame, yaw=yaw, priority=priority)
-        detail: dict[str, object] = {
-            "action_type": "local_position",
-            "x": x,
-            "y": y,
-            "z": z,
-            "frame": frame,
-            "key": str(action.get("key") or ""),
-        }
-        for name in (
-            "input_frame", "input_target", "local_target", "field_origin_local_x",
-            "field_origin_local_y", "field_heading_yaw_rad",
-        ):
-            if name in action:
-                detail[name] = action[name]
-        if yaw is not None:
-            detail["yaw"] = yaw
-        return {"status": "sent", "detail": detail}
+        result, log_msg = dispatch_local_position(action, link_manager=link_manager)
+        if log_msg is not None:
+            self._logger.info(log_msg)
+        return result
 
     def _dispatch_flight_command(
         self,
