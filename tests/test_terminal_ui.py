@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from uav_ui.terminal_ui import complete_command_input
+from app.ui_commands import complete_command_input
 
 
 def test_complete_unique_command() -> None:

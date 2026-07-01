@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from app.mission_orchestrator import MissionActionStep
 from app.app_config import ROOT_DIR, UiConfig
-from uav_ui.completion_catalog import COMMAND_COMPLETIONS
+from app.completion_catalog import COMMAND_COMPLETIONS
 from web_ui.audit import AuditLog
 from web_ui.config_store import ConfigStore
 
