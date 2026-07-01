@@ -1,13 +1,16 @@
+const AppState = window.UavAppState;
+
 let state = {};
-let completions = [];
-let history = [];
+let completions = AppState.completions;
+let history = AppState.history;
+let actionParamCache = {};
+
 let historyIndex = -1;
 let currentConfigPath = "";
 let currentOriginal = "";
 let missionCatalog = [];
 let actionSpecs = [];
 let selectedActionName = "";
-let actionParamCache = {};
 let latestActionLab = null;
 let actionStatusJsonSelecting = false;
 let currentActionMission = null;
