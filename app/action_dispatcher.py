@@ -7,8 +7,7 @@ import time
 from typing import Any
 
 
-from app.dispatch_policy import ACTION_DISPATCH_POLICY, DispatchRule
-from app.safety_gate import SafetyGate
+from app.dispatch.policy import ACTION_DISPATCH_POLICY, DispatchRule, SafetyGate
 from telemetry_link.frames import BODY_NED, LOCAL_NED
 
 
