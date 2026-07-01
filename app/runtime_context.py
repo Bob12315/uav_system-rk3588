@@ -5,6 +5,9 @@ import math
 import time
 from typing import Any
 
+from .coordinate_transform import field_to_local_ned, local_ned_to_field
+from .field_reference import FieldReference
+
 
 class RuntimeContextBuilder:
     """Builds the action-lab context dict from a web-status snapshot.
@@ -139,32 +142,26 @@ class RuntimeContextBuilder:
         }
 
     def local_to_field_xy(self, local_x: object, local_y: object) -> tuple[float, float] | None:
-        if not self.field_transform_ready():
+        ref = self._build_field_reference_from_runtime_state()
+        if ref is None:
             return None
         lx = self._float_or_none(local_x)
         ly = self._float_or_none(local_y)
         if lx is None or ly is None:
             return None
-        ox = float(self.field_origin_local_x)
-        oy = float(self.field_origin_local_y)
-        yaw = float(self.field_heading_yaw_rad)
-        dx = lx - ox
-        dy = ly - oy
-        return (-dx * math.sin(yaw) + dy * math.cos(yaw),
-                dx * math.cos(yaw) + dy * math.sin(yaw))
+        result = local_ned_to_field(lx, ly, z_down_m=0.0, reference=ref)
+        return (result.field_x_m, result.field_y_m)
 
     def field_to_local_xy(self, field_x: object, field_y: object) -> tuple[float, float] | None:
-        if not self.field_transform_ready():
+        ref = self._build_field_reference_from_runtime_state()
+        if ref is None:
             return None
         fx = self._float_or_none(field_x)
         fy = self._float_or_none(field_y)
         if fx is None or fy is None:
             return None
-        yaw = float(self.field_heading_yaw_rad)
-        local_dx = fy * math.cos(yaw) - fx * math.sin(yaw)
-        local_dy = fy * math.sin(yaw) + fx * math.cos(yaw)
-        return (float(self.field_origin_local_x) + local_dx,
-                float(self.field_origin_local_y) + local_dy)
+        result = field_to_local_ned(fx, fy, altitude_m=0.0, reference=ref)
+        return (result.north_m, result.east_m)
 
     def field_position_from_drone(self, drone: object) -> dict[str, object] | None:
         if not isinstance(drone, dict) or not bool(drone.get("local_position_valid", False)):
@@ -274,6 +271,30 @@ class RuntimeContextBuilder:
         except (TypeError, ValueError):
             return None
         return result if math.isfinite(result) else None
+
+    # ------------------------------------------------------------------
+    # adapter: build FieldReference from legacy runtime state
+    # ------------------------------------------------------------------
+
+    def _build_field_reference_from_runtime_state(self) -> FieldReference | None:
+        """Build a :class:`FieldReference` from the current runtime state
+        for use by ``field_to_local_ned`` / ``local_ned_to_field``.
+
+        Returns ``None`` when the runtime state is not ready (same guard
+        as ``field_transform_ready()``).
+        """
+        if not self.field_transform_ready():
+            return None
+        ref = FieldReference()
+        ref.is_confirmed = True  # guarded by field_transform_ready() above
+        ref.origin_local_n_m = float(self.field_origin_local_x)
+        ref.origin_local_e_m = float(self.field_origin_local_y)
+        ref.field_heading_yaw_rad = float(self.field_heading_yaw_rad)
+        # heading_source / origin_source are intentionally NOT mapped here:
+        # the old runtime context uses free-form strings (e.g. "manual",
+        # "takeoff_auto") that don't correspond 1:1 to the new enums.
+        # These fields are not needed for the pure math transforms.
+        return ref
 
     @classmethod
     def json_safe(cls, value):
