@@ -29,10 +29,10 @@ from app.health_monitor import HealthMonitor
 from app.service_manager import ServiceManager
 from missions.common.actions.action_lab import action_lab_specs, create_action_lab_registry
 from missions.common.actions.runner import ActionRunner
-from uav_ui.control_switches import ControlRuntimeSwitches
-from uav_ui.terminal_ui import run_terminal_ui
-from uav_ui.ui_commands import CommandResult, build_ui_command_handler, format_controller_snapshot
-from uav_ui.yolo_command_client import YoloCommandClient
+from app.control_switches import ControlRuntimeSwitches
+
+from app.ui_commands import CommandResult, build_ui_command_handler, format_controller_snapshot
+from app.yolo_command_client import YoloCommandClient
 
 try:
     from app.mission_runner import MissionRunner
@@ -187,12 +187,7 @@ class SystemRunner:
             if not self.mission_enabled:
                 self._action_lab_only_loop()
                 return
-            if self.config.ui.terminal_enabled and self.services.link_manager is not None:
-                self._run_with_ui()
-            else:
-                if self.config.ui.terminal_enabled and self.services.link_manager is None:
-                    self.logger.warning("UI disabled because telemetry is not connected")
-                self._control_loop()
+            self._control_loop()
         finally:
             self.stop()
 
@@ -208,34 +203,6 @@ class SystemRunner:
         self._stop_external_processes()
         self.logger.info("app runtime stopped")
 
-    def _run_with_ui(self) -> None:
-        assert self.services.link_manager is not None
-        ui_command_handler = build_ui_command_handler(
-            self.services.link_manager,
-            controller_switches=self.controller_switches,
-            yolo_client=YoloCommandClient(self.config.yolo_command),
-            mission_command_handler=self._handle_mission_command,
-            stage_override_handler=self._set_stage_override,
-            stage_config_reload_handler=self._reload_mission_stage_config,
-        )
-        control_thread = threading.Thread(
-            name="AppControlLoop",
-            target=self._control_loop,
-            daemon=True,
-        )
-        control_thread.start()
-        try:
-            run_terminal_ui(
-                self.services.link_manager,
-                self.stop_event,
-                self._get_mission_control_lines,
-                ui_command_handler,
-            )
-        finally:
-            self.stop_event.set()
-            control_thread.join(timeout=1.0)
-
-    def _action_lab_only_loop(self) -> None:
         loop_sleep_sec = 1.0 / max(self.config.runtime.loop_hz, 0.1)
         print_sleep_sec = 1.0 / max(self.config.runtime.print_rate_hz, 0.1)
         started_at = time.time()

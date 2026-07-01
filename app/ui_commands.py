@@ -4,8 +4,8 @@ from collections.abc import Callable
 
 from telemetry_link.command_dispatcher import CommandResult, dispatch_text_command
 from telemetry_link.link_manager import LinkManager
-from uav_ui.control_switches import ControlRuntimeSwitches, ControlSwitchSnapshot
-from uav_ui.yolo_command_client import YoloCommandClient
+from app.control_switches import ControlRuntimeSwitches, ControlSwitchSnapshot
+from app.yolo_command_client import YoloCommandClient
 
 
 _CONTINUOUS_MANUAL_COMMANDS = {"body_vel", "yaw_rate", "stop", "gimbal_rate", "local_pos"}
@@ -241,3 +241,60 @@ def _clear_continuous_commands(manager: LinkManager) -> None:
     clear_sender = getattr(manager, "clear_continuous_commands", None)
     if callable(clear_sender):
         clear_sender()
+
+
+# ---------------------------------------------------------------------------
+# command autocomplete (extracted from uav_ui/terminal_ui.py)
+# ---------------------------------------------------------------------------
+
+from dataclasses import dataclass  # noqa: E402  (second import is intentional for autocomplete types)
+
+from app.completion_catalog import COMMAND_COMPLETIONS  # noqa: E402
+
+
+@dataclass(slots=True)
+class AutocompleteState:
+    seed: str = ""
+    matches: tuple[str, ...] = ()
+    index: int = -1
+
+
+@dataclass(slots=True)
+class AutocompleteResult:
+    buffer: str
+    cursor: int
+    state: AutocompleteState
+    message: str
+
+
+def complete_command_input(
+    buffer: str, cursor: int, state: AutocompleteState | None = None,
+) -> AutocompleteResult:
+    state = state or AutocompleteState()
+    cursor = max(0, min(cursor, len(buffer)))
+    prefix = buffer[:cursor]
+    suffix = buffer[cursor:]
+    current_match = (
+        state.matches[state.index]
+        if 0 <= state.index < len(state.matches)
+        else ""
+    )
+    if state.matches and prefix in {state.seed, current_match}:
+        matches = state.matches
+        index = (state.index + 1) % len(matches)
+    else:
+        lowered = prefix.lower()
+        matches = tuple(
+            c for c in COMMAND_COMPLETIONS if c.lower().startswith(lowered)
+        )
+        index = 0
+    if not matches:
+        return AutocompleteResult(buffer, cursor, AutocompleteState(), "no completion")
+    candidate = matches[index]
+    next_buffer = candidate + suffix
+    next_state = AutocompleteState(seed=prefix, matches=matches, index=index)
+    if len(matches) == 1:
+        message = f"completion 1/1: {candidate}"
+    else:
+        message = f"completion {index + 1}/{len(matches)}: {candidate}"
+    return AutocompleteResult(next_buffer, len(candidate), next_state, message)

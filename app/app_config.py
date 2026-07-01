@@ -110,7 +110,7 @@ except ModuleNotFoundError as exc:
             )
 from app.health_monitor import HealthMonitorConfig
 from telemetry_link.config import TelemetryConfig, load_config_file as load_telemetry_config
-from uav_ui.yolo_command_client import YoloCommandConfig
+from app.yolo_command_client import YoloCommandConfig
 
 
 @dataclass(slots=True)
@@ -151,7 +151,6 @@ class BlackboxConfig:
 @dataclass(slots=True)
 class UiConfig:
     web_enabled: bool
-    terminal_enabled: bool
     web_host: str
     web_port: int
     audit_log_path: str
@@ -332,9 +331,6 @@ def load_app_config(args: argparse.Namespace) -> AppConfig:
     )
     if args.ui_enabled is not None:
         ui_enabled = bool(args.ui_enabled)
-    terminal_enabled = _cfg_bool(ui_data, "terminal_enabled", ui_enabled, "ui")
-    if args.ui_enabled is not None:
-        terminal_enabled = bool(args.ui_enabled)
     audit_log_path = Path(
         str(ui_data.get("audit_log_path", "runtime/logs/web_ui/audit.jsonl"))
     ).expanduser()
@@ -342,7 +338,6 @@ def load_app_config(args: argparse.Namespace) -> AppConfig:
         audit_log_path = ROOT_DIR / audit_log_path
     ui_cfg = UiConfig(
         web_enabled=_cfg_bool(ui_data, "web_enabled", False, "ui"),
-        terminal_enabled=terminal_enabled,
         web_host=str(ui_data.get("web_host", "0.0.0.0")),
         web_port=int(ui_data.get("web_port", 8080)),
         audit_log_path=str(audit_log_path),
@@ -378,7 +373,7 @@ def load_app_config(args: argparse.Namespace) -> AppConfig:
             else _cfg_bool(runtime_data, "require_gimbal_feedback", True)
         ),
         log_level=args.log_level or str(runtime_data.get("log_level", "INFO")),
-        ui_enabled=terminal_enabled,
+        ui_enabled=ui_enabled,
         connect_telemetry=connect_telemetry,
         start_yolo_udp=(
             False

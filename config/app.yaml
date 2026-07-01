@@ -43,9 +43,8 @@ services:
 # 操作界面
 # -----------------------------------------------------------------------------
 ui:
-  # Web UI 与 curses 终端 UI 可以独立启用。
+  # Web UI 为唯一正式操作入口。Terminal/curses UI 已退场。
   web_enabled: true
-  terminal_enabled: false
 
   # Web UI 监听地址和端口。0.0.0.0 表示允许局域网访问。
   web_host: "0.0.0.0"

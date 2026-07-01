@@ -20,7 +20,6 @@ def test_app_config_loads_current_web_and_terminal_ui_settings() -> None:
     config = load_app_config(args)
 
     assert config.ui.web_enabled is True
-    assert config.ui.terminal_enabled is False
     assert config.ui.web_port == 8080
 
 

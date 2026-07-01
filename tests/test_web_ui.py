@@ -120,7 +120,7 @@ def test_web_api_executes_command_and_records_audit(tmp_path: Path) -> None:
 
     app = create_app(
         _FakeRunner(),
-        UiConfig(True, False, "127.0.0.1", 8080, str(tmp_path / "audit.jsonl")),
+        UiConfig(True, "127.0.0.1", 8080, str(tmp_path / "audit.jsonl")),
     )
     client = TestClient(app)
 
@@ -137,7 +137,7 @@ def test_web_api_toggles_camera_recording_and_records_audit(tmp_path: Path) -> N
 
     app = create_app(
         _FakeRunner(),
-        UiConfig(True, False, "127.0.0.1", 8080, str(tmp_path / "audit.jsonl")),
+        UiConfig(True, "127.0.0.1", 8080, str(tmp_path / "audit.jsonl")),
     )
     client = TestClient(app)
 
@@ -157,7 +157,7 @@ def test_web_api_clears_localization_and_records_audit(tmp_path: Path) -> None:
     runner = _FakeRunner()
     app = create_app(
         runner,
-        UiConfig(True, False, "127.0.0.1", 8080, str(tmp_path / "audit.jsonl")),
+        UiConfig(True, "127.0.0.1", 8080, str(tmp_path / "audit.jsonl")),
     )
     client = TestClient(app)
 
@@ -175,7 +175,7 @@ def test_web_api_confirms_field_heading_and_records_audit(tmp_path: Path) -> Non
 
     app = create_app(
         _FakeRunner(),
-        UiConfig(True, False, "127.0.0.1", 8080, str(tmp_path / "audit.jsonl")),
+        UiConfig(True, "127.0.0.1", 8080, str(tmp_path / "audit.jsonl")),
     )
     client = TestClient(app)
 
@@ -196,7 +196,7 @@ def test_web_status_api_includes_field_heading(tmp_path: Path) -> None:
 
     app = create_app(
         _FakeRunner(),
-        UiConfig(True, False, "127.0.0.1", 8080, str(tmp_path / "audit.jsonl")),
+        UiConfig(True, "127.0.0.1", 8080, str(tmp_path / "audit.jsonl")),
     )
     client = TestClient(app)
 
@@ -501,7 +501,7 @@ configureActionMission().then(() => {
 
 
 def test_action_mission_template_api_lists_competition_templates() -> None:
-    app = create_app(_FakeRunner(), UiConfig(True, False, "127.0.0.1", 8080, "runtime/test-audit.jsonl"))
+    app = create_app(_FakeRunner(), UiConfig(True, "127.0.0.1", 8080, "runtime/test-audit.jsonl"))
 
     endpoint = next(route.endpoint for route in app.routes if getattr(route, "path", "") == "/api/action-mission/templates")
     response = endpoint()
@@ -519,7 +519,7 @@ def test_action_mission_template_api_lists_competition_templates() -> None:
 def test_action_mission_template_api_returns_template_and_rejects_unknown() -> None:
     from fastapi import HTTPException
 
-    app = create_app(_FakeRunner(), UiConfig(True, False, "127.0.0.1", 8080, "runtime/test-audit.jsonl"))
+    app = create_app(_FakeRunner(), UiConfig(True, "127.0.0.1", 8080, "runtime/test-audit.jsonl"))
     endpoint = next(route.endpoint for route in app.routes if getattr(route, "path", "") == "/api/action-mission/template/{name}")
 
     response = endpoint("drop_two_targets_v1")
@@ -536,7 +536,7 @@ def test_action_mission_template_api_returns_template_and_rejects_unknown() -> N
 
 
 def test_action_mission_api_returns_recon_inspection_template() -> None:
-    app = create_app(_FakeRunner(), UiConfig(True, False, "127.0.0.1", 8080, "runtime/test-audit.jsonl"))
+    app = create_app(_FakeRunner(), UiConfig(True, "127.0.0.1", 8080, "runtime/test-audit.jsonl"))
     endpoint = next(route.endpoint for route in app.routes if getattr(route, "path", "") == "/api/action-mission/template/{name}")
 
     response = endpoint("recon_inspect_5_targets_stepwise_v1")

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from telemetry_link.command_dispatcher import CommandResult
-from uav_ui.control_switches import ControlRuntimeSwitches
-from uav_ui.ui_commands import build_ui_command_handler
+from app.control_switches import ControlRuntimeSwitches
+from app.ui_commands import build_ui_command_handler
 
 
 class _FakeManager:
