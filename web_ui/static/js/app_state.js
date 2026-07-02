@@ -4,5 +4,4 @@
 window.UavAppState = {
   completions: [],
   history: [],
-  actionParamCache: {},
 };

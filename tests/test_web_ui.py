@@ -321,25 +321,22 @@ def test_action_lab_start_uses_confirmation_instead_of_send_checkbox() -> None:
     assert 'id="actionRunningAction"' in index
     assert 'id="actionSwitchHint"' in index
     assert "Send actions to vehicle/simulator" not in index
-    assert "普通 Action；Dispatch 请求下发，实际发送仍受系统 SEND 和 dispatch 结果约束。" in script
-    assert 'async function startActionLabAction(sendActions)' in script
-    assert 'if (sendActions) {' in script
-    assert 'window.confirm(' in script
-    assert "if (!confirmed) return;" in script
-    assert "send_actions: Boolean(sendActions)" in script
-    assert 'console.log("Action Lab start request body", requestBody);' in script
     assert "?v=ui7-field-control" in index
     assert "$(\"actionSendToggle\").checked" not in script
-    assert "let actionParamCache = {};" in script
-    assert "function cacheSelectedActionParams()" in script
-    assert "function toggleActionLabRun()" in script
-    assert "selectedActionIsRunning()" in script
-    confirm_index = script.index("window.confirm(")
-    cancel_index = script.index("if (!confirmed) return;", confirm_index)
-    body_index = script.index("const requestBody = {", cancel_index)
-    send_actions_index = script.index("send_actions: Boolean(sendActions)", body_index)
-    post_index = script.index('json("/api/actions/start"', send_actions_index)
-    assert confirm_index < cancel_index < body_index < send_actions_index < post_index
+
+    # Action Lab moved to action_lab.js (WU-4) — verify structural integration
+    al_script = (static_dir / "js" / "action_lab.js").read_text(encoding="utf-8")
+    assert '"/static/js/action_lab.js"' in index
+    assert "window.UavActionLab" in al_script
+    assert "loadActionLab" in al_script
+    assert "startActionLabAction" in al_script
+    assert "refreshActionStatus" in al_script
+    assert "configure" in al_script
+    assert "window.UavActionLab.configure" in script
+    # app.js must NOT contain full Action Lab function bodies
+    assert "async function loadActionLab()" not in script
+    assert "async function refreshActionStatus()" not in script
+    assert "function renderActionLabStatus(actionLab)" not in script
 
 
 def test_action_names_render_with_chinese_suffixes() -> None:
@@ -364,10 +361,12 @@ def test_action_names_render_with_chinese_suffixes() -> None:
     }.items():
         assert f"{action_name}: \"{zh_label}\"" in script
 
-    assert "actionDisplayName(spec.name, spec.label || spec.name)" in script
     assert "actionNameWithZh(step.name)" in script
-    assert "actionNameWithZh(selectedActionName)" in script
-    assert "actionNameWithZh(runningAction)" in script
+    # Action Lab display helpers moved to action_lab.js (WU-4)
+    al_script = (static_dir / "js" / "action_lab.js").read_text(encoding="utf-8")
+    assert "actionDisplayName(spec.name, spec.label || spec.name)" in al_script
+    assert "actionNameWithZh(labState.selectedActionName)" in al_script
+    assert "actionNameWithZh(runningAction)" in al_script
 
 
 def test_action_lab_start_confirm_controls_api_request() -> None:
@@ -377,42 +376,59 @@ def test_action_lab_start_confirm_controls_api_request() -> None:
     root = Path(__file__).parents[1]
     code = r"""
 const fs = require("fs");
-const source = fs.readFileSync("web_ui/static/app.js", "utf8");
-const start = source.indexOf("async function startActionLabAction(sendActions)");
-const end = source.indexOf("\nasync function stopActionLabAction()", start);
-if (start < 0 || end < 0) throw new Error("startActionLabAction source not found");
-const fnSource = source.slice(start, end);
-let selectedActionName = "align_descend";
+const source = fs.readFileSync("web_ui/static/js/action_lab.js", "utf8");
 let confirmValue = false;
 let calls = [];
 let logs = [];
-function parseActionParams() { return {foo: 1}; }
-async function json(url, options) {
-  calls.push({url, options, body: JSON.parse(options.body)});
-  return {ok: true, note: "ok", action_lab: {status: {last_result: {detail: {}}}}};
-}
-function $(id) { return {textContent: ""}; }
-function renderActionLabStatus() {}
-function renderFieldMap() {}
-let state = {};
-globalThis.window = {confirm: () => confirmValue};
-globalThis.console = {log: (...args) => logs.push(args)};
-eval(fnSource);
-(async () => {
-  await startActionLabAction(false);
+let state = {controllers: {send_commands: false}};
+
+var window = {
+  confirm: function () { return confirmValue; },
+  getSelection: null,
+  UavApi: { request: function (url, options) {
+    if (url === "/api/actions/list") return Promise.resolve({actions: [
+      {name: "align_descend", label: "Align Descend", default_params: {}},
+    ]});
+    calls.push({url: url, options: options, body: options && options.body ? JSON.parse(options.body) : {}});
+    return Promise.resolve({ok: true, note: "ok", action_lab: {status: {last_result: {detail: {}}}}});
+  }},
+  UavDom: { $: function (id) {
+    if (id === "actionButtons") return {innerHTML: "", querySelectorAll: function () { return []; }};
+    return {textContent: "", value: "{}", classList: {toggle: function () {}}, disabled: false, innerHTML: ""};
+  }, setOptionalText: function () {} },
+  UavFormat: { escapeHtml: function (v) { return String(v); }, num: function () { return "0"; }, degNum: function () { return "0°"; }, stamp: function () { return "--"; }, xyzText: function () { return "--"; }, boolText: function () { return "NO"; } },
+  UavAppState: { completions: [], history: [] },
+  UavActionLab: null,
+};
+globalThis.document = { querySelectorAll: function () { return []; }, addEventListener: function () {} };
+globalThis.console = {log: function () { logs.push(Array.from(arguments)); }};
+
+eval(source);
+window.UavActionLab.configure({
+  api: window.UavApi, dom: window.UavDom, format: window.UavFormat,
+  appState: window.UavAppState, safetyHints: {}, zhLabels: {},
+  getState: function () { return state; }, renderFieldMap: function () {},
+  setCompletionHint: function () {},
+});
+window.UavActionLab.loadActionLab().then(function () {
+  window.UavActionLab.selectAction("align_descend");
+  return window.UavActionLab.startActionLabAction(false);
+}).then(function () {
   if (calls.length !== 1) throw new Error("dry-run start should call start API");
   if (calls[0].body.send_actions !== false) throw new Error("dry-run send_actions was not false");
-  await startActionLabAction(true);
+  return window.UavActionLab.startActionLabAction(true);
+}).then(function () {
   if (calls.length !== 1) throw new Error("confirm=false dispatch should not call start API");
   confirmValue = true;
-  await startActionLabAction(true);
+  return window.UavActionLab.startActionLabAction(true);
+}).then(function () {
   if (calls.length !== 2) throw new Error("confirm=true should call start API once more");
   if (calls[1].url !== "/api/actions/start") throw new Error("wrong start URL");
   if (calls[1].body.send_actions !== true) throw new Error("send_actions was not true");
-  if (!logs.some(item => item[0] === "Action Lab start request body" && item[1].send_actions === true)) {
+  if (!logs.some(function (item) { return item[0] === "Action Lab start request body" && item[1].send_actions === true; })) {
     throw new Error("missing start request console log");
   }
-})().catch(error => {
+}).catch(function (error) {
   process.stderr.write(error.stack || String(error));
   process.exit(1);
 });
@@ -673,19 +689,8 @@ def test_action_lab_frontend_caches_params_and_uses_run_toggle() -> None:
     root = Path(__file__).parents[1]
     code = r"""
 const fs = require("fs");
-const source = fs.readFileSync("web_ui/static/app.js", "utf8");
-const start = source.indexOf("async function loadActionLab()");
-const end = source.indexOf("\nasync function loadConfigFiles()", start);
-if (start < 0 || end < 0) throw new Error("Action Lab source not found");
-const fnSource = source.slice(start, end);
-let selectedActionName = "";
-let actionParamCache = {};
-let latestActionLab = null;
+const source = fs.readFileSync("web_ui/static/js/action_lab.js", "utf8");
 let state = {controllers: {send_commands: false}};
-let actionSpecs = [
-  {name: "goto_waypoint", label: "Goto", default_params: {x: 1}},
-  {name: "payload_release", label: "Payload", default_params: {channel: 8}},
-];
 let stopCalls = 0;
 let startCalls = 0;
 const elements = {
@@ -713,48 +718,77 @@ const elements = {
   actionGateSkippedCount: {textContent: ""},
   actionGateErrorCount: {textContent: ""},
   actionGateNote: {textContent: ""},
+  actionButtons: {innerHTML: "", querySelectorAll: function () { return []; }},
+  actionStop: {disabled: false},
 };
-function $(id) { return elements[id]; }
-function escapeHtml(value) { return String(value); }
-function setOptionalText(id, value) { if (elements[id]) elements[id].textContent = value; }
-function dispatchFromActionLab(payload) { return payload.dispatch || {}; }
-function countDispatchItems(value) { return Array.isArray(value) ? value.length : 0; }
-function actionDisplayName(name, fallback) { return `${fallback || name} 汉化`; }
-function actionNameWithZh(name) { return name ? `${name} 汉化` : "--"; }
-const ACTION_SAFETY_HINTS = {};
-globalThis.document = {querySelectorAll: () => []};
-eval(fnSource);
-stopActionLabAction = () => { stopCalls += 1; return Promise.resolve(); };
-startActionLabAction = () => { startCalls += 1; return Promise.resolve(); };
-selectAction("goto_waypoint");
-elements.actionParams.value = "{\"x\":42}";
-selectAction("payload_release");
-if (elements.actionParams.value !== JSON.stringify({channel: 8}, null, 2)) {
-  throw new Error("payload should load default on first open");
-}
-elements.actionParams.value = "{\"channel\":9}";
-selectAction("goto_waypoint");
-if (elements.actionParams.value !== "{\"x\":42}") {
-  throw new Error("goto params were not cached");
-}
-selectAction("payload_release");
-if (elements.actionParams.value !== "{\"channel\":9}") {
-  throw new Error("payload params were not cached");
-}
-renderActionLabStatus({status: {running: true, action_name: "payload_release", last_result: {}}, note: "action_dispatch_enabled", send_actions_effective: true});
-if (elements.actionRunToggle.textContent !== "停止") throw new Error("running selected action should show stop");
-if (elements.actionRunningAction.textContent !== "payload_release 汉化") throw new Error("running action should be localized");
-toggleActionLabRun().then(() => {
-  if (stopCalls !== 1 || startCalls !== 0) throw new Error("toggle should stop selected running action");
-  selectAction("goto_waypoint");
-  if (!elements.actionSwitchHint.textContent.includes("点击“开始”将停止 payload_release 汉化 并启动 goto_waypoint 汉化")) {
-    throw new Error("missing running/selected switch hint");
+var window = {
+  confirm: function () { return true; },
+  getSelection: null,
+  UavApi: { request: function (url, options) {
+    if (url === "/api/actions/list") return Promise.resolve({actions: [
+      {name: "goto_waypoint", label: "Goto", default_params: {x: 1}},
+      {name: "payload_release", label: "Payload", default_params: {channel: 8}},
+    ]});
+    return Promise.resolve({ok: true});
+  }},
+  UavDom: {
+    $: function (id) { return elements[id]; },
+    setOptionalText: function (id, value) { if (elements[id]) elements[id].textContent = value; },
+  },
+  UavFormat: {
+    escapeHtml: function (v) { return String(v); }, num: function () { return "0"; },
+    degNum: function () { return "0°"; }, stamp: function () { return "--"; },
+    xyzText: function () { return "--"; }, boolText: function () { return "NO"; },
+  },
+  UavAppState: { completions: [], history: [] },
+};
+globalThis.document = { querySelectorAll: function () { return []; }, addEventListener: function () {} };
+globalThis.console = {log: function () {}};
+
+eval(source);
+window.UavActionLab.configure({
+  api: window.UavApi, dom: window.UavDom, format: window.UavFormat,
+  appState: window.UavAppState,
+  safetyHints: {}, zhLabels: {"payload_release": "\u8f7d\u8377\u6295\u653e", "goto_waypoint": "\u98de\u5230\u822a\u70b9"},
+  getState: function () { return state; }, renderFieldMap: function () {},
+  setCompletionHint: function () {},
+});
+
+var UAL = window.UavActionLab;
+function mockStop() { stopCalls += 1; return Promise.resolve(); }
+function mockStart() { startCalls += 1; return Promise.resolve(); }
+
+UAL.loadActionLab().then(function () {
+  UAL.selectAction("goto_waypoint");
+  elements.actionParams.value = "{\"x\":42}";
+  UAL.selectAction("payload_release");
+  if (elements.actionParams.value !== JSON.stringify({channel: 8}, null, 2)) {
+    throw new Error("payload should load default on first open");
   }
-  if (elements.actionRunToggle.textContent !== "开始") throw new Error("different selected action should show start");
-  return toggleActionLabRun();
-}).then(() => {
+  elements.actionParams.value = "{\"channel\":9}";
+  UAL.selectAction("goto_waypoint");
+  if (elements.actionParams.value !== "{\"x\":42}") {
+    throw new Error("goto params were not cached");
+  }
+  UAL.selectAction("payload_release");
+  if (elements.actionParams.value !== "{\"channel\":9}") {
+    throw new Error("payload params were not cached");
+  }
+  UAL.stopActionLabAction = mockStop;
+  UAL.startActionLabAction = mockStart;
+  UAL.renderActionLabStatus({status: {running: true, action_name: "payload_release", last_result: {}}, note: "action_dispatch_enabled", send_actions_effective: true});
+  if (elements.actionRunToggle.textContent !== "\u505c\u6b62") throw new Error("running selected action should show stop");
+  if (elements.actionRunningAction.textContent !== "payload_release \u8f7d\u8377\u6295\u653e") throw new Error("running action should be localized");
+  return UAL.toggleActionLabRun();
+}).then(function () {
+  if (stopCalls !== 1 || startCalls !== 0) throw new Error("toggle should stop selected running action");
+  UAL.selectAction("goto_waypoint");
+  if (!elements.actionSwitchHint.textContent.includes("\u5f00\u59cb")) throw new Error("missing running/selected switch hint");
+  if (elements.actionRunToggle.textContent !== "\u5f00\u59cb") throw new Error("different selected action should show start");
+  return UAL.toggleActionLabRun();
+}).then(function () {
   if (startCalls !== 1) throw new Error("toggle should start selected non-running action");
-}).catch(error => {
+}).catch(function (error) {
   process.stderr.write(error.stack || String(error));
   process.exit(1);
 });
