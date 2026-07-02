@@ -45,6 +45,22 @@ def _load_example() -> FieldProfile:
     return load_field_profile_json(EXAMPLE_PROFILE_PATH)
 
 
+def _profile_from_data(data: Dict[str, Any]) -> FieldProfile:
+    profile = parse_field_profile(data)
+    diag = validate_field_profile(profile)
+    if not diag.ok:
+        raise FieldProfileValidationError(diag)
+    return profile
+
+
+# -- cardinal direction profiles with self-consistent GPS/declared coords ----
+
+# 1 degree latitude ≈ 111,195 m  (EARTH_RADIUS_M * π/180)
+_DEG_TO_M_LAT = 111194.9
+# 1 degree longitude at 34° ≈ 111,195 * cos(34°) ≈ 92,193 m
+_DEG_TO_M_LON_AT_34 = 111194.9 * math.cos(math.radians(34.0))
+
+
 def _make_north_profile() -> FieldProfile:
     """O→F purely north, ~33.4 m baseline."""
     data: Dict[str, Any] = {
@@ -58,20 +74,14 @@ def _make_north_profile() -> FieldProfile:
         },
         "points": {
             "origin": {
-                "name": "O",
-                "role": "origin",
-                "lat": 34.0,
-                "lon": 108.0,
-                "field_x_m": 0.0,
-                "field_y_m": 0.0,
+                "name": "O", "role": "origin",
+                "lat": 34.0, "lon": 108.0,
+                "field_x_m": 0.0, "field_y_m": 0.0,
             },
             "forward": {
-                "name": "F",
-                "role": "forward",
-                "lat": 34.0003,  # ~33.4 m north
-                "lon": 108.0,
-                "field_x_m": 0.0,
-                "field_y_m": 33.36,
+                "name": "F", "role": "forward",
+                "lat": 34.0003, "lon": 108.0,
+                "field_x_m": 0.0, "field_y_m": 33.36,
             },
         },
     }
@@ -79,7 +89,8 @@ def _make_north_profile() -> FieldProfile:
 
 
 def _make_east_profile() -> FieldProfile:
-    """O→F purely east, ~33.4 m baseline."""
+    """O→F purely east, ~27.7 m baseline."""
+    dlon = 33.36 / _DEG_TO_M_LON_AT_34  # lon delta for 33.36 m at 34° lat
     data: Dict[str, Any] = {
         "schema_version": 1,
         "profile_id": "east_test",
@@ -91,20 +102,14 @@ def _make_east_profile() -> FieldProfile:
         },
         "points": {
             "origin": {
-                "name": "O",
-                "role": "origin",
-                "lat": 34.0,
-                "lon": 108.0,
-                "field_x_m": 0.0,
-                "field_y_m": 0.0,
+                "name": "O", "role": "origin",
+                "lat": 34.0, "lon": 108.0,
+                "field_x_m": 0.0, "field_y_m": 0.0,
             },
             "forward": {
-                "name": "F",
-                "role": "forward",
-                "lat": 34.0,
-                "lon": 108.0003,  # ~33.4 m east
-                "field_x_m": 0.0,
-                "field_y_m": 33.36,
+                "name": "F", "role": "forward",
+                "lat": 34.0, "lon": 108.0 + dlon,
+                "field_x_m": 0.0, "field_y_m": 33.36,
             },
         },
     }
@@ -124,20 +129,14 @@ def _make_south_profile() -> FieldProfile:
         },
         "points": {
             "origin": {
-                "name": "O",
-                "role": "origin",
-                "lat": 34.0003,
-                "lon": 108.0,
-                "field_x_m": 0.0,
-                "field_y_m": 0.0,
+                "name": "O", "role": "origin",
+                "lat": 34.0003, "lon": 108.0,
+                "field_x_m": 0.0, "field_y_m": 0.0,
             },
             "forward": {
-                "name": "F",
-                "role": "forward",
-                "lat": 34.0,
-                "lon": 108.0,
-                "field_x_m": 0.0,
-                "field_y_m": 33.36,
+                "name": "F", "role": "forward",
+                "lat": 34.0, "lon": 108.0,
+                "field_x_m": 0.0, "field_y_m": 33.36,
             },
         },
     }
@@ -145,7 +144,8 @@ def _make_south_profile() -> FieldProfile:
 
 
 def _make_west_profile() -> FieldProfile:
-    """O→F purely west, ~33.4 m baseline."""
+    """O→F purely west, ~27.7 m baseline."""
+    dlon = 33.36 / _DEG_TO_M_LON_AT_34
     data: Dict[str, Any] = {
         "schema_version": 1,
         "profile_id": "west_test",
@@ -157,32 +157,47 @@ def _make_west_profile() -> FieldProfile:
         },
         "points": {
             "origin": {
-                "name": "O",
-                "role": "origin",
-                "lat": 34.0,
-                "lon": 108.0003,
-                "field_x_m": 0.0,
-                "field_y_m": 0.0,
+                "name": "O", "role": "origin",
+                "lat": 34.0, "lon": 108.0 + dlon,
+                "field_x_m": 0.0, "field_y_m": 0.0,
             },
             "forward": {
-                "name": "F",
-                "role": "forward",
-                "lat": 34.0,
-                "lon": 108.0,
-                "field_x_m": 0.0,
-                "field_y_m": 33.36,
+                "name": "F", "role": "forward",
+                "lat": 34.0, "lon": 108.0,
+                "field_x_m": 0.0, "field_y_m": 33.36,
             },
         },
     }
     return _profile_from_data(data)
 
 
-def _profile_from_data(data: Dict[str, Any]) -> FieldProfile:
-    profile = parse_field_profile(data)
-    diag = validate_field_profile(profile)
-    if not diag.ok:
-        raise FieldProfileValidationError(diag)
-    return profile
+def _make_northeast_profile() -> FieldProfile:
+    """O→F northeast, ~33.4 m baseline each axis."""
+    dlat = 23.58 / _DEG_TO_M_LAT  # ~23.58 m north
+    dlon = 23.58 / _DEG_TO_M_LON_AT_34  # ~23.58 m east
+    data: Dict[str, Any] = {
+        "schema_version": 1,
+        "profile_id": "ne_test",
+        "name": "NE Test",
+        "coordinate_convention": {
+            "field_x_positive": "right",
+            "field_y_positive": "forward",
+            "altitude_positive": "up",
+        },
+        "points": {
+            "origin": {
+                "name": "O", "role": "origin",
+                "lat": 34.0, "lon": 108.0,
+                "field_x_m": 0.0, "field_y_m": 0.0,
+            },
+            "forward": {
+                "name": "F", "role": "forward",
+                "lat": 34.0 + dlat, "lon": 108.0 + dlon,
+                "field_x_m": 0.0, "field_y_m": 33.36,
+            },
+        },
+    }
+    return _profile_from_data(data)
 
 
 def _bind(
@@ -196,6 +211,7 @@ def _bind(
     satellites_visible: int = 12,
     gps_eph: float = 1.0,
     gps_epv: float = 2.0,
+    timestamp: float = None,
 ) -> BindResult:
     return FieldProfileService.bind_profile_to_current_vehicle(
         profile=profile,
@@ -208,6 +224,7 @@ def _bind(
         satellites_visible=satellites_visible,
         gps_eph=gps_eph,
         gps_epv=gps_epv,
+        timestamp=timestamp,
     )
 
 
@@ -217,8 +234,6 @@ def _bind(
 
 
 def test_bind_at_origin_gives_zero_field_position() -> None:
-    """When vehicle GPS equals origin GPS, field position is (0,0) and
-    origin_local equals current_local."""
     profile = _load_example()
     origin = profile.origin
 
@@ -245,7 +260,6 @@ def test_bind_at_origin_gives_zero_field_position() -> None:
 
 
 def test_bind_at_forward_gives_field_y_equals_baseline() -> None:
-    """When vehicle GPS equals forward GPS, field_y ≈ baseline, field_x ≈ 0."""
     profile = _load_example()
     forward = profile.forward
     origin = profile.origin
@@ -274,7 +288,6 @@ def test_bind_at_forward_gives_field_y_equals_baseline() -> None:
 
 
 def test_heading_north() -> None:
-    """O→F purely north → heading ≈ 0 rad (0°)."""
     profile = _make_north_profile()
     result = _bind(profile)
     assert result.ok
@@ -283,7 +296,6 @@ def test_heading_north() -> None:
 
 
 def test_heading_east() -> None:
-    """O→F purely east → heading ≈ π/2 rad (90°)."""
     profile = _make_east_profile()
     result = _bind(profile)
     assert result.ok
@@ -292,17 +304,14 @@ def test_heading_east() -> None:
 
 
 def test_heading_south() -> None:
-    """O→F purely south → heading ≈ ±π rad (180° or -180°)."""
     profile = _make_south_profile()
     result = _bind(profile)
     assert result.ok
-    # Normalised to (-π, π], so south is π or -π (both ≈ 180° absolute).
     assert abs(result.field_heading_yaw_rad) == pytest.approx(math.pi, abs=1e-6)
     assert abs(result.field_heading_deg) == pytest.approx(180.0, abs=1e-3)
 
 
 def test_heading_west() -> None:
-    """O→F purely west → heading ≈ -π/2 rad (-90°)."""
     profile = _make_west_profile()
     result = _bind(profile)
     assert result.ok
@@ -311,20 +320,45 @@ def test_heading_west() -> None:
 
 
 # ---------------------------------------------------------------------------
+# diagonal heading bind
+# ---------------------------------------------------------------------------
+
+
+def test_diagonal_heading_bind() -> None:
+    """Northeast heading: current pos at origin → field (0,0), heading ~45°."""
+    profile = _make_northeast_profile()
+    result = _bind(profile, current_lat=34.0, current_lon=108.0)
+    assert result.ok
+    assert result.field_heading_yaw_rad == pytest.approx(math.pi / 4, abs=1e-4)
+    assert result.field_heading_deg == pytest.approx(45.0, abs=1e-1)
+    assert result.current_field_x_m == pytest.approx(0.0, abs=1e-6)
+    assert result.current_field_y_m == pytest.approx(0.0, abs=1e-6)
+
+
+def test_diagonal_heading_field_position() -> None:
+    """Northeast heading: vehicle at F GPS → field_y ≈ baseline, field_x ≈ 0."""
+    profile = _make_northeast_profile()
+    result = _bind(
+        profile,
+        current_lat=profile.forward.lat,
+        current_lon=profile.forward.lon,
+    )
+    assert result.ok
+    assert result.current_field_x_m == pytest.approx(0.0, abs=1e-3)
+    assert result.current_field_y_m == pytest.approx(result.baseline_m, rel=1e-6)
+
+
+# ---------------------------------------------------------------------------
 # arbitrary LOCAL_NED offset → origin_local back-calculated correctly
 # ---------------------------------------------------------------------------
 
 
 def test_arbitrary_local_ned_offset() -> None:
-    """Given an arbitrary local position, the computed origin_local must
-    satisfy: current_local - d_OC == origin_local."""
     profile = _load_example()
     origin = profile.origin
 
-    # Place vehicle at a GPS offset from origin
-    # ~10 m north, ~15 m east of origin (using 1 deg ≈ 111,195 m)
-    current_lat = origin.lat + 10.0 / 111195.0
-    current_lon = origin.lon + 15.0 / (111195.0 * math.cos(math.radians(origin.lat)))
+    current_lat = origin.lat + 10.0 / _DEG_TO_M_LAT
+    current_lon = origin.lon + 15.0 / _DEG_TO_M_LON_AT_34
 
     current_n = 500.0
     current_e = -300.0
@@ -340,8 +374,6 @@ def test_arbitrary_local_ned_offset() -> None:
     )
 
     assert result.ok
-
-    # Verify: origin_local + d_OC should equal current_local
     d_north, d_east = _gps_enu_deltas(
         origin.lat, origin.lon, current_lat, current_lon
     )
@@ -355,9 +387,7 @@ def test_arbitrary_local_ned_offset() -> None:
 
 
 def test_bind_preserves_altitude_sign() -> None:
-    """origin_local_z_m must equal current_local_z_m unchanged (no sign flip)."""
     profile = _load_example()
-
     for z in (-50.0, 0.0, 10.0, -0.001):
         result = _bind(profile, current_local_z_m=z)
         assert result.ok
@@ -371,7 +401,7 @@ def test_bind_preserves_altitude_sign() -> None:
 
 def test_gps_fix_type_too_low_fails() -> None:
     profile = _load_example()
-    result = _bind(profile, gps_fix_type=2)  # need ≥ 3
+    result = _bind(profile, gps_fix_type=2)
     assert not result.ok
     assert any("fix_type" in e.lower() for e in result.errors)
 
@@ -383,7 +413,7 @@ def test_gps_fix_type_too_low_fails() -> None:
 
 def test_gps_satellites_too_low_fails() -> None:
     profile = _load_example()
-    result = _bind(profile, satellites_visible=8)  # need ≥ 10
+    result = _bind(profile, satellites_visible=8)
     assert not result.ok
     assert any("satellites" in e.lower() for e in result.errors)
 
@@ -452,16 +482,159 @@ def test_gps_epv_inf_fails() -> None:
 
 def test_gps_eph_exceeds_max_fails() -> None:
     profile = _load_example()
-    result = _bind(profile, gps_eph=10.0)  # max is 2.5
+    result = _bind(profile, gps_eph=10.0)
     assert not result.ok
     assert any("eph" in e.lower() for e in result.errors)
 
 
 def test_gps_epv_exceeds_max_fails() -> None:
     profile = _load_example()
-    result = _bind(profile, gps_epv=6.0)  # max is 5.0
+    result = _bind(profile, gps_epv=6.0)
     assert not result.ok
     assert any("epv" in e.lower() for e in result.errors)
+
+
+# ---------------------------------------------------------------------------
+# bind input validation — current_lat / current_lon out of range
+# ---------------------------------------------------------------------------
+
+
+def test_current_lat_out_of_range_fails() -> None:
+    profile = _load_example()
+    result = _bind(profile, current_lat=91.0)
+    assert not result.ok
+    assert any("current_lat" in e.lower() for e in result.errors)
+
+
+def test_current_lon_out_of_range_fails() -> None:
+    profile = _load_example()
+    result = _bind(profile, current_lon=181.0)
+    assert not result.ok
+    assert any("current_lon" in e.lower() for e in result.errors)
+
+
+# ---------------------------------------------------------------------------
+# bind input validation — LOCAL_NED NaN / Inf
+# ---------------------------------------------------------------------------
+
+
+def test_current_local_n_nan_fails() -> None:
+    profile = _load_example()
+    result = _bind(profile, current_local_n_m=float("nan"))
+    assert not result.ok
+    assert any("current_local_n_m" in e.lower() for e in result.errors)
+
+
+def test_current_local_e_inf_fails() -> None:
+    profile = _load_example()
+    result = _bind(profile, current_local_e_m=float("inf"))
+    assert not result.ok
+    assert any("current_local_e_m" in e.lower() for e in result.errors)
+
+
+def test_current_local_z_nan_fails() -> None:
+    profile = _load_example()
+    result = _bind(profile, current_local_z_m=float("nan"))
+    assert not result.ok
+    assert any("current_local_z_m" in e.lower() for e in result.errors)
+
+
+# ---------------------------------------------------------------------------
+# bind input validation — gps_fix_type invalid
+# ---------------------------------------------------------------------------
+
+
+def test_gps_fix_type_none_fails() -> None:
+    profile = _load_example()
+    result = _bind(profile, gps_fix_type=None)
+    assert not result.ok
+    assert any("fix_type" in e.lower() for e in result.errors)
+
+
+def test_gps_fix_type_nan_fails() -> None:
+    profile = _load_example()
+    result = _bind(profile, gps_fix_type=float("nan"))
+    assert not result.ok
+    assert any("fix_type" in e.lower() for e in result.errors)
+
+
+def test_gps_fix_type_negative_fails() -> None:
+    profile = _load_example()
+    result = _bind(profile, gps_fix_type=-1)
+    assert not result.ok
+    assert any("fix_type" in e.lower() for e in result.errors)
+
+
+# ---------------------------------------------------------------------------
+# bind input validation — satellites_visible invalid
+# ---------------------------------------------------------------------------
+
+
+def test_satellites_visible_none_fails() -> None:
+    profile = _load_example()
+    result = _bind(profile, satellites_visible=None)
+    assert not result.ok
+    assert any("satellites" in e.lower() for e in result.errors)
+
+
+def test_satellites_visible_nan_fails() -> None:
+    profile = _load_example()
+    result = _bind(profile, satellites_visible=float("nan"))
+    assert not result.ok
+    assert any("satellites" in e.lower() for e in result.errors)
+
+
+def test_satellites_visible_negative_fails() -> None:
+    profile = _load_example()
+    result = _bind(profile, satellites_visible=-5)
+    assert not result.ok
+    assert any("satellites" in e.lower() for e in result.errors)
+
+
+# ---------------------------------------------------------------------------
+# bind input validation — profile not validated
+# ---------------------------------------------------------------------------
+
+
+def test_bind_with_invalid_profile_fails() -> None:
+    """Construct a profile that would fail validation, bypass it, then bind."""
+    data: Dict[str, Any] = {
+        "schema_version": 1,
+        "profile_id": "bad",
+        "name": "Bad",
+        "coordinate_convention": {
+            "field_x_positive": "right",
+            "field_y_positive": "forward",
+            "altitude_positive": "up",
+        },
+        "points": {
+            "origin": {
+                "name": "O", "role": "origin",
+                "lat": 34.0, "lon": 108.0,
+                "field_x_m": 0.0, "field_y_m": 0.0,
+            },
+            "forward": {
+                "name": "F", "role": "forward",
+                "lat": 34.0003, "lon": 108.0,
+                "field_x_m": 0.0, "field_y_m": 33.36,
+            },
+            "left_check": {
+                "name": "L", "role": "left_check",
+                "lat": 34.00015, "lon": 107.99998,
+                "field_x_m": 5.0, "field_y_m": 16.68,  # wrong sign
+            },
+        },
+    }
+    # parse succeeds but validate will fail → bind re-validates and fails
+    profile = parse_field_profile(data)
+    result = FieldProfileService.bind_profile_to_current_vehicle(
+        profile=profile,
+        current_lat=34.0, current_lon=108.0,
+        current_local_n_m=100.0, current_local_e_m=200.0, current_local_z_m=-50.0,
+        gps_fix_type=3, satellites_visible=12,
+        gps_eph=1.0, gps_epv=2.0,
+    )
+    assert not result.ok
 
 
 # ---------------------------------------------------------------------------
@@ -470,25 +643,39 @@ def test_gps_epv_exceeds_max_fails() -> None:
 
 
 def test_bind_result_has_no_side_effects() -> None:
-    """BindResult is a pure data class — accessing it must not trigger any
-    system state change."""
     profile = _load_example()
     result = _bind(profile)
 
-    # The result is just data.
     assert isinstance(result, BindResult)
     assert result.ok
 
-    # No confirm/freeze/send attributes exist on the result.
     assert not hasattr(result, "is_confirmed")
     assert not hasattr(result, "is_frozen")
     assert not hasattr(result, "sent_commands")
 
-    # Calling bind twice gives the same result (idempotent).
     result2 = _bind(profile)
     assert result2.origin_local_n_m == pytest.approx(result.origin_local_n_m)
     assert result2.origin_local_e_m == pytest.approx(result.origin_local_e_m)
     assert result2.field_heading_yaw_rad == pytest.approx(result.field_heading_yaw_rad)
+
+
+# ---------------------------------------------------------------------------
+# timestamp stored in BindResult
+# ---------------------------------------------------------------------------
+
+
+def test_timestamp_stored() -> None:
+    profile = _load_example()
+    result = _bind(profile, timestamp=1234567890.5)
+    assert result.ok
+    assert result.timestamp == pytest.approx(1234567890.5)
+
+
+def test_timestamp_none_when_omitted() -> None:
+    profile = _load_example()
+    result = _bind(profile)
+    assert result.ok
+    assert result.timestamp is None
 
 
 # ---------------------------------------------------------------------------
@@ -497,10 +684,8 @@ def test_bind_result_has_no_side_effects() -> None:
 
 
 def test_check_points_are_populated() -> None:
-    """When the profile has L and R, they appear in check_points."""
     profile = _load_example()
     result = _bind(profile)
-
     assert result.ok
     roles = {cp.role for cp in result.check_points}
     assert "left_check" in roles
@@ -513,33 +698,24 @@ def test_check_points_are_populated() -> None:
 
 
 def test_field_position_consistent_with_heading() -> None:
-    """For a north-oriented profile, a GPS offset east should give
-    positive field_x (right)."""
+    """For a north-oriented profile, a GPS offset east → positive field_x."""
     profile = _make_north_profile()
     origin = profile.origin
 
-    # Vehicle ~10 m east of origin
-    current_lon = origin.lon + 10.0 / (
-        111195.0 * math.cos(math.radians(origin.lat))
-    )
-
+    current_lon = origin.lon + 10.0 / _DEG_TO_M_LON_AT_34
     result = _bind(profile, current_lat=origin.lat, current_lon=current_lon)
 
     assert result.ok
-    # Heading north → east offset = positive field_x (right side)
     assert result.current_field_x_m > 0.0
     assert result.current_field_y_m == pytest.approx(0.0, abs=0.1)
 
 
 def test_field_position_north_of_origin() -> None:
-    """For a north-oriented profile, a GPS offset north should give
-    positive field_y (forward)."""
+    """For a north-oriented profile, a GPS offset north → positive field_y."""
     profile = _make_north_profile()
     origin = profile.origin
 
-    # Vehicle ~10 m north of origin
-    current_lat = origin.lat + 10.0 / 111195.0
-
+    current_lat = origin.lat + 10.0 / _DEG_TO_M_LAT
     result = _bind(profile, current_lat=current_lat, current_lon=origin.lon)
 
     assert result.ok

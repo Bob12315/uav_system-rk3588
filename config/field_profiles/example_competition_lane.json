@@ -23,23 +23,23 @@
       "lat": 34.00030000,
       "lon": 108.00000000,
       "field_x_m": 0.0,
-      "field_y_m": 40.0
+      "field_y_m": 33.36
     },
     "left_check": {
       "name": "L_left_check",
       "role": "left_check",
       "lat": 34.00015000,
       "lon": 107.99998000,
-      "field_x_m": -2.5,
-      "field_y_m": 20.0
+      "field_x_m": -1.84,
+      "field_y_m": 16.68
     },
     "right_check": {
       "name": "R_right_check",
       "role": "right_check",
       "lat": 34.00015000,
       "lon": 108.00002000,
-      "field_x_m": 2.5,
-      "field_y_m": 20.0
+      "field_x_m": 1.84,
+      "field_y_m": 16.68
     }
   },
   "gps_quality": {

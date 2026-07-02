@@ -69,6 +69,7 @@ class BindResult:
     errors: List[str] = field(default_factory=list)
     gps_quality: Optional[GpsQuality] = None
     check_points: List[CheckPointResult] = field(default_factory=list)
+    timestamp: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +108,9 @@ class FieldProfileService:
         If *name_or_path* is an existing file path it is used directly.
         Otherwise it is resolved relative to *profile_dir* (with a
         ``.json`` suffix appended if missing).
+
+        Path-traversal attacks (``../``) that escape *profile_dir* are
+        rejected.
         """
         if os.path.isfile(name_or_path):
             return load_field_profile_json(name_or_path)
@@ -120,7 +124,15 @@ class FieldProfileService:
         if not name_or_path.endswith(".json"):
             name_or_path = name_or_path + ".json"
 
-        full_path = os.path.join(profile_dir, name_or_path)
+        # Resolve to prevent ../ escapes.
+        profile_dir_real = os.path.realpath(profile_dir)
+        full_path = os.path.realpath(os.path.join(profile_dir, name_or_path))
+
+        if not full_path.startswith(profile_dir_real + os.sep) and full_path != profile_dir_real:
+            raise ValueError(
+                f"Field profile path escapes profile_dir: {name_or_path}"
+            )
+
         if not os.path.isfile(full_path):
             raise FileNotFoundError(f"Field profile not found: {full_path}")
 
@@ -158,12 +170,34 @@ class FieldProfileService:
         errors: List[str] = []
         warnings: List[str] = []
 
+        # -- re-validate profile (defence in depth) -----------------------
+        profile_diag = validate_field_profile(profile)
+        if not profile_diag.ok:
+            errors.extend(profile_diag.errors)
+            warnings.extend(profile_diag.warnings)
+            return BindResult(
+                ok=False,
+                profile_id=profile.profile_id,
+                diagnostics=FieldProfileDiagnostics(errors=list(errors), warnings=list(warnings)),
+                warnings=list(warnings),
+                errors=list(errors),
+                timestamp=timestamp,
+            )
+
         thresholds: GpsQualityThresholds = profile.gps_quality
 
-        # -- validate inputs are finite ----------------------------------
+        # -- validate current_lat / current_lon ---------------------------
+        for name, val, lo, hi in [
+            ("current_lat", current_lat, -90.0, 90.0),
+            ("current_lon", current_lon, -180.0, 180.0),
+        ]:
+            if not math.isfinite(val):
+                errors.append(f"{name} is not finite: {val}")
+            elif val < lo or val > hi:
+                errors.append(f"{name} {val} out of range [{lo}, {hi}]")
+
+        # -- validate LOCAL_NED inputs are finite -------------------------
         for name, val in [
-            ("current_lat", current_lat),
-            ("current_lon", current_lon),
             ("current_local_n_m", current_local_n_m),
             ("current_local_e_m", current_local_e_m),
             ("current_local_z_m", current_local_z_m),
@@ -171,21 +205,70 @@ class FieldProfileService:
             if not math.isfinite(val):
                 errors.append(f"{name} is not finite: {val}")
 
-        # -- GPS quality (fail-closed) -----------------------------------
+        # -- validate gps_fix_type ----------------------------------------
+        fix_type_valid: bool = True
+        fix_type_int: int = 0
+        try:
+            if gps_fix_type is None:
+                errors.append("gps_fix_type is None")
+                fix_type_valid = False
+            elif isinstance(gps_fix_type, bool) or not isinstance(gps_fix_type, (int, float)):
+                errors.append(f"gps_fix_type must be a number, got {type(gps_fix_type).__name__}")
+                fix_type_valid = False
+            else:
+                fv = float(gps_fix_type)
+                if not math.isfinite(fv):
+                    errors.append(f"gps_fix_type is not finite: {fv}")
+                    fix_type_valid = False
+                elif fv < 0.0:
+                    errors.append(f"gps_fix_type must be >= 0, got {fv}")
+                    fix_type_valid = False
+                else:
+                    fix_type_int = int(fv)
+        except (ValueError, TypeError):
+            errors.append(f"gps_fix_type cannot be converted to int: {gps_fix_type}")
+            fix_type_valid = False
+
+        # -- validate satellites_visible ----------------------------------
+        sats_valid: bool = True
+        sats_int: int = 0
+        try:
+            if satellites_visible is None:
+                errors.append("satellites_visible is None")
+                sats_valid = False
+            elif isinstance(satellites_visible, bool) or not isinstance(satellites_visible, (int, float)):
+                errors.append(f"satellites_visible must be a number, got {type(satellites_visible).__name__}")
+                sats_valid = False
+            else:
+                sv = float(satellites_visible)
+                if not math.isfinite(sv):
+                    errors.append(f"satellites_visible is not finite: {sv}")
+                    sats_valid = False
+                elif sv < 0.0:
+                    errors.append(f"satellites_visible must be >= 0, got {sv}")
+                    sats_valid = False
+                else:
+                    sats_int = int(sv)
+        except (ValueError, TypeError):
+            errors.append(f"satellites_visible cannot be converted to int: {satellites_visible}")
+            sats_valid = False
+
+        # -- GPS quality object -------------------------------------------
         gps_quality = GpsQuality(
-            fix_type=gps_fix_type,
-            satellites_visible=satellites_visible,
+            fix_type=fix_type_int if fix_type_valid else 0,
+            satellites_visible=sats_int if sats_valid else 0,
             eph=gps_eph,
             epv=gps_epv,
         )
 
-        if gps_fix_type < thresholds.min_fix_type:
+        # -- check against thresholds (only if inputs are valid) ----------
+        if fix_type_valid and fix_type_int < thresholds.min_fix_type:
             errors.append(
-                f"GPS fix_type {gps_fix_type} < required {thresholds.min_fix_type}"
+                f"GPS fix_type {fix_type_int} < required {thresholds.min_fix_type}"
             )
-        if satellites_visible < thresholds.min_satellites:
+        if sats_valid and sats_int < thresholds.min_satellites:
             errors.append(
-                f"GPS satellites {satellites_visible} < required {thresholds.min_satellites}"
+                f"GPS satellites {sats_int} < required {thresholds.min_satellites}"
             )
 
         # eph / epv: missing, negative, or non-finite → fail
@@ -208,10 +291,11 @@ class FieldProfileService:
             return BindResult(
                 ok=False,
                 profile_id=profile.profile_id,
-                diagnostics=FieldProfileDiagnostics(errors=errors, warnings=warnings),
-                warnings=warnings,
-                errors=errors,
+                diagnostics=FieldProfileDiagnostics(errors=list(errors), warnings=list(warnings)),
+                warnings=list(warnings),
+                errors=list(errors),
                 gps_quality=gps_quality,
+                timestamp=timestamp,
             )
 
         # -- geometry ----------------------------------------------------
@@ -265,9 +349,10 @@ class FieldProfileService:
             current_field_x_m=current_field_x_m,
             current_field_y_m=current_field_y_m,
             baseline_m=baseline_m,
-            diagnostics=FieldProfileDiagnostics(errors=[], warnings=warnings),
-            warnings=warnings,
+            diagnostics=FieldProfileDiagnostics(errors=[], warnings=list(warnings)),
+            warnings=list(warnings),
             errors=[],
             gps_quality=gps_quality,
             check_points=check_points,
+            timestamp=timestamp,
         )

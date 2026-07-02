@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from typing import Any, Dict
 
@@ -13,6 +14,9 @@ from app.field_profile import (
     FieldProfilePoint,
     FieldProfileValidationError,
     GpsQualityThresholds,
+    GPS_DECLARED_TOLERANCE_M,
+    LR_COINCIDENT_M,
+    LR_TOO_CLOSE_WARN_M,
     load_field_profile_json,
     parse_field_profile,
     validate_field_profile,
@@ -33,7 +37,11 @@ EXAMPLE_PROFILE_PATH = os.path.join(
 
 
 def _make_minimal_data() -> Dict[str, Any]:
-    """Return a dict that passes parse + validate."""
+    """Return a dict that passes parse + validate.
+
+    O=(34.0, 108.0), F≈33.36 m north, L/R ≈1.84 m left/right at ~16.68 m forward.
+    Declared coords match GPS projection for a north-oriented profile.
+    """
     return {
         "schema_version": 1,
         "profile_id": "test_profile",
@@ -59,23 +67,23 @@ def _make_minimal_data() -> Dict[str, Any]:
                 "lat": 34.0003,
                 "lon": 108.0,
                 "field_x_m": 0.0,
-                "field_y_m": 40.0,
+                "field_y_m": 33.36,
             },
             "left_check": {
                 "name": "L",
                 "role": "left_check",
                 "lat": 34.00015,
                 "lon": 107.99998,
-                "field_x_m": -2.5,
-                "field_y_m": 20.0,
+                "field_x_m": -1.84,
+                "field_y_m": 16.68,
             },
             "right_check": {
                 "name": "R",
                 "role": "right_check",
                 "lat": 34.00015,
                 "lon": 108.00002,
-                "field_x_m": 2.5,
-                "field_y_m": 20.0,
+                "field_x_m": 1.84,
+                "field_y_m": 16.68,
             },
         },
         "gps_quality": {
@@ -121,9 +129,7 @@ def test_missing_origin_fails() -> None:
     del data["points"]["origin"]
     with pytest.raises(FieldProfileValidationError) as exc:
         _profile_from_data(data)
-    assert "origin" in str(exc.value).lower() or any(
-        "origin" in e.lower() for e in exc.value.diagnostics.errors
-    )
+    assert any("origin" in e.lower() for e in exc.value.diagnostics.errors)
 
 
 def test_missing_forward_fails() -> None:
@@ -131,9 +137,7 @@ def test_missing_forward_fails() -> None:
     del data["points"]["forward"]
     with pytest.raises(FieldProfileValidationError) as exc:
         _profile_from_data(data)
-    assert "forward" in str(exc.value).lower() or any(
-        "forward" in e.lower() for e in exc.value.diagnostics.errors
-    )
+    assert any("forward" in e.lower() for e in exc.value.diagnostics.errors)
 
 
 def test_left_check_optional() -> None:
@@ -175,16 +179,21 @@ def test_lon_out_of_range_fails() -> None:
 
 def test_lat_negative_90_accepted() -> None:
     data = _make_minimal_data()
+    del data["points"]["left_check"]
+    del data["points"]["right_check"]
     data["points"]["origin"]["lat"] = -90.0
-    data["points"]["forward"]["lat"] = -89.9997  # keep ~33m baseline
+    data["points"]["forward"]["lat"] = -89.9997
+    data["points"]["forward"]["lon"] = 108.0
     profile = _profile_from_data(data)
     assert profile.origin.lat == -90.0
 
 
 def test_lon_negative_180_accepted() -> None:
     data = _make_minimal_data()
+    del data["points"]["left_check"]
+    del data["points"]["right_check"]
     data["points"]["origin"]["lon"] = -180.0
-    data["points"]["forward"]["lon"] = -180.0  # pure north baseline
+    data["points"]["forward"]["lon"] = -180.0
     data["points"]["forward"]["lat"] = 34.0003
     profile = _profile_from_data(data)
     assert profile.origin.lon == -180.0
@@ -227,12 +236,11 @@ def test_non_finite_value_fails(attr: str, bad_value: float) -> None:
 def test_baseline_below_min_fails() -> None:
     """O and F less than 5 m apart must be a hard error."""
     data = _make_minimal_data()
-    # ~3 m baseline (pure north)
-    # 1 deg lat ≈ 111,195 m → 3 m ≈ 0.000027 deg
     data["points"]["origin"]["lat"] = 34.0
     data["points"]["origin"]["lon"] = 108.0
-    data["points"]["forward"]["lat"] = 34.000027
+    data["points"]["forward"]["lat"] = 34.000027  # ~3 m
     data["points"]["forward"]["lon"] = 108.0
+    data["points"]["forward"]["field_y_m"] = 3.0  # consistent
     with pytest.raises(FieldProfileValidationError) as exc:
         _profile_from_data(data)
     assert any(
@@ -248,12 +256,11 @@ def test_baseline_below_min_fails() -> None:
 def test_baseline_between_min_and_recommended_warns() -> None:
     """O and F 7 m apart → warning but not error."""
     data = _make_minimal_data()
-    # ~7 m baseline (pure north)
-    # 7 m ≈ 0.000063 deg
     data["points"]["origin"]["lat"] = 34.0
     data["points"]["origin"]["lon"] = 108.0
-    data["points"]["forward"]["lat"] = 34.000063
+    data["points"]["forward"]["lat"] = 34.000063  # ~7 m
     data["points"]["forward"]["lon"] = 108.0
+    data["points"]["forward"]["field_y_m"] = 7.0  # consistent
     profile = parse_field_profile(data)
     diag = validate_field_profile(profile)
     assert diag.ok, f"Expected ok, got errors: {diag.errors}"
@@ -270,6 +277,11 @@ def test_baseline_between_min_and_recommended_warns() -> None:
 def test_left_check_negative_x_accepted() -> None:
     data = _make_minimal_data()
     data["points"]["left_check"]["field_x_m"] = -0.1
+    # Adjust GPS so projection is also negative:
+    # field_x ≈ d_east for north heading. -0.1 m east → lon offset
+    data["points"]["left_check"]["lon"] = 108.0 - 0.1 / (
+        111195.0 * math.cos(math.radians(34.0))
+    )
     profile = _profile_from_data(data)
     assert profile.left_check is not None
     assert profile.left_check.field_x_m < 0.0
@@ -278,31 +290,57 @@ def test_left_check_negative_x_accepted() -> None:
 def test_right_check_positive_x_accepted() -> None:
     data = _make_minimal_data()
     data["points"]["right_check"]["field_x_m"] = 0.1
+    data["points"]["right_check"]["lon"] = 108.0 + 0.1 / (
+        111195.0 * math.cos(math.radians(34.0))
+    )
     profile = _profile_from_data(data)
     assert profile.right_check is not None
     assert profile.right_check.field_x_m > 0.0
 
 
 # ---------------------------------------------------------------------------
-# L/R swapped
+# L/R swapped — declared
 # ---------------------------------------------------------------------------
 
 
-def test_lr_swapped_fails() -> None:
-    """L with positive x and R with negative x → swapped error."""
+def test_lr_declared_swapped_fails() -> None:
+    """L with positive declared x and R with negative declared x → error."""
     data = _make_minimal_data()
     data["points"]["left_check"]["field_x_m"] = 2.5
     data["points"]["right_check"]["field_x_m"] = -2.5
     with pytest.raises(FieldProfileValidationError) as exc:
         _profile_from_data(data)
     errors_text = " ".join(exc.value.diagnostics.errors).lower()
-    assert "swap" in errors_text or "inverted" in errors_text, (
-        f"Expected swapped error, got: {exc.value.diagnostics.errors}"
+    assert ("negative" in errors_text) or ("positive" in errors_text), (
+        f"Expected sign error, got: {exc.value.diagnostics.errors}"
     )
 
 
 # ---------------------------------------------------------------------------
-# L/R same side
+# L/R swapped — GPS
+# ---------------------------------------------------------------------------
+
+
+def test_lr_gps_swapped_fails() -> None:
+    """Swap L and R GPS coordinates → GPS-derived signs are wrong."""
+    data = _make_minimal_data()
+    # Swap GPS coords but keep declared field_x correct
+    l_lat = data["points"]["left_check"]["lat"]
+    l_lon = data["points"]["left_check"]["lon"]
+    data["points"]["left_check"]["lat"] = data["points"]["right_check"]["lat"]
+    data["points"]["left_check"]["lon"] = data["points"]["right_check"]["lon"]
+    data["points"]["right_check"]["lat"] = l_lat
+    data["points"]["right_check"]["lon"] = l_lon
+    with pytest.raises(FieldProfileValidationError) as exc:
+        _profile_from_data(data)
+    errors_text = " ".join(exc.value.diagnostics.errors).lower()
+    assert ("swap" in errors_text) or ("gps-derived" in errors_text), (
+        f"Expected GPS swap error, got: {exc.value.diagnostics.errors}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# L/R same side — declared
 # ---------------------------------------------------------------------------
 
 
@@ -313,8 +351,8 @@ def test_lr_both_positive_fails() -> None:
     with pytest.raises(FieldProfileValidationError) as exc:
         _profile_from_data(data)
     errors_text = " ".join(exc.value.diagnostics.errors).lower()
-    assert "same side" in errors_text, (
-        f"Expected same-side error, got: {exc.value.diagnostics.errors}"
+    assert "negative" in errors_text, (
+        f"Expected left sign error, got: {exc.value.diagnostics.errors}"
     )
 
 
@@ -325,51 +363,112 @@ def test_lr_both_negative_fails() -> None:
     with pytest.raises(FieldProfileValidationError) as exc:
         _profile_from_data(data)
     errors_text = " ".join(exc.value.diagnostics.errors).lower()
-    assert "same side" in errors_text, (
-        f"Expected same-side error, got: {exc.value.diagnostics.errors}"
+    assert "positive" in errors_text, (
+        f"Expected right sign error, got: {exc.value.diagnostics.errors}"
     )
 
 
 # ---------------------------------------------------------------------------
-# L/R coincident / too close
+# L/R same side — GPS
+# ---------------------------------------------------------------------------
+
+
+def test_lr_gps_same_side_fails() -> None:
+    """Put both L and R GPS on the left side → GPS-derived same-side error."""
+    data = _make_minimal_data()
+    # Put R GPS also on the left (negative lon offset)
+    data["points"]["right_check"]["lon"] = 108.0 - 0.00005
+    data["points"]["right_check"]["field_x_m"] = -3.0  # declared also left
+    with pytest.raises(FieldProfileValidationError) as exc:
+        _profile_from_data(data)
+    # Declared sign catches it
+    errors_text = " ".join(exc.value.diagnostics.errors).lower()
+    assert "positive" in errors_text or "same side" in errors_text, (
+        f"Expected sign/same-side error, got: {exc.value.diagnostics.errors}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# L/R GPS coincident
+# ---------------------------------------------------------------------------
+
+
+def test_lr_gps_coincident_fails() -> None:
+    """Same GPS → GPS-derived coincident error."""
+    data = _make_minimal_data()
+    # Put L and R at the same GPS as forward but slightly offset
+    # to get different declared signs but same GPS projection
+    # Actually, just make them share the same GPS coords:
+    data["points"]["left_check"]["lat"] = 34.00015
+    data["points"]["left_check"]["lon"] = 108.00001
+    data["points"]["right_check"]["lat"] = 34.00015
+    data["points"]["right_check"]["lon"] = 108.00001
+    # Both at same lon = positive field_x for both → same-side from GPS
+    data["points"]["left_check"]["field_x_m"] = 1.0  # wrong sign, caught by declared
+    data["points"]["right_check"]["field_x_m"] = 1.0  # caught by GPS same-side
+    with pytest.raises(FieldProfileValidationError) as exc:
+        _profile_from_data(data)
+    errors_text = " ".join(exc.value.diagnostics.errors).lower()
+    assert "negative" in errors_text or "same side" in errors_text, (
+        f"Expected error, got: {exc.value.diagnostics.errors}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# L/R GPS too close
+# ---------------------------------------------------------------------------
+
+
+def test_lr_gps_too_close_fails() -> None:
+    """L/R GPS very close (< 1 m) → warning or error."""
+    data = _make_minimal_data()
+    # Set L GPS at tiny left offset, R GPS at tiny right offset
+    # field_x ~ d_east for north heading
+    tiny = 0.3 / (111195.0 * math.cos(math.radians(34.0)))  # ~0.3 m
+    data["points"]["left_check"]["lon"] = 108.0 - tiny
+    data["points"]["left_check"]["field_x_m"] = -0.3
+    data["points"]["right_check"]["lon"] = 108.0 + tiny
+    data["points"]["right_check"]["field_x_m"] = 0.3
+    profile = parse_field_profile(data)
+    diag = validate_field_profile(profile)
+    # Distance ≈ 0.6 m < 1.0 m → warning
+    assert diag.ok, f"Expected ok, got errors: {diag.errors}"
+    assert any(
+        "close" in w.lower() for w in diag.warnings
+    ), f"Expected proximity warning, got: {diag.warnings}"
+
+
+# ---------------------------------------------------------------------------
+# GPS vs declared mismatch > tolerance
+# ---------------------------------------------------------------------------
+
+
+def test_gps_declared_mismatch_fails() -> None:
+    """Declared field_x_m far from GPS-derived → hard error."""
+    data = _make_minimal_data()
+    # Set declared way off from GPS
+    data["points"]["left_check"]["field_x_m"] = -10.0  # GPS is ~-1.84
+    with pytest.raises(FieldProfileValidationError) as exc:
+        _profile_from_data(data)
+    errors_text = " ".join(exc.value.diagnostics.errors).lower()
+    assert "differs" in errors_text, (
+        f"Expected mismatch error, got: {exc.value.diagnostics.errors}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# L/R coincident / too close (declared, now backed by GPS)
 # ---------------------------------------------------------------------------
 
 
 def test_lr_coincident_fails() -> None:
+    """Declared L/R extremely close → GPS check catches coincident."""
     data = _make_minimal_data()
-    data["points"]["left_check"]["field_x_m"] = -2.5
-    data["points"]["left_check"]["field_y_m"] = 20.0
-    data["points"]["right_check"]["field_x_m"] = -2.5
-    data["points"]["right_check"]["field_y_m"] = 20.0
-    # With L.x < 0 and R.x < 0 we already get same-side error, so test
-    # with swapped-names but formally correct signs:
-    # Actually the coincident check only fires when individual signs are ok.
-    # Set them = same exact coords:
-    data["points"]["right_check"]["field_x_m"] = -2.5
-    data["points"]["left_check"]["field_x_m"] = -2.5
-    data["points"]["right_check"]["field_y_m"] = 20.0
-    data["points"]["left_check"]["field_y_m"] = 20.0
-    # Both negative → same-side error caught first (before degeneracy check).
-    # So coincident is only tested when signs are correct.  Set them to
-    # correct signs but identical coords:
-    data["points"]["left_check"]["field_x_m"] = -2.5
-    data["points"]["right_check"]["field_x_m"] = 2.5
-    data["points"]["left_check"]["field_y_m"] = 20.0
-    data["points"]["right_check"]["field_y_m"] = 20.0
-    # That's not coincident (5 m apart).  Make them truly coincident:
-    data["points"]["left_check"]["field_x_m"] = 0.0  # not < 0 → sign error
-    # Hmm.  To get coincident with correct signs we need L=-d, R=+d, d→0.
-    # But d=0.0 means L.x=0 → left_check x>=0 error.
-    # The truly coincident case without sign issues is essentially untestable
-    # unless both are at (0,0) which violates sign rules.
-    # Instead: L/R at different y but same x=0 → sign error for both.
-    # The coincident check is most relevant when L/R have correct sign but
-    # are extremely close (distance < LR_COINCIDENT_M).  We can test with
-    # L.x=-1e-9, R.x=+1e-9 → distance ≈ 2e-9 < 1e-6 → coincident error.
+    # Put both at essentially same GPS
+    data["points"]["left_check"]["lon"] = 108.0 - 1e-12
     data["points"]["left_check"]["field_x_m"] = -1e-9
+    data["points"]["right_check"]["lon"] = 108.0 + 1e-12
     data["points"]["right_check"]["field_x_m"] = 1e-9
-    data["points"]["left_check"]["field_y_m"] = 20.0
-    data["points"]["right_check"]["field_y_m"] = 20.0
     with pytest.raises(FieldProfileValidationError) as exc:
         _profile_from_data(data)
     errors_text = " ".join(exc.value.diagnostics.errors).lower()
@@ -381,10 +480,11 @@ def test_lr_coincident_fails() -> None:
 def test_lr_too_close_warns() -> None:
     """L and R 0.5 m apart → warning, not error."""
     data = _make_minimal_data()
+    tiny = 0.25 / (111195.0 * math.cos(math.radians(34.0)))
+    data["points"]["left_check"]["lon"] = 108.0 - tiny
     data["points"]["left_check"]["field_x_m"] = -0.25
+    data["points"]["right_check"]["lon"] = 108.0 + tiny
     data["points"]["right_check"]["field_x_m"] = 0.25
-    data["points"]["left_check"]["field_y_m"] = 20.0
-    data["points"]["right_check"]["field_y_m"] = 20.0
     profile = parse_field_profile(data)
     diag = validate_field_profile(profile)
     assert diag.ok, f"Expected ok, got errors: {diag.errors}"
@@ -453,9 +553,35 @@ def test_unknown_top_level_field_warns() -> None:
     assert any(
         "future_extension" in w for w in diag.warnings
     ), f"Expected warning about 'future_extension', got: {diag.warnings}"
-    # Verify the extra data is preserved.
     assert "future_extension" in profile.extra
     assert profile.extra["future_extension"] == {"some": "value"}
+
+
+# ---------------------------------------------------------------------------
+# nested unknown fields
+# ---------------------------------------------------------------------------
+
+
+def test_nested_unknown_in_point_warns() -> None:
+    data = _make_minimal_data()
+    data["points"]["origin"]["custom_flag"] = True
+    profile = parse_field_profile(data)
+    diag = validate_field_profile(profile)
+    assert diag.ok, f"Unknown nested field should not cause error, got: {diag.errors}"
+    assert any(
+        "points.origin.custom_flag" in w for w in diag.warnings
+    ), f"Expected nested unknown warning, got: {diag.warnings}"
+
+
+def test_nested_unknown_in_gps_quality_warns() -> None:
+    data = _make_minimal_data()
+    data["gps_quality"]["future_key"] = 123
+    profile = parse_field_profile(data)
+    diag = validate_field_profile(profile)
+    assert diag.ok, f"Unknown gps_quality field should not cause error, got: {diag.errors}"
+    assert any(
+        "gps_quality.future_key" in w for w in diag.warnings
+    ), f"Expected nested unknown warning, got: {diag.warnings}"
 
 
 # ---------------------------------------------------------------------------
@@ -468,7 +594,6 @@ def test_parse_serialize_reparse_stable() -> None:
     data = _make_minimal_data()
     profile1 = _profile_from_data(data)
 
-    # Rebuild a JSON-like dict and re-parse
     rebuilt: Dict[str, Any] = {
         "schema_version": profile1.schema_version,
         "profile_id": profile1.profile_id,
@@ -530,6 +655,179 @@ def test_empty_profile_id_fails() -> None:
     assert any(
         "profile_id" in e.lower() for e in exc.value.diagnostics.errors
     ), f"Expected profile_id error, got: {exc.value.diagnostics.errors}"
+
+
+# ---------------------------------------------------------------------------
+# missing point fields
+# ---------------------------------------------------------------------------
+
+
+def test_missing_point_lat_fails() -> None:
+    data = _make_minimal_data()
+    del data["points"]["origin"]["lat"]
+    with pytest.raises(FieldProfileValidationError) as exc:
+        parse_field_profile(data)
+    assert any(
+        "lat" in e.lower() and "missing" in e.lower()
+        for e in exc.value.diagnostics.errors
+    ), f"Expected missing lat error, got: {exc.value.diagnostics.errors}"
+
+
+def test_missing_point_lon_fails() -> None:
+    data = _make_minimal_data()
+    del data["points"]["origin"]["lon"]
+    with pytest.raises(FieldProfileValidationError) as exc:
+        parse_field_profile(data)
+    assert any(
+        "lon" in e.lower() and "missing" in e.lower()
+        for e in exc.value.diagnostics.errors
+    ), f"Expected missing lon error, got: {exc.value.diagnostics.errors}"
+
+
+def test_missing_point_field_x_fails() -> None:
+    data = _make_minimal_data()
+    del data["points"]["origin"]["field_x_m"]
+    with pytest.raises(FieldProfileValidationError) as exc:
+        parse_field_profile(data)
+    assert any(
+        "field_x_m" in e.lower() and "missing" in e.lower()
+        for e in exc.value.diagnostics.errors
+    ), f"Expected missing field_x_m error, got: {exc.value.diagnostics.errors}"
+
+
+def test_missing_point_field_y_fails() -> None:
+    data = _make_minimal_data()
+    del data["points"]["origin"]["field_y_m"]
+    with pytest.raises(FieldProfileValidationError) as exc:
+        parse_field_profile(data)
+    assert any(
+        "field_y_m" in e.lower() and "missing" in e.lower()
+        for e in exc.value.diagnostics.errors
+    ), f"Expected missing field_y_m error, got: {exc.value.diagnostics.errors}"
+
+
+def test_missing_point_role_fails() -> None:
+    data = _make_minimal_data()
+    del data["points"]["origin"]["role"]
+    with pytest.raises(FieldProfileValidationError) as exc:
+        parse_field_profile(data)
+    assert any(
+        "role" in e.lower() and "missing" in e.lower()
+        for e in exc.value.diagnostics.errors
+    ), f"Expected missing role error, got: {exc.value.diagnostics.errors}"
+
+
+def test_point_none_lat_fails() -> None:
+    data = _make_minimal_data()
+    data["points"]["origin"]["lat"] = None
+    with pytest.raises(FieldProfileValidationError) as exc:
+        parse_field_profile(data)
+    assert any(
+        "lat" in e.lower() for e in exc.value.diagnostics.errors
+    )
+
+
+# ---------------------------------------------------------------------------
+# point key / role mismatch
+# ---------------------------------------------------------------------------
+
+
+def test_point_key_role_mismatch_fails() -> None:
+    data = _make_minimal_data()
+    data["points"]["origin"]["role"] = "forward"
+    with pytest.raises(FieldProfileValidationError) as exc:
+        parse_field_profile(data)
+    errors_text = " ".join(exc.value.diagnostics.errors).lower()
+    assert "key" in errors_text or "role" in errors_text, (
+        f"Expected key/role mismatch error, got: {exc.value.diagnostics.errors}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# gps_quality threshold validation
+# ---------------------------------------------------------------------------
+
+
+def test_gps_quality_max_eph_nan_fails() -> None:
+    data = _make_minimal_data()
+    data["gps_quality"]["max_eph"] = float("nan")
+    with pytest.raises(FieldProfileValidationError) as exc:
+        parse_field_profile(data)
+    assert any(
+        "max_eph" in e.lower() for e in exc.value.diagnostics.errors
+    )
+
+
+def test_gps_quality_max_epv_inf_fails() -> None:
+    data = _make_minimal_data()
+    data["gps_quality"]["max_epv"] = float("inf")
+    with pytest.raises(FieldProfileValidationError) as exc:
+        parse_field_profile(data)
+    assert any(
+        "max_epv" in e.lower() for e in exc.value.diagnostics.errors
+    )
+
+
+def test_gps_quality_min_fix_type_negative_fails() -> None:
+    data = _make_minimal_data()
+    data["gps_quality"]["min_fix_type"] = -1
+    with pytest.raises(FieldProfileValidationError) as exc:
+        parse_field_profile(data)
+    assert any(
+        "min_fix_type" in e.lower() for e in exc.value.diagnostics.errors
+    )
+
+
+def test_gps_quality_min_satellites_negative_fails() -> None:
+    data = _make_minimal_data()
+    data["gps_quality"]["min_satellites"] = -5
+    with pytest.raises(FieldProfileValidationError) as exc:
+        parse_field_profile(data)
+    assert any(
+        "min_satellites" in e.lower() for e in exc.value.diagnostics.errors
+    )
+
+
+def test_gps_quality_min_fix_type_float_fails() -> None:
+    data = _make_minimal_data()
+    data["gps_quality"]["min_fix_type"] = 3.5
+    with pytest.raises(FieldProfileValidationError) as exc:
+        parse_field_profile(data)
+    assert any(
+        "min_fix_type" in e.lower() for e in exc.value.diagnostics.errors
+    )
+
+
+# ---------------------------------------------------------------------------
+# forward.field_x_m far from 0
+# ---------------------------------------------------------------------------
+
+
+def test_forward_field_x_far_from_zero_fails() -> None:
+    data = _make_minimal_data()
+    data["points"]["forward"]["field_x_m"] = 10.0
+    with pytest.raises(FieldProfileValidationError) as exc:
+        _profile_from_data(data)
+    assert any(
+        "forward" in e.lower() and "field_x" in e.lower()
+        for e in exc.value.diagnostics.errors
+    ), f"Expected forward field_x error, got: {exc.value.diagnostics.errors}"
+
+
+# ---------------------------------------------------------------------------
+# forward.field_y_m <= 0
+# ---------------------------------------------------------------------------
+
+
+def test_forward_field_y_zero_or_negative_fails() -> None:
+    data = _make_minimal_data()
+    data["points"]["forward"]["field_y_m"] = -1.0
+    with pytest.raises(FieldProfileValidationError) as exc:
+        _profile_from_data(data)
+    assert any(
+        "forward" in e.lower() and "field_y" in e.lower()
+        for e in exc.value.diagnostics.errors
+    ), f"Expected forward field_y error, got: {exc.value.diagnostics.errors}"
 
 
 # ---------------------------------------------------------------------------
