@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "profile_id": "example_competition_lane",
+  "name": "Example Competition Lane",
+  "created_at": "2025-01-01T00:00:00Z",
+  "coordinate_convention": {
+    "field_x_positive": "right",
+    "field_y_positive": "forward",
+    "altitude_positive": "up"
+  },
+  "points": {
+    "origin": {
+      "name": "O_takeoff_center",
+      "role": "origin",
+      "lat": 34.00000000,
+      "lon": 108.00000000,
+      "field_x_m": 0.0,
+      "field_y_m": 0.0
+    },
+    "forward": {
+      "name": "F_far_center",
+      "role": "forward",
+      "lat": 34.00030000,
+      "lon": 108.00000000,
+      "field_x_m": 0.0,
+      "field_y_m": 40.0
+    },
+    "left_check": {
+      "name": "L_left_check",
+      "role": "left_check",
+      "lat": 34.00015000,
+      "lon": 107.99998000,
+      "field_x_m": -2.5,
+      "field_y_m": 20.0
+    },
+    "right_check": {
+      "name": "R_right_check",
+      "role": "right_check",
+      "lat": 34.00015000,
+      "lon": 108.00002000,
+      "field_x_m": 2.5,
+      "field_y_m": 20.0
+    }
+  },
+  "gps_quality": {
+    "min_fix_type": 3,
+    "min_satellites": 10,
+    "max_eph": 2.5,
+    "max_epv": 5.0
+  }
+}
