@@ -5,8 +5,7 @@ let completions = AppState.completions;
 let history = AppState.history;
 
 let historyIndex = -1;
-let currentConfigPath = "";
-let currentOriginal = "";
+// currentConfigPath/currentOriginal moved to config_panel.js (WU-7B v2)
 let missionCatalog = [];
 let currentActionMission = null;
 let currentActionMissionSteps = [];
@@ -681,6 +680,14 @@ async function loadMissions() {
   renderMissionSteps(state || {});
 }
 // Audit log moved to log_panel.js (WU-7A)
+// Config panel configure (WU-7B v2)
+var loadConfigFiles = function () { return window.UavConfigPanel.loadConfigFiles(); };
+var openConfig = function (path) { return window.UavConfigPanel.openConfig(path); };
+var localDiff = function (before, after) { return window.UavConfigPanel.localDiff(before, after); };
+var saveConfig = function (action) { return window.UavConfigPanel.saveConfig(action); };
+var restoreConfig = function () { return window.UavConfigPanel.restoreConfig(); };
+var actionForPath = function () { return window.UavConfigPanel.actionForPath(); };
+
 // Video panel configure (WU-6 v2)
 if (window.UavLogPanel && window.UavLogPanel.configure) {
   window.UavLogPanel.configure({
@@ -691,6 +698,18 @@ if (window.UavLogPanel && window.UavLogPanel.configure) {
   });
 }
 var loadAudit = function () { return window.UavLogPanel.loadAudit(); };
+
+// Config panel configure (WU-7B v2) — must be after loadAudit is defined
+if (window.UavConfigPanel && window.UavConfigPanel.configure) {
+  window.UavConfigPanel.configure({
+    api: window.UavApi,
+    dom: window.UavDom,
+    format: window.UavFormat,
+    loadAudit: loadAudit,
+    setCompletionHint: function (text) { $("completionHint").textContent = text; },
+    setConfigStatus: function (text) { var el = $("configStatus"); if (el) el.textContent = text; },
+  });
+}
 
 // Video panel configure (WU-6 v2)
 if (window.UavVideoPanel && window.UavVideoPanel.configure) {
@@ -943,11 +962,6 @@ var startActionLabAction = function (sendActions) { return window.UavActionLab.s
 var stopActionLabAction = function () { return window.UavActionLab.stopActionLabAction(); };
 var resetActionLabAction = function () { return window.UavActionLab.resetActionLabAction(); };
 
-async function loadConfigFiles() {
-  const files = await json("/api/config/files");
-  $("configFiles").innerHTML = files.map(path => `<button data-path="${path}">${path}</button>`).join("");
-  $("configFiles").querySelectorAll("button").forEach(button => button.onclick = () => openConfig(button.dataset.path));
-}
 function startStatusUpdates() {
   let fallbackTimer = null;
   let actionTimer = null;
@@ -981,44 +995,8 @@ function startStatusUpdates() {
     startFallback();
   }
 }
-async function openConfig(path) {
-  const file = await json(`/api/config/file?path=${encodeURIComponent(path)}`);
-  currentConfigPath = path;
-  currentOriginal = file.content;
-  $("editingPath").textContent = path;
-  $("yamlEditor").value = file.content;
-  $("configDiff").textContent = "";
-  $("configStatus").textContent = file.has_backup ? "存在上一次保存前版本，可恢复。" : "尚无备份版本。";
-  document.querySelectorAll("#configFiles button").forEach(b => b.classList.toggle("active", b.dataset.path === path));
-  const action = path.startsWith("missions/") ? "保存并应用" :
-    path === "config/telemetry.yaml" ? "保存并重连" :
-    path === "config/yolo.yaml" ? "保存并重启 YOLO" :
-    path === "config/app.yaml" ? "保存并重启 App" : "保存并应用";
-  $("applyConfig").textContent = action;
-}
-function localDiff(before, after) {
-  if (before === after) return "没有修改。";
-  return "已修改配置；保存前后端会再次校验 YAML，并返回正式差异。";
-}
 var setupActionStatusJsonCopyGuard = function () { window.UavActionLab.setupActionStatusJsonCopyGuard(); };
 
-async function saveConfig(action = "save") {
-  if (!currentConfigPath) return;
-  if (action !== "save" && !confirm(`${$("applyConfig").textContent} 将可能停止命令发送或重启服务，确认继续？`)) return;
-  const result = await json(`/api/config/file?path=${encodeURIComponent(currentConfigPath)}`, {
-    method: "PUT", body: JSON.stringify({content: $("yamlEditor").value, action})
-  });
-  currentOriginal = $("yamlEditor").value;
-  $("configDiff").textContent = result.diff || "保存成功，无文本差异。";
-  $("configStatus").textContent = result.message;
-  await loadAudit();
-}
-function actionForPath() {
-  if (currentConfigPath.startsWith("missions/")) return "apply";
-  if (currentConfigPath === "config/telemetry.yaml") return "reconnect";
-  if (currentConfigPath === "config/yolo.yaml" || currentConfigPath === "config/app.yaml") return "restart";
-  return "save";
-}
 async function init() {
   // Video panel setup moved to video_panel.js (WU-6 v2)
   window.UavVideoPanel.setupVideoPanel().catch(function (err) {
@@ -1094,15 +1072,10 @@ async function init() {
     document.querySelectorAll(".tab").forEach(item => item.classList.toggle("active", item === tab));
     document.querySelectorAll(".page").forEach(page => page.classList.toggle("active", page.id === `${tab.dataset.page}Page`));
   });
-  $("previewConfig").onclick = () => $("configDiff").textContent = localDiff(currentOriginal, $("yamlEditor").value);
+  $("previewConfig").onclick = function () { $("configDiff").textContent = window.UavConfigPanel.localDiff(window.UavConfigPanel.getCurrentOriginal(), $("yamlEditor").value); };
   $("saveConfig").onclick = () => saveConfig("save");
   $("applyConfig").onclick = () => saveConfig(actionForPath());
-  $("restoreConfig").onclick = async () => {
-    if (!currentConfigPath || !confirm("确认恢复上一次保存前版本？")) return;
-    const action = currentConfigPath.startsWith("missions/") ? "apply" : "save";
-    const result = await json(`/api/config/restore?path=${encodeURIComponent(currentConfigPath)}&action=${action}`, {method: "POST"});
-    $("configStatus").textContent = result.message; $("configDiff").textContent = result.diff; await openConfig(currentConfigPath); await loadAudit();
-  };
+  $("restoreConfig").onclick = restoreConfig;
   $("reconnectTelemetry").onclick = () => confirm("重连通信将关闭自动发送，确认？") && json("/api/services/telemetry/reconnect", {method: "POST"}).then(loadAudit);
   $("restartYolo").onclick = () => confirm("确认重启 YOLO 服务？") && json("/api/services/yolo/restart", {method: "POST"}).then(loadAudit);
   $("restartApp").onclick = () => confirm("重启 App 将关闭自动发送并暂时断开网页，确认？") && json("/api/services/app/restart", {method: "POST"}).then(loadAudit);
