@@ -1,7 +1,20 @@
+from pathlib import Path
+
 from app.app_config import build_arg_parser, load_app_config, load_telemetry_config
 from app.system_runner import SystemRunner
 from telemetry_link.config import DEFAULT_CONFIG_PATH, load_config_file
 from web_ui.server import create_app
+
+
+def test_system_runner_does_not_import_legacy_mission_or_stage_entrypoints() -> None:
+    source = (Path(__file__).parents[2] / "app" / "system_runner.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "app.mission_runner" not in source
+    assert "app.stage_registry" not in source
+    assert "MissionRunner" not in source
+    assert "StageRegistry" not in source
 
 
 def test_app_config_falls_back_when_legacy_missions_are_unavailable():

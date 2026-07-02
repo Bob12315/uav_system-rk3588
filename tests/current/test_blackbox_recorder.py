@@ -1,13 +1,31 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from types import SimpleNamespace
 
 from app.app_config import BlackboxConfig
 from app.blackbox_recorder import BlackboxRecorder
-from app.system_runner import FlightCommand
 from fusion.models import FusedState, PerceptionTarget
 from telemetry_link.models import DroneState, GimbalState, LinkStatus
+
+
+@dataclass
+class _CommandFixture:
+    vx_cmd: float = 0.0
+    vy_cmd: float = 0.0
+    vz_cmd: float = 0.0
+    yaw_rate_cmd: float = 0.0
+    gimbal_yaw_rate_cmd: float = 0.0
+    gimbal_pitch_rate_cmd: float = 0.0
+    gimbal_yaw_angle_cmd: float = 0.0
+    gimbal_pitch_angle_cmd: float = 0.0
+    enable_body: bool = False
+    enable_gimbal: bool = False
+    enable_gimbal_angle: bool = False
+    enable_approach: bool = False
+    active: bool = False
+    valid: bool = True
 
 
 def _config(output_dir: str) -> BlackboxConfig:
@@ -64,8 +82,8 @@ def test_blackbox_recorder_writes_control_cycle_jsonl(tmp_path) -> None:
         mission=SimpleNamespace(active_mode="APPROACH_TRACK", hold_reason=""),
         health=SimpleNamespace(hold_reason="ok"),
         mode_status=SimpleNamespace(mode_name="APPROACH_TRACK", hold_reason=""),
-        raw_command=FlightCommand(vx_cmd=0.4, gimbal_yaw_rate_cmd=-0.1, valid=True, active=True),
-        shaped_command=FlightCommand(vx_cmd=0.3, gimbal_yaw_rate_cmd=-0.08, enable_gimbal=True, valid=True, active=True),
+        raw_command=_CommandFixture(vx_cmd=0.4, gimbal_yaw_rate_cmd=-0.1, valid=True, active=True),
+        shaped_command=_CommandFixture(vx_cmd=0.3, gimbal_yaw_rate_cmd=-0.08, enable_gimbal=True, valid=True, active=True),
         send_commands=True,
         debug={"align_descend": {"detail": {"ex_cam": -0.12, "ey_cam": 0.04}}},
     )
