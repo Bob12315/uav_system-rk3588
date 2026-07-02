@@ -243,6 +243,7 @@ def test_web_ui_exposes_field_heading_controls() -> None:
     static_dir = Path(__file__).parents[1] / "web_ui" / "static"
     index = (static_dir / "index.html").read_text(encoding="utf-8")
     script = (static_dir / "app.js").read_text(encoding="utf-8")
+    fm_script = (static_dir / "js" / "field_map.js").read_text(encoding="utf-8")
     styles = (static_dir / "style.css").read_text(encoding="utf-8")
 
     assert 'id="confirmFieldHeading"' in index
@@ -254,9 +255,9 @@ def test_web_ui_exposes_field_heading_controls() -> None:
     assert "function renderFieldHeading" in script
     assert "function confirmFieldHeading" in script
     assert "delta_current_to_field_deg" in script
-    assert "function localPointToField" in script
-    assert "const dronePosition = fieldPosition || missionPosition" in script
-    assert '"UAV LOCAL fallback"' in script
+    assert "function localPointToField" in fm_script
+    assert "const dronePosition = fieldPosition || missionPosition" in fm_script
+    assert '"UAV LOCAL fallback"' in fm_script
     assert ".field-heading-panel" in styles
 
 
@@ -291,19 +292,19 @@ def test_web_ui_distinguishes_selected_and_current_mission_steps() -> None:
 def test_web_ui_exposes_read_only_field_map() -> None:
     static_dir = Path(__file__).parents[1] / "web_ui" / "static"
     index = (static_dir / "index.html").read_text(encoding="utf-8")
-    script = (static_dir / "app.js").read_text(encoding="utf-8")
+    fm_script = (static_dir / "js" / "field_map.js").read_text(encoding="utf-8")
     styles = (static_dir / "style.css").read_text(encoding="utf-8")
 
     assert 'id="fieldMap"' in index
     assert 'id="fieldMapLegend"' in index
-    assert "function renderFieldMap(next)" in script
-    assert "mission_detail" in script
-    assert "mission_position" in script
-    assert "drawCoordinateTicks" in script
-    assert "drawTargetCoordinateList" in script
-    assert "筒坐标" in script
-    assert "Number(item.seen_count || 0) > 0" in script
-    assert "ctx.rotate" not in script
+    assert "function renderFieldMap(next)" in fm_script
+    assert "mission_detail" in fm_script
+    assert "mission_position" in fm_script
+    assert "drawCoordinateTicks" in fm_script
+    assert "drawTargetCoordinateList" in fm_script
+    assert "筒坐标" in fm_script
+    assert "Number(item.seen_count || 0) > 0" in fm_script
+    assert "ctx.rotate" not in fm_script
     assert ".field-map-wrap" in styles
 
 
@@ -873,32 +874,32 @@ def test_drop_targets_result_is_persisted_and_exposed() -> None:
 def test_web_ui_drop_targets_source_contains_red_rendering() -> None:
     """Localization markers recolor red for selected drop targets — no overlay pass."""
     static_dir = Path(__file__).parents[1] / "web_ui" / "static"
-    script = (static_dir / "app.js").read_text(encoding="utf-8")
+    fm_script = (static_dir / "js" / "field_map.js").read_text(encoding="utf-8")
 
-    assert "function pointX(obj)" in script
-    assert "function pointY(obj)" in script
-    assert "Number.isFinite(Number(obj.local_x))" in script
-    assert "Number.isFinite(Number(obj.x))" in script
-    assert "function isSelectedDropTarget(obj, selectedTargets)" in script
-    assert "Math.abs(ox - tx) < 0.15" in script
-    assert "#ff3b30" in script
-    assert "dropTargetsSelected" in script
+    assert "function pointX(obj)" in fm_script
+    assert "function pointY(obj)" in fm_script
+    assert "Number.isFinite(Number(obj.local_x))" in fm_script
+    assert "Number.isFinite(Number(obj.x))" in fm_script
+    assert "function isSelectedDropTarget(obj, selectedTargets)" in fm_script
+    assert "Math.abs(ox - tx) < 0.15" in fm_script
+    assert "#ff3b30" in fm_script
+    assert "dropTargetsSelected" in fm_script
 
     # drawLocalizationTargets must use pointX/pointY for coordinate reading
-    dl_start = script.index("function drawLocalizationTargets(ctx, model)")
-    dl_end = script.index("\nfunction drawSingleViewTargets", dl_start)
-    dl_body = script[dl_start:dl_end]
+    dl_start = fm_script.index("function drawLocalizationTargets(ctx, model)")
+    dl_end = fm_script.index("\nfunction drawSingleViewTargets", dl_start)
+    dl_body = fm_script[dl_start:dl_end]
     assert "pointX(target)" in dl_body, "drawLocalizationTargets must use pointX"
     assert "pointY(target)" in dl_body, "drawLocalizationTargets must use pointY"
     assert "isSelectedDropTarget(target, model.dropTargetsSelected)" in dl_body
 
     # drawDropTargets (overlay) must NOT exist
-    assert "function drawDropTargets(ctx, model)" not in script
-    rf_start = script.index("function renderFieldMap(next)")
-    rf_end = script.index("\nfunction renderStatus", rf_start)
-    rf_body = script[rf_start:rf_end]
+    assert "function drawDropTargets(ctx, model)" not in fm_script
+    rf_start = fm_script.index("function renderFieldMap(next)")
+    rf_end = fm_script.index("\n  window.UavFieldMap", rf_start)
+    rf_body = fm_script[rf_start:rf_end]
     assert "drawDropTargets(ctx, model);" not in rf_body, "drawDropTargets call removed from renderFieldMap"
 
     # Legend must include Selected count
-    assert "Selected:" in script
-    assert "dropTargetsSelected.length" in script
+    assert "Selected:" in fm_script
+    assert "dropTargetsSelected.length" in fm_script
