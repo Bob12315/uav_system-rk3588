@@ -228,14 +228,14 @@ def test_web_ui_exposes_manual_step_movement_controls() -> None:
 def test_web_ui_exposes_raw_camera_recording_controls() -> None:
     static_dir = Path(__file__).parents[1] / "web_ui" / "static"
     index = (static_dir / "index.html").read_text(encoding="utf-8")
-    script = (static_dir / "app.js").read_text(encoding="utf-8")
+    vp_script = (static_dir / "js" / "video_panel.js").read_text(encoding="utf-8")
     styles = (static_dir / "style.css").read_text(encoding="utf-8")
 
     assert 'id="cameraRecordToggle"' in index
     assert 'id="cameraRecordStatus"' in index
-    assert '"/api/camera-recording/status"' in script
-    assert '"/api/camera-recording/toggle"' in script
-    assert "function renderCameraRecordingStatus" in script
+    assert '"/api/camera-recording/status"' in vp_script
+    assert '"/api/camera-recording/toggle"' in vp_script
+    assert "function renderCameraRecordingStatus" in vp_script
     assert ".camera-recording-status" in styles
 
 
