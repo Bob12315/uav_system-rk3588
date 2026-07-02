@@ -673,12 +673,6 @@ function renderDetections(scene, target) {
   $("detections").querySelectorAll("[data-track]").forEach(button => button.onclick = () =>
     execute(`target lock ${button.dataset.track}`, "LIST"));
 }
-async function loadAudit() {
-  const records = await json("/api/audit?limit=100");
-  history = records.filter(r => ["CLI", "BUTTON"].includes(r.source)).map(r => r.action);
-  $("auditLog").innerHTML = records.map(r =>
-    `<div class="log-line ${r.ok ? "" : "bad"}">${stamp(r.timestamp)} ${escapeHtml(r.source)} &nbsp; ${escapeHtml(r.action)}</div>`).join("");
-}
 async function loadMissions() {
   missionCatalog = await json("/api/missions");
   if (!$("missionSelect")) return;
@@ -686,6 +680,18 @@ async function loadMissions() {
     `<option value="${item.name}" ${item.active ? "selected" : ""}>${item.name}</option>`).join("");
   renderMissionSteps(state || {});
 }
+// Audit log moved to log_panel.js (WU-7A)
+// Video panel configure (WU-6 v2)
+if (window.UavLogPanel && window.UavLogPanel.configure) {
+  window.UavLogPanel.configure({
+    api: window.UavApi,
+    dom: window.UavDom,
+    format: window.UavFormat,
+    appState: window.UavAppState,
+  });
+}
+var loadAudit = function () { return window.UavLogPanel.loadAudit(); };
+
 // Video panel configure (WU-6 v2)
 if (window.UavVideoPanel && window.UavVideoPanel.configure) {
   window.UavVideoPanel.configure({
