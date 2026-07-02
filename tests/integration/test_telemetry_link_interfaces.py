@@ -234,7 +234,7 @@ def test_release_payload_not_called_by_action_dispatcher() -> None:
     import os
 
     dispatcher_path = os.path.join(
-        os.path.dirname(__file__), "..", "app", "action_dispatcher.py"
+        os.path.dirname(__file__), "..", "..", "app", "action_dispatcher.py"
     )
     with open(dispatcher_path, "r", encoding="utf-8") as fh:
         content = fh.read()
@@ -247,6 +247,7 @@ def test_release_payload_not_called_by_payload_release_action() -> None:
 
     action_path = os.path.join(
         os.path.dirname(__file__),
+        "..",
         "..",
         "missions",
         "common",

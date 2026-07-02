@@ -17,6 +17,7 @@ from missions.common.actions.action_lab import create_action_lab_registry
 
 DEFAULT_TEMPLATE_PATHS = [
     ROOT / "config/action_missions/drop_two_targets_v1.json",
+    ROOT / "config/action_missions/recon_inspect_5_targets_stepwise_v1.json",
     ROOT / "config/action_missions/rescue_2026_full_auto.json",
 ]
 ALLOWED_FAILURE_ACTIONS = {"fail", "retry_current", "jump_to", "continue"}
@@ -191,11 +192,22 @@ def _smoke_blackboard() -> MissionBlackboard:
     blackboard.set(
         "recon_scan",
         {
+            "localized_objects": [
+                {"id": "r1", "class_name": "bucket", "local_x": 1.0, "local_y": 5.0}
+            ],
             "recon_report": {
                 "barrels": [
                     {"id": "recon_1", "content": "danger_1", "confidence": 0.8}
                 ]
             }
+        },
+    )
+    blackboard.set(
+        "recon_targets",
+        {
+            "selected_targets": [
+                {"id": "r1", "class_name": "bucket", "local_x": 1.0, "local_y": 5.0}
+            ]
         },
     )
     return blackboard

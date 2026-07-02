@@ -4,10 +4,40 @@ The active configuration files are tracked in Git and read directly by the
 application:
 
 ```text
-config/app.yaml
-config/telemetry.yaml
-config/yolo.yaml
+config/app.yaml         — 应用全局配置（executor、服务开关、系统参数）
+config/telemetry.yaml   — MAVLink 遥测链接配置（连接参数、设备、端口）
+config/yolo.yaml        — YOLO 感知配置（模型路径、阈值、视频源、输出）
 ```
+
+## Action Mission Templates
+
+```text
+config/action_missions/*.json
+```
+
+`config/action_missions/` 存放 Action Mission JSON 模板。每个模板定义一组有序的
+Action 步骤及其参数，由 Action Mission 页面加载执行。
+
+当前模板：
+
+| 文件 | 用途 |
+| --- | --- |
+| `drop_two_targets_v1.json` | 双目标投放任务 |
+| `recon_inspect_5_targets_stepwise_v1.json` | 五目标侦察检查（分步） |
+| `rescue_2026_full_auto.json` | 2026 救援比赛全自动任务 |
+
+模板由 `scripts/validate_action_missions.py` 校验。
+
+## Configuration Profiles
+
+```text
+config/profiles/rk3588-real/   — 实机部署配置档案
+config/profiles/rk3588-sitl/   — SITL 仿真配置档案
+```
+
+Profiles 保存不同部署环境的 `telemetry.yaml`、`yolo.yaml` 和
+`action_missions/*.json` 快照，通过 `scripts/config/apply_*.sh` 切换到工作区，
+通过 `scripts/config/save_*.sh` 从工作区保存更新。
 
 Mission-specific settings remain under `missions/<mission_name>/config.yaml`.
 Generated logs, SITL state, and videos belong under `runtime/`.
