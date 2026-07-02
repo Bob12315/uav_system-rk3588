@@ -31,18 +31,28 @@ from .field_reference import (  # noqa: E501  (Phase B private import)
 
 ORIGIN_EPSILON_M = 1e-9
 """Maximum |field_x_m| / |field_y_m| for an origin point before we warn and
-normalise to exactly 0.0."""
+normalise to exactly 0.0.  Values above this but below MAX_ORIGIN_DEVIATION_M
+are normalised with a warning."""
+
+MAX_ORIGIN_DEVIATION_M = 0.1
+"""Maximum |field_x_m| / |field_y_m| for an origin point.  Values exceeding
+this are a hard error — the origin is fundamentally wrong."""
 
 LR_COINCIDENT_M = 1e-6
 """Distance below which left_check and right_check are considered coincident
 (degenerate geometry → hard error)."""
 
-LR_TOO_CLOSE_WARN_M = 1.0
-"""Distance below which left_check and right_check trigger a proximity warning."""
+MIN_LR_GPS_BASELINE_M = 1.0
+"""Minimum GPS-derived distance between left_check and right_check.
+Below this → hard error (unsafe geometry)."""
 
-GPS_DECLARED_TOLERANCE_M = 3.0
+DECLARED_POSITION_TOLERANCE_M = 1.0
 """Maximum allowed difference (metres) between GPS-derived FIELD coordinates
 and the declared field_x_m / field_y_m in the profile JSON."""
+
+FORWARD_X_TOLERANCE_M = 0.5
+"""Maximum allowed |field_x_m| for the forward point — it must lie very
+close to the O→F heading line."""
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +214,39 @@ def parse_field_profile(data: Dict[str, Any]) -> FieldProfile:
         if key not in _TOP_KEYS:
             extra[key] = value
 
-    schema_version = int(data.get("schema_version", 1))
+    # -- schema_version: must be int-like, reject bool/None/NaN/Inf/string
+    try:
+        raw_sv = data.get("schema_version", 1)
+        if raw_sv is None:
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(errors=["schema_version is None"])
+            )
+        if isinstance(raw_sv, bool):
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(errors=["schema_version must be a number, got bool"])
+            )
+        if not isinstance(raw_sv, (int, float)):
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(
+                    errors=[f"schema_version must be a number, got {type(raw_sv).__name__}"]
+                )
+            )
+        fv = float(raw_sv)
+        if not math.isfinite(fv):
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(errors=[f"schema_version is not finite: {fv}"])
+            )
+        if fv != math.floor(fv):
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(errors=[f"schema_version must be an integer, got {fv}"])
+            )
+        schema_version = int(fv)
+    except FieldProfileValidationError:
+        raise
+    except (ValueError, TypeError) as exc:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(errors=[f"schema_version invalid: {exc}"])
+        )
     profile_id = str(data["profile_id"])
     name = str(data["name"])
     created_at = str(data.get("created_at", ""))
@@ -317,12 +359,20 @@ def validate_field_profile(profile: FieldProfile) -> FieldProfileDiagnostics:
         return diag
 
     # -- origin field_x / field_y should be 0 -----------------------------
-    if abs(origin.field_x_m) > ORIGIN_EPSILON_M:
+    if abs(origin.field_x_m) > MAX_ORIGIN_DEVIATION_M:
+        diag.errors.append(
+            f"origin field_x_m is {origin.field_x_m}, far from 0 (max {MAX_ORIGIN_DEVIATION_M})"
+        )
+    elif abs(origin.field_x_m) > ORIGIN_EPSILON_M:
         diag.warnings.append(
             f"origin field_x_m is {origin.field_x_m}, normalised to 0.0"
         )
         origin.field_x_m = 0.0
-    if abs(origin.field_y_m) > ORIGIN_EPSILON_M:
+    if abs(origin.field_y_m) > MAX_ORIGIN_DEVIATION_M:
+        diag.errors.append(
+            f"origin field_y_m is {origin.field_y_m}, far from 0 (max {MAX_ORIGIN_DEVIATION_M})"
+        )
+    elif abs(origin.field_y_m) > ORIGIN_EPSILON_M:
         diag.warnings.append(
             f"origin field_y_m is {origin.field_y_m}, normalised to 0.0"
         )
@@ -344,7 +394,7 @@ def validate_field_profile(profile: FieldProfile) -> FieldProfileDiagnostics:
     heading_rad = _gps_bearing_rad(origin.lat, origin.lon, forward.lat, forward.lon)
 
     # -- forward declared-coordinate checks --------------------------------
-    if abs(forward.field_x_m) > GPS_DECLARED_TOLERANCE_M:
+    if abs(forward.field_x_m) > FORWARD_X_TOLERANCE_M:
         diag.errors.append(
             f"forward field_x_m must be ≈0 (heading-aligned), got {forward.field_x_m}"
         )
@@ -354,11 +404,11 @@ def validate_field_profile(profile: FieldProfile) -> FieldProfileDiagnostics:
         )
     else:
         # Check forward declared field_y vs GPS-derived baseline.
-        if abs(forward.field_y_m - baseline_m) > GPS_DECLARED_TOLERANCE_M:
+        if abs(forward.field_y_m - baseline_m) > DECLARED_POSITION_TOLERANCE_M:
             diag.errors.append(
                 f"forward field_y_m {forward.field_y_m} differs from GPS baseline "
                 f"{baseline_m:.2f} by {abs(forward.field_y_m - baseline_m):.2f} m "
-                f"(tolerance {GPS_DECLARED_TOLERANCE_M} m)"
+                f"(tolerance {DECLARED_POSITION_TOLERANCE_M} m)"
             )
 
     # -- left_check / right_check (optional) -------------------------------
@@ -493,6 +543,12 @@ def _parse_coordinate_convention(
 ) -> Dict[str, str]:
     raw = data.get("coordinate_convention", None)
     if raw is None or not isinstance(raw, dict):
+        if raw is not None:
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(
+                    errors=[f"coordinate_convention must be a JSON object, got {type(raw).__name__}"]
+                )
+            )
         return {
             "field_x_positive": "right",
             "field_y_positive": "forward",
@@ -514,6 +570,12 @@ def _parse_gps_quality_thresholds(
 ) -> GpsQualityThresholds:
     raw = data.get("gps_quality", None)
     if raw is None or not isinstance(raw, dict):
+        if raw is not None:
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(
+                    errors=[f"gps_quality must be a JSON object, got {type(raw).__name__}"]
+                )
+            )
         return GpsQualityThresholds()
 
     _GQ_KEYS = {"min_fix_type", "min_satellites", "max_eph", "max_epv"}
@@ -643,19 +705,19 @@ def _validate_lr_gps_geometry(
                 f"GPS-derived left_check field_x is {gps_left_x:.3f}, must be negative"
             )
         # Cross-check declared vs GPS-derived.
-        if abs(gps_left_x - left.field_x_m) > GPS_DECLARED_TOLERANCE_M:
+        if abs(gps_left_x - left.field_x_m) > DECLARED_POSITION_TOLERANCE_M:
             diag.errors.append(
                 f"left_check declared field_x_m {left.field_x_m} differs from "
                 f"GPS-derived {gps_left_x:.2f} by "
                 f"{abs(gps_left_x - left.field_x_m):.2f} m "
-                f"(tolerance {GPS_DECLARED_TOLERANCE_M} m)"
+                f"(tolerance {DECLARED_POSITION_TOLERANCE_M} m)"
             )
-        if abs(gps_left_y - left.field_y_m) > GPS_DECLARED_TOLERANCE_M:
+        if abs(gps_left_y - left.field_y_m) > DECLARED_POSITION_TOLERANCE_M:
             diag.errors.append(
                 f"left_check declared field_y_m {left.field_y_m} differs from "
                 f"GPS-derived {gps_left_y:.2f} by "
                 f"{abs(gps_left_y - left.field_y_m):.2f} m "
-                f"(tolerance {GPS_DECLARED_TOLERANCE_M} m)"
+                f"(tolerance {DECLARED_POSITION_TOLERANCE_M} m)"
             )
 
     if right is not None:
@@ -664,19 +726,19 @@ def _validate_lr_gps_geometry(
             diag.errors.append(
                 f"GPS-derived right_check field_x is {gps_right_x:.3f}, must be positive"
             )
-        if abs(gps_right_x - right.field_x_m) > GPS_DECLARED_TOLERANCE_M:
+        if abs(gps_right_x - right.field_x_m) > DECLARED_POSITION_TOLERANCE_M:
             diag.errors.append(
                 f"right_check declared field_x_m {right.field_x_m} differs from "
                 f"GPS-derived {gps_right_x:.2f} by "
                 f"{abs(gps_right_x - right.field_x_m):.2f} m "
-                f"(tolerance {GPS_DECLARED_TOLERANCE_M} m)"
+                f"(tolerance {DECLARED_POSITION_TOLERANCE_M} m)"
             )
-        if abs(gps_right_y - right.field_y_m) > GPS_DECLARED_TOLERANCE_M:
+        if abs(gps_right_y - right.field_y_m) > DECLARED_POSITION_TOLERANCE_M:
             diag.errors.append(
                 f"right_check declared field_y_m {right.field_y_m} differs from "
                 f"GPS-derived {gps_right_y:.2f} by "
                 f"{abs(gps_right_y - right.field_y_m):.2f} m "
-                f"(tolerance {GPS_DECLARED_TOLERANCE_M} m)"
+                f"(tolerance {DECLARED_POSITION_TOLERANCE_M} m)"
             )
 
     # -- GPS-level cross-checks when both exist ----------------------------
@@ -703,7 +765,7 @@ def _validate_lr_gps_geometry(
                 diag.errors.append(
                     f"L/R GPS positions are coincident (distance {lr_dist:.6f} m)"
                 )
-            elif lr_dist < LR_TOO_CLOSE_WARN_M:
-                diag.warnings.append(
-                    f"L/R GPS positions are very close ({lr_dist:.3f} m < {LR_TOO_CLOSE_WARN_M} m)"
+            elif lr_dist < MIN_LR_GPS_BASELINE_M:
+                diag.errors.append(
+                    f"L/R GPS positions are too close ({lr_dist:.3f} m < {MIN_LR_GPS_BASELINE_M} m)"
                 )
