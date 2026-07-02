@@ -1,3 +1,9 @@
+"""Deprecated legacy mission/stage runner.
+
+Not part of the current Action Mission runtime. Kept temporarily for
+historical reference until final legacy removal.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields, is_dataclass

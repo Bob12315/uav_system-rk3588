@@ -77,3 +77,10 @@ Web UI → Action Mission → ActionRuntimeService → ActionRunner
 - 是否只被 `tests/legacy` 或 `docs/archive` 引用：**否**。
 - 当前是否建议删除/移动：**否**；先保持原位并标记 deprecated。
 - 后续方向：以一次可验证的 `SystemRunner` legacy fallback 清理替代零散删文件，且不得改变 Action Mission、发送门控或飞控行为。
+
+## 5. 后续状态
+
+`refactor/remove-system-runner-legacy-fallback` 已清理 `SystemRunner` 中的 legacy
+联合 import、旧 mission/stage/control loop 与配置热更新分支。旧 mission/stage UI
+入口保留为显式 disabled 响应，避免恢复 deprecated 栈。`app/mission_runner.py` 和
+`app/stage_registry.py` 仍原位保留，仅作为最终 legacy removal 前的历史参考。

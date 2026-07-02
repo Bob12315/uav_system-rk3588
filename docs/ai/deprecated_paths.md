@@ -5,8 +5,8 @@
 | 项目 | 状态与原因 | 当前替代 | 现在可删除？/前置迁移 |
 | --- | --- | --- | --- |
 | `uav_ui` terminal/curses UI | deprecated；Web UI 是正式入口 | `web_ui/` | **Not safe to delete yet.** Shared components must be migrated first：先迁出 runtime switches、命令处理和 YOLO client 等 app 共用组件 |
-| `MissionRunner` | 旧 mission 主线，依赖缺失 | `MissionOrchestrator` | 暂不直接删；先清理 app fallback、文档和测试 |
-| `StageRegistry` | 旧 stage 注册表，依赖缺失 | Action registry | 暂不直接删；先清理导入和配置兼容代码 |
+| `MissionRunner` | 旧 mission 主线，依赖缺失；SystemRunner fallback 已清理 | `MissionOrchestrator` | 文件暂留历史参考；最终 legacy removal 时删除 |
+| `StageRegistry` | 旧 stage 注册表，依赖缺失；SystemRunner fallback 已清理 | Action registry | 文件暂留历史参考；最终 legacy removal 时删除 |
 | `CommandShaper` | 旧 stage 命令整形器，不在 Action 主线 | 待裁决的 Action-compatible safety pipeline | 不能用“删除测试”代替安全裁决，也不得恢复旧栈 |
 | `FlightCommandExecutor` | 旧 stage 执行器，不在 Action 主线 | 当前为 `ActionDispatcher → LinkManager` | 待安全架构裁决后清理 |
 | `missions/<mission>/mission.py` | deprecated 旧式任务插件 | `config/action_missions/*.json` | 不新增；旧引用清理后可删残留 |

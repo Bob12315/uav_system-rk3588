@@ -19,11 +19,11 @@
 - `main.py`：入口。
 - `system_runner.py`：主循环。
 - `service_manager.py`：YOLO UDP、telemetry、fusion 服务管理。
-- `mission_runner.py`：调用当前 mission，并分发 `MissionAction`。
+- `mission_runner.py`：deprecated 旧 mission runner；不属于当前 Action Mission runtime，暂留历史参考。
 - `health_monitor.py`：数据健康状态。
 - `app_config.py`：加载 app 和 mission 配置；telemetry 配置复用 `telemetry_link.config`。
 - `debug_runtime.py`：强制模式和通道覆盖。
-- `stage_registry.py`：mission stage controller 注册。
+- `stage_registry.py`：deprecated 旧 stage controller 注册表；SystemRunner 已不再导入。
 
 ## 禁止事项
 

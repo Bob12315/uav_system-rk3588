@@ -185,8 +185,8 @@ Field Reference 等当前主线测试；`test_mission_orchestrator.py` 必须保
 
 | 文件 | 状态 | 依赖的废弃模块 | 当前引用方 |
 | --- | --- | --- | --- |
-| `app/mission_runner.py` | **待 Codex 审查** | `missions.base` (Mission, MissionAction, MissionContext, MissionOutput) | 可能被 `app/system_runner.py` 引用 |
-| `app/stage_registry.py` | **待 Codex 审查** | `missions.base_stage`、`missions.visual_tracking.stages`、`missions.rescue_competition.stages` | 可能被 `app/app_config.py` 引用 |
+| `app/mission_runner.py` | **deprecated，暂留历史参考** | `missions.base` (Mission, MissionAction, MissionContext, MissionOutput) | SystemRunner fallback 已清理；最终 legacy removal 时删除 |
+| `app/stage_registry.py` | **deprecated，暂留历史参考** | `missions.base_stage`、`missions.visual_tracking.stages`、`missions.rescue_competition.stages` | SystemRunner fallback 已清理；最终 legacy removal 时删除 |
 | `app/mission_orchestrator.py` | **待 Codex 审查（当前依赖，不是 legacy 删除候选）** | 自身不含废弃 import；`MissionOrchestrator`、`MissionActionStep` 和 `MissionBlackboard` 被当前 Action Mission、SystemRunner 与 Web UI 使用 | `app/system_runner.py`、`web_ui/server.py` 及当前 Action Mission 测试 |
 
 ### 额外 legacy 说明
@@ -231,7 +231,7 @@ Field Reference 等当前主线测试；`test_mission_orchestrator.py` 必须保
 
 ## 6. 后续行动建议
 
-1. **Codex 审查** `app/mission_runner.py`、`app/stage_registry.py`、`app/mission_orchestrator.py`；前两者评估保留/清理，后者作为当前 Action Mission 依赖仅评估命名或拆分，不得直接删除
+1. `app/mission_runner.py`、`app/stage_registry.py` 已审查并从 SystemRunner 解绑；最终 legacy removal 时删除。`app/mission_orchestrator.py` 作为当前 Action Mission 依赖仅评估命名或拆分，不得直接删除
 2. 评估是否将 `MissionActionStep` 和 `MissionBlackboard` 从 `mission_orchestrator.py` 迁出到独立模块
-3. 确认 `system_runner.py` 中是否仍有对 `mission_runner`/`stage_registry` 的引用路径并评估安全移除
+3. 继续审查 `app/app_config.py`、`app/web_status_service.py` 中剩余的 legacy config/status 兼容表面
 4. 评估是否需要为 `command_dispatcher.py` 设计正式的 Action-compatible 替代方案（当前安全架构缺口）
