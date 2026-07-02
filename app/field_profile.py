@@ -541,6 +541,10 @@ def _require_float_nonneg(val: Any, path: str) -> float:
 def _parse_coordinate_convention(
     data: Dict[str, Any], nested_unknowns: List[str]
 ) -> Dict[str, str]:
+    if "coordinate_convention" in data and data["coordinate_convention"] is None:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(errors=["coordinate_convention is null"])
+        )
     raw = data.get("coordinate_convention", None)
     if raw is None or not isinstance(raw, dict):
         if raw is not None:
@@ -568,6 +572,10 @@ def _parse_coordinate_convention(
 def _parse_gps_quality_thresholds(
     data: Dict[str, Any], nested_unknowns: List[str]
 ) -> GpsQualityThresholds:
+    if "gps_quality" in data and data["gps_quality"] is None:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(errors=["gps_quality is null"])
+        )
     raw = data.get("gps_quality", None)
     if raw is None or not isinstance(raw, dict):
         if raw is not None:

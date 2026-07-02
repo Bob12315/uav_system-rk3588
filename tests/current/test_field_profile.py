@@ -452,6 +452,22 @@ def test_coordinate_convention_not_object_fails() -> None:
     assert any("coordinate_convention" in e.lower() for e in exc.value.diagnostics.errors)
 
 
+def test_gps_quality_null_fails() -> None:
+    data = _make_minimal_data()
+    data["gps_quality"] = None
+    with pytest.raises(FieldProfileValidationError) as exc:
+        parse_field_profile(data)
+    assert any("gps_quality" in e.lower() and "null" in e.lower() for e in exc.value.diagnostics.errors)
+
+
+def test_coordinate_convention_null_fails() -> None:
+    data = _make_minimal_data()
+    data["coordinate_convention"] = None
+    with pytest.raises(FieldProfileValidationError) as exc:
+        parse_field_profile(data)
+    assert any("coordinate_convention" in e.lower() and "null" in e.lower() for e in exc.value.diagnostics.errors)
+
+
 def test_points_not_object_fails() -> None:
     data = _make_minimal_data()
     data["points"] = []
