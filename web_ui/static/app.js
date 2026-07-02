@@ -13,7 +13,7 @@ let currentActionMissionSteps = [];
 let lastActionMissionStatus = null;
 let lastActionMissionResult = null;
 let actionMissionAutoTickTimer = null;
-let latestCameraRecording = {recording: false, path: "", message: "未录制"};
+// latestCameraRecording moved to video_panel.js (WU-6 v2)
 const fallbackStageModes = ["AUTO", "IDLE", "APPROACH_TRACK", "OVERHEAD_HOLD", "CORRIDOR_FOLLOW"];
 const ACTION_SAFETY_HINTS = {
   goto_waypoint: "默认输入 FIELD 坐标（x=右，y=前），转换为 LOCAL_NED 后下发；需要 SEND=ON 才实发。",
@@ -186,32 +186,6 @@ async function execute(command, source = "BUTTON") {
     method: "POST", body: JSON.stringify({command, source})
   });
   $("completionHint").textContent = result.message;
-  await loadAudit();
-  return result;
-}
-function renderCameraRecordingStatus(payload) {
-  if (payload) latestCameraRecording = payload;
-  const status = latestCameraRecording || {};
-  const button = $("cameraRecordToggle");
-  const label = $("cameraRecordStatus");
-  if (button) {
-    button.textContent = status.recording ? "停止录制" : "开始录制";
-    button.classList.toggle("warning", Boolean(status.recording));
-  }
-  if (label) {
-    const path = status.path ? ` · ${status.path}` : "";
-    label.textContent = `${status.message || (status.recording ? "录制中" : "未录制")}${path}`;
-  }
-}
-async function refreshCameraRecordingStatus() {
-  const result = await json("/api/camera-recording/status");
-  if (result.ok) renderCameraRecordingStatus(result.recording || {});
-  return result;
-}
-async function toggleCameraRecording() {
-  const result = await json("/api/camera-recording/toggle", {method: "POST", body: "{}"});
-  renderCameraRecordingStatus(result.recording || {message: result.message || "录制状态未知"});
-  $("completionHint").textContent = result.message || (result.ok ? "camera recording toggled" : "camera recording failed");
   await loadAudit();
   return result;
 }
@@ -699,30 +673,6 @@ function renderDetections(scene, target) {
   $("detections").querySelectorAll("[data-track]").forEach(button => button.onclick = () =>
     execute(`target lock ${button.dataset.track}`, "LIST"));
 }
-function clickVideo(event) {
-  const scene = state.scene || {};
-  const img = $("video");
-  if (!scene.image_width || !scene.image_height) return;
-  const rect = img.getBoundingClientRect();
-  const sourceRatio = scene.image_width / scene.image_height;
-  const boxRatio = rect.width / rect.height;
-  const shownWidth = sourceRatio > boxRatio ? rect.width : rect.height * sourceRatio;
-  const shownHeight = sourceRatio > boxRatio ? rect.width / sourceRatio : rect.height;
-  const offsetX = (rect.width - shownWidth) / 2;
-  const offsetY = (rect.height - shownHeight) / 2;
-  const displayX = event.clientX - rect.left - offsetX;
-  const displayY = event.clientY - rect.top - offsetY;
-  if (displayX < 0 || displayY < 0 || displayX > shownWidth || displayY > shownHeight) return;
-  const x = displayX * scene.image_width / shownWidth;
-  const y = displayY * scene.image_height / shownHeight;
-  const hits = (scene.detections || []).filter(d => x >= d.x1 && x <= d.x2 && y >= d.y1 && y <= d.y2);
-  if (!hits.length) {
-    $("completionHint").textContent = "点击位置没有可锁定目标";
-    return;
-  }
-  hits.sort((a, b) => (a.w * a.h) - (b.w * b.h));
-  execute(`target lock ${hits[0].track_id}`, "VIDEO");
-}
 async function loadAudit() {
   const records = await json("/api/audit?limit=100");
   history = records.filter(r => ["CLI", "BUTTON"].includes(r.source)).map(r => r.action);
@@ -736,6 +686,22 @@ async function loadMissions() {
     `<option value="${item.name}" ${item.active ? "selected" : ""}>${item.name}</option>`).join("");
   renderMissionSteps(state || {});
 }
+// Video panel configure (WU-6 v2)
+if (window.UavVideoPanel && window.UavVideoPanel.configure) {
+  window.UavVideoPanel.configure({
+    api: window.UavApi,
+    dom: window.UavDom,
+    format: window.UavFormat,
+    getState: function () { return state; },
+    execute: execute,
+    loadAudit: loadAudit,
+    setCompletionHint: function (text) { $("completionHint").textContent = text; },
+  });
+}
+var refreshCameraRecordingStatus = function () { return window.UavVideoPanel.refreshCameraRecordingStatus(); };
+var toggleCameraRecording = function () { return window.UavVideoPanel.toggleCameraRecording(); };
+var renderCameraRecordingStatus = function (payload) { window.UavVideoPanel.renderCameraRecordingStatus(payload); };
+
 // Action Lab moved to action_lab.js (WU-4 v4) — sole state owner
 if (window.UavActionLab && window.UavActionLab.configure) {
   window.UavActionLab.configure({
@@ -1048,15 +1014,10 @@ function actionForPath() {
   return "save";
 }
 async function init() {
-  const videoConfig = await json("/api/yolo/stream");
-  const videoUrl = `${location.protocol}//${location.hostname}:${videoConfig.port}${videoConfig.path}`;
-  $("video").src = videoUrl;
-  $("video").onload = () => $("videoOffline").style.display = "none";
-  $("video").onerror = () => {
-    $("videoOffline").style.display = "block";
-    setTimeout(() => { $("video").src = `${videoUrl}?retry=${Date.now()}`; }, 1500);
-  };
-  $("hitCanvas").onclick = clickVideo;
+  // Video panel setup moved to video_panel.js (WU-6 v2)
+  window.UavVideoPanel.setupVideoPanel().catch(function (err) {
+  console.warn("video panel setup failed", err);
+});
   document.querySelectorAll("[data-command]").forEach(button => button.onclick = () => {
     if (button.dataset.confirm && !confirm(button.dataset.confirm)) return;
     execute(button.dataset.command, button.dataset.origin || "BUTTON");
@@ -1123,12 +1084,6 @@ async function init() {
       }
     };
   }
-  if ($("cameraRecordToggle")) {
-    $("cameraRecordToggle").onclick = () => toggleCameraRecording().catch(error => {
-      renderCameraRecordingStatus({recording: false, path: "", message: `录制命令失败: ${error.message}`});
-    });
-    refreshCameraRecordingStatus().catch(() => {});
-  }
   document.querySelectorAll(".tab").forEach(tab => tab.onclick = () => {
     document.querySelectorAll(".tab").forEach(item => item.classList.toggle("active", item === tab));
     document.querySelectorAll(".page").forEach(page => page.classList.toggle("active", page.id === `${tab.dataset.page}Page`));
@@ -1192,7 +1147,6 @@ async function init() {
   };
   completions = (await json("/api/commands/completions")).commands;
   await Promise.all([loadAudit(), loadMissions(), loadConfigFiles(), loadActionLab(), loadActionMissionTemplates()]);
-  refreshCameraRecordingStatus().catch(() => {});
   startStatusUpdates();
 }
 init().catch(error => { $("completionHint").textContent = error.message; });
