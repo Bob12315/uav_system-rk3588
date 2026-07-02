@@ -245,7 +245,7 @@ def test_load_config_file_uses_tracked_real_root_profile() -> None:
 
 
 def test_load_config_file_uses_explicit_sitl_profile() -> None:
-    profile = Path(__file__).resolve().parents[1] / "config" / "profiles" / "rk3588-sitl" / "telemetry.yaml"
+    profile = Path(__file__).resolve().parents[2] / "config" / "profiles" / "rk3588-sitl" / "telemetry.yaml"
 
     cfg = load_config_file(profile)
 

@@ -9,6 +9,7 @@
 5. [../reference/field_origin_heading.md](../reference/field_origin_heading.md)
 6. [../reference/safety.md](../reference/safety.md)
 7. [task_checklist.md](task_checklist.md)
+8. [repo_trim_plan.md](repo_trim_plan.md)
 
 当前主线：
 
@@ -28,12 +29,16 @@ Web UI → Action Lab / Action Mission → ActionRuntimeService → ActionRunner
 - `executor.send_commands` 默认 false。
 - 运行产物只进入 `runtime/`。
 
+文件分类参考：[repo_trim_plan.md](repo_trim_plan.md)（current/debug-only/legacy/archive）
+仓库盘点：[repo_file_inventory.txt](repo_file_inventory.txt)、[repo_loc_inventory.txt](repo_loc_inventory.txt)
+
 验证：
 
 ```bash
 python -m compileall app missions telemetry_link fusion yolo_app web_ui scripts
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q tests/current tests/integration
 python scripts/validate_action_missions.py
 ```
 
+legacy 测试在 `tests/legacy/` 下，不作为主线 pytest 默认目标。
 已知测试基线见 [../refactor/phase0_baseline.md](../refactor/phase0_baseline.md)。

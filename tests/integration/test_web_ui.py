@@ -208,7 +208,7 @@ def test_web_status_api_includes_field_heading(tmp_path: Path) -> None:
 
 
 def test_web_ui_exposes_manual_step_movement_controls() -> None:
-    static_dir = Path(__file__).parents[1] / "web_ui" / "static"
+    static_dir = Path(__file__).parents[2] / "web_ui" / "static"
     index = (static_dir / "index.html").read_text(encoding="utf-8")
     script = (static_dir / "app.js").read_text(encoding="utf-8")
 
@@ -226,7 +226,7 @@ def test_web_ui_exposes_manual_step_movement_controls() -> None:
 
 
 def test_web_ui_exposes_raw_camera_recording_controls() -> None:
-    static_dir = Path(__file__).parents[1] / "web_ui" / "static"
+    static_dir = Path(__file__).parents[2] / "web_ui" / "static"
     index = (static_dir / "index.html").read_text(encoding="utf-8")
     vp_script = (static_dir / "js" / "video_panel.js").read_text(encoding="utf-8")
     styles = (static_dir / "style.css").read_text(encoding="utf-8")
@@ -240,7 +240,7 @@ def test_web_ui_exposes_raw_camera_recording_controls() -> None:
 
 
 def test_web_ui_exposes_field_heading_controls() -> None:
-    static_dir = Path(__file__).parents[1] / "web_ui" / "static"
+    static_dir = Path(__file__).parents[2] / "web_ui" / "static"
     index = (static_dir / "index.html").read_text(encoding="utf-8")
     script = (static_dir / "app.js").read_text(encoding="utf-8")
     fm_script = (static_dir / "js" / "field_map.js").read_text(encoding="utf-8")
@@ -262,7 +262,7 @@ def test_web_ui_exposes_field_heading_controls() -> None:
 
 
 def test_web_ui_exposes_clear_localization_control() -> None:
-    static_dir = Path(__file__).parents[1] / "web_ui" / "static"
+    static_dir = Path(__file__).parents[2] / "web_ui" / "static"
     index = (static_dir / "index.html").read_text(encoding="utf-8")
     script = (static_dir / "app.js").read_text(encoding="utf-8")
 
@@ -274,7 +274,7 @@ def test_web_ui_exposes_clear_localization_control() -> None:
 
 
 def test_web_ui_distinguishes_selected_and_current_mission_steps() -> None:
-    static_dir = Path(__file__).parents[1] / "web_ui" / "static"
+    static_dir = Path(__file__).parents[2] / "web_ui" / "static"
     script = (static_dir / "app.js").read_text(encoding="utf-8")
     styles = (static_dir / "style.css").read_text(encoding="utf-8")
 
@@ -290,7 +290,7 @@ def test_web_ui_distinguishes_selected_and_current_mission_steps() -> None:
 
 
 def test_web_ui_exposes_read_only_field_map() -> None:
-    static_dir = Path(__file__).parents[1] / "web_ui" / "static"
+    static_dir = Path(__file__).parents[2] / "web_ui" / "static"
     index = (static_dir / "index.html").read_text(encoding="utf-8")
     fm_script = (static_dir / "js" / "field_map.js").read_text(encoding="utf-8")
     styles = (static_dir / "style.css").read_text(encoding="utf-8")
@@ -309,7 +309,7 @@ def test_web_ui_exposes_read_only_field_map() -> None:
 
 
 def test_action_lab_start_uses_confirmation_instead_of_send_checkbox() -> None:
-    static_dir = Path(__file__).parents[1] / "web_ui" / "static"
+    static_dir = Path(__file__).parents[2] / "web_ui" / "static"
     index = (static_dir / "index.html").read_text(encoding="utf-8")
     script = (static_dir / "app.js").read_text(encoding="utf-8")
 
@@ -341,7 +341,7 @@ def test_action_lab_start_uses_confirmation_instead_of_send_checkbox() -> None:
 
 
 def test_action_names_render_with_chinese_suffixes() -> None:
-    static_dir = Path(__file__).parents[1] / "web_ui" / "static"
+    static_dir = Path(__file__).parents[2] / "web_ui" / "static"
     index = (static_dir / "index.html").read_text(encoding="utf-8")
     script = (static_dir / "app.js").read_text(encoding="utf-8")
 
@@ -374,7 +374,7 @@ def test_action_lab_start_confirm_controls_api_request() -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("node is not installed")
-    root = Path(__file__).parents[1]
+    root = Path(__file__).parents[2]
     code = r"""
 const fs = require("fs");
 const source = fs.readFileSync("web_ui/static/js/action_lab.js", "utf8");
@@ -449,7 +449,7 @@ def test_action_mission_frontend_preserves_save_as_in_configure_request() -> Non
     node = shutil.which("node")
     if node is None:
         pytest.skip("node is not installed")
-    root = Path(__file__).parents[1]
+    root = Path(__file__).parents[2]
     code = r"""
 const fs = require("fs");
 const source = fs.readFileSync("web_ui/static/app.js", "utf8");
@@ -574,13 +574,13 @@ def test_action_mission_api_returns_recon_inspection_template() -> None:
 
 
 def test_action_mission_frontend_has_recon_template_button() -> None:
-    index = (Path(__file__).parents[1] / "web_ui" / "static" / "index.html").read_text(encoding="utf-8")
+    index = (Path(__file__).parents[2] / "web_ui" / "static" / "index.html").read_text(encoding="utf-8")
 
     assert 'data-action-mission-template="recon_inspect_5_targets_stepwise_v1"' in index
 
 
 def test_action_mission_auto_tick_can_wait_before_start() -> None:
-    script = (Path(__file__).parents[1] / "web_ui" / "static" / "app.js").read_text(encoding="utf-8")
+    script = (Path(__file__).parents[2] / "web_ui" / "static" / "app.js").read_text(encoding="utf-8")
 
     assert '"自动推进 待命"' in script
     assert "if (!lastActionMissionStatus?.running)" in script
@@ -592,7 +592,7 @@ def test_action_mission_frontend_parses_array_and_object_inputs() -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("node is not installed")
-    root = Path(__file__).parents[1]
+    root = Path(__file__).parents[2]
     code = r"""
 const fs = require("fs");
 const source = fs.readFileSync("web_ui/static/app.js", "utf8");
@@ -629,7 +629,7 @@ def test_action_mission_frontend_timeline_statuses() -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("node is not installed")
-    root = Path(__file__).parents[1]
+    root = Path(__file__).parents[2]
     code = r"""
 const fs = require("fs");
 const source = fs.readFileSync("web_ui/static/app.js", "utf8");
@@ -687,7 +687,7 @@ def test_action_lab_frontend_caches_params_and_uses_run_toggle() -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("node is not installed")
-    root = Path(__file__).parents[1]
+    root = Path(__file__).parents[2]
     code = r"""
 const fs = require("fs");
 const source = fs.readFileSync("web_ui/static/js/action_lab.js", "utf8");
@@ -873,7 +873,7 @@ def test_drop_targets_result_is_persisted_and_exposed() -> None:
 
 def test_web_ui_drop_targets_source_contains_red_rendering() -> None:
     """Localization markers recolor red for selected drop targets — no overlay pass."""
-    static_dir = Path(__file__).parents[1] / "web_ui" / "static"
+    static_dir = Path(__file__).parents[2] / "web_ui" / "static"
     fm_script = (static_dir / "js" / "field_map.js").read_text(encoding="utf-8")
 
     assert "function pointX(obj)" in fm_script

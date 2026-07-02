@@ -12,6 +12,7 @@
 | [reference/field_origin_heading.md](reference/field_origin_heading.md) | Field Reference 与 GPS A/B 设计 |
 | [reference/safety.md](reference/safety.md) | 当前发送链路与安全边界 |
 | [refactor/phase0_baseline.md](refactor/phase0_baseline.md) | 重构分支基线快照 |
+| [ai/repo_trim_plan.md](ai/repo_trim_plan.md) | 仓库文件裁剪分类（current/debug-only/legacy/archive） |
 
 ## 用户文档
 
@@ -34,5 +35,7 @@
 | [ai/task_checklist.md](ai/task_checklist.md) | 按任务追加阅读 |
 | [reference/configuration.md](reference/configuration.md) | 当前配置说明 |
 
-`archive/` 保存历史材料，不是当前实现依据。旧 mission/stage 文档若未标注更新，均按
-[deprecated_paths.md](ai/deprecated_paths.md) 处理。
+**当前实现以根目录 `README.md`、`AGENTS.md` 和 `docs/ai/current_architecture.md` 为准。**
+
+`archive/` 和 `docs/refactor/` 保存历史材料，不是当前实现依据。旧 mission/stage 文档若未标注更新，均按
+[deprecated_paths.md](ai/deprecated_paths.md) 处理。`docs/ai/repo_trim_plan.md` 提供了全仓库文件的 current/debug-only/legacy/archive 分类。

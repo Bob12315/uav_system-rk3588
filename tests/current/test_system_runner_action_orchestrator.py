@@ -12,7 +12,7 @@ from app.app_config import build_arg_parser, load_app_config
 from app.mission_orchestrator import MissionActionStep
 from app.system_runner import SystemRunner
 
-from tests.test_action_lab_dispatch import FakeLink
+from tests.integration.test_action_lab_dispatch import FakeLink
 
 
 # ── helpers ──────────────────────────────────────────────────────────
