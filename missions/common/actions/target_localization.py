@@ -37,6 +37,7 @@ class TargetLocalization:
         self.camera = camera or CameraProjectionConfig()
         self.min_confidence = float(min_confidence)
         self.class_names = set(class_names) if class_names is not None else None
+        self.last_debug: dict[str, Any] = {}
 
     def localize_detection(
         self,
@@ -113,8 +114,14 @@ class TargetLocalization:
         image_height: int | float | None = None,
     ) -> list[dict[str, Any]]:
         estimates: list[dict[str, Any]] = []
+        rejected: dict[str, int] = {}
+        observed_classes: dict[str, int] = {}
         for detection in detections:
-            if not self._passes_filters(detection):
+            class_name = str(detection.get("class_name") or "")
+            observed_classes[class_name] = observed_classes.get(class_name, 0) + 1
+            rejection = self._filter_rejection(detection)
+            if rejection is not None:
+                rejected[rejection] = rejected.get(rejection, 0) + 1
                 continue
             try:
                 estimates.append(
@@ -125,19 +132,32 @@ class TargetLocalization:
                         image_height=image_height,
                     )
                 )
-            except ValueError:
+            except ValueError as exc:
+                key = f"invalid_projection:{exc}"
+                rejected[key] = rejected.get(key, 0) + 1
                 continue
+        self.last_debug = {
+            "input_count": len(detections),
+            "localized_count": len(estimates),
+            "observed_classes": observed_classes,
+            "rejected_by_reason": rejected,
+            "allowed_classes": sorted(self.class_names) if self.class_names is not None else None,
+            "min_confidence": self.min_confidence,
+        }
         return estimates
 
     def _passes_filters(self, detection: dict[str, Any]) -> bool:
+        return self._filter_rejection(detection) is None
+
+    def _filter_rejection(self, detection: dict[str, Any]) -> str | None:
         confidence = self._optional_float(detection.get("confidence"), "confidence")
         if confidence is not None and confidence < self.min_confidence:
-            return False
+            return "low_confidence"
         if confidence is None and self.min_confidence > 0.0:
-            return False
+            return "missing_confidence"
         if self.class_names is not None and detection.get("class_name") not in self.class_names:
-            return False
-        return True
+            return "class_not_allowed"
+        return None
 
     def _detection_error(
         self,

@@ -8,7 +8,7 @@
 # RKNN 模型
 # -----------------------------------------------------------------------------
 # 仓库内随代码管理的 RKNN FP16 部署模型。
-model_path: "../data/models/cuadc-fp16.rknn"
+model_path: "../data/models/cuadc2026-fp16.rknn"
 
 # 模型类别名称，顺序必须与 RKNN 模型输出一致。
 class_names: ["baozha", "shenghua", "yiran", "fangshe", "buran", "fushi", "youdu", "yushi", "ziran", "ciji", "bucket"]

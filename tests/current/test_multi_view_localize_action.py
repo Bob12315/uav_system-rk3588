@@ -418,6 +418,32 @@ def test_output_is_json_serializable() -> None:
     json.dumps(result.detail)  # must not raise
 
 
+def test_failure_reports_filtered_detection_classes() -> None:
+    action = MultiViewLocalizeAction()
+    action.start(_params(
+        waypoints=[{"x": 1.0, "y": 2.0, "altitude_m": 3.0}],
+        capture_updates_per_waypoint=1,
+        settle_updates_per_waypoint=1,
+        class_names={"bucket"},
+    ))
+
+    ctx = _at_waypoint(1.0, 2.0, 3.0)
+    action.update(ctx)
+    action.update(ctx)
+    ctx["scene"] = _scene_with_detection(
+        track_id=1, ex=0.0, ey=0.0, class_name="baozha",
+    )
+    result = action.update(ctx)
+
+    assert result.failed is True
+    assert result.reason == "no_target_fused"
+    assert result.detail["observed_classes"] == {"baozha": 1}
+    assert result.detail["rejected_by_reason"] == {"class_not_allowed": 1}
+    assert result.detail["allowed_classes"] == ["bucket"]
+    assert result.detail["diagnostic"] == "all detections were rejected before fusion"
+    assert len(result.detail["captures"]) == 1
+
+
 # ── stop / reset ────────────────────────────────────────────────────
 
 

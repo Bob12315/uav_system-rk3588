@@ -308,6 +308,30 @@ def test_missing_blackboard_reference_fails_mission_without_starting_action() ->
     assert runtime.runner.sent_actions == []
 
 
+def test_missing_blackboard_reference_can_jump_to_recovery() -> None:
+    runtime = FakeRuntime([])
+    orch = MissionOrchestrator(
+        runtime,
+        [
+            MissionActionStep(
+                "fake2",
+                {"x": "$missing.value"},
+                on_failed={"action": "jump_to", "target": "recovery", "max_attempts": 1},
+            ),
+            MissionActionStep("recovery", label="recovery"),
+        ],
+    )
+
+    orch.start()
+
+    status = orch.status()
+    assert status.running is True
+    assert status.failed is False
+    assert status.reason == "jump_to"
+    assert status.current_action == "recovery"
+    assert runtime.runner.sent_actions == [("recovery", {})]
+
+
 def test_start_clears_existing_blackboard_data() -> None:
     runtime = FakeRuntime([])
     orch = MissionOrchestrator(runtime, _single_step())

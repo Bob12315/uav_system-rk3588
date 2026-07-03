@@ -128,6 +128,7 @@ class BlackboxRecorder:
         shaped_command: FlightCommand,
         send_commands: bool,
         debug: dict[str, Any] | None = None,
+        scene: Any = None,
     ) -> None:
         if not self.enabled:
             return
@@ -158,6 +159,8 @@ class BlackboxRecorder:
         }
         if self.config.include_perception:
             payload["perception"] = self._dataclass_dict(perception)
+            if scene is not None:
+                payload["scene"] = self._dataclass_dict(scene)
         if self.config.include_drone:
             payload["drone"] = self._dataclass_dict(drone)
             if link is not None:

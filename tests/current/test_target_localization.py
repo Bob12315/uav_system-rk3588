@@ -214,6 +214,12 @@ def test_localize_detections_filters_and_skips_bad_detections() -> None:
     assert estimates[0]["track_id"] == 1
     assert estimates[0]["x"] == pytest.approx(1.0)
     assert estimates[0]["y"] == pytest.approx(2.0)
+    assert localizer.last_debug["observed_classes"] == {"cylinder": 3, "hazard": 1}
+    assert localizer.last_debug["rejected_by_reason"] == {
+        "low_confidence": 1,
+        "class_not_allowed": 1,
+        "invalid_projection:ex/ey or cx/cy with image size are required": 1,
+    }
 
 
 def test_localize_detections_returns_multiple_estimates() -> None:

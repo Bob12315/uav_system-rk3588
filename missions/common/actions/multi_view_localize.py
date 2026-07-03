@@ -92,6 +92,8 @@ class MultiViewLocalizeAction(ActionModule):
         self.capture_count = 0
         self.update_count_at_waypoint = 0
         self.fused_objects: list[dict[str, Any]] = []
+        self.observed_classes: dict[str, int] = {}
+        self.rejected_by_reason: dict[str, int] = {}
         self.failure_reason = ""
         self.yaw_defaulted = False
         self.start_yaw_rad: float | None = None
@@ -151,6 +153,8 @@ class MultiViewLocalizeAction(ActionModule):
         self.raw_estimates = []
         self.captures = []
         self.fused_objects = []
+        self.observed_classes = {}
+        self.rejected_by_reason = {}
         self.settle_count = 0
         self.capture_count = 0
         self.update_count_at_waypoint = 0
@@ -265,6 +269,9 @@ class MultiViewLocalizeAction(ActionModule):
                     detail=self._detail(extra={"error": str(exc)}),
                 )
             self.raw_estimates.extend(estimates)
+            debug = self.localizer.last_debug
+            self._merge_counts(self.observed_classes, debug.get("observed_classes"))
+            self._merge_counts(self.rejected_by_reason, debug.get("rejected_by_reason"))
 
         self.capture_count += 1
         self.captures.append({
@@ -297,7 +304,15 @@ class MultiViewLocalizeAction(ActionModule):
         if not self.fused_objects:
             self.phase = "failed"
             self.failure_reason = "no_target_fused"
-            return ActionResult(failed=True, reason="no_target_fused", detail=self._detail())
+            return ActionResult(
+                failed=True,
+                reason="no_target_fused",
+                detail=self._detail(extra={
+                    "captures": self.captures,
+                    "diagnostic": "all detections were rejected before fusion"
+                    if not self.raw_estimates and self.observed_classes else "fusion produced no clusters",
+                }),
+            )
         self.phase = "done"
         return ActionResult(done=True, reason="multi_view_localized", detail=self._detail(done=True))
 
@@ -453,6 +468,10 @@ class MultiViewLocalizeAction(ActionModule):
             "update_count_at_waypoint": self.update_count_at_waypoint,
             "coordinate_frame": "LOCAL_NED",
             "yaw_mode": self.yaw_mode,
+            "observed_classes": dict(self.observed_classes),
+            "rejected_by_reason": dict(self.rejected_by_reason),
+            "allowed_classes": sorted(self.class_names) if self.class_names is not None else None,
+            "min_confidence": self.localizer.min_confidence if self.localizer is not None else None,
         }
         if self.start_yaw_rad is not None:
             detail["start_yaw_rad"] = self.start_yaw_rad
@@ -488,6 +507,17 @@ class MultiViewLocalizeAction(ActionModule):
         if extra:
             detail.update(extra)
         return detail
+
+    @staticmethod
+    def _merge_counts(target: dict[str, int], values: Any) -> None:
+        if not isinstance(values, dict):
+            return
+        for key, value in values.items():
+            try:
+                count = int(value)
+            except (TypeError, ValueError):
+                continue
+            target[str(key)] = target.get(str(key), 0) + count
 
     # ── validation ──────────────────────────────────────────────────
 

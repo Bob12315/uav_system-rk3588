@@ -68,6 +68,7 @@ class SelectDropTargetsAction(ActionModule):
 
         self.objects = list(objects)
         self.target_count = target_count
+        self.allow_fewer = self._bool_param(data.get("allow_fewer", False), "allow_fewer")
         self.score_table = {str(key): float(value) for key, value in score_table.items()}
         self.min_seen_count = min_seen_count
         self.min_raw_count = min_raw_count
@@ -75,6 +76,12 @@ class SelectDropTargetsAction(ActionModule):
         self.require_local_xy = self._bool_param(data.get("require_local_xy", True), "require_local_xy")
         self.deduplicate_radius_m = deduplicate_radius_m
         self.prefer_class_order = [str(value) for value in prefer_class_order]
+        self.single_target_servo_outputs = self._servo_outputs(
+            data.get("single_target_servo_outputs"), "single_target_servo_outputs"
+        )
+        self.multi_target_first_servo_outputs = self._servo_outputs(
+            data.get("multi_target_first_servo_outputs"), "multi_target_first_servo_outputs"
+        )
         self.key = str(data.get("key") or "").strip() or "select_drop_targets"
         self.zone_center = self._zone_center(data.get("zone_center"))
         self.started = True
@@ -103,6 +110,7 @@ class SelectDropTargetsAction(ActionModule):
     def reset(self) -> None:
         self.objects: list[Any] = []
         self.target_count = 2
+        self.allow_fewer = False
         self.score_table = dict(DEFAULT_SCORE_TABLE)
         self.min_seen_count = 2
         self.min_raw_count = 0
@@ -110,6 +118,8 @@ class SelectDropTargetsAction(ActionModule):
         self.require_local_xy = True
         self.deduplicate_radius_m = 0.35
         self.prefer_class_order = list(DEFAULT_CLASS_ORDER)
+        self.single_target_servo_outputs: list[dict[str, Any]] | None = None
+        self.multi_target_first_servo_outputs: list[dict[str, Any]] | None = None
         self.zone_center: tuple[float, float] | None = None
         self.key = "select_drop_targets"
         self.started = False
@@ -157,7 +167,7 @@ class SelectDropTargetsAction(ActionModule):
             if len(selected) >= self.target_count:
                 break
 
-        if len(selected) < self.target_count:
+        if len(selected) < self.target_count and not self.allow_fewer:
             detail = self._base_detail(selected, rejected, candidate_count=len(candidates))
             return ActionResult(failed=True, reason="not_enough_drop_targets", detail=detail)
 
@@ -225,7 +235,7 @@ class SelectDropTargetsAction(ActionModule):
         candidate_count: int | None = None,
     ) -> dict[str, Any]:
         selected_targets = [self._selected_dict(candidate, rank) for rank, candidate in enumerate(selected, start=1)]
-        return {
+        detail = {
             "selected_targets": selected_targets,
             "candidate_count": len(selected) if candidate_count is None else candidate_count,
             "selected_count": len(selected_targets),
@@ -233,8 +243,34 @@ class SelectDropTargetsAction(ActionModule):
             "rejected_objects": rejected,
             "score_table": dict(self.score_table),
             "target_count": self.target_count,
+            "allow_fewer": self.allow_fewer,
             "key": self.key,
         }
+        if selected_targets:
+            outputs = (
+                self.single_target_servo_outputs
+                if len(selected_targets) == 1
+                else self.multi_target_first_servo_outputs
+            )
+            if outputs is not None:
+                detail["first_release_servo_outputs"] = [dict(item) for item in outputs]
+        return detail
+
+    @staticmethod
+    def _bool_param(value: Any, name: str) -> bool:
+        if isinstance(value, bool):
+            return value
+        raise ValueError(f"{name} must be a bool")
+
+    @staticmethod
+    def _servo_outputs(value: Any, name: str) -> list[dict[str, Any]] | None:
+        if value is None:
+            return None
+        if not isinstance(value, list) or not value:
+            raise ValueError(f"{name} must be a non-empty list")
+        if not all(isinstance(item, dict) for item in value):
+            raise ValueError(f"{name} entries must be dicts")
+        return [dict(item) for item in value]
 
     def _selected_dict(self, candidate: _Candidate, rank: int) -> dict[str, Any]:
         data = {

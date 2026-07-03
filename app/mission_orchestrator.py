@@ -355,15 +355,18 @@ class MissionOrchestrator:
             try:
                 resolved_params = self.blackboard.resolve(dict(step.params))
             except Exception as exc:
-                self.failed = True
-                self.running = False
-                self.reason = "param_resolution_failed"
-                self.detail = {
-                    "step_index": self.current_index,
-                    "step_name": step.name,
-                    "error": str(exc),
-                    "blackboard_keys": sorted(self.blackboard.data.keys()),
+                result = {
+                    "failed": True,
+                    "done": False,
+                    "reason": "param_resolution_failed",
+                    "detail": {
+                        "step_index": self.current_index,
+                        "step_name": step.name,
+                        "error": str(exc),
+                        "blackboard_keys": sorted(self.blackboard.data.keys()),
+                    },
                 }
+                self._handle_step_failed(result, link_manager=link_manager)
                 return
             self.step_attempts[self.current_index] = self.step_attempts.get(self.current_index, 0) + 1
             start(

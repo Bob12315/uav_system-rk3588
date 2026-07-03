@@ -26,22 +26,22 @@
         "waypoints": [
           {
             "x": -1.5,
-            "y": 31,
+            "y": 31.5,
             "altitude_m": 4.5
           },
           {
             "x": 1.5,
-            "y": 31,
+            "y": 31.5,
             "altitude_m": 4.5
           },
           {
             "x": 1.5,
-            "y": 34,
+            "y": 33.5,
             "altitude_m": 4.5
           },
           {
             "x": -1.5,
-            "y": 34,
+            "y": 33.5,
             "altitude_m": 4.5
           }
         ],
@@ -81,6 +81,14 @@
       "params": {
         "objects": "$drop_scan.localized_objects",
         "target_count": 2,
+        "allow_fewer": true,
+        "single_target_servo_outputs": [
+          {"channel": 8, "release_pwm": 1750, "hold_pwm": 1250},
+          {"channel": 9, "release_pwm": 1815, "hold_pwm": 1185}
+        ],
+        "multi_target_first_servo_outputs": [
+          {"channel": 8, "release_pwm": 1750, "hold_pwm": 1250}
+        ],
         "score_table": {
           "bucket_1": 500,
           "bucket_2": 300,
@@ -208,13 +216,7 @@
     {
       "name": "payload_release",
       "params": {
-        "servo_outputs": [
-          {
-            "channel": 8,
-            "release_pwm": 1750,
-            "hold_pwm": 1250
-          }
-        ],
+        "servo_outputs": "$drop_targets.first_release_servo_outputs",
         "payload_id": "payload_1",
         "target_id": "$drop_targets.selected_targets.0.id",
         "release_wait_updates": 5,
@@ -239,6 +241,11 @@
     },
     {
       "name": "goto_waypoint",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "return_home",
+        "max_attempts": 1
+      },
       "params": {
         "x": "$drop_targets.selected_targets.1.local_x",
         "y": "$drop_targets.selected_targets.1.local_y",
@@ -373,6 +380,7 @@
     },
     {
       "name": "goto_waypoint",
+      "label": "return_home",
       "params": {
         "x": 0.0,
         "y": 0.0,

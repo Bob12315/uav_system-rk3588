@@ -186,7 +186,10 @@ def _smoke_blackboard() -> MissionBlackboard:
             "selected_targets": [
                 {"id": "b1", "local_x": 1.0, "local_y": 30.0},
                 {"id": "b2", "local_x": -1.0, "local_y": 31.0},
-            ]
+            ],
+            "first_release_servo_outputs": [
+                {"channel": 8, "release_pwm": 1750, "hold_pwm": 1250},
+            ],
         },
     )
     blackboard.set(

@@ -96,6 +96,13 @@ def test_drop_two_targets_template_save_as_names() -> None:
 
     assert by_name["multi_view_localize"]["save_as"] == "drop_scan"
     assert by_name["select_drop_targets"]["save_as"] == "drop_targets"
+    assert by_name["select_drop_targets"]["params"]["allow_fewer"] is True
+    assert [
+        item["channel"]
+        for item in by_name["select_drop_targets"]["params"]["single_target_servo_outputs"]
+    ] == [8, 9]
+    return_home = next(step for step in data["steps"] if step.get("label") == "return_home")
+    assert return_home["params"]["key"] == "return_home"
 
 
 def test_action_mission_templates_contain_required_blackboard_refs() -> None:
@@ -141,7 +148,10 @@ def test_action_mission_templates_blackboard_references_resolve() -> None:
             "selected_targets": [
                 {"id": "b1", "local_x": 1.0, "local_y": 30.0},
                 {"id": "b2", "local_x": -1.0, "local_y": 31.0},
-            ]
+            ],
+            "first_release_servo_outputs": [
+                {"channel": 8, "release_pwm": 1750, "hold_pwm": 1250},
+            ],
         },
     )
     blackboard.set(

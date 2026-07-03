@@ -38,6 +38,41 @@ def test_select_drop_targets_selects_bucket_1_and_bucket_2() -> None:
     assert result.actions == []
 
 
+def test_select_drop_targets_allow_fewer_accepts_one_target() -> None:
+    result = _select(
+        [{"id": "b1", "class_name": "bucket", "local_x": 1, "local_y": 2, "seen_count": 2}],
+        target_count=2,
+        allow_fewer=True,
+        single_target_servo_outputs=[
+            {"channel": 8, "release_pwm": 1750},
+            {"channel": 9, "release_pwm": 1815},
+        ],
+        multi_target_first_servo_outputs=[{"channel": 8, "release_pwm": 1750}],
+    )
+
+    assert result.done is True
+    assert result.failed is False
+    assert result.detail["selected_count"] == 1
+    assert result.detail["allow_fewer"] is True
+    assert [item["channel"] for item in result.detail["first_release_servo_outputs"]] == [8, 9]
+
+
+def test_select_drop_targets_two_targets_uses_first_payload_only() -> None:
+    result = _select(
+        [
+            {"id": "b1", "class_name": "bucket", "local_x": 1, "local_y": 2, "seen_count": 2},
+            {"id": "b2", "class_name": "bucket", "local_x": 3, "local_y": 4, "seen_count": 2},
+        ],
+        target_count=2,
+        allow_fewer=True,
+        single_target_servo_outputs=[{"channel": 8}, {"channel": 9}],
+        multi_target_first_servo_outputs=[{"channel": 8}],
+    )
+
+    assert result.done is True
+    assert [item["channel"] for item in result.detail["first_release_servo_outputs"]] == [8]
+
+
 def test_select_drop_targets_uses_xy_as_local_xy_fallback() -> None:
     result = _select(
         [
