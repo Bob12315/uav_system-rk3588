@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time as _time
+from dataclasses import dataclass, fields
 from typing import Any, Optional
 
 from .field_profile_service import BindResult
@@ -10,6 +11,15 @@ from .field_reference import (
     HeadingSource,
     OriginSource,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class FieldReferenceServiceSnapshot:
+    """Complete rollback snapshot for a FieldReferenceService transaction."""
+
+    reference_values: dict[str, Any]
+    profile_id: Optional[str]
+    profile_name: Optional[str]
 
 
 class FieldReferenceService:
@@ -29,6 +39,26 @@ class FieldReferenceService:
     @property
     def reference(self) -> FieldReference:
         return self._ref
+
+    def snapshot(self) -> FieldReferenceServiceSnapshot:
+        """Capture reference fields and service-owned profile metadata."""
+        return FieldReferenceServiceSnapshot(
+            reference_values={
+                item.name: getattr(self._ref, item.name)
+                for item in fields(FieldReference)
+            },
+            profile_id=self._profile_id,
+            profile_name=self._profile_name,
+        )
+
+    def restore(self, snapshot: FieldReferenceServiceSnapshot) -> None:
+        """Restore a snapshot after a failed apply/sync transaction."""
+        if not isinstance(snapshot, FieldReferenceServiceSnapshot):
+            raise TypeError("snapshot must be FieldReferenceServiceSnapshot")
+        for name, value in snapshot.reference_values.items():
+            setattr(self._ref, name, value)
+        self._profile_id = snapshot.profile_id
+        self._profile_name = snapshot.profile_name
 
     # ------------------------------------------------------------------
     # marker / setter wrappers

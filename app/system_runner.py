@@ -455,8 +455,10 @@ class SystemRunner:
             except FileNotFoundError:
                 continue
             except Exception as exc:
-                return {"ok": False, "error": str(exc)}
-        return {"ok": False, "error": f"profile not found: {profile_id}"}
+                return self._field_profile_error(profile_id, str(exc))
+        return self._field_profile_error(
+            profile_id, f"profile not found: {profile_id}"
+        )
 
     def field_profile_validate(self, profile_id: str) -> dict[str, object]:
         for d in self._PROFILE_DIRS:
@@ -472,12 +474,25 @@ class SystemRunner:
             except FileNotFoundError:
                 continue
             except Exception as exc:
-                return {"ok": False, "error": str(exc)}
-        return {"ok": False, "error": f"profile not found: {profile_id}"}
+                return self._field_profile_error(profile_id, str(exc))
+        return self._field_profile_error(
+            profile_id, f"profile not found: {profile_id}"
+        )
 
     def field_profile_bind_current(self, profile_id: str) -> dict[str, object]:
         with self.action_runtime_lock:
             return self.field_reference_controller.bind_profile_current(profile_id)
+
+    @staticmethod
+    def _field_profile_error(profile_id: str, error: str) -> dict[str, object]:
+        return {
+            "ok": False,
+            "error": error,
+            "profile_id": profile_id,
+            "errors": [error],
+            "warnings": [],
+            "diagnostics": {"errors": [error], "warnings": []},
+        }
 
     def _with_field_coordinates(self, items: list[object]) -> list[object]:
         enriched: list[object] = []

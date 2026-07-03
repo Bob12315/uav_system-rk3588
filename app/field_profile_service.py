@@ -176,6 +176,11 @@ class FieldProfileService:
                 f"Field profile not found: {name_or_path} (no profile_dir supplied)"
             )
 
+        if not isinstance(name_or_path, str) or not name_or_path.strip():
+            raise ValueError("Field profile id must be a non-empty string")
+        if name_or_path != name_or_path.strip() or name_or_path in {".", ".."}:
+            raise ValueError(f"Invalid field profile id: {name_or_path!r}")
+
         # Reject absolute paths and traversal characters.
         if os.path.isabs(name_or_path):
             raise ValueError(f"Field profile path must be relative: {name_or_path}")
@@ -185,7 +190,12 @@ class FieldProfileService:
             raise ValueError(
                 f"Field profile path must not contain directory separators: {name_or_path}"
             )
-        if not name_or_path.endswith(".json"):
+        explicit_ext = os.path.splitext(name_or_path)[1]
+        if explicit_ext and explicit_ext != ".json":
+            raise ValueError(
+                f"Field profile explicit extension must be .json: {name_or_path}"
+            )
+        if not explicit_ext:
             name_or_path = name_or_path + ".json"
 
         profile_dir_real = os.path.realpath(profile_dir)

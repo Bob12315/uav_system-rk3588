@@ -371,9 +371,32 @@ def test_api_subdir_rejected(client):
     assert resp.status_code == 404  # FastAPI rejects paths with / in param
 
 
-def test_api_non_json_rejected():
-    """Non-.json suffix is appended by load_profile, not rejected at API level."""
-    pass  # load_profile appends .json, so this is handled internally
+def test_api_non_json_rejected_by_real_runner(tmp_path):
+    """A dotted non-json ID is rejected through the real FastAPI wrapper."""
+    from app.app_config import UiConfig, build_arg_parser, load_app_config
+    from app.system_runner import SystemRunner
+    from web_ui.server import create_app
+
+    raw = open(
+        os.path.join("config", "field_profiles", "example_competition_lane.json"),
+        encoding="utf-8",
+    ).read()
+    (tmp_path / "foo.txt.json").write_text(raw, encoding="utf-8")
+    args = build_arg_parser().parse_args(["--run-seconds", "0.1", "--no-yolo-udp"])
+    runner = SystemRunner(load_app_config(args))
+    runner._PROFILE_DIRS = [str(tmp_path)]
+    app = create_app(
+        runner,
+        UiConfig(True, "127.0.0.1", 8080, str(tmp_path / "audit.jsonl")),
+    )
+
+    response = TestClient(app).get("/api/field-profiles/foo.txt")
+    data = response.json()
+    assert data["ok"] is False
+    assert data["profile_id"] == "foo.txt"
+    assert isinstance(data["errors"], list) and data["errors"]
+    assert isinstance(data["warnings"], list)
+    assert isinstance(data["diagnostics"], dict)
 
 
 def test_api_dot_dot_rejected(client):

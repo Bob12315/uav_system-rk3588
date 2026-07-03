@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pytest
@@ -28,6 +30,17 @@ EXAMPLE_PATH = os.path.join(
     os.path.dirname(__file__), "..", "..",
     "config", "field_profiles", "example_competition_lane.json",
 )
+
+
+def _write_named_profiles(directory: Path) -> None:
+    base = json.loads(Path(EXAMPLE_PATH).read_text(encoding="utf-8"))
+    for profile_id in ("profile_a", "profile_b"):
+        data = dict(base)
+        data["profile_id"] = profile_id
+        data["name"] = profile_id
+        (directory / f"{profile_id}.json").write_text(
+            json.dumps(data), encoding="utf-8"
+        )
 
 
 def _make_drone_snapshot(
@@ -687,3 +700,183 @@ def test_bind_frozen_response_has_structured_errors():
     assert "diagnostics" in result
     assert len(result["errors"]) > 0
 
+
+def test_service_snapshot_restores_reference_and_profile_metadata() -> None:
+    svc = FieldReferenceService(FieldReference())
+    before = svc.snapshot()
+    svc.apply_profile_binding(
+        bind_result=_make_mock_bind_ok(),
+        profile_id="temporary",
+        profile_name="Temporary",
+        origin_lat=34.0,
+        origin_lon=108.0,
+        forward_lat=34.0003,
+        forward_lon=108.0,
+    )
+
+    svc.restore(before)
+
+    assert svc.reference.is_confirmed is False
+    assert svc.status().get("profile_id") is None
+    assert svc._profile_id is None
+    assert svc._profile_name is None
+
+
+@pytest.mark.parametrize("sync_mode", ["false", "exception"])
+def test_second_profile_sync_failure_rolls_back_all_state(
+    tmp_path: Path,
+    sync_mode: str,
+) -> None:
+    _write_named_profiles(tmp_path)
+    svc = FieldReferenceService(FieldReference())
+    builder = RuntimeContextBuilder()
+    drone = _make_drone_snapshot()
+    ctrl = FieldReferenceController(svc, builder, lambda: drone)
+    ctrl._PROFILE_DIRS = [str(tmp_path)]
+
+    first = ctrl.bind_profile_current("profile_a")
+    assert first["ok"] is True
+    before_ref = svc.snapshot()
+    before_runtime = {
+        "yaw": builder.field_heading_yaw_rad,
+        "source": builder.field_heading_source,
+        "x": builder.field_origin_local_x,
+        "y": builder.field_origin_local_y,
+        "z": builder.field_origin_local_z,
+    }
+    original_sync = builder.confirm_field_reference
+
+    def failing_sync(**kwargs):
+        original_sync(**kwargs)
+        if sync_mode == "exception":
+            raise RuntimeError("simulated sync exception")
+        return False
+
+    builder.confirm_field_reference = failing_sync
+    second = ctrl.bind_profile_current("profile_b")
+
+    assert second["ok"] is False
+    assert second["errors"]
+    assert svc.snapshot() == before_ref
+    assert svc.status()["profile_id"] == "profile_a"
+    assert svc._profile_id == "profile_a"
+    assert ctrl.status()["field_reference"]["profile_id"] == "profile_a"
+    assert ctrl.status()["field_reference"]["last_bind_profile_id"] == "profile_b"
+    assert ctrl.status()["field_reference"]["profile_binding_ok"] is False
+    assert builder.field_heading_yaw_rad == before_runtime["yaw"]
+    assert builder.field_heading_source == before_runtime["source"]
+    assert builder.field_origin_local_x == before_runtime["x"]
+    assert builder.field_origin_local_y == before_runtime["y"]
+    assert builder.field_origin_local_z == before_runtime["z"]
+
+
+def test_gps_failure_records_last_profile_without_changing_active(
+    tmp_path: Path,
+) -> None:
+    _write_named_profiles(tmp_path)
+    drone = _make_drone_snapshot()
+    svc = FieldReferenceService(FieldReference())
+    ctrl = FieldReferenceController(svc, RuntimeContextBuilder(), lambda: drone)
+    ctrl._PROFILE_DIRS = [str(tmp_path)]
+    assert ctrl.bind_profile_current("profile_a")["ok"] is True
+    drone["gps_fix_type"] = 1
+
+    result = ctrl.bind_profile_current("profile_b")
+    status = ctrl.status()["field_reference"]
+
+    assert result["ok"] is False
+    assert status["profile_id"] == "profile_a"
+    assert status["last_bind_profile_id"] == "profile_b"
+    assert status["profile_binding_ok"] is False
+    assert status["profile_binding_errors"]
+
+
+def test_frozen_failure_records_last_profile_without_changing_active(
+    tmp_path: Path,
+) -> None:
+    _write_named_profiles(tmp_path)
+    svc = FieldReferenceService(FieldReference())
+    ctrl = FieldReferenceController(
+        svc, RuntimeContextBuilder(), lambda: _make_drone_snapshot()
+    )
+    ctrl._PROFILE_DIRS = [str(tmp_path)]
+    assert ctrl.bind_profile_current("profile_a")["ok"] is True
+    assert svc.freeze()["ok"] is True
+
+    result = ctrl.bind_profile_current("profile_b")
+    status = ctrl.status()["field_reference"]
+
+    assert result["ok"] is False
+    assert status["profile_id"] == "profile_a"
+    assert status["last_bind_profile_id"] == "profile_b"
+    assert status["profile_binding_ok"] is False
+    assert any("frozen" in item.lower() for item in status["profile_binding_errors"])
+
+
+def test_non_dict_drone_failure_has_stable_shape() -> None:
+    ctrl = FieldReferenceController(
+        FieldReferenceService(FieldReference()),
+        RuntimeContextBuilder(),
+        lambda: None,
+    )
+
+    result = ctrl.bind_profile_current("example_competition_lane")
+
+    assert result["ok"] is False
+    assert result["profile_id"] == "example_competition_lane"
+    assert isinstance(result["errors"], list) and result["errors"]
+    assert isinstance(result["warnings"], list)
+    assert isinstance(result["diagnostics"], dict)
+    assert result["synced_to_runtime"] is False
+
+
+def test_drone_snapshot_exception_has_stable_shape() -> None:
+    def raise_snapshot():
+        raise RuntimeError("snapshot failed")
+
+    ctrl = FieldReferenceController(
+        FieldReferenceService(FieldReference()),
+        RuntimeContextBuilder(),
+        raise_snapshot,
+    )
+    result = ctrl.bind_profile_current("example_competition_lane")
+    assert result["ok"] is False
+    assert result["errors"]
+    assert result["diagnostics"]["errors"]
+    assert "snapshot failed" in result["error"]
+
+
+def test_non_json_looking_profile_id_is_rejected(tmp_path: Path) -> None:
+    base = Path(EXAMPLE_PATH).read_text(encoding="utf-8")
+    (tmp_path / "foo.txt.json").write_text(base, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="extension"):
+        FieldProfileService.load_profile("foo.txt", profile_dir=str(tmp_path))
+
+
+def test_absolute_profile_path_is_rejected(tmp_path: Path) -> None:
+    target = tmp_path / "outside.json"
+    target.write_text(Path(EXAMPLE_PATH).read_text(encoding="utf-8"), encoding="utf-8")
+    with pytest.raises(ValueError, match="relative"):
+        FieldProfileService.load_profile(str(target), profile_dir=str(tmp_path))
+
+
+def test_profile_symlink_escape_is_rejected(tmp_path: Path) -> None:
+    profile_dir = tmp_path / "profiles"
+    profile_dir.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text(Path(EXAMPLE_PATH).read_text(encoding="utf-8"), encoding="utf-8")
+    (profile_dir / "escape.json").symlink_to(outside)
+    with pytest.raises(ValueError, match="escapes"):
+        FieldProfileService.load_profile("escape", profile_dir=str(profile_dir))
+
+
+def test_plain_and_json_profile_ids_still_load() -> None:
+    directory = os.path.dirname(EXAMPLE_PATH)
+    plain = FieldProfileService.load_profile(
+        "example_competition_lane", profile_dir=directory
+    )
+    explicit = FieldProfileService.load_profile(
+        "example_competition_lane.json", profile_dir=directory
+    )
+    assert plain.profile_id == explicit.profile_id == "example_competition_lane"
