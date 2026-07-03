@@ -512,3 +512,178 @@ def test_bind_current_profile_not_found():
     result = ctrl.bind_profile_current("nonexistent_profile_xyz")
     assert result.get("ok") is False
     assert "not found" in str(result.get("error", "")).lower()
+
+
+
+# ===================================================================
+# Fix 1 regression tests: mark_origin/forward/yaw no NameError
+# ===================================================================
+
+
+def test_mark_origin_bad_drone_no_nameerror():
+    from app.field_reference_controller import FieldReferenceController
+    from app.field_reference_service import FieldReferenceService
+    from app.field_reference import FieldReference
+    from app.runtime_context import RuntimeContextBuilder
+    ctrl = FieldReferenceController(
+        FieldReferenceService(FieldReference()),
+        RuntimeContextBuilder(),
+        lambda: {},
+    )
+    result = ctrl.mark_origin()
+    assert result["ok"] is False
+
+
+def test_mark_forward_bad_drone_no_nameerror():
+    from app.field_reference_controller import FieldReferenceController
+    from app.field_reference_service import FieldReferenceService
+    from app.field_reference import FieldReference
+    from app.runtime_context import RuntimeContextBuilder
+    ctrl = FieldReferenceController(
+        FieldReferenceService(FieldReference()),
+        RuntimeContextBuilder(),
+        lambda: {},
+    )
+    result = ctrl.mark_forward()
+    assert result["ok"] is False
+
+
+def test_use_current_yaw_bad_drone_no_nameerror():
+    from app.field_reference_controller import FieldReferenceController
+    from app.field_reference_service import FieldReferenceService
+    from app.field_reference import FieldReference
+    from app.runtime_context import RuntimeContextBuilder
+    ctrl = FieldReferenceController(
+        FieldReferenceService(FieldReference()),
+        RuntimeContextBuilder(),
+        lambda: {},
+    )
+    result = ctrl.use_current_yaw()
+    assert result["ok"] is False
+
+
+# ===================================================================
+# Fix 2: real profile list valid=true
+# ===================================================================
+
+
+def test_real_system_runner_profile_list_valid():
+    """SystemRunner field_profile_list must show example as valid=True."""
+    from app.system_runner import SystemRunner
+    from app.app_config import build_arg_parser, load_app_config
+    args = build_arg_parser().parse_args(["--run-seconds", "0.1", "--no-yolo-udp"])
+    config = load_app_config(args)
+    runner = SystemRunner(config)
+    result = runner.field_profile_list()
+    assert result["ok"] is True
+    profiles = {p["profile_id"]: p for p in result["profiles"]}
+    assert "example_competition_lane" in profiles
+    assert profiles["example_competition_lane"]["valid"] is True
+    assert profiles["example_competition_lane"]["errors"] == []
+
+
+# ===================================================================
+# Fix 5: active vs last profile separation
+# ===================================================================
+
+
+def test_active_profile_remains_after_failed_bind():
+    """After successful bind A then failed bind B, active is still A."""
+    from app.field_reference_controller import FieldReferenceController
+    from app.field_reference_service import FieldReferenceService
+    from app.field_reference import FieldReference
+    from app.runtime_context import RuntimeContextBuilder
+
+    ref = FieldReference()
+    svc = FieldReferenceService(reference=ref)
+    builder = RuntimeContextBuilder()
+    drone_ok = _make_drone_snapshot(lat=34.0, lon=108.0)
+    ctrl = FieldReferenceController(svc, builder, lambda: drone_ok)
+
+    # Bind A succeeds
+    r = ctrl.bind_profile_current("example_competition_lane")
+    assert r["ok"] is True
+
+    # Bind B fails (missing local_z)
+    drone_bad = dict(drone_ok)
+    del drone_bad["local_z"]
+    ctrl._get_drone_snapshot = lambda: drone_bad
+    r2 = ctrl.bind_profile_current("example_competition_lane")
+    assert r2["ok"] is False
+
+    # status: active is still A, last_bind is B (same ID here but check structure)
+    st = ctrl.status()
+    fr = st["field_reference"]
+    assert fr.get("profile_id") == "example_competition_lane"
+    assert fr.get("profile_binding_ok") is False
+    assert len(fr.get("profile_binding_errors", [])) > 0
+
+
+def test_reset_clears_both_active_and_last():
+    from app.field_reference_controller import FieldReferenceController
+    from app.field_reference_service import FieldReferenceService
+    from app.field_reference import FieldReference
+    from app.runtime_context import RuntimeContextBuilder
+
+    ref = FieldReference()
+    svc = FieldReferenceService(reference=ref)
+    builder = RuntimeContextBuilder()
+    drone = _make_drone_snapshot(lat=34.0, lon=108.0)
+    ctrl = FieldReferenceController(svc, builder, lambda: drone)
+    ctrl.bind_profile_current("example_competition_lane")
+    ctrl.reset()
+
+    st = ctrl.status()
+    fr = st["field_reference"]
+    assert fr.get("profile_id") is None
+    assert fr.get("profile_binding_ok") is None
+
+
+# ===================================================================
+# Fix 6: unified response structure
+# ===================================================================
+
+
+def test_bind_failure_response_has_errors_warnings_diagnostics():
+    """All bind-current failure paths must have errors/warnings/diagnostics."""
+    from app.field_reference_controller import FieldReferenceController
+    from app.field_reference_service import FieldReferenceService
+    from app.field_reference import FieldReference
+    from app.runtime_context import RuntimeContextBuilder
+
+    ref = FieldReference()
+    svc = FieldReferenceService(reference=ref)
+    builder = RuntimeContextBuilder()
+    ctrl = FieldReferenceController(svc, builder, lambda: {})
+
+    result = ctrl.bind_profile_current("example_competition_lane")
+    assert result["ok"] is False
+    assert "errors" in result
+    assert isinstance(result["errors"], list)
+    assert "warnings" in result
+    assert isinstance(result["warnings"], list)
+    assert "diagnostics" in result
+    assert isinstance(result["diagnostics"], dict)
+
+
+def test_bind_frozen_response_has_structured_errors():
+    from app.field_reference_controller import FieldReferenceController
+    from app.field_reference_service import FieldReferenceService
+    from app.field_reference import FieldReference
+    from app.runtime_context import RuntimeContextBuilder
+
+    ref = FieldReference()
+    svc = FieldReferenceService(reference=ref)
+    builder = RuntimeContextBuilder()
+    drone = _make_drone_snapshot(lat=34.0, lon=108.0)
+    ctrl = FieldReferenceController(svc, builder, lambda: drone)
+    # Bind first, freeze, then try again
+    ctrl.bind_profile_current("example_competition_lane")
+    svc.freeze()
+    result = ctrl.bind_profile_current("example_competition_lane")
+    assert result["ok"] is False
+    assert "errors" in result
+    assert "warnings" in result
+    assert "diagnostics" in result
+    assert len(result["errors"]) > 0
+

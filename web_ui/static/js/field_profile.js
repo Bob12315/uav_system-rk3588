@@ -102,8 +102,8 @@ window.UavFieldProfiles = (function () {
     dom.setText($("fpRightField"), pointHas(r) ? fieldText(r.field_x_m, r.field_y_m) : "(无)");
 
     var gq = data.gps_quality || {};
-    dom.setText($("fpGpsQualityFixSats"), "fix≥" + (gq.min_fix_type || "?") + " sats≥" + (gq.min_satellites || "?"));
-    dom.setText($("fpGpsQualityEphEpv"), "eph≤" + (gq.max_eph || "?") + " epv≤" + (gq.max_epv || "?"));
+    dom.setText($("fpGpsQualityFixSats"), "fix≥" + (gq.min_fix_type != null ? gq.min_fix_type : "?") + " sats≥" + (gq.min_satellites != null ? gq.min_satellites : "?"));
+    dom.setText($("fpGpsQualityEphEpv"), "eph≤" + (gq.max_eph != null ? gq.max_eph : "?") + " epv≤" + (gq.max_epv != null ? gq.max_epv : "?"));
   }
 
   async function validateProfile() {

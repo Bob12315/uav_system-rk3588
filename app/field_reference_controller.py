@@ -37,7 +37,8 @@ class FieldReferenceController:
         self._builder = runtime_context_builder
         self._get_drone_snapshot = get_drone_snapshot
         self._last_bind_result: Optional[BindResult] = None
-        self._last_bound_profile_id: Optional[str] = None
+        self._active_profile_id: Optional[str] = None
+        self._last_bind_profile_id: Optional[str] = None
 
     # ------------------------------------------------------------------
     # status
@@ -99,21 +100,21 @@ class FieldReferenceController:
             else "none"
         )
 
-        # profile binding info (Fix 5: full diagnostics)
+        # profile binding info
         fr["warnings"] = []
-        if self._last_bound_profile_id:
-            fr["profile_id"] = self._last_bound_profile_id
-            if self._last_bind_result:
-                fr["profile_binding_ok"] = self._last_bind_result.ok
-                fr["profile_binding_errors"] = list(self._last_bind_result.errors)
-                fr["profile_binding_warnings"] = list(self._last_bind_result.warnings)
-                fr["profile_binding_diagnostics"] = {
-                    "errors": list(self._last_bind_result.diagnostics.errors),
-                    "warnings": list(self._last_bind_result.diagnostics.warnings),
-                }
-                fr["warnings"].extend(self._last_bind_result.warnings)
-            else:
-                fr["profile_binding_ok"] = None
+        if self._active_profile_id:
+            fr["profile_id"] = self._active_profile_id
+        if self._last_bind_result:
+            fr["profile_binding_ok"] = self._last_bind_result.ok
+            fr["profile_binding_errors"] = list(self._last_bind_result.errors)
+            fr["profile_binding_warnings"] = list(self._last_bind_result.warnings)
+            fr["profile_binding_diagnostics"] = {
+                "errors": list(self._last_bind_result.diagnostics.errors),
+                "warnings": list(self._last_bind_result.diagnostics.warnings),
+            }
+            fr["warnings"].extend(self._last_bind_result.warnings)
+        if self._last_bind_profile_id:
+            fr["last_bind_profile_id"] = self._last_bind_profile_id
 
         return {"ok": True, "field_reference": fr, "telemetry": telemetry}
 
@@ -124,10 +125,8 @@ class FieldReferenceController:
     def mark_origin(self) -> dict[str, object]:
         drone = self._drone_snapshot()
         if not isinstance(drone, dict):
-            self._record_bind_failure(profile_id, "drone state unavailable")
             return {"ok": False, "error": "drone state unavailable"}
         if not bool(drone.get("global_position_valid", False)):
-            self._record_bind_failure(profile_id, "no valid GPS position")
             return {"ok": False, "error": "no valid GPS position"}
         gps_fix = drone.get("gps_fix_type", 0)
         if not isinstance(gps_fix, (int, float)) or int(gps_fix) < 3:
@@ -148,10 +147,8 @@ class FieldReferenceController:
     def mark_forward(self) -> dict[str, object]:
         drone = self._drone_snapshot()
         if not isinstance(drone, dict):
-            self._record_bind_failure(profile_id, "drone state unavailable")
             return {"ok": False, "error": "drone state unavailable"}
         if not bool(drone.get("global_position_valid", False)):
-            self._record_bind_failure(profile_id, "no valid GPS position")
             return {"ok": False, "error": "no valid GPS position"}
         gps_fix = drone.get("gps_fix_type", 0)
         if not isinstance(gps_fix, (int, float)) or int(gps_fix) < 3:
@@ -165,7 +162,6 @@ class FieldReferenceController:
     def use_current_yaw(self) -> dict[str, object]:
         drone = self._drone_snapshot()
         if not isinstance(drone, dict):
-            self._record_bind_failure(profile_id, "drone state unavailable")
             return {"ok": False, "error": "drone state unavailable"}
         if not bool(drone.get("attitude_valid", False)):
             return {"ok": False, "error": "attitude yaw not valid"}
@@ -218,7 +214,8 @@ class FieldReferenceController:
         result = self._svc.reset()
         self._builder.clear_field_heading()
         self._last_bind_result = None
-        self._last_bound_profile_id = None
+        self._active_profile_id = None
+        self._last_bind_profile_id = None
         return result
 
     def freeze(self) -> dict[str, object]:
@@ -251,27 +248,37 @@ class FieldReferenceController:
         if profile is None:
             self._record_bind_failure(profile_id, f"profile not found: {profile_id}")
             return {"ok": False, "error": f"profile not found: {profile_id}",
-                    "errors": errors}
+                    "profile_id": profile_id,
+                    "errors": list(errors), "warnings": [],
+                    "diagnostics": {"errors": list(errors), "warnings": []}}
 
         # -- drone telemetry ------------------------------------------------
         drone = self._drone_snapshot()
         if not isinstance(drone, dict):
-            self._record_bind_failure(profile_id, "drone state unavailable")
             return {"ok": False, "error": "drone state unavailable"}
 
         if not bool(drone.get("global_position_valid", False)):
             self._record_bind_failure(profile_id, "no valid GPS position")
-            return {"ok": False, "error": "no valid GPS position"}
+            return {"ok": False, "error": "no valid GPS position",
+                    "profile_id": profile.profile_id,
+                    "errors": ["no valid GPS position"], "warnings": [],
+                    "diagnostics": {"errors": ["no valid GPS position"], "warnings": []}}
 
         current_lat = RuntimeContextBuilder._float_or_none(drone.get("lat"))
         current_lon = RuntimeContextBuilder._float_or_none(drone.get("lon"))
         if current_lat is None or current_lon is None:
             self._record_bind_failure(profile_id, "GPS lat/lon not available")
-            return {"ok": False, "error": "GPS lat/lon not available"}
+            return {"ok": False, "error": "GPS lat/lon not available",
+                    "profile_id": profile.profile_id,
+                    "errors": ["GPS lat/lon not available"], "warnings": [],
+                    "diagnostics": {"errors": ["GPS lat/lon not available"], "warnings": []}}
 
         if not bool(drone.get("local_position_valid", False)):
             self._record_bind_failure(profile_id, "no valid LOCAL_NED position")
-            return {"ok": False, "error": "no valid LOCAL_NED position"}
+            return {"ok": False, "error": "no valid LOCAL_NED position",
+                    "profile_id": profile.profile_id,
+                    "errors": ["no valid LOCAL_NED position"], "warnings": [],
+                    "diagnostics": {"errors": ["no valid LOCAL_NED position"], "warnings": []}}
 
         local_x = RuntimeContextBuilder._float_or_none(drone.get("local_x"))
         local_y = RuntimeContextBuilder._float_or_none(drone.get("local_y"))
@@ -286,7 +293,10 @@ class FieldReferenceController:
                 missing.append("local_z")
             err_msg = f"LOCAL_NED missing: {', '.join(missing)}"
             self._record_bind_failure(profile_id, err_msg)
-            return {"ok": False, "error": err_msg}
+            return {"ok": False, "error": err_msg,
+                    "profile_id": profile.profile_id,
+                    "errors": [err_msg], "warnings": [],
+                    "diagnostics": {"errors": [err_msg], "warnings": []}}
 
         gps_fix_type = drone.get("gps_fix_type", 0)
         satellites_visible = drone.get("satellites_visible", 0)
@@ -340,7 +350,7 @@ class FieldReferenceController:
             "field_heading_yaw_rad": self._svc.reference.field_heading_yaw_rad,
             "confirmed_at_s": self._svc.reference.confirmed_at_s,
         }
-        saved_profile_id = self._last_bound_profile_id
+        saved_active_id = self._active_profile_id
         saved_bind_result = self._last_bind_result
 
         # -- apply to field reference --------------------------------------
@@ -360,9 +370,27 @@ class FieldReferenceController:
                 "ok": False,
                 "error": applied.get("error", "apply failed"),
                 "profile_id": profile.profile_id,
+                "errors": [applied.get("error", "apply failed")],
+                "warnings": [],
+                "diagnostics": {"errors": [applied.get("error", "apply failed")], "warnings": []},
             }
 
-        self._last_bound_profile_id = profile.profile_id
+        self._active_profile_id = profile.profile_id
+        self._last_bind_profile_id = profile.profile_id
+
+        # -- save old RuntimeContext for rollback (Fix 4) -------------------
+        saved_rt = {
+            "field_heading_confirmed": self._builder.field_heading_confirmed,
+            "field_origin_confirmed": self._builder.field_origin_confirmed,
+            "field_heading_yaw_rad": self._builder.field_heading_yaw_rad,
+            "field_heading_source": self._builder.field_heading_source,
+            "field_heading_time": self._builder.field_heading_time,
+            "field_origin_local_x": self._builder.field_origin_local_x,
+            "field_origin_local_y": self._builder.field_origin_local_y,
+            "field_origin_local_z": self._builder.field_origin_local_z,
+            "field_origin_time": self._builder.field_origin_time,
+            "field_origin_confirmed": self._builder.field_origin_confirmed,
+        }
 
         # -- sync to RuntimeContext ----------------------------------------
         ref = self._svc.reference
@@ -394,15 +422,29 @@ class FieldReferenceController:
             ref.forward_marker_lon = saved_ref["forward_marker_lon"]
             ref.field_heading_yaw_rad = saved_ref["field_heading_yaw_rad"]
             ref.confirmed_at_s = saved_ref["confirmed_at_s"]
-            self._last_bound_profile_id = saved_profile_id
+            self._active_profile_id = saved_active_id
+            self._last_bind_profile_id = profile.profile_id
             # Preserve the sync error in diagnostics
             bind_result.errors.append("sync to runtime context failed")
             bind_result.diagnostics.errors.append("sync to runtime context failed")
             self._last_bind_result = bind_result
+            # Restore RuntimeContext
+            self._builder.field_heading_confirmed = saved_rt["field_heading_confirmed"]
+            self._builder.field_origin_confirmed = saved_rt["field_origin_confirmed"]
+            self._builder.field_heading_yaw_rad = saved_rt["field_heading_yaw_rad"]
+            self._builder.field_heading_source = saved_rt["field_heading_source"]
+            self._builder.field_heading_time = saved_rt["field_heading_time"]
+            self._builder.field_origin_local_x = saved_rt["field_origin_local_x"]
+            self._builder.field_origin_local_y = saved_rt["field_origin_local_y"]
+            self._builder.field_origin_local_z = saved_rt["field_origin_local_z"]
+            self._builder.field_origin_time = saved_rt["field_origin_time"]
             return {
                 "ok": False,
                 "error": "apply succeeded but failed to sync to runtime context",
                 "profile_id": profile.profile_id,
+                "errors": ["sync to runtime context failed"],
+                "warnings": [],
+                "diagnostics": {"errors": ["sync to runtime context failed"], "warnings": []},
             }
 
         return {
@@ -441,7 +483,13 @@ class FieldReferenceController:
             errors=[error],
             diagnostics=FieldProfileDiagnostics(errors=[error]),
         )
-        self._last_bound_profile_id = profile_id
+        self._last_bind_profile_id = profile_id
+        self._last_bind_result = BindResult(
+            ok=False,
+            profile_id=profile_id,
+            errors=[error],
+            diagnostics=FieldProfileDiagnostics(errors=[error]),
+        )
 
     @staticmethod
     def _is_field_reference_synced(

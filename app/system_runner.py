@@ -405,8 +405,9 @@ class SystemRunner:
         for d in self._PROFILE_DIRS:
             source = "config" if "config" in d else "runtime"
             for path in FieldProfileService.list_profiles(d):
+                pid = os.path.splitext(os.path.basename(path))[0]
                 try:
-                    p = FieldProfileService.load_profile(path)
+                    p = FieldProfileService.load_profile(pid, profile_dir=d)
                     profiles.append({
                         "profile_id": p.profile_id,
                         "name": p.name,
@@ -417,7 +418,6 @@ class SystemRunner:
                         "warnings": [],
                     })
                 except Exception as exc:
-                    pid = os.path.splitext(os.path.basename(path))[0]
                     profiles.append({
                         "profile_id": pid,
                         "name": pid,
@@ -476,7 +476,8 @@ class SystemRunner:
         return {"ok": False, "error": f"profile not found: {profile_id}"}
 
     def field_profile_bind_current(self, profile_id: str) -> dict[str, object]:
-        return self.field_reference_controller.bind_profile_current(profile_id)
+        with self.action_runtime_lock:
+            return self.field_reference_controller.bind_profile_current(profile_id)
 
     def _with_field_coordinates(self, items: list[object]) -> list[object]:
         enriched: list[object] = []
