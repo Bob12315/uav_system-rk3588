@@ -209,6 +209,10 @@ class ReconInspectTargetAction(ActionModule):
         detail.update({"target_index": self.target_index, "state": self.state, "done": self.state == "done"})
         if child_detail is not None:
             detail["child_detail"] = child_detail
+            if self.state == "align_descend" and isinstance(child_detail, dict):
+                command = child_detail.get("command")
+                if isinstance(command, dict) and command.get("type") == "flight_command":
+                    detail["command"] = command
         return detail
 
     def _target(self) -> dict[str, Any] | None:

@@ -1458,3 +1458,81 @@ def test_multi_view_localize_dispatches_local_position_when_gates_enabled() -> N
     assert payload["send_actions_effective"] is True
     assert payload["note"] == "local_position_dispatch_enabled"
     assert payload["dispatch"]["sent"][0]["action_type"] == "local_position"
+
+
+# ======================================================================
+# recon_inspect_target align_descend child command promotion
+# ======================================================================
+
+
+def _recon_inspect_align_result(command: dict[str, object]) -> dict[str, object]:
+    """Simulate ReconInspectTargetAction result when internal align_descend is running
+    and the child command has been promoted to detail["command"]."""
+    return {
+        "done": False,
+        "failed": False,
+        "reason": "descending_slow",
+        "actions": [],
+        "detail": {
+            "command": command,
+            "child_detail": {
+                "command": command,
+                "height_m": 2.8,
+                "aligned": True,
+                "hold_reason": "descending_slow",
+            },
+            "target_index": 0,
+            "state": "align_descend",
+            "done": False,
+            "target_id": "t0",
+            "rank": 1,
+            "class_name": "bucket",
+            "local_x": 0.3,
+            "local_y": 5.1,
+            "field_x": 0.3,
+            "field_y": 5.1,
+            "status": "",
+            "sign_class": "",
+            "confidence": 0.0,
+            "bbox": None,
+            "track_id": None,
+            "goto_reason": "waypoint_reached",
+            "lock_reason": "target_locked",
+            "align_reason": "",
+            "observe_reason": "",
+            "observe_time_s": 2.0,
+            "height_m": 2.8,
+        },
+    }
+
+
+def test_recon_inspect_target_align_descend_command_dispatches_flight_command() -> None:
+    runner = _runner()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_start_action("recon_inspect_target", {}, send_actions=True)
+
+    dispatch = runner._dispatch_action_lab_result(
+        _recon_inspect_align_result(_flight_command())
+    )
+
+    assert runner.services.link_manager.calls == [
+        ("send_body_velocity", (0.4, -0.329, 0.0), 0)
+    ]
+    assert dispatch["sent"][0]["action_type"] == "flight_command"
+    assert dispatch["sent"][0]["key"] == "recon_inspect_target_flight_command"
+
+
+def test_recon_inspect_target_align_descend_command_respects_safety_gate() -> None:
+    """send_actions=false must skip recon_inspect_target flight_command dispatch."""
+    runner = _runner()
+    runner.controller_switches.set_send_commands(True)
+    runner.action_lab_start_action("recon_inspect_target", {}, send_actions=False)
+
+    dispatch = runner._dispatch_action_lab_result(
+        _recon_inspect_align_result(_flight_command())
+    )
+
+    assert runner.services.link_manager.calls == []
+    assert dispatch["sent"] == []
+    assert dispatch["skipped"][0]["action_type"] == "flight_command"
+    assert dispatch["skipped"][0]["reason"] == "dry_run_only"

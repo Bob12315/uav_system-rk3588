@@ -92,3 +92,37 @@ def test_default_align_configuration_disables_payload_offset_and_finishes_at_1_5
     assert action.align_params["finish_altitude_m"] == 1.5
     assert action.align_params["config"]["min_altitude_m"] == 1.3
     assert action.align_params["config"]["payload_offset_enabled"] is False
+
+
+def test_align_descend_running_promotes_child_command_to_top_level_detail():
+    action = _action()
+    _to_align(action)
+    flight_command = {
+        "type": "flight_command",
+        "vx_cmd": 0.15,
+        "vy_cmd": -0.08,
+        "vz_cmd": -0.18,
+        "yaw_rate_cmd": 0.0,
+        "active": True,
+        "valid": True,
+        "frame": "BODY_NED",
+        "enable_body": True,
+        "enable_approach": False,
+        "priority": 5,
+    }
+    child_detail = {
+        "command": flight_command,
+        "height_m": 2.8,
+        "aligned": True,
+        "hold_reason": "descending_slow",
+    }
+    action.child = _Child(done=False, failed=False, reason="descending_slow", height=2.8)
+    action.child.result = ActionResult(
+        done=False, failed=False, reason="descending_slow", detail=child_detail
+    )
+    result = action.update({})
+    assert not result.done and not result.failed
+    assert result.detail.get("child_detail") is not None
+    assert result.detail["child_detail"]["command"] == flight_command
+    assert result.detail.get("command") == flight_command
+    assert result.detail["state"] == "align_descend"
