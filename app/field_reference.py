@@ -24,12 +24,14 @@ class OriginSource(str, Enum):
     LOCAL_POSITION = "local_position"
     GPS_MARKER = "gps_marker"
     MANUAL_GPS_INPUT = "manual_gps_input"
+    PROFILE_GPS_BOUND = "profile_gps_bound"
 
 
 class HeadingSource(str, Enum):
     COMPASS_YAW = "compass_yaw"
     GPS_TWO_POINT = "gps_two_point"
     MANUAL_ANGLE = "manual_angle"
+    PROFILE_GPS_TWO_POINT = "profile_gps_two_point"
 
 
 # ---------------------------------------------------------------------------

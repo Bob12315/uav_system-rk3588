@@ -1,8 +1,25 @@
 from __future__ import annotations
 
-from typing import Any
+import time as _time
+from dataclasses import dataclass, fields
+from typing import Any, Optional
 
-from .field_reference import FieldReference, FieldReferenceError
+from .field_profile_service import BindResult
+from .field_reference import (
+    FieldReference,
+    FieldReferenceError,
+    HeadingSource,
+    OriginSource,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class FieldReferenceServiceSnapshot:
+    """Complete rollback snapshot for a FieldReferenceService transaction."""
+
+    reference_values: dict[str, Any]
+    profile_id: Optional[str]
+    profile_name: Optional[str]
 
 
 class FieldReferenceService:
@@ -16,10 +33,32 @@ class FieldReferenceService:
 
     def __init__(self, reference: FieldReference | None = None) -> None:
         self._ref = reference or FieldReference()
+        self._profile_id: Optional[str] = None
+        self._profile_name: Optional[str] = None
 
     @property
     def reference(self) -> FieldReference:
         return self._ref
+
+    def snapshot(self) -> FieldReferenceServiceSnapshot:
+        """Capture reference fields and service-owned profile metadata."""
+        return FieldReferenceServiceSnapshot(
+            reference_values={
+                item.name: getattr(self._ref, item.name)
+                for item in fields(FieldReference)
+            },
+            profile_id=self._profile_id,
+            profile_name=self._profile_name,
+        )
+
+    def restore(self, snapshot: FieldReferenceServiceSnapshot) -> None:
+        """Restore a snapshot after a failed apply/sync transaction."""
+        if not isinstance(snapshot, FieldReferenceServiceSnapshot):
+            raise TypeError("snapshot must be FieldReferenceServiceSnapshot")
+        for name, value in snapshot.reference_values.items():
+            setattr(self._ref, name, value)
+        self._profile_id = snapshot.profile_id
+        self._profile_name = snapshot.profile_name
 
     # ------------------------------------------------------------------
     # marker / setter wrappers
@@ -95,6 +134,54 @@ class FieldReferenceService:
         return {"ok": True}
 
     # ------------------------------------------------------------------
+    # profile binding
+    # ------------------------------------------------------------------
+
+    def apply_profile_binding(
+        self,
+        bind_result: BindResult,
+        profile_id: str,
+        profile_name: str,
+        origin_lat: float,
+        origin_lon: float,
+        forward_lat: float,
+        forward_lon: float,
+        timestamp: float | None = None,
+    ) -> dict[str, Any]:
+        """Atomically apply a profile bind result to this field reference.
+
+        Rejected if the reference is already frozen or the bind result is
+        not ``ok``.  On success the reference is marked confirmed.
+        """
+        if self._ref.is_frozen:
+            return {"ok": False, "error": "field reference is frozen"}
+        if not bind_result.ok:
+            return {"ok": False, "error": "bind result is not ok",
+                    "errors": list(bind_result.errors)}
+
+        ts = timestamp if timestamp is not None else _time.time()
+
+        # Write all fields atomically (bypass individual setter guards
+        # since we already checked is_frozen above).
+        self._ref.origin_source = OriginSource.PROFILE_GPS_BOUND.value
+        self._ref.heading_source = HeadingSource.PROFILE_GPS_TWO_POINT.value
+        self._ref.origin_lat = origin_lat
+        self._ref.origin_lon = origin_lon
+        self._ref.forward_marker_lat = forward_lat
+        self._ref.forward_marker_lon = forward_lon
+        self._ref.origin_local_n_m = bind_result.origin_local_n_m
+        self._ref.origin_local_e_m = bind_result.origin_local_e_m
+        self._ref.origin_local_z_m = bind_result.origin_local_z_m
+        self._ref.field_heading_yaw_rad = bind_result.field_heading_yaw_rad
+        self._ref.is_confirmed = True
+        self._ref.confirmed_at_s = ts
+
+        self._profile_id = profile_id
+        self._profile_name = profile_name
+
+        return {"ok": True}
+
+    # ------------------------------------------------------------------
     # lifecycle
     # ------------------------------------------------------------------
 
@@ -120,11 +207,13 @@ class FieldReferenceService:
     def reset(self) -> dict[str, Any]:
         """Reset the reference to its initial unconfirmed, unfrozen state."""
         self._ref.reset()
+        self._profile_id = None
+        self._profile_name = None
         return {"ok": True}
 
     def status(self) -> dict[str, Any]:
         """Return a snapshot of the current reference state."""
-        return {
+        result: dict[str, Any] = {
             "is_confirmed": self._ref.is_confirmed,
             "is_frozen": self._ref.is_frozen,
             "is_ready": self._ref.is_ready(),
@@ -140,3 +229,7 @@ class FieldReferenceService:
             "field_heading_yaw_rad": self._ref.field_heading_yaw_rad,
             "confirmed_at_s": self._ref.confirmed_at_s,
         }
+        if self._ref.origin_source == OriginSource.PROFILE_GPS_BOUND.value:
+            result["profile_id"] = self._profile_id
+            result["profile_name"] = self._profile_name
+        return result
