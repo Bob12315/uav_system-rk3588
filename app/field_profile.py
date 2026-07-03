@@ -1,8 +1,10 @@
-"""Field Profile — pure logic for loading, validating, and binding O/F/L/R
-field profiles.
+"""Field Profile — pure logic for loading, validating, and binding
+centerline-based field profiles.
 
 This module does NOT write RuntimeContext, does NOT confirm/freeze, and does
 NOT send MAVLink commands.  It is a pure data-and-math layer.
+
+Schema version 2: takeoff-anchor + 4+ centerline GPS points.
 """
 
 from __future__ import annotations
@@ -11,48 +13,14 @@ import json
 import math
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
-# Phase B: temporary private imports from field_reference.
-# A future phase may make these public or extract them to a shared utility.
-from .field_reference import (  # noqa: E501  (Phase B private import)
+from .field_reference import (
     EARTH_RADIUS_M,
-    MIN_GPS_BASELINE_M,
-    RECOMMENDED_GPS_BASELINE_M,
     _gps_bearing_rad,
     _gps_distance_m,
     _gps_enu_deltas,
 )
-
-
-# ---------------------------------------------------------------------------
-# constants local to this module
-# ---------------------------------------------------------------------------
-
-ORIGIN_EPSILON_M = 1e-9
-"""Maximum |field_x_m| / |field_y_m| for an origin point before we warn and
-normalise to exactly 0.0.  Values above this but below MAX_ORIGIN_DEVIATION_M
-are normalised with a warning."""
-
-MAX_ORIGIN_DEVIATION_M = 0.1
-"""Maximum |field_x_m| / |field_y_m| for an origin point.  Values exceeding
-this are a hard error — the origin is fundamentally wrong."""
-
-LR_COINCIDENT_M = 1e-6
-"""Distance below which left_check and right_check are considered coincident
-(degenerate geometry → hard error)."""
-
-MIN_LR_GPS_BASELINE_M = 1.0
-"""Minimum GPS-derived distance between left_check and right_check.
-Below this → hard error (unsafe geometry)."""
-
-DECLARED_POSITION_TOLERANCE_M = 1.0
-"""Maximum allowed difference (metres) between GPS-derived FIELD coordinates
-and the declared field_x_m / field_y_m in the profile JSON."""
-
-FORWARD_X_TOLERANCE_M = 0.5
-"""Maximum allowed |field_x_m| for the forward point — it must lie very
-close to the O→F heading line."""
 
 
 # ---------------------------------------------------------------------------
@@ -81,66 +49,98 @@ class GpsQuality:
 
 
 @dataclass(slots=True)
-class FieldProfilePoint:
-    """A single named point (O / F / L / R) within a field profile."""
+class AnchorPoint:
+    """Takeoff anchor point — defines where the drone takes off."""
 
     name: str
-    role: str  # "origin", "forward", "left_check", "right_check"
     lat: float
     lon: float
-    field_x_m: float
-    field_y_m: float
+    field_x_m: float = 0.0
+    field_y_m: float = 0.0
+
+
+@dataclass(slots=True)
+class CenterlinePoint:
+    """A single GPS point along the field centerline (≥4 required)."""
+
+    name: str
+    lat: float
+    lon: float
+    expected_field_y_m: Optional[float] = None
+    """Optional diagnostic-only expected field_y.  Does NOT participate in fitting."""
+
+
+@dataclass(slots=True)
+class FieldGeometry:
+    """Field geometry parameters."""
+
+    lane_half_width_m: float = 4.0
+    drop_center_y_m: float = 30.0
+    recce_center_y_m: float = 55.0
+    drop_area_y_min: Optional[float] = None
+    drop_area_y_max: Optional[float] = None
+    recce_area_y_min: Optional[float] = None
+    recce_area_y_max: Optional[float] = None
+
+
+@dataclass(slots=True)
+class BindingPolicy:
+    """Binding error/warning thresholds."""
+
+    max_start_error_m: float = 3.0
+    warn_start_error_m: float = 1.5
+    max_centerline_residual_m: float = 2.5
+    warn_centerline_residual_m: float = 1.5
 
 
 @dataclass(slots=True)
 class FieldProfile:
-    """Deserialised, validated field profile.
+    """Deserialised, validated field profile (schema v2 — centerline).
 
-    The ``points`` dict is keyed by role::
-
-        {"origin": ..., "forward": ..., "left_check": ..., "right_check": ...}
+    Key differences from v1:
+    - ``anchor`` replaces ``origin``: lat/lon + field (0,0) anchor.
+    - ``centerline_points`` replaces ``forward`` + ``left_check`` / ``right_check``:
+      at least 4 GPS points along the centerline.
+    - ``field_geometry`` contains lane/drop/recce dimensions.
+    - ``binding_policy`` contains error/warning thresholds.
     """
 
     schema_version: int
     profile_id: str
     name: str
-    created_at: str
     coordinate_convention: Dict[str, str]
-    points: Dict[str, FieldProfilePoint]
+    anchor: AnchorPoint
+    centerline_points: List[CenterlinePoint]
     gps_quality: GpsQualityThresholds = field(default_factory=GpsQualityThresholds)
+    field_geometry: FieldGeometry = field(default_factory=FieldGeometry)
+    binding_policy: BindingPolicy = field(default_factory=BindingPolicy)
     extra: Dict[str, Any] = field(default_factory=dict)
     """Unknown top-level JSON keys preserved for forward compatibility."""
-    nested_unknowns: List[str] = field(default_factory=list)
-    """Unknown keys discovered inside points / gps_quality / coordinate_convention
-    objects.  Populated during parse; warned about during validate."""
-
-    # ---- derived helpers (cached after first call) ----
-
-    @property
-    def origin(self) -> FieldProfilePoint:
-        return self.points["origin"]
-
-    @property
-    def forward(self) -> FieldProfilePoint:
-        return self.points["forward"]
-
-    @property
-    def left_check(self) -> Optional[FieldProfilePoint]:
-        return self.points.get("left_check")
-
-    @property
-    def right_check(self) -> Optional[FieldProfilePoint]:
-        return self.points.get("right_check")
 
 
 # ---------------------------------------------------------------------------
-# validation result helpers
+# centerline fitting result
 # ---------------------------------------------------------------------------
 
 
 @dataclass
+class CenterlineFitResult:
+    """Output of centerline fitting on anchor + centerline_points."""
+
+    field_heading_yaw_rad: float
+    field_heading_deg: float
+    baseline_m: float
+    """Distance from anchor to farthest centerline point."""
+    point_residuals: List[float]
+    """Perpendicular residual (m) for each centerline point."""
+    max_residual_m: float
+    rms_residual_m: float
+    diagnostics: "FieldProfileDiagnostics"
+
+
+@dataclass
 class FieldProfileDiagnostics:
-    """Collected errors and warnings from validation."""
+    """Collected errors and warnings from validation or fitting."""
 
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
@@ -191,32 +191,20 @@ def load_field_profile_json(path: str) -> FieldProfile:
 
 
 def parse_field_profile(data: Dict[str, Any]) -> FieldProfile:
-    """Construct a :class:`FieldProfile` from a raw JSON dict.
-
-    Every point MUST explicitly contain *role*, *lat*, *lon*,
-    *field_x_m*, and *field_y_m*.  Missing / None / wrong-type /
-    non-finite values raise :class:`FieldProfileValidationError` immediately.
-
-    Call :func:`validate_field_profile` afterwards for semantic checks.
-    """
-    # -- top-level required strings ----------------------------------------
-    _require_str(data, "profile_id")
-    _require_str(data, "name")
-
-    # Track unknown keys for forward compatibility.
+    """Construct a :class:`FieldProfile` from a raw JSON dict (schema v2)."""
     _TOP_KEYS = {
         "schema_version", "profile_id", "name", "created_at",
-        "coordinate_convention", "points", "gps_quality",
+        "coordinate_convention", "anchor", "centerline_points",
+        "gps_quality", "field_geometry", "binding_policy",
     }
     extra: Dict[str, Any] = {}
-    nested_unknowns: List[str] = []
     for key, value in data.items():
         if key not in _TOP_KEYS:
             extra[key] = value
 
-    # -- schema_version: must be int-like, reject bool/None/NaN/Inf/string
+    # -- schema_version --------------------------------------------------
     try:
-        raw_sv = data.get("schema_version", 1)
+        raw_sv = data.get("schema_version", 2)
         if raw_sv is None:
             raise FieldProfileValidationError(
                 FieldProfileDiagnostics(errors=["schema_version is None"])
@@ -247,89 +235,98 @@ def parse_field_profile(data: Dict[str, Any]) -> FieldProfile:
         raise FieldProfileValidationError(
             FieldProfileDiagnostics(errors=[f"schema_version invalid: {exc}"])
         )
+
+    _require_str(data, "profile_id")
+    _require_str(data, "name")
+
     profile_id = str(data["profile_id"])
     name = str(data["name"])
-    created_at = str(data.get("created_at", ""))
-    coordinate_convention = _parse_coordinate_convention(data, nested_unknowns)
-    gps_quality = _parse_gps_quality_thresholds(data, nested_unknowns)
+    coordinate_convention = _parse_coordinate_convention(data)
 
-    # -- points ------------------------------------------------------------
-    raw_points: Any = data.get("points")
-    if raw_points is None or not isinstance(raw_points, dict):
+    # -- anchor ----------------------------------------------------------
+    raw_anchor = data.get("anchor")
+    if raw_anchor is None or not isinstance(raw_anchor, dict):
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(errors=["'anchor' is required and must be a JSON object"])
+        )
+    anchor_name = str(raw_anchor.get("name", "takeoff_anchor"))
+    anchor_lat = _require_float_in_obj(raw_anchor, "lat", "anchor")
+    anchor_lon = _require_float_in_obj(raw_anchor, "lon", "anchor")
+    anchor_fx = float(raw_anchor.get("field_x_m", 0.0))
+    anchor_fy = float(raw_anchor.get("field_y_m", 0.0))
+    anchor = AnchorPoint(name=anchor_name, lat=anchor_lat, lon=anchor_lon,
+                         field_x_m=anchor_fx, field_y_m=anchor_fy)
+
+    # -- centerline_points -----------------------------------------------
+    raw_cl = data.get("centerline_points")
+    if raw_cl is None or not isinstance(raw_cl, list):
         raise FieldProfileValidationError(
             FieldProfileDiagnostics(
-                errors=["'points' is required and must be a JSON object"]
+                errors=["'centerline_points' is required and must be a JSON array"]
             )
         )
-
-    _POINT_KEYS = {"name", "role", "lat", "lon", "field_x_m", "field_y_m"}
-    points: Dict[str, FieldProfilePoint] = {}
-    for dict_key, raw_pt in raw_points.items():
+    centerline_points: List[CenterlinePoint] = []
+    for i, raw_pt in enumerate(raw_cl):
         if not isinstance(raw_pt, dict):
             raise FieldProfileValidationError(
                 FieldProfileDiagnostics(
-                    errors=[f"points.{dict_key} must be a JSON object, got {type(raw_pt).__name__}"]
+                    errors=[f"centerline_points[{i}] must be a JSON object, got {type(raw_pt).__name__}"]
                 )
             )
-
-        # Detect unknown sub-keys inside the point object.
-        for sub_key in raw_pt:
-            if sub_key not in _POINT_KEYS:
-                nested_unknowns.append(f"points.{dict_key}.{sub_key}")
-
-        # Every point field is strictly required.
-        role = _require_str_in_obj(raw_pt, "role", f"points.{dict_key}")
-        lat = _require_float_in_obj(raw_pt, "lat", f"points.{dict_key}")
-        lon = _require_float_in_obj(raw_pt, "lon", f"points.{dict_key}")
-        fx = _require_float_in_obj(raw_pt, "field_x_m", f"points.{dict_key}")
-        fy = _require_float_in_obj(raw_pt, "field_y_m", f"points.{dict_key}")
-        pt_name = str(raw_pt.get("name", dict_key))
-
-        # Dict key must match role.
-        if role != dict_key:
-            raise FieldProfileValidationError(
-                FieldProfileDiagnostics(
-                    errors=[
-                        f"points.{dict_key} has role '{role}' but key must be '{dict_key}'"
-                    ]
+        pt_name = str(raw_pt.get("name", f"cl_{i}"))
+        pt_lat = _require_float_in_obj(raw_pt, "lat", f"centerline_points[{i}]")
+        pt_lon = _require_float_in_obj(raw_pt, "lon", f"centerline_points[{i}]")
+        expected_fy = raw_pt.get("expected_field_y_m")
+        if expected_fy is not None:
+            if isinstance(expected_fy, bool) or not isinstance(expected_fy, (int, float)):
+                raise FieldProfileValidationError(
+                    FieldProfileDiagnostics(
+                        errors=[f"centerline_points[{i}].expected_field_y_m must be a number"]
+                    )
                 )
-            )
+            expected_fy = float(expected_fy)
+            if not math.isfinite(expected_fy):
+                raise FieldProfileValidationError(
+                    FieldProfileDiagnostics(
+                        errors=[f"centerline_points[{i}].expected_field_y_m is not finite"]
+                    )
+                )
+        centerline_points.append(CenterlinePoint(
+            name=pt_name, lat=pt_lat, lon=pt_lon,
+            expected_field_y_m=expected_fy,
+        ))
 
-        points[dict_key] = FieldProfilePoint(
-            name=pt_name,
-            role=role,
-            lat=lat,
-            lon=lon,
-            field_x_m=fx,
-            field_y_m=fy,
-        )
+    # -- gps_quality -----------------------------------------------------
+    gps_quality = _parse_gps_quality_thresholds(data)
+
+    # -- field_geometry --------------------------------------------------
+    field_geometry = _parse_field_geometry(data)
+
+    # -- binding_policy --------------------------------------------------
+    binding_policy = _parse_binding_policy(data)
 
     return FieldProfile(
         schema_version=schema_version,
         profile_id=profile_id,
         name=name,
-        created_at=created_at,
         coordinate_convention=coordinate_convention,
-        points=points,
+        anchor=anchor,
+        centerline_points=centerline_points,
         gps_quality=gps_quality,
+        field_geometry=field_geometry,
+        binding_policy=binding_policy,
         extra=extra,
-        nested_unknowns=nested_unknowns,
     )
 
 
 def validate_field_profile(profile: FieldProfile) -> FieldProfileDiagnostics:
-    """Run all semantic validation checks on *profile*.
-
-    Returns a :class:`FieldProfileDiagnostics` with collected errors and
-    warnings.  Validation is **fail-early** for structural issues but
-    **collects** as many semantic issues as practical.
-    """
+    """Run all semantic validation checks on *profile*."""
     diag = FieldProfileDiagnostics()
 
     # -- schema version --------------------------------------------------
-    if profile.schema_version != 1:
+    if profile.schema_version != 2:
         diag.errors.append(
-            f"Unsupported schema_version {profile.schema_version} (only 1 is supported)"
+            f"Unsupported schema_version {profile.schema_version} (only 2 is supported)"
         )
 
     # -- profile_id -------------------------------------------------------
@@ -339,87 +336,94 @@ def validate_field_profile(profile: FieldProfile) -> FieldProfileDiagnostics:
     # -- coordinate convention --------------------------------------------
     _validate_coordinate_convention(profile.coordinate_convention, diag)
 
-    # -- mandatory points -------------------------------------------------
-    if "origin" not in profile.points:
-        diag.errors.append("Missing required point: origin")
-    if "forward" not in profile.points:
-        diag.errors.append("Missing required point: forward")
+    # -- anchor -----------------------------------------------------------
+    anchor = profile.anchor
+    if anchor.lat < -90.0 or anchor.lat > 90.0:
+        diag.errors.append(f"anchor.lat {anchor.lat} out of range [-90, 90]")
+    if anchor.lon < -180.0 or anchor.lon > 180.0:
+        diag.errors.append(f"anchor.lon {anchor.lon} out of range [-180, 180]")
+    if not math.isfinite(anchor.field_x_m):
+        diag.errors.append(f"anchor.field_x_m is not finite: {anchor.field_x_m}")
+    if not math.isfinite(anchor.field_y_m):
+        diag.errors.append(f"anchor.field_y_m is not finite: {anchor.field_y_m}")
+
+    # -- centerline_points ------------------------------------------------
+    if len(profile.centerline_points) < 4:
+        diag.errors.append(
+            f"centerline_points must have at least 4 points, got {len(profile.centerline_points)}"
+        )
+    for i, pt in enumerate(profile.centerline_points):
+        if pt.lat < -90.0 or pt.lat > 90.0:
+            diag.errors.append(f"centerline_points[{i}].lat {pt.lat} out of range [-90, 90]")
+        if pt.lon < -180.0 or pt.lon > 180.0:
+            diag.errors.append(f"centerline_points[{i}].lon {pt.lon} out of range [-180, 180]")
 
     if not diag.ok:
         return diag
 
-    origin = profile.origin
-    forward = profile.forward
+    # -- centerline fitting sanity ---------------------------------------
+    # Compute ENU coordinates relative to anchor
+    enu_points: List[Tuple[float, float]] = []
+    for pt in profile.centerline_points:
+        dn, de = _gps_enu_deltas(anchor.lat, anchor.lon, pt.lat, pt.lon)
+        enu_points.append((dn, de))
 
-    # -- validate every point's numeric fields -----------------------------
-    for key, pt in profile.points.items():
-        _validate_point_numerics(key, pt, diag)
-
-    if not diag.ok:
-        return diag
-
-    # -- origin field_x / field_y should be 0 -----------------------------
-    if abs(origin.field_x_m) > MAX_ORIGIN_DEVIATION_M:
+    # All points must be at a meaningful distance from anchor
+    min_dist = min(
+        math.hypot(dn, de) for dn, de in enu_points
+    )
+    if min_dist < 0.5:
         diag.errors.append(
-            f"origin field_x_m is {origin.field_x_m}, far from 0 (max {MAX_ORIGIN_DEVIATION_M})"
+            f"Minimum centerline point distance from anchor is {min_dist:.2f} m (< 0.5 m)"
         )
-    elif abs(origin.field_x_m) > ORIGIN_EPSILON_M:
-        diag.warnings.append(
-            f"origin field_x_m is {origin.field_x_m}, normalised to 0.0"
-        )
-        origin.field_x_m = 0.0
-    if abs(origin.field_y_m) > MAX_ORIGIN_DEVIATION_M:
+
+    # Check that centerline points are roughly collinear (quick cosine check
+    # on farthest point direction)
+    farthest_idx = max(range(len(enu_points)), key=lambda i: math.hypot(*enu_points[i]))
+    farthest_n, farthest_e = enu_points[farthest_idx]
+    farthest_dist = math.hypot(farthest_n, farthest_e)
+    if farthest_dist > 0.0:
+        ref_n = farthest_n / farthest_dist
+        ref_e = farthest_e / farthest_dist
+        for i, (dn, de) in enumerate(enu_points):
+            d = math.hypot(dn, de)
+            if d < 0.01:
+                continue
+            dot = (dn * ref_n + de * ref_e) / d
+            if dot < 0.7:
+                diag.warnings.append(
+                    f"centerline_points[{i}] direction deviates from main axis (cos={dot:.2f})"
+                )
+
+    # -- field_geometry ---------------------------------------------------
+    fg = profile.field_geometry
+    if fg.lane_half_width_m <= 0.0:
+        diag.errors.append(f"field_geometry.lane_half_width_m must be > 0, got {fg.lane_half_width_m}")
+    if fg.drop_center_y_m <= 0.0:
+        diag.errors.append(f"field_geometry.drop_center_y_m must be > 0, got {fg.drop_center_y_m}")
+    if fg.recce_center_y_m <= 0.0:
+        diag.errors.append(f"field_geometry.recce_center_y_m must be > 0, got {fg.recce_center_y_m}")
+
+    # -- binding_policy ---------------------------------------------------
+    bp = profile.binding_policy
+    if bp.max_start_error_m <= 0.0:
+        diag.errors.append(f"binding_policy.max_start_error_m must be > 0, got {bp.max_start_error_m}")
+    if bp.warn_start_error_m <= 0.0:
+        diag.errors.append(f"binding_policy.warn_start_error_m must be > 0, got {bp.warn_start_error_m}")
+    if bp.warn_start_error_m >= bp.max_start_error_m:
         diag.errors.append(
-            f"origin field_y_m is {origin.field_y_m}, far from 0 (max {MAX_ORIGIN_DEVIATION_M})"
+            f"binding_policy.warn_start_error_m ({bp.warn_start_error_m}) "
+            f"must be < max_start_error_m ({bp.max_start_error_m})"
         )
-    elif abs(origin.field_y_m) > ORIGIN_EPSILON_M:
-        diag.warnings.append(
-            f"origin field_y_m is {origin.field_y_m}, normalised to 0.0"
-        )
-        origin.field_y_m = 0.0
-
-    # -- O→F GPS baseline + heading ---------------------------------------
-    baseline_m = _gps_distance_m(origin.lat, origin.lon, forward.lat, forward.lon)
-    if baseline_m < MIN_GPS_BASELINE_M:
+    if bp.max_centerline_residual_m <= 0.0:
+        diag.errors.append(f"binding_policy.max_centerline_residual_m must be > 0, got {bp.max_centerline_residual_m}")
+    if bp.warn_centerline_residual_m <= 0.0:
+        diag.errors.append(f"binding_policy.warn_centerline_residual_m must be > 0, got {bp.warn_centerline_residual_m}")
+    if bp.warn_centerline_residual_m >= bp.max_centerline_residual_m:
         diag.errors.append(
-            f"O→F GPS baseline {baseline_m:.2f} m is below minimum "
-            f"{MIN_GPS_BASELINE_M:.0f} m"
+            f"binding_policy.warn_centerline_residual_m ({bp.warn_centerline_residual_m}) "
+            f"must be < max_centerline_residual_m ({bp.max_centerline_residual_m})"
         )
-    elif baseline_m < RECOMMENDED_GPS_BASELINE_M:
-        diag.warnings.append(
-            f"O→F GPS baseline {baseline_m:.2f} m is below recommended "
-            f"{RECOMMENDED_GPS_BASELINE_M:.0f} m"
-        )
-
-    heading_rad = _gps_bearing_rad(origin.lat, origin.lon, forward.lat, forward.lon)
-
-    # -- forward declared-coordinate checks --------------------------------
-    if abs(forward.field_x_m) > FORWARD_X_TOLERANCE_M:
-        diag.errors.append(
-            f"forward field_x_m must be ≈0 (heading-aligned), got {forward.field_x_m}"
-        )
-    if forward.field_y_m <= 0.0:
-        diag.errors.append(
-            f"forward field_y_m must be > 0, got {forward.field_y_m}"
-        )
-    else:
-        # Check forward declared field_y vs GPS-derived baseline.
-        if abs(forward.field_y_m - baseline_m) > DECLARED_POSITION_TOLERANCE_M:
-            diag.errors.append(
-                f"forward field_y_m {forward.field_y_m} differs from GPS baseline "
-                f"{baseline_m:.2f} by {abs(forward.field_y_m - baseline_m):.2f} m "
-                f"(tolerance {DECLARED_POSITION_TOLERANCE_M} m)"
-            )
-
-    # -- left_check / right_check (optional) -------------------------------
-    left = profile.left_check
-    right = profile.right_check
-
-    if left is not None or right is not None:
-        _validate_lr_gps_geometry(profile, left, right, heading_rad, diag)
-
-    # -- GPS quality thresholds self-validation ---------------------------
-    _validate_gps_quality_thresholds(profile.gps_quality, diag)
 
     # -- unknown top-level keys → warning ----------------------------------
     if profile.extra:
@@ -428,11 +432,157 @@ def validate_field_profile(profile: FieldProfile) -> FieldProfileDiagnostics:
                 f"Unknown top-level key '{key}' (retained for forward compatibility)"
             )
 
-    # -- nested unknown keys → warning -------------------------------------
-    for msg in sorted(profile.nested_unknowns):
-        diag.warnings.append(f"Unknown field '{msg}' (retained for forward compatibility)")
-
     return diag
+
+
+# ---------------------------------------------------------------------------
+# centerline fitting
+# ---------------------------------------------------------------------------
+
+
+def fit_centerline(
+    anchor: AnchorPoint,
+    centerline_points: List[CenterlinePoint],
+    binding_policy: BindingPolicy,
+) -> CenterlineFitResult:
+    """Fit a straight centerline through anchor + centerline_points.
+
+    Uses ENU coordinates relative to anchor.  Direction is determined by
+    principal component analysis (PCA) of the centerline points, with the
+    sign chosen so that the positive direction points from anchor toward
+    the farthest centerline point.
+
+    Returns a :class:`CenterlineFitResult` with heading, residuals, and
+    diagnostics.
+    """
+    diag = FieldProfileDiagnostics()
+
+    if len(centerline_points) < 4:
+        diag.errors.append("At least 4 centerline_points required for fitting")
+        return CenterlineFitResult(
+            field_heading_yaw_rad=0.0,
+            field_heading_deg=0.0,
+            baseline_m=0.0,
+            point_residuals=[],
+            max_residual_m=0.0,
+            rms_residual_m=0.0,
+            diagnostics=diag,
+        )
+
+    # Convert all centerline points to ENU relative to anchor
+    enu_pts: List[Tuple[float, float]] = []
+    for pt in centerline_points:
+        dn, de = _gps_enu_deltas(anchor.lat, anchor.lon, pt.lat, pt.lon)
+        enu_pts.append((dn, de))
+
+    n = len(enu_pts)
+
+    # Compute centroid
+    mean_n = sum(dn for dn, de in enu_pts) / n
+    mean_e = sum(de for dn, de in enu_pts) / n
+
+    # Compute covariance (centered at anchor, not centroid, to ensure
+    # the line passes through the anchor).
+    # We fit a line through the origin (anchor) with direction (u_n, u_e).
+    # The direction is the dominant eigenvector of the scatter matrix.
+    cov_nn = sum(dn * dn for dn, de in enu_pts)
+    cov_ee = sum(de * de for dn, de in enu_pts)
+    cov_ne = sum(dn * de for dn, de in enu_pts)
+
+    # Eigenvalues of [[cov_nn, cov_ne], [cov_ne, cov_ee]]
+    trace = cov_nn + cov_ee
+    det = cov_nn * cov_ee - cov_ne * cov_ne
+    discriminant = max(0.0, trace * trace - 4.0 * det)
+    lambda1 = (trace + math.sqrt(discriminant)) / 2.0
+
+    # Eigenvector for lambda1 (dominant): (cov_nn - lambda1, cov_ne) is not
+    # the right approach.  Instead, solve (cov - lambda*I) * v = 0.
+    # For 2x2: direction is (cov_ne, lambda1 - cov_nn) or (lambda1 - cov_ee, cov_ne).
+    if abs(cov_ne) > 1e-15:
+        u_n = cov_ne
+        u_e = lambda1 - cov_nn
+    elif cov_nn >= cov_ee:
+        u_n = 1.0
+        u_e = 0.0
+    else:
+        u_n = 0.0
+        u_e = 1.0
+
+    # Normalize
+    norm = math.hypot(u_n, u_e)
+    if norm < 1e-15:
+        diag.errors.append("Centerline points are degenerate (zero scatter)")
+        return CenterlineFitResult(
+            field_heading_yaw_rad=0.0,
+            field_heading_deg=0.0,
+            baseline_m=0.0,
+            point_residuals=[],
+            max_residual_m=0.0,
+            rms_residual_m=0.0,
+            diagnostics=diag,
+        )
+    u_n /= norm
+    u_e /= norm
+
+    # Ensure direction points from anchor toward the farthest centerline point
+    farthest_idx = max(range(n), key=lambda i: math.hypot(*enu_pts[i]))
+    fn, fe = enu_pts[farthest_idx]
+    if u_n * fn + u_e * fe < 0.0:
+        u_n = -u_n
+        u_e = -u_e
+
+    # Heading: bearing from anchor in direction (u_n, u_e)
+    field_heading_yaw_rad = math.atan2(u_e, u_n)
+    field_heading_deg = math.degrees(field_heading_yaw_rad)
+
+    # Baseline: distance to farthest point
+    baseline_m = math.hypot(fn, fe)
+
+    # Compute perpendicular residuals for each point
+    point_residuals: List[float] = []
+    for dn, de in enu_pts:
+        # Project onto direction
+        along = dn * u_n + de * u_e
+        # Perpendicular residual = distance from point to line
+        perp = math.hypot(dn - along * u_n, de - along * u_e)
+        point_residuals.append(perp)
+
+    max_residual_m = max(point_residuals) if point_residuals else 0.0
+    rms_residual_m = math.sqrt(sum(r * r for r in point_residuals) / n) if n > 0 else 0.0
+
+    # Check against binding policy
+    if max_residual_m > binding_policy.max_centerline_residual_m:
+        diag.errors.append(
+            f"Max centerline residual {max_residual_m:.3f} m exceeds "
+            f"max_centerline_residual_m {binding_policy.max_centerline_residual_m:.3f} m"
+        )
+    elif max_residual_m > binding_policy.warn_centerline_residual_m:
+        diag.warnings.append(
+            f"Max centerline residual {max_residual_m:.3f} m exceeds "
+            f"warn_centerline_residual_m {binding_policy.warn_centerline_residual_m:.3f} m"
+        )
+
+    # Diagnostic-only: compare expected_field_y_m with projection
+    for i, pt in enumerate(centerline_points):
+        if pt.expected_field_y_m is not None:
+            dn, de = enu_pts[i]
+            along = dn * u_n + de * u_e
+            diff = abs(along - pt.expected_field_y_m)
+            if diff > 1.0:
+                diag.warnings.append(
+                    f"centerline_points[{i}] ({pt.name}) expected_field_y_m={pt.expected_field_y_m:.2f} "
+                    f"but fitted distance along line is {along:.2f} m (diff {diff:.2f} m)"
+                )
+
+    return CenterlineFitResult(
+        field_heading_yaw_rad=field_heading_yaw_rad,
+        field_heading_deg=field_heading_deg,
+        baseline_m=baseline_m,
+        point_residuals=point_residuals,
+        max_residual_m=max_residual_m,
+        rms_residual_m=rms_residual_m,
+        diagnostics=diag,
+    )
 
 
 # ===================================================================
@@ -445,19 +595,6 @@ def _require_str(data: Dict[str, Any], key: str) -> None:
         raise FieldProfileValidationError(
             FieldProfileDiagnostics(errors=[f"'{key}' is required and must be a non-empty string"])
         )
-
-
-def _require_str_in_obj(obj: Dict[str, Any], key: str, path: str) -> str:
-    if key not in obj:
-        raise FieldProfileValidationError(
-            FieldProfileDiagnostics(errors=[f"{path}.{key} is required but missing"])
-        )
-    val = obj[key]
-    if val is None or not isinstance(val, str) or not val.strip():
-        raise FieldProfileValidationError(
-            FieldProfileDiagnostics(errors=[f"{path}.{key} must be a non-empty string, got {type(val).__name__}"])
-        )
-    return str(val)
 
 
 def _require_float_in_obj(obj: Dict[str, Any], key: str, path: str) -> float:
@@ -485,7 +622,6 @@ def _require_float_in_obj(obj: Dict[str, Any], key: str, path: str) -> float:
 
 
 def _require_int_nonneg(val: Any, path: str) -> int:
-    """Require *val* to be int-castable, finite, and >= 0."""
     if val is None:
         raise FieldProfileValidationError(
             FieldProfileDiagnostics(errors=[f"{path} is None"])
@@ -515,7 +651,6 @@ def _require_int_nonneg(val: Any, path: str) -> int:
 
 
 def _require_float_nonneg(val: Any, path: str) -> float:
-    """Require *val* to be a finite float >= 0."""
     if val is None:
         raise FieldProfileValidationError(
             FieldProfileDiagnostics(errors=[f"{path} is None"])
@@ -538,9 +673,7 @@ def _require_float_nonneg(val: Any, path: str) -> float:
     return fval
 
 
-def _parse_coordinate_convention(
-    data: Dict[str, Any], nested_unknowns: List[str]
-) -> Dict[str, str]:
+def _parse_coordinate_convention(data: Dict[str, Any]) -> Dict[str, str]:
     if "coordinate_convention" in data and data["coordinate_convention"] is None:
         raise FieldProfileValidationError(
             FieldProfileDiagnostics(errors=["coordinate_convention is null"])
@@ -558,10 +691,6 @@ def _parse_coordinate_convention(
             "field_y_positive": "forward",
             "altitude_positive": "up",
         }
-    _CONV_KEYS = {"field_x_positive", "field_y_positive", "altitude_positive"}
-    for key in raw:
-        if key not in _CONV_KEYS:
-            nested_unknowns.append(f"coordinate_convention.{key}")
     return {
         "field_x_positive": str(raw.get("field_x_positive", "right")),
         "field_y_positive": str(raw.get("field_y_positive", "forward")),
@@ -569,9 +698,7 @@ def _parse_coordinate_convention(
     }
 
 
-def _parse_gps_quality_thresholds(
-    data: Dict[str, Any], nested_unknowns: List[str]
-) -> GpsQualityThresholds:
+def _parse_gps_quality_thresholds(data: Dict[str, Any]) -> GpsQualityThresholds:
     if "gps_quality" in data and data["gps_quality"] is None:
         raise FieldProfileValidationError(
             FieldProfileDiagnostics(errors=["gps_quality is null"])
@@ -585,11 +712,6 @@ def _parse_gps_quality_thresholds(
                 )
             )
         return GpsQualityThresholds()
-
-    _GQ_KEYS = {"min_fix_type", "min_satellites", "max_eph", "max_epv"}
-    for key in raw:
-        if key not in _GQ_KEYS:
-            nested_unknowns.append(f"gps_quality.{key}")
 
     min_fix_type = _require_int_nonneg(
         raw.get("min_fix_type", 3), "gps_quality.min_fix_type"
@@ -605,6 +727,50 @@ def _parse_gps_quality_thresholds(
         min_satellites=min_satellites,
         max_eph=max_eph,
         max_epv=max_epv,
+    )
+
+
+def _parse_field_geometry(data: Dict[str, Any]) -> FieldGeometry:
+    raw = data.get("field_geometry", None)
+    if raw is None or not isinstance(raw, dict):
+        if raw is not None:
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(
+                    errors=[f"field_geometry must be a JSON object, got {type(raw).__name__}"]
+                )
+            )
+        return FieldGeometry()
+
+    lane = float(raw.get("lane_half_width_m", 4.0))
+    drop_y = float(raw.get("drop_center_y_m", 30.0))
+    recce_y = float(raw.get("recce_center_y_m", 55.0))
+    return FieldGeometry(
+        lane_half_width_m=lane,
+        drop_center_y_m=drop_y,
+        recce_center_y_m=recce_y,
+        drop_area_y_min=raw.get("drop_area_y_min"),
+        drop_area_y_max=raw.get("drop_area_y_max"),
+        recce_area_y_min=raw.get("recce_area_y_min"),
+        recce_area_y_max=raw.get("recce_area_y_max"),
+    )
+
+
+def _parse_binding_policy(data: Dict[str, Any]) -> BindingPolicy:
+    raw = data.get("binding_policy", None)
+    if raw is None or not isinstance(raw, dict):
+        if raw is not None:
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(
+                    errors=[f"binding_policy must be a JSON object, got {type(raw).__name__}"]
+                )
+            )
+        return BindingPolicy()
+
+    return BindingPolicy(
+        max_start_error_m=float(raw.get("max_start_error_m", 3.0)),
+        warn_start_error_m=float(raw.get("warn_start_error_m", 1.5)),
+        max_centerline_residual_m=float(raw.get("max_centerline_residual_m", 2.5)),
+        warn_centerline_residual_m=float(raw.get("warn_centerline_residual_m", 1.5)),
     )
 
 
@@ -627,153 +793,3 @@ def _validate_coordinate_convention(
             diag.errors.append(
                 f"coordinate_convention.{key} must be '{expected_value}', got '{actual}'"
             )
-
-
-def _validate_gps_quality_thresholds(
-    t: GpsQualityThresholds, diag: FieldProfileDiagnostics
-) -> None:
-    """Self-validate the threshold values (they should have been parsed strictly,
-    but we double-check in case of programmatic construction)."""
-    for name, val in [("min_fix_type", t.min_fix_type), ("min_satellites", t.min_satellites)]:
-        if not isinstance(val, int) or val < 0:
-            diag.errors.append(f"gps_quality.{name} must be a non-negative integer, got {val}")
-    for name, val in [("max_eph", t.max_eph), ("max_epv", t.max_epv)]:
-        if not isinstance(val, (int, float)) or isinstance(val, bool) or not math.isfinite(float(val)) or float(val) < 0.0:
-            diag.errors.append(f"gps_quality.{name} must be finite and >= 0, got {val}")
-
-
-def _validate_point_numerics(
-    key: str, pt: FieldProfilePoint, diag: FieldProfileDiagnostics
-) -> None:
-    prefix = f"points.{key}"
-
-    for attr in ("lat", "lon", "field_x_m", "field_y_m"):
-        val = getattr(pt, attr)
-        if not math.isfinite(val):
-            diag.errors.append(f"{prefix}.{attr} is not finite: {val}")
-
-    if pt.lat < -90.0 or pt.lat > 90.0:
-        diag.errors.append(f"{prefix}.lat {pt.lat} out of range [-90, 90]")
-    if pt.lon < -180.0 or pt.lon > 180.0:
-        diag.errors.append(f"{prefix}.lon {pt.lon} out of range [-180, 180]")
-
-
-def _project_gps_to_field(
-    origin: FieldProfilePoint,
-    pt: FieldProfilePoint,
-    heading_rad: float,
-) -> Tuple[float, float]:
-    """Return (field_x_m, field_y_m) for *pt* by projecting its GPS position
-    relative to *origin* into the FIELD frame defined by *heading_rad*."""
-    d_north, d_east = _gps_enu_deltas(origin.lat, origin.lon, pt.lat, pt.lon)
-    cos_h = math.cos(heading_rad)
-    sin_h = math.sin(heading_rad)
-    field_x = -d_north * sin_h + d_east * cos_h
-    field_y = d_north * cos_h + d_east * sin_h
-    return field_x, field_y
-
-
-def _validate_lr_gps_geometry(
-    profile: FieldProfile,
-    left: Optional[FieldProfilePoint],
-    right: Optional[FieldProfilePoint],
-    heading_rad: float,
-    diag: FieldProfileDiagnostics,
-) -> None:
-    """Validate L/R using BOTH declared and GPS-derived FIELD coordinates.
-
-    Two-layer defence:
-    1. Declared field_x_m sign checks (catches JSON typos).
-    2. GPS-derived sign, cross-check, and proximity checks (authoritative).
-    """
-    origin = profile.origin
-
-    gps_left_x: Optional[float] = None
-    gps_left_y: Optional[float] = None
-    gps_right_x: Optional[float] = None
-    gps_right_y: Optional[float] = None
-
-    # -- Layer 1: declared sign checks -----------------------------------
-    if left is not None:
-        if left.field_x_m >= 0.0:
-            diag.errors.append(
-                f"left_check declared field_x_m must be negative, got {left.field_x_m}"
-            )
-    if right is not None:
-        if right.field_x_m <= 0.0:
-            diag.errors.append(
-                f"right_check declared field_x_m must be positive, got {right.field_x_m}"
-            )
-
-    # -- Layer 2: GPS-derived checks (authoritative) ---------------------
-    if left is not None:
-        gps_left_x, gps_left_y = _project_gps_to_field(origin, left, heading_rad)
-        if gps_left_x >= 0.0:
-            diag.errors.append(
-                f"GPS-derived left_check field_x is {gps_left_x:.3f}, must be negative"
-            )
-        # Cross-check declared vs GPS-derived.
-        if abs(gps_left_x - left.field_x_m) > DECLARED_POSITION_TOLERANCE_M:
-            diag.errors.append(
-                f"left_check declared field_x_m {left.field_x_m} differs from "
-                f"GPS-derived {gps_left_x:.2f} by "
-                f"{abs(gps_left_x - left.field_x_m):.2f} m "
-                f"(tolerance {DECLARED_POSITION_TOLERANCE_M} m)"
-            )
-        if abs(gps_left_y - left.field_y_m) > DECLARED_POSITION_TOLERANCE_M:
-            diag.errors.append(
-                f"left_check declared field_y_m {left.field_y_m} differs from "
-                f"GPS-derived {gps_left_y:.2f} by "
-                f"{abs(gps_left_y - left.field_y_m):.2f} m "
-                f"(tolerance {DECLARED_POSITION_TOLERANCE_M} m)"
-            )
-
-    if right is not None:
-        gps_right_x, gps_right_y = _project_gps_to_field(origin, right, heading_rad)
-        if gps_right_x <= 0.0:
-            diag.errors.append(
-                f"GPS-derived right_check field_x is {gps_right_x:.3f}, must be positive"
-            )
-        if abs(gps_right_x - right.field_x_m) > DECLARED_POSITION_TOLERANCE_M:
-            diag.errors.append(
-                f"right_check declared field_x_m {right.field_x_m} differs from "
-                f"GPS-derived {gps_right_x:.2f} by "
-                f"{abs(gps_right_x - right.field_x_m):.2f} m "
-                f"(tolerance {DECLARED_POSITION_TOLERANCE_M} m)"
-            )
-        if abs(gps_right_y - right.field_y_m) > DECLARED_POSITION_TOLERANCE_M:
-            diag.errors.append(
-                f"right_check declared field_y_m {right.field_y_m} differs from "
-                f"GPS-derived {gps_right_y:.2f} by "
-                f"{abs(gps_right_y - right.field_y_m):.2f} m "
-                f"(tolerance {DECLARED_POSITION_TOLERANCE_M} m)"
-            )
-
-    # -- GPS-level cross-checks when both exist ----------------------------
-    if left is not None and right is not None and gps_left_x is not None and gps_right_x is not None:
-        # GPS-level swap / same-side
-        if gps_left_x > 0.0 and gps_right_x < 0.0:
-            diag.errors.append(
-                "L/R GPS coordinates appear swapped (GPS-derived L.x > 0, R.x < 0)"
-            )
-        elif gps_left_x > 0.0 and gps_right_x > 0.0:
-            diag.errors.append(
-                "L/R GPS coordinates are on the same side (both GPS-derived x > 0)"
-            )
-        elif gps_left_x < 0.0 and gps_right_x < 0.0:
-            diag.errors.append(
-                "L/R GPS coordinates are on the same side (both GPS-derived x < 0)"
-            )
-        else:
-            # Signs are correct → proximity / degeneracy on GPS coords.
-            lr_dist = math.hypot(
-                gps_left_x - gps_right_x, gps_left_y - gps_right_y
-            )
-            if lr_dist < LR_COINCIDENT_M:
-                diag.errors.append(
-                    f"L/R GPS positions are coincident (distance {lr_dist:.6f} m)"
-                )
-            elif lr_dist < MIN_LR_GPS_BASELINE_M:
-                diag.errors.append(
-                    f"L/R GPS positions are too close ({lr_dist:.3f} m < {MIN_LR_GPS_BASELINE_M} m)"
-                )

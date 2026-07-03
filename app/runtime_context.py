@@ -181,46 +181,6 @@ class RuntimeContextBuilder:
             "confirmed": True,
         }
 
-    def confirm_field_heading(
-        self,
-        yaw_rad: float | None = None,
-        *,
-        drone: dict[str, object] | None = None,
-        source: str = "manual",
-    ) -> bool:
-        if yaw_rad is None and isinstance(drone, dict):
-            yaw_rad = self._float_or_none(drone.get("yaw"))
-        yaw = self._float_or_none(yaw_rad)
-        if yaw is None or not math.isfinite(yaw):
-            return False
-        if not isinstance(drone, dict) or not bool(drone.get("local_position_valid", False)):
-            return False
-        origin_x = self._float_or_none(drone.get("local_x"))
-        origin_y = self._float_or_none(drone.get("local_y"))
-        origin_z = self._float_or_none(drone.get("local_z"))
-        if origin_x is None or origin_y is None or origin_z is None:
-            return False
-        normalized = self._normalize_yaw(yaw)
-        now = time.time()
-        self.field_heading_yaw_rad = normalized
-        self.field_heading_time = now
-        self.field_heading_confirmed = True
-        self.field_heading_source = source
-        self.field_origin_local_x = origin_x
-        self.field_origin_local_y = origin_y
-        self.field_origin_local_z = origin_z
-        self.field_origin_time = now
-        self.field_origin_confirmed = True
-        self.logger.info(
-            "field heading confirmed yaw_rad=%s origin=(%s,%s,%s) source=%s",
-            normalized,
-            origin_x,
-            origin_y,
-            origin_z,
-            source,
-        )
-        return True
-
     def confirm_field_reference(
         self,
         field_heading_yaw_rad: float,

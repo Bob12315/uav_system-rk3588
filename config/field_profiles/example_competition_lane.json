@@ -1,51 +1,60 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "profile_id": "example_competition_lane",
-  "name": "Example Competition Lane",
-  "created_at": "2025-01-01T00:00:00Z",
+  "name": "Example Competition Lane (Centerline)",
   "coordinate_convention": {
     "field_x_positive": "right",
     "field_y_positive": "forward",
     "altitude_positive": "up"
   },
-  "points": {
-    "origin": {
-      "name": "O_takeoff_center",
-      "role": "origin",
-      "lat": 34.00000000,
-      "lon": 108.00000000,
-      "field_x_m": 0.0,
-      "field_y_m": 0.0
-    },
-    "forward": {
-      "name": "F_far_center",
-      "role": "forward",
-      "lat": 34.00030000,
-      "lon": 108.00000000,
-      "field_x_m": 0.0,
-      "field_y_m": 33.36
-    },
-    "left_check": {
-      "name": "L_left_check",
-      "role": "left_check",
-      "lat": 34.00015000,
-      "lon": 107.99998000,
-      "field_x_m": -1.84,
-      "field_y_m": 16.68
-    },
-    "right_check": {
-      "name": "R_right_check",
-      "role": "right_check",
-      "lat": 34.00015000,
-      "lon": 108.00002000,
-      "field_x_m": 1.84,
-      "field_y_m": 16.68
-    }
+  "anchor": {
+    "name": "takeoff_anchor",
+    "lat": 34.0,
+    "lon": 108.0,
+    "field_x_m": 0.0,
+    "field_y_m": 0.0
   },
+  "centerline_points": [
+    {
+      "name": "CL_1",
+      "lat": 34.000075,
+      "lon": 108.0,
+      "expected_field_y_m": 8.34
+    },
+    {
+      "name": "CL_2",
+      "lat": 34.00015,
+      "lon": 108.0,
+      "expected_field_y_m": 16.68
+    },
+    {
+      "name": "CL_3",
+      "lat": 34.000225,
+      "lon": 108.0,
+      "expected_field_y_m": 25.02
+    },
+    {
+      "name": "CL_4",
+      "lat": 34.0003,
+      "lon": 108.0,
+      "expected_field_y_m": 33.36
+    }
+  ],
   "gps_quality": {
     "min_fix_type": 3,
     "min_satellites": 10,
     "max_eph": 2.5,
     "max_epv": 5.0
+  },
+  "field_geometry": {
+    "lane_half_width_m": 4.0,
+    "drop_center_y_m": 30.0,
+    "recce_center_y_m": 55.0
+  },
+  "binding_policy": {
+    "max_start_error_m": 3.0,
+    "warn_start_error_m": 1.5,
+    "max_centerline_residual_m": 2.5,
+    "warn_centerline_residual_m": 1.5
   }
 }

@@ -322,21 +322,13 @@ def create_app(runner, config: UiConfig) -> FastAPI:
         except Exception as exc:
             return {"ok": False, "message": str(exc)}
 
+    # -- deprecated: legacy field-heading confirm (removed, centerline-only) ---
     @app.post("/api/field-heading/confirm")
     def confirm_field_heading():
-        try:
-            result = runner.confirm_field_heading_manual()
-            audit.append("FIELD_HEADING", "confirm", result.ok, result.message)
-            return {
-                "ok": result.ok,
-                "message": result.message,
-                "field_heading": runner.field_heading_status(),
-            }
-        except Exception as exc:
-            return {"ok": False, "message": str(exc)}
+        raise HTTPException(status_code=410, detail="field-heading/confirm removed — use /api/field-profiles/{id}/bind-current")
 
     # ------------------------------------------------------------------
-    # Field Reference API (Phase 4C-1) — coexists with legacy field-heading
+    # Field Reference API — centerline only
     # ------------------------------------------------------------------
 
     @app.get("/api/field-reference/status")
@@ -346,40 +338,26 @@ def create_app(runner, config: UiConfig) -> FastAPI:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    # -- deprecated: marker/set/manual routes (removed, centerline-only) -----
     @app.post("/api/field-reference/mark-origin")
     def field_reference_mark_origin():
-        try:
-            return runner.field_reference_mark_origin()
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+        raise HTTPException(status_code=410, detail="mark-origin removed — use /api/field-profiles/{id}/bind-current")
 
     @app.post("/api/field-reference/mark-forward")
     def field_reference_mark_forward():
-        try:
-            return runner.field_reference_mark_forward()
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+        raise HTTPException(status_code=410, detail="mark-forward removed — use /api/field-profiles/{id}/bind-current")
 
     @app.post("/api/field-reference/use-current-yaw")
     def field_reference_use_current_yaw():
-        try:
-            return runner.field_reference_use_current_yaw()
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+        raise HTTPException(status_code=410, detail="use-current-yaw removed — yaw is display-only with centerline profiles")
 
     @app.post("/api/field-reference/set-manual-heading")
-    def field_reference_set_manual_heading(request: ManualHeadingRequest):
-        try:
-            return runner.field_reference_set_manual_heading(request.yaw_deg)
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+    def field_reference_set_manual_heading():
+        raise HTTPException(status_code=410, detail="set-manual-heading removed — heading comes from centerline profile only")
 
     @app.post("/api/field-reference/confirm")
     def field_reference_confirm():
-        try:
-            return runner.field_reference_confirm()
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+        raise HTTPException(status_code=410, detail="confirm removed — bind-current auto-confirms the reference")
 
     @app.post("/api/field-reference/reset")
     def field_reference_reset():

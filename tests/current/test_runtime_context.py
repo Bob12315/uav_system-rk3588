@@ -1,3 +1,4 @@
+"""Tests for RuntimeContextBuilder field-reference bridge methods."""
 from __future__ import annotations
 
 import math
@@ -7,159 +8,254 @@ import pytest
 from app.runtime_context import RuntimeContextBuilder
 
 
-def test_build_action_context_includes_new_fields() -> None:
-    builder = RuntimeContextBuilder()
-    snapshot: dict[str, object] = {
-        "drone": {"armed": False, "attitude_valid": True, "yaw": 1.0},
-        "gimbal": {"pitch": 0.1, "yaw": 0.2},
-        "link": {"connected": True},
-        "health": {"hold_reason": "ok"},
-        "command": {"vx_cmd": 0.5},
-        "mission_detail": {"name": "test"},
-    }
-    context = builder.build_action_context(snapshot)
-
-    # new pass-through fields
-    assert context["gimbal"] == {"pitch": 0.1, "yaw": 0.2}
-    assert context["link"] == {"connected": True}
-    assert context["health"] == {"hold_reason": "ok"}
-    assert context["command"] == {"vx_cmd": 0.5}
-    assert context["mission_detail"] == {"name": "test"}
-    assert context["pre_arm_yaw_rad"] == pytest.approx(1.0)
-    assert context["field_heading_confirmed"] is False
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
 
 
-def test_build_action_context_new_fields_default_to_empty_dict() -> None:
-    builder = RuntimeContextBuilder()
-    context = builder.build_action_context({})
-
-    assert context["gimbal"] == {}
-    assert context["link"] == {}
-    assert context["health"] == {}
-    assert context["command"] == {}
-    assert context["mission_detail"] == {}
-    assert context["field_heading_confirmed"] is False
+def _builder():
+    return RuntimeContextBuilder()
 
 
-def test_build_action_context_retains_existing_fields() -> None:
-    builder = RuntimeContextBuilder()
-    snapshot: dict[str, object] = {
-        "drone": {
-            "armed": False,
-            "yaw": 1.5,
-            "local_x": 1.0,
-            "local_y": 2.0,
-            "local_z": -3.0,
-            "relative_altitude": 5.0,
-            "control_allowed": True,
-        },
-        "perception": {
-            "target_valid": True,
-            "tracking_state": "locked",
-            "track_id": 7,
-            "ex": 0.01,
-            "ey": -0.02,
-        },
-        "scene": {"detections": []},
-    }
-    context = builder.build_action_context(snapshot)
-
-    # existing field checks
-    assert context["local_position"] == {"x": 1.0, "y": 2.0, "z": -3.0}
-    assert context["target_valid"] is True
-    assert context["tracking_state"] == "locked"
-    assert context["track_id"] == 7
-    assert context["ex_cam"] == 0.01
-    assert context["ey_cam"] == -0.02
-    assert context["target_locked"] is True
-    assert context["control_allowed"] is True
-    assert context["relative_altitude"] == 5.0
-    assert "timestamp" in context
-    assert "drone" in context
-    assert "scene" in context
-
-
-def test_disarmed_valid_attitude_records_pre_arm_yaw() -> None:
-    builder = RuntimeContextBuilder()
-
-    context = builder.build_action_context(
-        {"drone": {"armed": False, "attitude_valid": True, "yaw": math.pi + 0.25}}
+def _confirm(builder, yaw=0.5, ox=10.0, oy=20.0, oz=-1.0, source="test", ts=1000.0):
+    return builder.confirm_field_reference(
+        field_heading_yaw_rad=yaw,
+        origin_local_x=ox,
+        origin_local_y=oy,
+        origin_local_z=oz,
+        source=source,
+        timestamp=ts,
     )
 
-    assert context["pre_arm_yaw_rad"] == pytest.approx(-math.pi + 0.25)
-    assert builder.pre_arm_yaw_rad == pytest.approx(-math.pi + 0.25)
+
+# ---------------------------------------------------------------------------
+# confirm_field_reference
+# ---------------------------------------------------------------------------
 
 
-def test_confirm_field_heading_records_normalized_yaw() -> None:
-    builder = RuntimeContextBuilder()
+def test_confirm_sets_confirmed_flags():
+    b = _builder()
+    assert not b.field_heading_confirmed
+    assert not b.field_origin_confirmed
 
-    ok = builder.confirm_field_heading(
-        yaw_rad=math.pi + 0.1,
-        drone={"local_position_valid": True, "local_x": 10.0, "local_y": 20.0, "local_z": -1.0},
+    ok = _confirm(b)
+    assert ok is True
+    assert b.field_heading_confirmed is True
+    assert b.field_origin_confirmed is True
+
+
+def test_confirm_stores_values():
+    b = _builder()
+    _confirm(b, yaw=0.8, ox=1.0, oy=2.0, oz=-3.0, source="unit_test", ts=1234.5)
+    assert b.field_heading_yaw_rad == pytest.approx(0.8)
+    assert b.field_heading_source == "unit_test"
+    assert b.field_heading_time == pytest.approx(1234.5)
+    assert b.field_origin_local_x == pytest.approx(1.0)
+    assert b.field_origin_local_y == pytest.approx(2.0)
+    assert b.field_origin_local_z == pytest.approx(-3.0)
+    assert b.field_origin_time == pytest.approx(1234.5)
+
+
+def test_confirm_normalizes_yaw():
+    b = _builder()
+    _confirm(b, yaw=3.0 * math.pi)  # 3π rounds to π
+    assert b.field_heading_yaw_rad == pytest.approx(math.pi, abs=1e-9)
+
+
+def test_confirm_accepts_none_origin_z():
+    b = _builder()
+    ok = b.confirm_field_reference(
+        field_heading_yaw_rad=0.3,
+        origin_local_x=5.0,
+        origin_local_y=6.0,
+        origin_local_z=None,
         source="test",
     )
-    context = builder.build_action_context({"drone": {}})
-
     assert ok is True
-    assert builder.field_heading_yaw_rad == pytest.approx(-math.pi + 0.1)
-    assert context["field_heading_yaw_rad"] == pytest.approx(-math.pi + 0.1)
-    assert context["field_heading_confirmed"] is True
-    assert context["field_heading_source"] == "test"
-    assert context["field_origin_confirmed"] is True
-    assert context["field_origin_local_x"] == pytest.approx(10.0)
-    assert context["field_origin_local_y"] == pytest.approx(20.0)
-    assert context["field_origin_local_z"] == pytest.approx(-1.0)
+    assert b.field_origin_local_z is None
 
 
-def test_confirm_field_heading_rejects_invalid_yaw() -> None:
-    builder = RuntimeContextBuilder()
-
-    assert builder.confirm_field_heading(yaw_rad=float("nan")) is False
-    assert builder.field_heading_yaw_rad is None
-
-
-def test_confirm_field_heading_rejects_invalid_local_position() -> None:
-    builder = RuntimeContextBuilder()
-
-    assert builder.confirm_field_heading(yaw_rad=0.5, drone={"local_position_valid": False}) is False
-    assert builder.field_heading_yaw_rad is None
-    assert builder.field_origin_confirmed is False
+def test_confirm_rejects_none_yaw():
+    b = _builder()
+    ok = b.confirm_field_reference(
+        field_heading_yaw_rad=None,
+        origin_local_x=1.0,
+        origin_local_y=2.0,
+    )
+    assert ok is False
+    assert b.field_heading_confirmed is False
 
 
-def test_field_transform_heading_zero_and_action_context_position() -> None:
-    builder = RuntimeContextBuilder()
-    drone = {"local_position_valid": True, "local_x": 10.0, "local_y": 20.0, "local_z": -2.0}
-    assert builder.confirm_field_heading(yaw_rad=0.0, drone=drone, source="test")
-
-    assert builder.local_to_field_xy(10.0, 20.0) == pytest.approx((0.0, 0.0))
-    assert builder.local_to_field_xy(11.0, 20.0) == pytest.approx((0.0, 1.0))
-    assert builder.local_to_field_xy(10.0, 21.0) == pytest.approx((1.0, 0.0))
-    assert builder.field_to_local_xy(1.0, 2.0) == pytest.approx((12.0, 21.0))
-
-    context = builder.build_action_context({"drone": drone})
-    assert context["local_position"] == {"x": 10.0, "y": 20.0, "z": -2.0}
-    assert context["field_position"]["x"] == pytest.approx(0.0)
-    assert context["field_position"]["y"] == pytest.approx(0.0)
-    assert context["field_position"]["z"] == pytest.approx(-2.0)
-    assert context["field_transform"]["convention"] == "field_y_forward_field_x_right"
-    assert context["field_transform"]["confirmed"] is True
+def test_confirm_rejects_nan_yaw():
+    b = _builder()
+    ok = b.confirm_field_reference(
+        field_heading_yaw_rad=float("nan"),
+        origin_local_x=1.0,
+        origin_local_y=2.0,
+    )
+    assert ok is False
 
 
-def test_field_transform_heading_ninety_degrees_is_invertible() -> None:
-    builder = RuntimeContextBuilder()
-    drone = {"local_position_valid": True, "local_x": 10.0, "local_y": 20.0, "local_z": -1.0}
-    assert builder.confirm_field_heading(yaw_rad=math.pi / 2.0, drone=drone)
+def test_confirm_rejects_none_origin():
+    b = _builder()
+    ok = b.confirm_field_reference(
+        field_heading_yaw_rad=0.5,
+        origin_local_x=None,
+        origin_local_y=2.0,
+    )
+    assert ok is False
 
-    field = builder.local_to_field_xy(10.0, 21.0)
-    assert field == pytest.approx((0.0, 1.0))
-    assert builder.field_to_local_xy(*field) == pytest.approx((10.0, 21.0))
+
+def test_no_old_confirm_field_heading():
+    """The deprecated confirm_field_heading() method must not exist."""
+    b = _builder()
+    assert not hasattr(b, "confirm_field_heading"), (
+        "Old confirm_field_heading(yaw_rad, drone, source) must not exist"
+    )
 
 
-def test_arm_heading_prefers_pre_arm_yaw_on_armed_transition() -> None:
-    builder = RuntimeContextBuilder()
+# ---------------------------------------------------------------------------
+# field_transform_ready
+# ---------------------------------------------------------------------------
 
-    builder.build_action_context({"drone": {"armed": False, "attitude_valid": True, "yaw": 0.4}})
-    context = builder.build_action_context({"drone": {"armed": True, "attitude_valid": True, "yaw": 1.2}})
 
-    assert context["arm_heading_yaw_rad"] == pytest.approx(0.4)
-    assert "arm_heading_fallback" not in context
+def test_transform_not_ready_initially():
+    b = _builder()
+    assert b.field_transform_ready() is False
+
+
+def test_transform_ready_after_confirm():
+    b = _builder()
+    _confirm(b)
+    assert b.field_transform_ready() is True
+
+
+def test_transform_not_ready_missing_origin():
+    b = _builder()
+    b.field_heading_confirmed = True
+    b.field_heading_yaw_rad = 0.5
+    assert b.field_transform_ready() is False  # origin not confirmed
+
+
+def test_transform_not_ready_missing_heading():
+    b = _builder()
+    b.field_origin_confirmed = True
+    b.field_origin_local_x = 1.0
+    b.field_origin_local_y = 2.0
+    assert b.field_transform_ready() is False  # heading not confirmed
+
+
+# ---------------------------------------------------------------------------
+# field_transform dict
+# ---------------------------------------------------------------------------
+
+
+def test_field_transform_dict():
+    b = _builder()
+    _confirm(b, yaw=0.7, ox=3.0, oy=4.0, oz=-5.0)
+    tf = b.field_transform()
+    assert tf["heading_yaw_rad"] == pytest.approx(0.7)
+    assert tf["origin_local_x"] == pytest.approx(3.0)
+    assert tf["origin_local_y"] == pytest.approx(4.0)
+    assert tf["origin_local_z"] == pytest.approx(-5.0)
+    assert tf["confirmed"] is True
+    assert tf["convention"] == "field_y_forward_field_x_right"
+
+
+# ---------------------------------------------------------------------------
+# local_to_field_xy / field_to_local_xy
+# ---------------------------------------------------------------------------
+
+
+def test_local_to_field_xy_yaw_zero():
+    b = _builder()
+    _confirm(b, yaw=0.0, ox=10.0, oy=20.0)
+    # Point 10 m north of origin: local_x=20.0, local_y=20.0
+    result = b.local_to_field_xy(20.0, 20.0)
+    assert result is not None
+    fx, fy = result
+    assert fx == pytest.approx(0.0)   # no east offset → field_x=0
+    assert fy == pytest.approx(10.0)  # 10 m north → field_y=10
+
+
+def test_field_to_local_xy_yaw_zero():
+    b = _builder()
+    _confirm(b, yaw=0.0, ox=10.0, oy=20.0)
+    result = b.field_to_local_xy(0.0, 10.0)
+    assert result is not None
+    ln, le = result
+    assert ln == pytest.approx(20.0)
+    assert le == pytest.approx(20.0)
+
+
+def test_local_to_field_xy_not_ready():
+    b = _builder()
+    assert b.local_to_field_xy(1.0, 2.0) is None
+
+
+def test_field_to_local_xy_not_ready():
+    b = _builder()
+    assert b.field_to_local_xy(1.0, 2.0) is None
+
+
+def test_local_to_field_xy_invalid_input():
+    b = _builder()
+    _confirm(b)
+    assert b.local_to_field_xy(None, 2.0) is None
+    assert b.local_to_field_xy(1.0, None) is None
+
+
+# ---------------------------------------------------------------------------
+# field_position_from_drone
+# ---------------------------------------------------------------------------
+
+
+def test_field_position_from_valid_drone():
+    b = _builder()
+    _confirm(b, yaw=0.0, ox=0.0, oy=0.0)
+    # Drone at 0 north, 10 east → field_x=10, field_y=0 with yaw=0
+    drone = {"local_position_valid": True, "local_x": 0.0, "local_y": 10.0, "local_z": -3.0}
+    result = b.field_position_from_drone(drone)
+    assert result is not None
+    assert result["x"] == pytest.approx(10.0)
+    assert result["y"] == pytest.approx(0.0)
+    assert result["z"] == pytest.approx(-3.0)
+    assert result["source"] == "field_heading"
+    assert result["confirmed"] is True
+
+
+def test_field_position_from_invalid_drone():
+    b = _builder()
+    _confirm(b)
+    drone = {"local_position_valid": False, "local_x": 0.0, "local_y": 0.0, "local_z": 0.0}
+    assert b.field_position_from_drone(drone) is None
+
+
+def test_field_position_from_nondict():
+    b = _builder()
+    _confirm(b)
+    assert b.field_position_from_drone(None) is None
+
+
+# ---------------------------------------------------------------------------
+# clear_field_heading
+# ---------------------------------------------------------------------------
+
+
+def test_clear_field_heading():
+    b = _builder()
+    _confirm(b)
+    assert b.field_heading_confirmed is True
+
+    b.clear_field_heading()
+
+    assert b.field_heading_confirmed is False
+    assert b.field_origin_confirmed is False
+    assert b.field_heading_yaw_rad is None
+    assert b.field_heading_source == ""
+    assert b.field_heading_time is None
+    assert b.field_origin_local_x is None
+    assert b.field_origin_local_y is None
+    assert b.field_origin_local_z is None
+    assert b.field_origin_time is None
+    assert b.field_transform_ready() is False

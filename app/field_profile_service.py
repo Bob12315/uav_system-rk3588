@@ -4,6 +4,8 @@ This service is a **pure-logic** layer.  It does NOT write to
 RuntimeContext, does NOT confirm/freeze, and does NOT send MAVLink
 commands.  Callers receive a :class:`BindResult` and decide what to do
 with it.
+
+Schema v2: takeoff anchor + centerline profile only.
 """
 
 from __future__ import annotations
@@ -15,16 +17,18 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from .field_profile import (
+    CenterlineFitResult,
+    CenterlinePoint,
     FieldProfile,
     FieldProfileDiagnostics,
-    FieldProfilePoint,
     FieldProfileValidationError,
     GpsQuality,
     GpsQualityThresholds,
+    fit_centerline,
     load_field_profile_json,
     validate_field_profile,
 )
-from .field_reference import (  # noqa: E501  (Phase B private import)
+from .field_reference import (
     _gps_bearing_rad,
     _gps_distance_m,
     _gps_enu_deltas,
@@ -93,26 +97,33 @@ def _safe_int_noneg(value: Any, label: str) -> Tuple[bool, int, Optional[str]]:
 
 
 # ---------------------------------------------------------------------------
+# centerline residual row
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CenterlineResidualRow:
+    """Per-point residual info for the bind result."""
+
+    name: str
+    lat: float
+    lon: float
+    residual_m: float
+    expected_field_y_m: Optional[float] = None
+    fitted_field_y_m: Optional[float] = None
+
+
+# ---------------------------------------------------------------------------
 # bind result
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class CheckPointResult:
-    """Computed check-point position at bind time."""
-
-    name: str
-    role: str
-    expected_field_x_m: float
-    expected_field_y_m: float
-
-
-@dataclass
 class BindResult:
-    """Result of :meth:`FieldProfileService.bind_profile_to_current_vehicle`.
+    """Result of :meth:`FieldProfileService.takeoff_anchor_centerline`.
 
-    *ok* is ``True`` when GPS quality passes and geometry is computable.
-    The caller is responsible for confirming / freezing / sending.
+    *ok* is ``True`` when GPS quality passes, start error is within bounds,
+    and centerline fitting succeeds within residual limits.
     """
 
     ok: bool
@@ -122,14 +133,18 @@ class BindResult:
     origin_local_z_m: Optional[float] = None
     field_heading_yaw_rad: Optional[float] = None
     field_heading_deg: Optional[float] = None
-    current_field_x_m: Optional[float] = None
-    current_field_y_m: Optional[float] = None
     baseline_m: Optional[float] = None
+    current_start_error_m: Optional[float] = None
+    """Distance from current GPS to anchor GPS (diagnostic only)."""
+    yaw_error_deg: Optional[float] = None
+    """Difference between current yaw and field heading (display only)."""
     diagnostics: FieldProfileDiagnostics = field(default_factory=FieldProfileDiagnostics)
     warnings: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
     gps_quality: Optional[GpsQuality] = None
-    check_points: List[CheckPointResult] = field(default_factory=list)
+    centerline_residuals: List[CenterlineResidualRow] = field(default_factory=list)
+    max_residual_m: Optional[float] = None
+    rms_residual_m: Optional[float] = None
     timestamp: Optional[float] = None
 
 
@@ -225,25 +240,31 @@ class FieldProfileService:
         return validate_field_profile(profile)
 
     # ------------------------------------------------------------------
-    # binding
+    # binding — centerline only
     # ------------------------------------------------------------------
 
     @staticmethod
-    def bind_profile_to_current_vehicle(
+    def takeoff_anchor_centerline(
         profile: FieldProfile,
         current_lat: Any = None,
         current_lon: Any = None,
         current_local_n_m: Any = None,
         current_local_e_m: Any = None,
         current_local_z_m: Any = None,
+        current_yaw_rad: Any = None,
         gps_fix_type: Any = None,
         satellites_visible: Any = None,
         gps_eph: Any = None,
         gps_epv: Any = None,
         timestamp: Optional[float] = None,
     ) -> BindResult:
-        """Compute a bind candidate.  All inputs are safely parsed — no
-        TypeError or ValueError will leak.
+        """Bind a centerline profile to the current vehicle takeoff position.
+
+        Key design rules:
+        - **origin_local = current LOCAL_NED directly** (never derived from GPS).
+        - **current GPS is only used for start_error** (distance to anchor).
+        - **field_heading comes from centerline fitting** (not from yaw/GPS bearing).
+        - **yaw_error is display-only** (never affects heading).
         """
         errors: List[str] = []
         warnings: List[str] = []
@@ -261,6 +282,7 @@ class FieldProfileService:
             )
 
         thresholds: GpsQualityThresholds = profile.gps_quality
+        binding_policy = profile.binding_policy
 
         # -- safe-parse current_lat ----------------------------------------
         ok_lat, f_lat, err_lat = _safe_float(current_lat, "current_lat")
@@ -287,6 +309,12 @@ class FieldProfileService:
         if not ok_z:
             errors.append(err_z)
 
+        # -- safe-parse current_yaw (optional, for display) ----------------
+        yaw_ok = False
+        f_yaw = 0.0
+        if current_yaw_rad is not None:
+            yaw_ok, f_yaw, _ = _safe_float(current_yaw_rad, "current_yaw_rad")
+
         # -- safe-parse gps_fix_type (must be non-negative integer) ---------
         ok_fix, fix_int, err_fix = _safe_int_noneg(gps_fix_type, "gps_fix_type")
         if not ok_fix:
@@ -297,7 +325,7 @@ class FieldProfileService:
         if not ok_sats:
             errors.append(err_sats)
 
-        # -- safe-parse gps_eph / gps_epv (must be finite >= 0, or None) ---
+        # -- safe-parse gps_eph / gps_epv ----------------------------------
         eph_ok: bool = False
         eph_val: float = 0.0
         if gps_eph is None:
@@ -342,49 +370,91 @@ class FieldProfileService:
                 gps_quality=gps_quality, timestamp=timestamp,
             )
 
-        # -- geometry (all inputs now known-safe) --------------------------
-        origin = profile.origin
-        forward = profile.forward
-
-        d_north, d_east = _gps_enu_deltas(origin.lat, origin.lon, f_lat, f_lon)
-
-        origin_local_n_m_val = f_n - d_north
-        origin_local_e_m_val = f_e - d_east
+        # -- origin_local = current LOCAL_NED directly ---------------------
+        # This is the KEY design rule: GPS does NOT redefine the origin.
+        origin_local_n_m_val = f_n
+        origin_local_e_m_val = f_e
         origin_local_z_m_val = f_z
 
-        heading_rad = _gps_bearing_rad(origin.lat, origin.lon, forward.lat, forward.lon)
-        heading_deg = math.degrees(heading_rad)
+        # -- compute current_start_error_m (GPS to anchor, check only) -----
+        anchor = profile.anchor
+        start_error_m = _gps_distance_m(anchor.lat, anchor.lon, f_lat, f_lon)
 
-        cos_h = math.cos(heading_rad)
-        sin_h = math.sin(heading_rad)
-        current_field_x_m = -d_north * sin_h + d_east * cos_h
-        current_field_y_m = d_north * cos_h + d_east * sin_h
+        if start_error_m > binding_policy.max_start_error_m:
+            errors.append(
+                f"Current GPS is {start_error_m:.2f} m from anchor GPS, "
+                f"exceeds max_start_error_m {binding_policy.max_start_error_m:.2f} m"
+            )
+        elif start_error_m > binding_policy.warn_start_error_m:
+            warnings.append(
+                f"Current GPS is {start_error_m:.2f} m from anchor GPS, "
+                f"exceeds warn_start_error_m {binding_policy.warn_start_error_m:.2f} m"
+            )
 
-        baseline_m = _gps_distance_m(origin.lat, origin.lon, forward.lat, forward.lon)
+        # -- centerline fitting --------------------------------------------
+        fit_result = fit_centerline(anchor, profile.centerline_points, binding_policy)
+        fit_diag = fit_result.diagnostics
 
-        check_points: List[CheckPointResult] = []
-        for role in ("left_check", "right_check"):
-            pt = profile.points.get(role)
-            if pt is not None:
-                check_points.append(CheckPointResult(
-                    name=pt.name, role=pt.role,
-                    expected_field_x_m=pt.field_x_m,
-                    expected_field_y_m=pt.field_y_m,
-                ))
+        if not fit_diag.ok:
+            errors.extend(fit_diag.errors)
+        warnings.extend(fit_diag.warnings)
+
+        if errors:
+            return BindResult(
+                ok=False, profile_id=profile.profile_id,
+                origin_local_n_m=origin_local_n_m_val,
+                origin_local_e_m=origin_local_e_m_val,
+                origin_local_z_m=origin_local_z_m_val,
+                current_start_error_m=start_error_m,
+                diagnostics=FieldProfileDiagnostics(errors=list(errors), warnings=list(warnings)),
+                warnings=list(warnings), errors=list(errors),
+                gps_quality=gps_quality,
+                max_residual_m=fit_result.max_residual_m,
+                rms_residual_m=fit_result.rms_residual_m,
+                timestamp=timestamp,
+            )
+
+        # -- compute yaw_error (display only) ------------------------------
+        yaw_error_deg: Optional[float] = None
+        if yaw_ok:
+            yaw_error_deg = math.degrees(
+                _normalize_angle(f_yaw - fit_result.field_heading_yaw_rad)
+            )
+
+        # -- build residual rows -------------------------------------------
+        residual_rows: List[CenterlineResidualRow] = []
+        for i, pt in enumerate(profile.centerline_points):
+            enu_n, enu_e = _gps_enu_deltas(anchor.lat, anchor.lon, pt.lat, pt.lon)
+            cos_h = math.cos(fit_result.field_heading_yaw_rad)
+            sin_h = math.sin(fit_result.field_heading_yaw_rad)
+            along_track = enu_n * cos_h + enu_e * sin_h
+            residual_rows.append(CenterlineResidualRow(
+                name=pt.name, lat=pt.lat, lon=pt.lon,
+                residual_m=fit_result.point_residuals[i] if i < len(fit_result.point_residuals) else 0.0,
+                expected_field_y_m=pt.expected_field_y_m,
+                fitted_field_y_m=along_track,
+            ))
 
         return BindResult(
             ok=True, profile_id=profile.profile_id,
             origin_local_n_m=origin_local_n_m_val,
             origin_local_e_m=origin_local_e_m_val,
             origin_local_z_m=origin_local_z_m_val,
-            field_heading_yaw_rad=heading_rad,
-            field_heading_deg=heading_deg,
-            current_field_x_m=current_field_x_m,
-            current_field_y_m=current_field_y_m,
-            baseline_m=baseline_m,
+            field_heading_yaw_rad=fit_result.field_heading_yaw_rad,
+            field_heading_deg=fit_result.field_heading_deg,
+            baseline_m=fit_result.baseline_m,
+            current_start_error_m=start_error_m,
+            yaw_error_deg=yaw_error_deg,
             diagnostics=FieldProfileDiagnostics(errors=[], warnings=list(warnings)),
             warnings=list(warnings), errors=[],
             gps_quality=gps_quality,
-            check_points=check_points,
+            centerline_residuals=residual_rows,
+            max_residual_m=fit_result.max_residual_m,
+            rms_residual_m=fit_result.rms_residual_m,
             timestamp=timestamp,
         )
+
+
+def _normalize_angle(rad: float) -> float:
+    """Normalize angle to (-pi, pi]."""
+    return math.atan2(math.sin(rad), math.cos(rad))

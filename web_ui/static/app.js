@@ -313,7 +313,7 @@ const {
   fetchFieldReferenceStatus,
   renderFieldReference,
   frPost,
-  frSetManualHeading,
+  
 } = window.UavFieldRef;
 
 const {
@@ -322,7 +322,7 @@ const {
 } = window.UavFieldProfiles || {};
 
 function renderFieldHeading(next) { window.UavFieldRef.renderFieldHeading(next); }
-async function confirmFieldHeading() { return window.UavFieldRef.confirmFieldHeading(); }
+// confirmFieldHeading removed (centerline-only)
 
 function renderMissionSteps(next) {
   if (!$("missionSelect") || !$("stageOverride") || !$("missionSteps")) return;
