@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+import os
+import time as _time
+from typing import Any, Optional
 
+from app.field_profile import FieldProfile, load_field_profile_json
+from app.field_profile_service import BindResult, FieldProfileService
 from app.field_reference import _gps_distance_m
 from app.field_reference_service import FieldReferenceService
 from app.runtime_context import RuntimeContextBuilder
@@ -16,6 +20,11 @@ class FieldReferenceController:
     LinkManager, or MAVLink.
     """
 
+    _PROFILE_DIRS = [
+        os.path.join("config", "field_profiles"),
+        os.path.join("runtime", "field_profiles"),
+    ]
+
     def __init__(
         self,
         field_reference_service: FieldReferenceService,
@@ -25,6 +34,8 @@ class FieldReferenceController:
         self._svc = field_reference_service
         self._builder = runtime_context_builder
         self._get_drone_snapshot = get_drone_snapshot
+        self._last_bind_result: Optional[BindResult] = None
+        self._last_bound_profile_id: Optional[str] = None
 
     # ------------------------------------------------------------------
     # status
@@ -88,6 +99,13 @@ class FieldReferenceController:
             and status["is_confirmed"]
             and builder.field_heading_yaw_rad == status.get("field_heading_yaw_rad")
         )
+
+        # profile binding info
+        if self._last_bound_profile_id:
+            fr["profile_id"] = self._last_bound_profile_id
+            fr["profile_binding_ok"] = (
+                self._last_bind_result.ok if self._last_bind_result else None
+            )
 
         return {"ok": True, "field_reference": fr, "telemetry": telemetry}
 
@@ -186,10 +204,154 @@ class FieldReferenceController:
     def reset(self) -> dict[str, object]:
         result = self._svc.reset()
         self._builder.clear_field_heading()
+        self._last_bind_result = None
+        self._last_bound_profile_id = None
         return result
 
     def freeze(self) -> dict[str, object]:
         return self._svc.freeze()
+
+    # ------------------------------------------------------------------
+    # profile binding
+    # ------------------------------------------------------------------
+
+    def bind_profile_current(self, profile_id: str) -> dict[str, object]:
+        """Load a profile, bind to current drone GPS+LOCAL_NED, and apply.
+
+        Returns ``{"ok": True, "synced_to_runtime": True, ...}`` on full
+        success.  Fails safely if telemetry is missing, GPS quality is low,
+        the reference is frozen, or the bind result is not ok.
+        """
+        # -- resolve profile ------------------------------------------------
+        profile = None
+        errors = []
+        for d in self._PROFILE_DIRS:
+            try:
+                profile = FieldProfileService.load_profile(profile_id, profile_dir=d)
+                break
+            except FileNotFoundError:
+                continue
+            except Exception as exc:
+                errors.append(str(exc))
+                continue
+
+        if profile is None:
+            return {"ok": False, "error": f"profile not found: {profile_id}",
+                    "errors": errors}
+
+        # -- drone telemetry ------------------------------------------------
+        drone = self._drone_snapshot()
+        if not isinstance(drone, dict):
+            return {"ok": False, "error": "drone state unavailable"}
+
+        if not bool(drone.get("global_position_valid", False)):
+            return {"ok": False, "error": "no valid GPS position"}
+
+        current_lat = RuntimeContextBuilder._float_or_none(drone.get("lat"))
+        current_lon = RuntimeContextBuilder._float_or_none(drone.get("lon"))
+        if current_lat is None or current_lon is None:
+            return {"ok": False, "error": "GPS lat/lon not available"}
+
+        if not bool(drone.get("local_position_valid", False)):
+            return {"ok": False, "error": "no valid LOCAL_NED position"}
+
+        local_x = RuntimeContextBuilder._float_or_none(drone.get("local_x"))
+        local_y = RuntimeContextBuilder._float_or_none(drone.get("local_y"))
+        local_z = RuntimeContextBuilder._float_or_none(drone.get("local_z"))
+        if local_x is None or local_y is None:
+            return {"ok": False, "error": "LOCAL_NED x/y not available"}
+        if local_z is None:
+            local_z = 0.0
+
+        gps_fix_type = drone.get("gps_fix_type", 0)
+        satellites_visible = drone.get("satellites_visible", 0)
+        gps_eph = drone.get("gps_eph")
+        gps_epv = drone.get("gps_epv")
+
+        # -- bind ----------------------------------------------------------
+        ts = _time.time()
+        bind_result = FieldProfileService.bind_profile_to_current_vehicle(
+            profile=profile,
+            current_lat=current_lat,
+            current_lon=current_lon,
+            current_local_n_m=local_x,
+            current_local_e_m=local_y,
+            current_local_z_m=local_z,
+            gps_fix_type=gps_fix_type,
+            satellites_visible=satellites_visible,
+            gps_eph=gps_eph,
+            gps_epv=gps_epv,
+            timestamp=ts,
+        )
+
+        self._last_bind_result = bind_result
+
+        if not bind_result.ok:
+            return {
+                "ok": False,
+                "error": "bind failed",
+                "profile_id": profile.profile_id,
+                "errors": bind_result.errors,
+                "warnings": bind_result.warnings,
+                "diagnostics": {
+                    "errors": list(bind_result.diagnostics.errors),
+                    "warnings": list(bind_result.diagnostics.warnings),
+                },
+            }
+
+        # -- apply to field reference --------------------------------------
+        applied = self._svc.apply_profile_binding(
+            bind_result=bind_result,
+            profile_id=profile.profile_id,
+            profile_name=profile.name,
+            origin_lat=profile.origin.lat,
+            origin_lon=profile.origin.lon,
+            forward_lat=profile.forward.lat,
+            forward_lon=profile.forward.lon,
+            timestamp=ts,
+        )
+
+        if not applied.get("ok"):
+            return {
+                "ok": False,
+                "error": applied.get("error", "apply failed"),
+                "profile_id": profile.profile_id,
+            }
+
+        self._last_bound_profile_id = profile.profile_id
+
+        # -- sync to RuntimeContext ----------------------------------------
+        ref = self._svc.reference
+        source = f"field_profile:{profile.profile_id}"
+        ok_sync = self._builder.confirm_field_reference(
+            field_heading_yaw_rad=ref.field_heading_yaw_rad,
+            origin_local_x=ref.origin_local_n_m,
+            origin_local_y=ref.origin_local_e_m,
+            origin_local_z=ref.origin_local_z_m,
+            source=source,
+            timestamp=ts,
+        )
+
+        return {
+            "ok": True,
+            "profile_id": profile.profile_id,
+            "synced_to_runtime": ok_sync,
+            "field_heading_yaw_rad": bind_result.field_heading_yaw_rad,
+            "field_heading_deg": bind_result.field_heading_deg,
+            "origin_local_n_m": bind_result.origin_local_n_m,
+            "origin_local_e_m": bind_result.origin_local_e_m,
+            "origin_local_z_m": bind_result.origin_local_z_m,
+            "current_field_x_m": bind_result.current_field_x_m,
+            "current_field_y_m": bind_result.current_field_y_m,
+            "baseline_m": bind_result.baseline_m,
+            "warnings": bind_result.warnings,
+            "check_points": [
+                {"name": cp.name, "role": cp.role,
+                 "expected_field_x_m": cp.expected_field_x_m,
+                 "expected_field_y_m": cp.expected_field_y_m}
+                for cp in bind_result.check_points
+            ],
+        }
 
     # ------------------------------------------------------------------
     # internal

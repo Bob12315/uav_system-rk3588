@@ -23,6 +23,8 @@ from app.mission_orchestrator import MissionActionStep, MissionOrchestrator
 from app.runtime_context import RuntimeContextBuilder
 from app.field_reference_service import FieldReferenceService
 from app.field_reference_controller import FieldReferenceController
+from app.field_profile_service import FieldProfileService
+from app.field_profile import FieldProfile
 from app.web_status_service import WebStatusService
 from app.command_pipeline import CommandPipeline
 from app.debug_runtime import DebugRuntime
@@ -387,6 +389,94 @@ class SystemRunner:
         return self.field_reference_controller.freeze()
 
     # ------------------------------------------------------------------
+
+
+    # ------------------------------------------------------------------
+    # Field Profile API handlers (Phase C-1)
+    # ------------------------------------------------------------------
+
+    _PROFILE_DIRS = [
+        os.path.join("config", "field_profiles"),
+        os.path.join("runtime", "field_profiles"),
+    ]
+
+    def field_profile_list(self) -> dict[str, object]:
+        profiles = []
+        for d in self._PROFILE_DIRS:
+            source = "config" if "config" in d else "runtime"
+            for path in FieldProfileService.list_profiles(d):
+                try:
+                    p = FieldProfileService.load_profile(path)
+                    profiles.append({
+                        "profile_id": p.profile_id,
+                        "name": p.name,
+                        "source": source,
+                        "schema_version": p.schema_version,
+                        "valid": True,
+                        "errors": [],
+                        "warnings": [],
+                    })
+                except Exception as exc:
+                    pid = os.path.splitext(os.path.basename(path))[0]
+                    profiles.append({
+                        "profile_id": pid,
+                        "name": pid,
+                        "source": source,
+                        "schema_version": None,
+                        "valid": False,
+                        "errors": [str(exc)],
+                        "warnings": [],
+                    })
+        return {"ok": True, "profiles": profiles}
+
+    def field_profile_get(self, profile_id: str) -> dict[str, object]:
+        for d in self._PROFILE_DIRS:
+            try:
+                p = FieldProfileService.load_profile(profile_id, profile_dir=d)
+                return {
+                    "ok": True,
+                    "profile_id": p.profile_id,
+                    "name": p.name,
+                    "schema_version": p.schema_version,
+                    "created_at": p.created_at,
+                    "points": {
+                        k: {"name": pt.name, "role": pt.role,
+                            "lat": pt.lat, "lon": pt.lon,
+                            "field_x_m": pt.field_x_m, "field_y_m": pt.field_y_m}
+                        for k, pt in p.points.items()
+                    },
+                    "gps_quality": {
+                        "min_fix_type": p.gps_quality.min_fix_type,
+                        "min_satellites": p.gps_quality.min_satellites,
+                        "max_eph": p.gps_quality.max_eph,
+                        "max_epv": p.gps_quality.max_epv,
+                    },
+                }
+            except FileNotFoundError:
+                continue
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
+        return {"ok": False, "error": f"profile not found: {profile_id}"}
+
+    def field_profile_validate(self, profile_id: str) -> dict[str, object]:
+        for d in self._PROFILE_DIRS:
+            try:
+                p = FieldProfileService.load_profile(profile_id, profile_dir=d)
+                diag = FieldProfileService.validate_profile(p)
+                return {
+                    "ok": diag.ok,
+                    "profile_id": p.profile_id,
+                    "errors": diag.errors,
+                    "warnings": diag.warnings,
+                }
+            except FileNotFoundError:
+                continue
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
+        return {"ok": False, "error": f"profile not found: {profile_id}"}
+
+    def field_profile_bind_current(self, profile_id: str) -> dict[str, object]:
+        return self.field_reference_controller.bind_profile_current(profile_id)
 
     def _with_field_coordinates(self, items: list[object]) -> list[object]:
         enriched: list[object] = []

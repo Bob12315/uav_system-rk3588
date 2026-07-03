@@ -395,6 +395,34 @@ def create_app(runner, config: UiConfig) -> FastAPI:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    @app.get("/api/field-profiles")
+    def field_profiles_list():
+        try:
+            return runner.field_profile_list()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.get("/api/field-profiles/{profile_id}")
+    def field_profiles_get(profile_id: str):
+        try:
+            return runner.field_profile_get(profile_id)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.get("/api/field-profiles/{profile_id}/validate")
+    def field_profiles_validate(profile_id: str):
+        try:
+            return runner.field_profile_validate(profile_id)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/field-profiles/{profile_id}/bind-current")
+    def field_profiles_bind_current(profile_id: str):
+        try:
+            return runner.field_profile_bind_current(profile_id)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     @app.post("/api/localization/clear")
     def clear_localization():
         clear = getattr(runner, "clear_localization_result", None)
