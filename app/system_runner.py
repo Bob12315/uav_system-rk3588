@@ -396,8 +396,8 @@ class SystemRunner:
     # ------------------------------------------------------------------
 
     _PROFILE_DIRS = [
-        os.path.join("config", "field_profiles"),
-        os.path.join("runtime", "field_profiles"),
+        os.path.join(ROOT_DIR, "config", "field_profiles"),
+        os.path.join(ROOT_DIR, "runtime", "field_profiles"),
     ]
 
     def field_profile_list(self) -> dict[str, object]:

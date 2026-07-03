@@ -20,9 +20,11 @@ class FieldReferenceController:
     LinkManager, or MAVLink.
     """
 
+    # Absolute profile directories resolved from repo root.
+    _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     _PROFILE_DIRS = [
-        os.path.join("config", "field_profiles"),
-        os.path.join("runtime", "field_profiles"),
+        os.path.join(_REPO_ROOT, "config", "field_profiles"),
+        os.path.join(_REPO_ROOT, "runtime", "field_profiles"),
     ]
 
     def __init__(
@@ -84,28 +86,34 @@ class FieldReferenceController:
             "warnings": [],
         }
 
-        # synced-to-legacy-runtime check
-        builder = self._builder
+        # synced-to-legacy-runtime check (unified with C-0 preflight logic)
+        fr["synced_to_runtime"] = self._is_field_reference_synced(
+            status, self._builder
+        )
+
         fr["active_source"] = (
             "legacy_field_heading"
-            if builder.field_heading_confirmed and not status["is_confirmed"]
+            if self._builder.field_heading_confirmed and not status["is_confirmed"]
             else "field_reference"
             if status["is_confirmed"]
             else "none"
         )
-        fr["synced_to_runtime"] = (
-            builder.field_heading_confirmed
-            and builder.field_origin_confirmed
-            and status["is_confirmed"]
-            and builder.field_heading_yaw_rad == status.get("field_heading_yaw_rad")
-        )
 
-        # profile binding info
+        # profile binding info (Fix 5: full diagnostics)
+        fr["warnings"] = []
         if self._last_bound_profile_id:
             fr["profile_id"] = self._last_bound_profile_id
-            fr["profile_binding_ok"] = (
-                self._last_bind_result.ok if self._last_bind_result else None
-            )
+            if self._last_bind_result:
+                fr["profile_binding_ok"] = self._last_bind_result.ok
+                fr["profile_binding_errors"] = list(self._last_bind_result.errors)
+                fr["profile_binding_warnings"] = list(self._last_bind_result.warnings)
+                fr["profile_binding_diagnostics"] = {
+                    "errors": list(self._last_bind_result.diagnostics.errors),
+                    "warnings": list(self._last_bind_result.diagnostics.warnings),
+                }
+                fr["warnings"].extend(self._last_bind_result.warnings)
+            else:
+                fr["profile_binding_ok"] = None
 
         return {"ok": True, "field_reference": fr, "telemetry": telemetry}
 
@@ -258,10 +266,15 @@ class FieldReferenceController:
         local_x = RuntimeContextBuilder._float_or_none(drone.get("local_x"))
         local_y = RuntimeContextBuilder._float_or_none(drone.get("local_y"))
         local_z = RuntimeContextBuilder._float_or_none(drone.get("local_z"))
-        if local_x is None or local_y is None:
-            return {"ok": False, "error": "LOCAL_NED x/y not available"}
-        if local_z is None:
-            local_z = 0.0
+        if local_x is None or local_y is None or local_z is None:
+            missing = []
+            if local_x is None:
+                missing.append("local_x")
+            if local_y is None:
+                missing.append("local_y")
+            if local_z is None:
+                missing.append("local_z")
+            return {"ok": False, "error": f"LOCAL_NED missing: {', '.join(missing)}"}
 
         gps_fix_type = drone.get("gps_fix_type", 0)
         satellites_visible = drone.get("satellites_visible", 0)
@@ -299,6 +312,25 @@ class FieldReferenceController:
                 },
             }
 
+        # -- save old state for rollback (Fix 3: atomic bind/apply/sync) ---
+        saved_ref = {
+            "is_confirmed": self._svc.reference.is_confirmed,
+            "is_frozen": self._svc.reference.is_frozen,
+            "origin_source": self._svc.reference.origin_source,
+            "heading_source": self._svc.reference.heading_source,
+            "origin_local_n_m": self._svc.reference.origin_local_n_m,
+            "origin_local_e_m": self._svc.reference.origin_local_e_m,
+            "origin_local_z_m": self._svc.reference.origin_local_z_m,
+            "origin_lat": self._svc.reference.origin_lat,
+            "origin_lon": self._svc.reference.origin_lon,
+            "forward_marker_lat": self._svc.reference.forward_marker_lat,
+            "forward_marker_lon": self._svc.reference.forward_marker_lon,
+            "field_heading_yaw_rad": self._svc.reference.field_heading_yaw_rad,
+            "confirmed_at_s": self._svc.reference.confirmed_at_s,
+        }
+        saved_profile_id = self._last_bound_profile_id
+        saved_bind_result = self._last_bind_result
+
         # -- apply to field reference --------------------------------------
         applied = self._svc.apply_profile_binding(
             bind_result=bind_result,
@@ -323,19 +355,45 @@ class FieldReferenceController:
         # -- sync to RuntimeContext ----------------------------------------
         ref = self._svc.reference
         source = f"field_profile:{profile.profile_id}"
-        ok_sync = self._builder.confirm_field_reference(
-            field_heading_yaw_rad=ref.field_heading_yaw_rad,
-            origin_local_x=ref.origin_local_n_m,
-            origin_local_y=ref.origin_local_e_m,
-            origin_local_z=ref.origin_local_z_m,
-            source=source,
-            timestamp=ts,
-        )
+        try:
+            ok_sync = self._builder.confirm_field_reference(
+                field_heading_yaw_rad=ref.field_heading_yaw_rad,
+                origin_local_x=ref.origin_local_n_m,
+                origin_local_y=ref.origin_local_e_m,
+                origin_local_z=ref.origin_local_z_m,
+                source=source,
+                timestamp=ts,
+            )
+        except Exception:
+            ok_sync = False
+
+        if not ok_sync:
+            # -- rollback (Fix 3) ------------------------------------------
+            ref.is_confirmed = saved_ref["is_confirmed"]
+            ref.is_frozen = saved_ref["is_frozen"]
+            ref.origin_source = saved_ref["origin_source"]
+            ref.heading_source = saved_ref["heading_source"]
+            ref.origin_local_n_m = saved_ref["origin_local_n_m"]
+            ref.origin_local_e_m = saved_ref["origin_local_e_m"]
+            ref.origin_local_z_m = saved_ref["origin_local_z_m"]
+            ref.origin_lat = saved_ref["origin_lat"]
+            ref.origin_lon = saved_ref["origin_lon"]
+            ref.forward_marker_lat = saved_ref["forward_marker_lat"]
+            ref.forward_marker_lon = saved_ref["forward_marker_lon"]
+            ref.field_heading_yaw_rad = saved_ref["field_heading_yaw_rad"]
+            ref.confirmed_at_s = saved_ref["confirmed_at_s"]
+            self._last_bound_profile_id = saved_profile_id
+            self._last_bind_result = saved_bind_result
+            return {
+                "ok": False,
+                "error": "apply succeeded but failed to sync to runtime context",
+                "profile_id": profile.profile_id,
+            }
 
         return {
             "ok": True,
             "profile_id": profile.profile_id,
-            "synced_to_runtime": ok_sync,
+            "synced_to_runtime": True,
             "field_heading_yaw_rad": bind_result.field_heading_yaw_rad,
             "field_heading_deg": bind_result.field_heading_deg,
             "origin_local_n_m": bind_result.origin_local_n_m,
@@ -356,6 +414,74 @@ class FieldReferenceController:
     # ------------------------------------------------------------------
     # internal
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_field_reference_synced(
+        status: dict[str, object],
+        builder: RuntimeContextBuilder,
+    ) -> bool:
+        """Unified sync check used by both status() and C-0 preflight.
+
+        Uses math.isclose for float comparisons.  Compares heading yaw,
+        origin N/X, origin E/Y, and origin Z (when available).
+        """
+        if not status.get("is_confirmed"):
+            return False
+        if not builder.field_heading_confirmed:
+            return False
+        if not builder.field_origin_confirmed:
+            return False
+
+        # heading
+        ref_yaw = status.get("field_heading_yaw_rad")
+        if ref_yaw is None or builder.field_heading_yaw_rad is None:
+            return False
+        if not math.isclose(
+            float(ref_yaw),
+            float(builder.field_heading_yaw_rad),
+            rel_tol=1e-9,
+            abs_tol=1e-9,
+        ):
+            return False
+
+        # origin N/X
+        ref_n = status.get("origin_local_n_m")
+        builder_x = RuntimeContextBuilder._float_or_none(
+            builder.field_origin_local_x
+        )
+        if ref_n is None or builder_x is None:
+            return False
+        if not math.isclose(
+            float(ref_n), float(builder_x), rel_tol=1e-9, abs_tol=1e-9,
+        ):
+            return False
+
+        # origin E/Y
+        ref_e = status.get("origin_local_e_m")
+        builder_y = RuntimeContextBuilder._float_or_none(
+            builder.field_origin_local_y
+        )
+        if ref_e is None or builder_y is None:
+            return False
+        if not math.isclose(
+            float(ref_e), float(builder_y), rel_tol=1e-9, abs_tol=1e-9,
+        ):
+            return False
+
+        # origin Z (when available on reference)
+        ref_z = status.get("origin_local_z_m")
+        if ref_z is not None:
+            builder_z = RuntimeContextBuilder._float_or_none(
+                builder.field_origin_local_z
+            )
+            if builder_z is None:
+                return False
+            if not math.isclose(
+                float(ref_z), float(builder_z), rel_tol=1e-9, abs_tol=1e-9,
+            ):
+                return False
+
+        return True
 
     def _drone_snapshot(self) -> dict[str, object]:
         return self._get_drone_snapshot()

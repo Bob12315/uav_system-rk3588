@@ -159,28 +159,53 @@ class FieldProfileService:
                 results.append(os.path.abspath(full))
         return results
 
+    _PROFILE_ROOT_DIRS: list[str] = []  # set by SystemRunner / caller
+
     @staticmethod
     def load_profile(name_or_path: str, profile_dir: Optional[str] = None) -> FieldProfile:
-        """Load and validate a field profile.  Rejects path traversal."""
-        if os.path.isfile(name_or_path):
-            return load_field_profile_json(name_or_path)
+        """Load and validate a field profile.  Strict path containment.
 
+        - *profile_dir* is always required (no bare abs-path bypass).
+        - Absolute paths, ``..``, and directory separators in
+          *name_or_path* are rejected.
+        - The resolved real path must be inside *profile_dir*.
+        - Only ``.json`` files are accepted.
+        """
         if profile_dir is None:
             raise FileNotFoundError(
                 f"Field profile not found: {name_or_path} (no profile_dir supplied)"
             )
 
+        # Reject absolute paths and traversal characters.
+        if os.path.isabs(name_or_path):
+            raise ValueError(f"Field profile path must be relative: {name_or_path}")
+        if ".." in name_or_path:
+            raise ValueError(f"Field profile path must not contain '..': {name_or_path}")
+        if "/" in name_or_path or "\\" in name_or_path:
+            raise ValueError(
+                f"Field profile path must not contain directory separators: {name_or_path}"
+            )
         if not name_or_path.endswith(".json"):
             name_or_path = name_or_path + ".json"
 
         profile_dir_real = os.path.realpath(profile_dir)
-        full_path = os.path.realpath(os.path.join(profile_dir, name_or_path))
+        full_path = os.path.realpath(os.path.join(profile_dir_real, name_or_path))
 
-        if not full_path.startswith(profile_dir_real + os.sep) and full_path != profile_dir_real:
+        # Containment: resolved path must start with profile_dir_real + sep.
+        common = os.path.commonpath([profile_dir_real, full_path])
+        if common != profile_dir_real:
             raise ValueError(f"Field profile path escapes profile_dir: {name_or_path}")
 
         if not os.path.isfile(full_path):
             raise FileNotFoundError(f"Field profile not found: {full_path}")
+
+        # Reject symlinks that escape.
+        if os.path.islink(full_path):
+            link_target = os.path.realpath(full_path)
+            if os.path.commonpath([profile_dir_real, link_target]) != profile_dir_real:
+                raise ValueError(
+                    f"Field profile symlink escapes profile_dir: {name_or_path}"
+                )
 
         return load_field_profile_json(full_path)
 

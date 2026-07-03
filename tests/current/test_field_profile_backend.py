@@ -185,7 +185,7 @@ def test_load_missing_profile():
 
 
 def test_path_traversal_rejected():
-    with pytest.raises(ValueError, match="escapes"):
+    with pytest.raises(ValueError, match="must not contain"):
         FieldProfileService.load_profile(
             "../../../etc/passwd",
             profile_dir=os.path.join("config", "field_profiles"),
@@ -311,6 +311,29 @@ def test_bind_current_lat_lon_none_fails():
     ctrl = _make_controller(drone=drone)
     result = ctrl.bind_profile_current("example_competition_lane")
     assert result.get("ok") is False
+
+
+def test_bind_current_missing_local_z_fails():
+    """local_z missing must fail, not forge 0.0."""
+    drone = _make_drone_snapshot(lat=34.0, lon=108.0)
+    del drone["local_z"]
+    ctrl = _make_controller(drone=drone)
+    result = ctrl.bind_profile_current("example_competition_lane")
+    assert result.get("ok") is False
+    assert "local_z" in str(result.get("error", "")).lower()
+
+
+def test_bind_current_missing_local_z_does_not_write_state():
+    """Missing local_z must NOT write FieldReference or RuntimeContext."""
+    drone = _make_drone_snapshot(lat=34.0, lon=108.0)
+    del drone["local_z"]
+    ctrl = _make_controller(drone=drone)
+    ref_before = ctrl._svc.reference.is_confirmed
+    ctrl.bind_profile_current("example_competition_lane")
+    # FieldReference must be unchanged
+    assert ctrl._svc.reference.is_confirmed == ref_before
+    # RuntimeContext must be unchanged
+    assert ctrl._builder.field_heading_confirmed == ref_before
 
 
 # ===================================================================
