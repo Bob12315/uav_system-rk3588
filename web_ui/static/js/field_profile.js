@@ -9,6 +9,13 @@ window.UavFieldProfiles = (function () {
   var dom = window.UavDom;
   var fmt = window.UavFormat;
 
+  function setText(element, value, tone) {
+    if (!element) return;
+    element.textContent = value == null ? "" : String(value);
+    element.classList.remove("ok-text", "warning-text", "danger-text");
+    if (tone) element.classList.add(tone);
+  }
+
   // ------------------------------------------------------------------
   // helpers
   // ------------------------------------------------------------------
@@ -32,7 +39,7 @@ window.UavFieldProfiles = (function () {
       var data = await api.request("/api/field-profiles");
       renderProfileList(data);
     } catch (e) {
-      dom.setText($("fpHint"), "获取 profile 列表失败: " + e.message, "danger-text");
+      setText($("fpHint"), "获取 profile 列表失败: " + e.message, "danger-text");
     }
   }
 
@@ -41,7 +48,7 @@ window.UavFieldProfiles = (function () {
     if (!sel) return;
     sel.innerHTML = '<option value="">-- 选择 Profile --</option>';
     if (!data.ok || !Array.isArray(data.profiles)) {
-      dom.setText($("fpHint"), "profile 列表不可用", "warning-text");
+      setText($("fpHint"), "profile 列表不可用", "warning-text");
       return;
     }
     data.profiles.forEach(function (p) {
@@ -64,7 +71,7 @@ window.UavFieldProfiles = (function () {
       var data = await api.request("/api/field-profiles/" + encodeURIComponent(id));
       renderProfileDetail(data);
     } catch (e) {
-      dom.setText($("fpHint"), "读取 profile 失败: " + e.message, "danger-text");
+      setText($("fpHint"), "读取 profile 失败: " + e.message, "danger-text");
     }
   }
 
@@ -72,57 +79,57 @@ window.UavFieldProfiles = (function () {
     var detail = $("fpProfileDetail");
     if (!detail) return;
     if (!data.ok) {
-      dom.setText($("fpHint"), "Profile 不可用: " + (data.error || "未知错误"), "danger-text");
+      setText($("fpHint"), "Profile 不可用: " + (data.error || "未知错误"), "danger-text");
       detail.style.display = "none";
       return;
     }
     detail.style.display = "block";
-    dom.setText($("fpProfileId"), data.profile_id);
-    dom.setText($("fpProfileName"), data.name);
-    dom.setText($("fpProfileSource"), "loaded");
-    dom.setText($("fpProfileSchema"), data.schema_version);
+    setText($("fpProfileId"), data.profile_id);
+    setText($("fpProfileName"), data.name);
+    setText($("fpProfileSource"), "loaded");
+    setText($("fpProfileSchema"), data.schema_version);
 
     // v2 anchor
     var anchor = data.anchor || {};
     if (anchor.lat != null) {
-      dom.setText($("fpOriginLatLon"), gpsText(anchor.lat, anchor.lon));
-      dom.setText($("fpOriginField"), fieldText(anchor.field_x_m, anchor.field_y_m));
+      setText($("fpOriginLatLon"), gpsText(anchor.lat, anchor.lon));
+      setText($("fpOriginField"), fieldText(anchor.field_x_m, anchor.field_y_m));
     } else {
-      dom.setText($("fpOriginLatLon"), "--");
-      dom.setText($("fpOriginField"), "--");
+      setText($("fpOriginLatLon"), "--");
+      setText($("fpOriginField"), "--");
     }
 
     // v2 centerline_points
     var cl = data.centerline_points || [];
-    dom.setText($("fpClPoints"), cl.length + " points");
+    setText($("fpClPoints"), cl.length + " points");
     if (cl.length) {
       var lines = cl.map(function (pt, i) {
         var ey = pt.expected_field_y_m != null ? pt.expected_field_y_m.toFixed(2) : "--";
         return "CL_" + (i + 1) + " " + pt.name + " lat=" + pt.lat.toFixed(6) + " lon=" + pt.lon.toFixed(6) + " ey=" + ey;
       });
-      dom.setText($("fpClDetails"), lines.join("\n"));
+      setText($("fpClDetails"), lines.join("\n"));
     } else {
-      dom.setText($("fpClDetails"), "--");
+      setText($("fpClDetails"), "--");
     }
 
     var gq = data.gps_quality || {};
-    dom.setText($("fpGpsQualityFixSats"), "fix≥" + (gq.min_fix_type != null ? gq.min_fix_type : "?") + " sats≥" + (gq.min_satellites != null ? gq.min_satellites : "?"));
-    dom.setText($("fpGpsQualityEphEpv"), "eph≤" + (gq.max_eph != null ? gq.max_eph : "?") + " epv≤" + (gq.max_epv != null ? gq.max_epv : "?"));
+    setText($("fpGpsQualityFixSats"), "fix≥" + (gq.min_fix_type != null ? gq.min_fix_type : "?") + " sats≥" + (gq.min_satellites != null ? gq.min_satellites : "?"));
+    setText($("fpGpsQualityEphEpv"), "eph≤" + (gq.max_eph != null ? gq.max_eph : "?") + " epv≤" + (gq.max_epv != null ? gq.max_epv : "?"));
   }
 
   async function validateProfile() {
     var id = $("fpProfileSelect").value;
-    if (!id) { dom.setText($("fpHint"), "请先选择 Profile", "warning-text"); return; }
+    if (!id) { setText($("fpHint"), "请先选择 Profile", "warning-text"); return; }
     try {
       var data = await api.request("/api/field-profiles/" + encodeURIComponent(id) + "/validate");
-      dom.setText($("fpHint"),
+      setText($("fpHint"),
         "验证 " + (data.ok ? "通过" : "失败") +
         (data.errors && data.errors.length ? " errors: " + JSON.stringify(data.errors) : "") +
         (data.warnings && data.warnings.length ? " warnings: " + JSON.stringify(data.warnings) : ""));
       // Refresh profile detail to show updated state
       loadAndRenderProfile(id);
     } catch (e) {
-      dom.setText($("fpHint"), "验证请求失败: " + e.message, "danger-text");
+      setText($("fpHint"), "验证请求失败: " + e.message, "danger-text");
     }
   }
 
@@ -132,7 +139,7 @@ window.UavFieldProfiles = (function () {
 
   async function bindCurrentProfile() {
     var id = $("fpProfileSelect").value;
-    if (!id) { dom.setText($("fpHint"), "请先选择 Profile", "warning-text"); return; }
+    if (!id) { setText($("fpHint"), "请先选择 Profile", "warning-text"); return; }
 
     try {
       var data = await api.request("/api/field-profiles/" + encodeURIComponent(id) + "/bind-current", {
@@ -145,7 +152,7 @@ window.UavFieldProfiles = (function () {
         window.UavFieldRef.fetchFieldReferenceStatus();
       }
     } catch (e) {
-      dom.setText($("fpHint"), "bind-current 请求失败: " + e.message, "danger-text");
+      setText($("fpHint"), "bind-current 请求失败: " + e.message, "danger-text");
     }
   }
 
@@ -154,27 +161,27 @@ window.UavFieldProfiles = (function () {
     if (!panel) return;
     panel.style.display = "block";
 
-    dom.setText($("fpBindOk"), data.ok ? "true" : "false",
+    setText($("fpBindOk"), data.ok ? "true" : "false",
       data.ok ? "ok-text" : "danger-text");
-    dom.setText($("fpBindProfileId"), data.profile_id || "--");
-    dom.setText($("fpBindSynced"), data.synced_to_runtime != null ? String(data.synced_to_runtime) : "--",
+    setText($("fpBindProfileId"), data.profile_id || "--");
+    setText($("fpBindSynced"), data.synced_to_runtime != null ? String(data.synced_to_runtime) : "--",
       data.synced_to_runtime ? "ok-text" : "warning-text");
-    dom.setText($("fpBindHeading"), data.field_heading_deg != null ? data.field_heading_deg.toFixed(2) + "°" : "--");
-    dom.setText($("fpBindOriginLocal"),
+    setText($("fpBindHeading"), data.field_heading_deg != null ? data.field_heading_deg.toFixed(2) + "°" : "--");
+    setText($("fpBindOriginLocal"),
       data.origin_local_n_m != null
         ? data.origin_local_n_m.toFixed(2) + ", " + data.origin_local_e_m.toFixed(2) + ", " + (data.origin_local_z_m != null ? data.origin_local_z_m.toFixed(2) : "--")
         : "--");
-    dom.setText($("fpBindCurrentField"),
+    setText($("fpBindCurrentField"),
       data.current_field_x_m != null
         ? fieldText(data.current_field_x_m, data.current_field_y_m)
         : "--");
-    dom.setText($("fpBindBaseline"), data.baseline_m != null ? data.baseline_m.toFixed(2) + " m" : "--");
+    setText($("fpBindBaseline"), data.baseline_m != null ? data.baseline_m.toFixed(2) + " m" : "--");
 
     // v2 new fields
-    dom.setText($("fpBindStartError"), data.current_start_error_m != null ? data.current_start_error_m.toFixed(2) + " m" : "--");
-    dom.setText($("fpBindYawError"), data.yaw_error_deg != null ? data.yaw_error_deg.toFixed(2) + "°" : "--");
-    dom.setText($("fpBindMaxResidual"), data.max_residual_m != null ? data.max_residual_m.toFixed(3) + " m" : "--");
-    dom.setText($("fpBindRmsResidual"), data.rms_residual_m != null ? data.rms_residual_m.toFixed(3) + " m" : "--");
+    setText($("fpBindStartError"), data.current_start_error_m != null ? data.current_start_error_m.toFixed(2) + " m" : "--");
+    setText($("fpBindYawError"), data.yaw_error_deg != null ? data.yaw_error_deg.toFixed(2) + "°" : "--");
+    setText($("fpBindMaxResidual"), data.max_residual_m != null ? data.max_residual_m.toFixed(3) + " m" : "--");
+    setText($("fpBindRmsResidual"), data.rms_residual_m != null ? data.rms_residual_m.toFixed(3) + " m" : "--");
 
     var residuals = data.centerline_residuals || [];
     if (residuals.length) {
@@ -183,26 +190,26 @@ window.UavFieldProfiles = (function () {
           (r.expected_field_y_m != null ? " ey=" + r.expected_field_y_m.toFixed(2) : "") +
           (r.fitted_field_y_m != null ? " fy=" + r.fitted_field_y_m.toFixed(2) : "");
       });
-      dom.setText($("fpBindResiduals"), lines.join("\n"));
+      setText($("fpBindResiduals"), lines.join("\n"));
     } else {
-      dom.setText($("fpBindResiduals"), "--");
+      setText($("fpBindResiduals"), "--");
     }
 
     var warnings = data.warnings || [];
-    dom.setText($("fpBindWarnings"), warnings.length ? warnings.join("; ") : "无");
+    setText($("fpBindWarnings"), warnings.length ? warnings.join("; ") : "无");
 
     var errors = data.errors || [];
-    dom.setText($("fpBindErrors"), errors.length ? errors.join("; ") : "无",
+    setText($("fpBindErrors"), errors.length ? errors.join("; ") : "无",
       errors.length ? "danger-text" : "ok-text");
 
     var diag = data.diagnostics || {};
     var diagErrors = diag.errors || [];
     var diagWarnings = diag.warnings || [];
-    dom.setText($("fpBindDiagnostics"),
+    setText($("fpBindDiagnostics"),
       (diagErrors.length ? "E:" + diagErrors.join("; ") : "") +
       (diagWarnings.length ? " W:" + diagWarnings.join("; ") : "无"));
 
-    dom.setText($("fpHint"),
+    setText($("fpHint"),
       data.ok
         ? "绑定成功 — Field Reference 已更新。请手动点击 freeze 后再启动 Mission。"
         : "绑定失败 — 见上方 errors。Field Reference 未修改。",
@@ -237,7 +244,7 @@ window.UavFieldProfiles = (function () {
     try {
       var data = await api.request("/api/field-reference/status");
       if (data && data.field_reference && data.field_reference.profile_id) {
-        dom.setText($("fpHint"),
+        setText($("fpHint"),
           "当前绑定 profile: " + data.field_reference.profile_id +
           " binding_ok=" + data.field_reference.profile_binding_ok +
           " synced=" + data.field_reference.synced_to_runtime);

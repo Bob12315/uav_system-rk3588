@@ -1,11 +1,16 @@
 """Integration tests for Web UI routes — centerline-only field reference."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import HTTPException
 
 from app.app_config import build_arg_parser, load_app_config
 from app.system_runner import SystemRunner
 from web_ui.server import create_app
+
+
+_STATIC_DIR = Path(__file__).resolve().parents[2] / "web_ui" / "static"
 
 
 # ---------------------------------------------------------------------------
@@ -50,6 +55,49 @@ def _endpoint(app, method, path):
         if route_path == path and method in methods:
             return route.endpoint
     raise LookupError(f"No route for {method} {path}")
+
+
+def test_field_profile_frontend_uses_available_dom_helper_and_v2_fields():
+    source = (_STATIC_DIR / "js" / "field_profile.js").read_text(encoding="utf-8")
+
+    assert "function setText(element, value, tone)" in source
+    assert "dom.setText" not in source
+    for field in (
+        "data.anchor",
+        "data.centerline_points",
+        "data.current_start_error_m",
+        "data.yaw_error_deg",
+        "data.max_residual_m",
+        "data.rms_residual_m",
+        "data.centerline_residuals",
+    ):
+        assert field in source
+
+
+def test_field_profile_frontend_dom_and_script_order_are_current():
+    html = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    for element_id in (
+        "fpClPoints",
+        "fpClDetails",
+        "fpBindStartError",
+        "fpBindYawError",
+        "fpBindMaxResidual",
+        "fpBindRmsResidual",
+        "fpBindResiduals",
+    ):
+        assert f'id="{element_id}"' in html
+
+    scripts = (
+        "/static/js/api_client.js",
+        "/static/js/format_utils.js",
+        "/static/js/dom_utils.js",
+        "/static/js/field_reference.js",
+        "/static/js/field_profile.js?v=ui8-field-profile-render",
+        "/static/app.js",
+    )
+    positions = [html.index(script) for script in scripts]
+    assert positions == sorted(positions)
 
 
 # ---------------------------------------------------------------------------
