@@ -1,5 +1,5 @@
 /* Field Profile — UI logic for /api/field-profiles endpoints.
-   Phase D — web_ui/static/js/field_profile.js */
+   Phase D — v2 centerline schema */
 
 window.UavFieldProfiles = (function () {
   "use strict";
@@ -21,10 +21,6 @@ window.UavFieldProfiles = (function () {
   function fieldText(x, y) {
     if (x == null || y == null) return "--";
     return (x >= 0 ? "+" : "") + x.toFixed(2) + " / " + (y >= 0 ? "+" : "") + y.toFixed(2);
-  }
-
-  function pointHas(pt) {
-    return pt && pt.lat != null && pt.lon != null;
   }
 
   // ------------------------------------------------------------------
@@ -86,20 +82,28 @@ window.UavFieldProfiles = (function () {
     dom.setText($("fpProfileSource"), "loaded");
     dom.setText($("fpProfileSchema"), data.schema_version);
 
-    var pts = data.points || {};
-    var o = pts.origin;
-    var f = pts.forward;
-    var l = pts.left_check;
-    var r = pts.right_check;
+    // v2 anchor
+    var anchor = data.anchor || {};
+    if (anchor.lat != null) {
+      dom.setText($("fpOriginLatLon"), gpsText(anchor.lat, anchor.lon));
+      dom.setText($("fpOriginField"), fieldText(anchor.field_x_m, anchor.field_y_m));
+    } else {
+      dom.setText($("fpOriginLatLon"), "--");
+      dom.setText($("fpOriginField"), "--");
+    }
 
-    dom.setText($("fpOriginLatLon"), pointHas(o) ? gpsText(o.lat, o.lon) : "--");
-    dom.setText($("fpOriginField"), pointHas(o) ? fieldText(o.field_x_m, o.field_y_m) : "--");
-    dom.setText($("fpForwardLatLon"), pointHas(f) ? gpsText(f.lat, f.lon) : "--");
-    dom.setText($("fpForwardField"), pointHas(f) ? fieldText(f.field_x_m, f.field_y_m) : "--");
-    dom.setText($("fpLeftLatLon"), pointHas(l) ? gpsText(l.lat, l.lon) : "(无)");
-    dom.setText($("fpLeftField"), pointHas(l) ? fieldText(l.field_x_m, l.field_y_m) : "(无)");
-    dom.setText($("fpRightLatLon"), pointHas(r) ? gpsText(r.lat, r.lon) : "(无)");
-    dom.setText($("fpRightField"), pointHas(r) ? fieldText(r.field_x_m, r.field_y_m) : "(无)");
+    // v2 centerline_points
+    var cl = data.centerline_points || [];
+    dom.setText($("fpClPoints"), cl.length + " points");
+    if (cl.length) {
+      var lines = cl.map(function (pt, i) {
+        var ey = pt.expected_field_y_m != null ? pt.expected_field_y_m.toFixed(2) : "--";
+        return "CL_" + (i + 1) + " " + pt.name + " lat=" + pt.lat.toFixed(6) + " lon=" + pt.lon.toFixed(6) + " ey=" + ey;
+      });
+      dom.setText($("fpClDetails"), lines.join("\n"));
+    } else {
+      dom.setText($("fpClDetails"), "--");
+    }
 
     var gq = data.gps_quality || {};
     dom.setText($("fpGpsQualityFixSats"), "fix≥" + (gq.min_fix_type != null ? gq.min_fix_type : "?") + " sats≥" + (gq.min_satellites != null ? gq.min_satellites : "?"));
@@ -115,6 +119,8 @@ window.UavFieldProfiles = (function () {
         "验证 " + (data.ok ? "通过" : "失败") +
         (data.errors && data.errors.length ? " errors: " + JSON.stringify(data.errors) : "") +
         (data.warnings && data.warnings.length ? " warnings: " + JSON.stringify(data.warnings) : ""));
+      // Refresh profile detail to show updated state
+      loadAndRenderProfile(id);
     } catch (e) {
       dom.setText($("fpHint"), "验证请求失败: " + e.message, "danger-text");
     }
@@ -164,6 +170,24 @@ window.UavFieldProfiles = (function () {
         : "--");
     dom.setText($("fpBindBaseline"), data.baseline_m != null ? data.baseline_m.toFixed(2) + " m" : "--");
 
+    // v2 new fields
+    dom.setText($("fpBindStartError"), data.current_start_error_m != null ? data.current_start_error_m.toFixed(2) + " m" : "--");
+    dom.setText($("fpBindYawError"), data.yaw_error_deg != null ? data.yaw_error_deg.toFixed(2) + "°" : "--");
+    dom.setText($("fpBindMaxResidual"), data.max_residual_m != null ? data.max_residual_m.toFixed(3) + " m" : "--");
+    dom.setText($("fpBindRmsResidual"), data.rms_residual_m != null ? data.rms_residual_m.toFixed(3) + " m" : "--");
+
+    var residuals = data.centerline_residuals || [];
+    if (residuals.length) {
+      var lines = residuals.map(function (r) {
+        return r.name + " resid=" + (r.residual_m != null ? r.residual_m.toFixed(3) : "--") + "m" +
+          (r.expected_field_y_m != null ? " ey=" + r.expected_field_y_m.toFixed(2) : "") +
+          (r.fitted_field_y_m != null ? " fy=" + r.fitted_field_y_m.toFixed(2) : "");
+      });
+      dom.setText($("fpBindResiduals"), lines.join("\n"));
+    } else {
+      dom.setText($("fpBindResiduals"), "--");
+    }
+
     var warnings = data.warnings || [];
     dom.setText($("fpBindWarnings"), warnings.length ? warnings.join("; ") : "无");
 
@@ -180,7 +204,7 @@ window.UavFieldProfiles = (function () {
 
     dom.setText($("fpHint"),
       data.ok
-        ? "绑定成功 — Field Reference 已更新。Mission 启动前需 freeze（由 Mission start 自动执行）。"
+        ? "绑定成功 — Field Reference 已更新。请手动点击 freeze 后再启动 Mission。"
         : "绑定失败 — 见上方 errors。Field Reference 未修改。",
       data.ok ? "ok-text" : "danger-text");
   }
