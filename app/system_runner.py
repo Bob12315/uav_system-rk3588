@@ -130,7 +130,7 @@ class SystemRunner:
             dispatcher=ActionDispatcher(
                 logger=self.logger,
                 yolo_client=YoloCommandClient(self.config.yolo_command),
-                field_heading_confirmer=self.runtime_context_builder.confirm_field_heading,
+                field_heading_confirmer=self.protected_confirm_field_heading,
             )
         )
         self.action_mission_orchestrator: MissionOrchestrator | None = None
@@ -404,11 +404,16 @@ class SystemRunner:
         return enriched
 
     def confirm_field_heading_manual(self) -> CommandResult:
-        # If the new FieldReference is frozen, block the old confirm path
-        if self.field_reference_service.reference.is_frozen:
+        reference = self.field_reference_service.reference
+        if reference.is_frozen:
             return CommandResult(
                 False,
                 "FieldReference is frozen; use /api/field-reference/reset to unfreeze before confirming via legacy API",
+            )
+        if reference.is_confirmed or reference.is_ready():
+            return CommandResult(
+                False,
+                "FieldReference is already confirmed; reset it before confirming via legacy API",
             )
         with self.control_command_log_lock:
             snapshot = dict(self.latest_snapshot)
@@ -420,7 +425,7 @@ class SystemRunner:
         yaw = RuntimeContextBuilder._float_or_none(drone.get("yaw"))
         if yaw is None:
             return CommandResult(False, "attitude yaw not valid")
-        ok = self.runtime_context_builder.confirm_field_heading(
+        ok = self.protected_confirm_field_heading(
             yaw_rad=yaw,
             drone=drone,
             source="manual_web",
@@ -447,6 +452,37 @@ class SystemRunner:
             message = f"{message}; vehicle is armed, confirm on ground before flight when possible"
         self._record_event("OK", message)
         return CommandResult(True, message)
+
+    def protected_confirm_field_heading(
+        self,
+        yaw_rad: float | None = None,
+        *,
+        drone: dict[str, object] | None = None,
+        source: str = "takeoff_auto",
+    ) -> bool:
+        """Guard the legacy runtime-context field-heading write path.
+
+        A confirmed or frozen FieldReference is authoritative.  Takeoff's
+        compatibility auto-confirm action succeeds as a no-op in that case,
+        so it cannot overwrite a profile binding or fail an otherwise valid
+        mission start.
+        """
+        reference = self.field_reference_service.reference
+        if reference.is_frozen or reference.is_confirmed or reference.is_ready():
+            self.logger.info(
+                "field heading confirm skipped: existing FieldReference "
+                "confirmed=%s ready=%s frozen=%s source=%s",
+                reference.is_confirmed,
+                reference.is_ready(),
+                reference.is_frozen,
+                source,
+            )
+            return True
+        return self.runtime_context_builder.confirm_field_heading(
+            yaw_rad=yaw_rad,
+            drone=drone,
+            source=source,
+        )
 
     def _update_arm_heading(self, drone: dict[str, object]) -> None:
         return self.runtime_context_builder._update_arm_heading(drone)
@@ -750,10 +786,83 @@ class SystemRunner:
             return self.action_mission_status_payload()
         with self.action_runtime_lock:
             self.latest_recon_inspection_result = {}
+            if self._action_mission_uses_field_coordinates():
+                reason = self._field_mission_preflight_reason()
+                if reason is not None:
+                    return self._reject_action_mission_start(reason)
+                freeze_result = self.field_reference_service.freeze()
+                if not bool(freeze_result.get("ok", False)):
+                    return self._reject_action_mission_start(
+                        "field_reference_freeze_failed",
+                        error=str(freeze_result.get("error") or "freeze failed"),
+                    )
             self.action_mission_orchestrator.start(
                 link_manager=self.services.link_manager,
             )
             return self.action_mission_status_payload()
+
+    def _action_mission_uses_field_coordinates(self) -> bool:
+        orchestrator = self.action_mission_orchestrator
+        if orchestrator is None:
+            return False
+        return any(
+            str(step.params.get("waypoint_mode", "")).strip().lower() == "field"
+            for step in orchestrator.steps
+        )
+
+    def _field_mission_preflight_reason(self) -> str | None:
+        reference = self.field_reference_service.reference
+        if not reference.is_confirmed:
+            return "field_reference_not_confirmed"
+        if not reference.is_ready():
+            return "field_reference_not_ready"
+
+        builder = self.runtime_context_builder
+        if not builder.field_heading_confirmed or not builder.field_origin_confirmed:
+            return "field_reference_not_synced"
+
+        pairs = (
+            (builder.field_heading_yaw_rad, reference.field_heading_yaw_rad),
+            (builder.field_origin_local_x, reference.origin_local_n_m),
+            (builder.field_origin_local_y, reference.origin_local_e_m),
+        )
+        for runtime_value, reference_value in pairs:
+            runtime_float = RuntimeContextBuilder._float_or_none(runtime_value)
+            reference_float = RuntimeContextBuilder._float_or_none(reference_value)
+            if runtime_float is None or reference_float is None or not math.isclose(
+                runtime_float,
+                reference_float,
+                rel_tol=1e-9,
+                abs_tol=1e-9,
+            ):
+                return "field_reference_not_synced"
+
+        if reference.origin_local_z_m is not None:
+            runtime_z = RuntimeContextBuilder._float_or_none(builder.field_origin_local_z)
+            reference_z = RuntimeContextBuilder._float_or_none(reference.origin_local_z_m)
+            if runtime_z is None or reference_z is None or not math.isclose(
+                runtime_z,
+                reference_z,
+                rel_tol=1e-9,
+                abs_tol=1e-9,
+            ):
+                return "field_reference_not_synced"
+        return None
+
+    def _reject_action_mission_start(
+        self,
+        reason: str,
+        *,
+        error: str | None = None,
+    ) -> dict[str, object]:
+        orchestrator = self.action_mission_orchestrator
+        if orchestrator is not None:
+            orchestrator.running = False
+            orchestrator.done = False
+            orchestrator.failed = True
+            orchestrator.reason = reason
+            orchestrator.detail = {"error": error} if error else {}
+        return self.action_mission_status_payload()
 
     def action_mission_stop(self) -> dict[str, object]:
         if self.action_mission_orchestrator is None:
