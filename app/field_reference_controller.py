@@ -124,8 +124,10 @@ class FieldReferenceController:
     def mark_origin(self) -> dict[str, object]:
         drone = self._drone_snapshot()
         if not isinstance(drone, dict):
+            self._record_bind_failure(profile_id, "drone state unavailable")
             return {"ok": False, "error": "drone state unavailable"}
         if not bool(drone.get("global_position_valid", False)):
+            self._record_bind_failure(profile_id, "no valid GPS position")
             return {"ok": False, "error": "no valid GPS position"}
         gps_fix = drone.get("gps_fix_type", 0)
         if not isinstance(gps_fix, (int, float)) or int(gps_fix) < 3:
@@ -146,8 +148,10 @@ class FieldReferenceController:
     def mark_forward(self) -> dict[str, object]:
         drone = self._drone_snapshot()
         if not isinstance(drone, dict):
+            self._record_bind_failure(profile_id, "drone state unavailable")
             return {"ok": False, "error": "drone state unavailable"}
         if not bool(drone.get("global_position_valid", False)):
+            self._record_bind_failure(profile_id, "no valid GPS position")
             return {"ok": False, "error": "no valid GPS position"}
         gps_fix = drone.get("gps_fix_type", 0)
         if not isinstance(gps_fix, (int, float)) or int(gps_fix) < 3:
@@ -161,6 +165,7 @@ class FieldReferenceController:
     def use_current_yaw(self) -> dict[str, object]:
         drone = self._drone_snapshot()
         if not isinstance(drone, dict):
+            self._record_bind_failure(profile_id, "drone state unavailable")
             return {"ok": False, "error": "drone state unavailable"}
         if not bool(drone.get("attitude_valid", False)):
             return {"ok": False, "error": "attitude yaw not valid"}
@@ -244,23 +249,28 @@ class FieldReferenceController:
                 continue
 
         if profile is None:
+            self._record_bind_failure(profile_id, f"profile not found: {profile_id}")
             return {"ok": False, "error": f"profile not found: {profile_id}",
                     "errors": errors}
 
         # -- drone telemetry ------------------------------------------------
         drone = self._drone_snapshot()
         if not isinstance(drone, dict):
+            self._record_bind_failure(profile_id, "drone state unavailable")
             return {"ok": False, "error": "drone state unavailable"}
 
         if not bool(drone.get("global_position_valid", False)):
+            self._record_bind_failure(profile_id, "no valid GPS position")
             return {"ok": False, "error": "no valid GPS position"}
 
         current_lat = RuntimeContextBuilder._float_or_none(drone.get("lat"))
         current_lon = RuntimeContextBuilder._float_or_none(drone.get("lon"))
         if current_lat is None or current_lon is None:
+            self._record_bind_failure(profile_id, "GPS lat/lon not available")
             return {"ok": False, "error": "GPS lat/lon not available"}
 
         if not bool(drone.get("local_position_valid", False)):
+            self._record_bind_failure(profile_id, "no valid LOCAL_NED position")
             return {"ok": False, "error": "no valid LOCAL_NED position"}
 
         local_x = RuntimeContextBuilder._float_or_none(drone.get("local_x"))
@@ -274,7 +284,9 @@ class FieldReferenceController:
                 missing.append("local_y")
             if local_z is None:
                 missing.append("local_z")
-            return {"ok": False, "error": f"LOCAL_NED missing: {', '.join(missing)}"}
+            err_msg = f"LOCAL_NED missing: {', '.join(missing)}"
+            self._record_bind_failure(profile_id, err_msg)
+            return {"ok": False, "error": err_msg}
 
         gps_fix_type = drone.get("gps_fix_type", 0)
         satellites_visible = drone.get("satellites_visible", 0)
@@ -383,7 +395,10 @@ class FieldReferenceController:
             ref.field_heading_yaw_rad = saved_ref["field_heading_yaw_rad"]
             ref.confirmed_at_s = saved_ref["confirmed_at_s"]
             self._last_bound_profile_id = saved_profile_id
-            self._last_bind_result = saved_bind_result
+            # Preserve the sync error in diagnostics
+            bind_result.errors.append("sync to runtime context failed")
+            bind_result.diagnostics.errors.append("sync to runtime context failed")
+            self._last_bind_result = bind_result
             return {
                 "ok": False,
                 "error": "apply succeeded but failed to sync to runtime context",
@@ -414,6 +429,19 @@ class FieldReferenceController:
     # ------------------------------------------------------------------
     # internal
     # ------------------------------------------------------------------
+
+    def _record_bind_failure(self, profile_id: str, error: str) -> None:
+        """Record a pre-bind failure as a synthetic failed BindResult
+        so status/diagnostics can surface the error."""
+        from app.field_profile_service import BindResult
+        from app.field_profile import FieldProfileDiagnostics
+        self._last_bind_result = BindResult(
+            ok=False,
+            profile_id=profile_id,
+            errors=[error],
+            diagnostics=FieldProfileDiagnostics(errors=[error]),
+        )
+        self._last_bound_profile_id = profile_id
 
     @staticmethod
     def _is_field_reference_synced(
