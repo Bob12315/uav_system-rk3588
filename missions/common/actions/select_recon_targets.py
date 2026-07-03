@@ -86,7 +86,10 @@ class SelectReconTargetsAction(ActionModule):
 
         detail = self._detail(selected, rejected, len(candidates))
         if not selected:
-            self.last_result = ActionResult(failed=True, reason="no_recon_targets", detail=detail)
+            if self.allow_fewer:
+                self.last_result = ActionResult(done=True, reason="recon_targets_selected_zero", detail=detail)
+            else:
+                self.last_result = ActionResult(failed=True, reason="no_recon_targets", detail=detail)
         elif len(selected) < self.target_count and not self.allow_fewer:
             self.last_result = ActionResult(failed=True, reason="not_enough_recon_targets", detail=detail)
         else:
@@ -146,9 +149,43 @@ class SelectReconTargetsAction(ActionModule):
                 "seen_count": candidate.seen_count, "raw_count": candidate.raw_count,
                 "weight": candidate.weight, "rank": rank,
             })
+        # Fixed-length slots: valid=true for selected, valid=false placeholder for missing
+        target_slots = []
+        for slot_index in range(self.target_count):
+            if slot_index < len(selected):
+                c = selected[slot_index]
+                target_slots.append({
+                    "valid": True,
+                    "id": c.object_id,
+                    "class_name": c.class_name,
+                    "local_x": c.x,
+                    "local_y": c.y,
+                    "x": c.x,
+                    "y": c.y,
+                    "seen_count": c.seen_count,
+                    "raw_count": c.raw_count,
+                    "weight": c.weight,
+                    "rank": slot_index + 1,
+                })
+            else:
+                target_slots.append({
+                    "valid": False,
+                    "id": f"missing_recon_target_{slot_index}",
+                    "class_name": "",
+                    "local_x": None,
+                    "local_y": None,
+                    "x": None,
+                    "y": None,
+                    "seen_count": 0,
+                    "raw_count": 0,
+                    "weight": 0.0,
+                    "rank": slot_index + 1,
+                    "status": "missing",
+                })
         return {"selected_targets": targets, "selected_count": len(targets),
-                "candidate_count": candidate_count, "target_count": self.target_count,
-                "allow_fewer": self.allow_fewer, "rejected_objects": rejected}
+                "target_slots": target_slots, "target_count": self.target_count,
+                "candidate_count": candidate_count, "allow_fewer": self.allow_fewer,
+                "rejected_objects": rejected}
 
     def _duplicate_distance(self, candidate: _Candidate, selected: list[_Candidate]) -> float | None:
         distances = [math.hypot(candidate.x - item.x, candidate.y - item.y) for item in selected]

@@ -16,6 +16,30 @@ class GotoWaypointAction(ActionModule):
 
     def start(self, params: dict[str, Any] | None = None) -> None:
         data = params or {}
+        self.skip_if_invalid_target = bool(data.get("skip_if_invalid_target", False))
+        x_raw = data.get("x")
+        y_raw = data.get("y")
+        altitude_raw = data.get("altitude_m")
+        # when skip enabled, check target validity before float conversion
+        if self.skip_if_invalid_target:
+            target = data.get("target")
+            if isinstance(target, dict) and target.get("valid") is False:
+                self._skipped = True
+                self.started = True
+                self.stopped = False
+                return
+            target_valid = data.get("target_valid")
+            if target_valid is False:
+                self._skipped = True
+                self.started = True
+                self.stopped = False
+                return
+            if self._is_invalid_coord(x_raw) or self._is_invalid_coord(y_raw) or self._is_invalid_coord(altitude_raw):
+                self._skipped = True
+                self.started = True
+                self.stopped = False
+                return
+
         x = self._required_float(data, "x")
         y = self._required_float(data, "y")
         altitude_m = self._required_float(data, "altitude_m")
@@ -65,6 +89,9 @@ class GotoWaypointAction(ActionModule):
             return ActionResult(failed=True, reason="action_not_started")
         if self.stopped:
             return ActionResult(done=True, reason="stopped")
+        if getattr(self, "_skipped", False):
+            return ActionResult(done=True, reason="skipped_missing_target",
+                                detail={"status": "skipped_missing_target"})
 
         context_data = context or {}
         arm_heading_yaw_rad = self._arm_heading_yaw(context_data)
@@ -135,6 +162,8 @@ class GotoWaypointAction(ActionModule):
     def reset(self) -> None:
         self.started = False
         self.stopped = False
+        self.skip_if_invalid_target = False
+        self._skipped = False
         self.target_x = 0.0
         self.target_y = 0.0
         self.target_z = 0.0
@@ -305,6 +334,17 @@ class GotoWaypointAction(ActionModule):
             }
         except (KeyError, TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _is_invalid_coord(value: Any) -> bool:
+        """Return True if value is None or not a finite float."""
+        if value is None:
+            return True
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return True
+        return not math.isfinite(v)
 
     def _required_float(self, params: dict[str, Any], name: str) -> float:
         if name not in params:

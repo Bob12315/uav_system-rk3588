@@ -3,10 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from .align_descend import AlignDescendAction
+from .build_recon_report import BuildReconReportAction
 from .goto_waypoint import GotoWaypointAction
 from .land import LandAction
 from .multi_view_localize import MultiViewLocalizeAction
 from .payload_release import PayloadReleaseAction
+from .recon_descend_observe import ReconDescendObserveAction
 from .recon_scan import ReconScanAction
 from .recon_inspect_target import ReconInspectTargetAction
 from .registry import ActionRegistry
@@ -33,6 +35,8 @@ def create_action_lab_registry() -> ActionRegistry:
     registry.register("select_recon_targets", SelectReconTargetsAction)
     registry.register("recon_inspect_target", ReconInspectTargetAction)
     registry.register("recon_scan", ReconScanAction)
+    registry.register("recon_descend_observe", ReconDescendObserveAction)
+    registry.register("build_recon_report", BuildReconReportAction)
     return registry
 
 
@@ -354,6 +358,64 @@ def action_lab_specs() -> list[dict[str, Any]]:
                     "sign_class_names": ["danger_1", "danger_2", "danger_3", "baozha", "shenghua", "yiran",
                                          "fangshe", "buran", "fushi", "youdu", "yushi", "ziran", "ciji"]},
                 "continue_on_lock_failed": False, "continue_on_align_failed": False, "priority": 5,
+            },
+        },
+        {
+            "name": "recon_descend_observe",
+            "label": "Recon Descend Observe",
+            "description": "Descend to 1.5m above a recon target while recording danger sign statistics, then output best-class result.",
+            "default_params": {
+                "target": {"id": "recon_0", "local_x": 0.0, "local_y": 50.0},
+                "target_index": 0,
+                "record_start_altitude_m": 2.0,
+                "finish_altitude_m": 1.5,
+                "detection_source": "scene",
+                "sign_class_names": [
+                    "baozha", "shenghua", "yiran", "fangshe", "buran",
+                    "fushi", "youdu", "yushi", "ziran", "ciji",
+                    "danger_1", "danger_2", "danger_3",
+                ],
+                "min_sign_confidence": 0.35,
+                "min_seen_frames": 3,
+                "min_confidence_max": 0.55,
+                "min_confidence_mean": 0.40,
+                "min_score": 1.2,
+                "min_margin_ratio": 1.4,
+                "align_descend": {
+                    "expected_dt_s": 0.1,
+                    "lost_timeout_updates": 8,
+                    "hold_updates_required": 1,
+                    "max_retries": 1,
+                    "max_updates": 120,
+                    "finish_altitude_m": 1.5,
+                    "config": {
+                        "descent_gate_policy": "allow_unaligned",
+                        "unaligned_descend_speed_mps": 0.06,
+                        "kp_vx": 0.35,
+                        "kp_vy": 0.35,
+                        "max_vx_mps": 0.12,
+                        "max_vy_mps": 0.12,
+                        "descend_speed_mps": 0.16,
+                        "slow_descend_speed_mps": 0.10,
+                        "max_ex_cam": 0.18,
+                        "max_ey_cam": 0.18,
+                        "slow_descend_max_ex_cam": 0.45,
+                        "slow_descend_max_ey_cam": 0.45,
+                        "deadband_ex_cam": 0.04,
+                        "deadband_ey_cam": 0.04,
+                        "min_altitude_m": 1.5,
+                        "require_target_locked": False,
+                        "payload_offset_enabled": False,
+                    },
+                },
+            },
+        },
+        {
+            "name": "build_recon_report",
+            "label": "Build Recon Report",
+            "description": "Aggregate recon_descend_observe results into a summary report — no flight commands.",
+            "default_params": {
+                "items": [],
             },
         },
     ]

@@ -193,22 +193,37 @@ def _smoke_blackboard() -> MissionBlackboard:
         "recon_scan",
         {
             "localized_objects": [
-                {"id": "r1", "class_name": "bucket", "local_x": 1.0, "local_y": 5.0}
+                {"id": "r1", "class_name": "bucket", "local_x": 1.0, "local_y": 5.0},
+                {"id": "r2", "class_name": "recon_bucket", "local_x": -1.0, "local_y": 51.0},
+                {"id": "r3", "class_name": "white_bucket", "local_x": 0.5, "local_y": 49.0},
             ],
-            "recon_report": {
-                "barrels": [
-                    {"id": "recon_1", "content": "danger_1", "confidence": 0.8}
-                ]
-            }
         },
     )
     blackboard.set(
         "recon_targets",
         {
             "selected_targets": [
-                {"id": "r1", "class_name": "bucket", "local_x": 1.0, "local_y": 5.0}
-            ]
+                {"id": "r1", "class_name": "bucket", "local_x": 1.0, "local_y": 5.0},
+                {"id": "r2", "class_name": "recon_bucket", "local_x": -1.0, "local_y": 51.0},
+                {"id": "r3", "class_name": "white_bucket", "local_x": 0.5, "local_y": 49.0},
+            ],
+            "target_slots": [
+                {"valid": True, "id": "r1", "class_name": "bucket", "local_x": 1.0, "local_y": 5.0, "x": 1.0, "y": 5.0, "seen_count": 3, "raw_count": 3, "weight": 3.0, "rank": 1},
+                {"valid": True, "id": "r2", "class_name": "recon_bucket", "local_x": -1.0, "local_y": 51.0, "x": -1.0, "y": 51.0, "seen_count": 2, "raw_count": 2, "weight": 2.0, "rank": 2},
+                {"valid": True, "id": "r3", "class_name": "white_bucket", "local_x": 0.5, "local_y": 49.0, "x": 0.5, "y": 49.0, "seen_count": 1, "raw_count": 1, "weight": 1.0, "rank": 3},
+                {"valid": False, "id": "missing_recon_target_3", "class_name": "", "local_x": None, "local_y": None, "x": None, "y": None, "seen_count": 0, "raw_count": 0, "weight": 0.0, "rank": 4, "status": "missing"},
+                {"valid": False, "id": "missing_recon_target_4", "class_name": "", "local_x": None, "local_y": None, "x": None, "y": None, "seen_count": 0, "raw_count": 0, "weight": 0.0, "rank": 5, "status": "missing"},
+            ],
         },
+    )
+    for i in range(5):
+        blackboard.set(
+            f"recon_result_{i}",
+            {"target_id": f"recon_{i}", "target_index": i, "content": "blank", "confidence": 0.0, "status": "blank_or_uncertain"},
+        )
+    blackboard.set(
+        "recon_report",
+        {"recon_report": {"barrels": []}, "barrel_count": 5, "detected_count": 0, "blank_count": 5, "skipped_count": 0},
     )
     return blackboard
 

@@ -63,6 +63,15 @@ def test_align_descend_config_defaults() -> None:
         {"gain_high_scale": 0.0},
         {"gain_high_scale": -0.1},
         {"gain_high_scale": 1.1},
+        {"descent_gate_policy": "invalid"},
+        {"unaligned_descend_speed_mps": -0.01},
+        {"descent_gate_policy": "allow_unaligned", "unaligned_descend_speed_mps": 0.5, "descend_speed_mps": 0.2},
+        {"unaligned_descend_speed_mps": float("nan")},
+        {"unaligned_descend_speed_mps": float("inf")},
+        {"descend_speed_mps": float("nan")},
+        {"descend_speed_mps": float("inf")},
+        {"slow_descend_speed_mps": float("nan")},
+        {"slow_descend_speed_mps": float("inf")},
     ],
 )
 def test_align_descend_config_rejects_invalid_values(kwargs) -> None:
@@ -1048,3 +1057,83 @@ def test_height_gain_points_scales_max_velocity() -> None:
 def test_height_gain_points_rejects_invalid_config(kwargs) -> None:
     with pytest.raises(ValueError):
         AlignDescendConfig(**kwargs)
+
+
+# ── descent gate policy tests ──────────────────────────────────────────
+
+
+def test_default_policy_holds_when_not_aligned() -> None:
+    """Default descent_gate_policy='aligned_or_slow': vz=0 when not aligned and not slow-descend."""
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.5, ey_cam=0.02),
+        AlignDescendConfig(
+            descent_gate_policy="aligned_or_slow",
+            max_ex_cam=0.06,
+            max_ey_cam=0.06,
+            descend_speed_mps=0.3,
+        ),
+    )
+
+    assert detail["aligned"] is False
+    assert detail["slow_descending"] is False
+    assert detail["hold_reason"] == "aligning"
+    assert command["vz_cmd"] == pytest.approx(0.0)
+    # vx/vy still active
+    assert command["vx_cmd"] != pytest.approx(0.0)
+    assert command["vy_cmd"] != pytest.approx(0.0)
+
+
+def test_allow_unaligned_descends_when_not_aligned() -> None:
+    """descent_gate_policy='allow_unaligned': vz=unaligned_descend_speed_mps even when not aligned."""
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.5, ey_cam=0.02),
+        AlignDescendConfig(
+            descent_gate_policy="allow_unaligned",
+            unaligned_descend_speed_mps=0.06,
+            max_ex_cam=0.06,
+            max_ey_cam=0.06,
+            slow_descend_speed_mps=0.0,
+        ),
+    )
+
+    assert detail["aligned"] is False
+    assert detail["hold_reason"] == "descending_unaligned"
+    assert command["vz_cmd"] == pytest.approx(0.06)
+    # vx/vy still apply horizontal correction
+    assert command["vx_cmd"] != pytest.approx(0.0)
+    assert command["vy_cmd"] != pytest.approx(0.0)
+
+
+def test_allow_unaligned_zero_speed_is_noop() -> None:
+    """When unaligned_descend_speed_mps=0, allow_unaligned falls back to aligning (safe no-op)."""
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.5, ey_cam=0.02),
+        AlignDescendConfig(
+            descent_gate_policy="allow_unaligned",
+            unaligned_descend_speed_mps=0.0,
+            max_ex_cam=0.06,
+            max_ey_cam=0.06,
+        ),
+    )
+
+    assert detail["aligned"] is False
+    assert detail["hold_reason"] == "aligning"
+    assert command["vz_cmd"] == pytest.approx(0.0)
+
+
+def test_allow_unaligned_aligned_still_uses_full_descend() -> None:
+    """When aligned, descent_gate_policy='allow_unaligned' still uses full descend_speed_mps."""
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.02, ey_cam=0.02),
+        AlignDescendConfig(
+            descent_gate_policy="allow_unaligned",
+            unaligned_descend_speed_mps=0.06,
+            max_ex_cam=0.06,
+            max_ey_cam=0.06,
+            descend_speed_mps=0.3,
+        ),
+    )
+
+    assert detail["aligned"] is True
+    assert detail["hold_reason"] == "descending"
+    assert command["vz_cmd"] == pytest.approx(0.3)

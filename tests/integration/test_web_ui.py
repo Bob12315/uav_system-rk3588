@@ -932,8 +932,8 @@ def test_web_ui_drop_targets_source_contains_red_rendering() -> None:
 
     assert "function pointX(obj)" in fm_script
     assert "function pointY(obj)" in fm_script
-    assert "Number.isFinite(Number(obj.local_x))" in fm_script
-    assert "Number.isFinite(Number(obj.x))" in fm_script
+    assert "finiteNumber(obj.local_x)" in fm_script
+    assert "finiteNumber(obj.x)" in fm_script
     assert "function isSelectedDropTarget(obj, selectedTargets)" in fm_script
     assert "Math.abs(ox - tx) < 0.15" in fm_script
     assert "#ff3b30" in fm_script

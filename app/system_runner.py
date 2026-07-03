@@ -684,7 +684,7 @@ class SystemRunner:
 
     def _maybe_save_recon_inspection_result(self) -> None:
         name = getattr(self.action_runtime, "action_name", None)
-        if name != "recon_inspect_target":
+        if name not in ("recon_inspect_target", "build_recon_report"):
             return
         last = getattr(self.action_runtime, "last_result", None)
         if last is None:
@@ -695,6 +695,27 @@ class SystemRunner:
         done = last.get("done") if isinstance(last, dict) else getattr(last, "done", False)
         if not done:
             return
+
+        # new path: build_recon_report output
+        if name == "build_recon_report":
+            recon_report = detail.get("recon_report", {})
+            barrels = recon_report.get("barrels", []) if isinstance(recon_report, dict) else []
+            self.latest_recon_inspection_result = {
+                "source": "build_recon_report", "updated_at": time.time(),
+                "barrels": self._with_field_coordinates(barrels),
+                "barrel_count": detail.get("barrel_count", len(barrels)),
+                "detected_count": detail.get("detected_count", 0),
+                "blank_count": detail.get("blank_count", 0),
+                "skipped_count": detail.get("skipped_count", 0),
+                "report": self._with_field_coordinates(barrels),
+                "inspected_count": len(barrels),
+                "detected_sign_count": detail.get("detected_count", 0),
+                "no_sign_count": detail.get("blank_count", 0),
+                "failed_count": detail.get("skipped_count", 0),
+            }
+            return
+
+        # old path: recon_inspect_target output (unchanged)
         target_index = detail.get("target_index")
         if not isinstance(target_index, int):
             return

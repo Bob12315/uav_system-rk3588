@@ -407,3 +407,99 @@ def test_local_target_matches_direct_at_cardinal_yaws(yaw_rad: float) -> None:
     assert target["x"] == pytest.approx(expected.north_m)
     assert target["y"] == pytest.approx(expected.east_m)
     assert target["z"] == pytest.approx(expected.z_down_m)
+
+
+def test_skip_if_invalid_target_true_skips_on_target_valid_false():
+    action = GotoWaypointAction()
+    action.start({
+        "x": 1.0, "y": 2.0, "altitude_m": 2.5,
+        "skip_if_invalid_target": True,
+        "target": {"valid": False, "local_x": 1.0, "local_y": 2.0},
+    })
+    result = action.update({})
+    assert result.done is True
+    assert result.reason == "skipped_missing_target"
+    assert result.actions == []
+
+
+def test_skip_if_invalid_target_true_skips_on_target_valid_param_false():
+    action = GotoWaypointAction()
+    action.start({
+        "x": 1.0, "y": 2.0, "altitude_m": 2.5,
+        "skip_if_invalid_target": True,
+        "target_valid": False,
+    })
+    result = action.update({})
+    assert result.done is True
+    assert result.reason == "skipped_missing_target"
+    assert result.actions == []
+
+
+def test_skip_if_invalid_target_true_skips_on_x_none():
+    action = GotoWaypointAction()
+    action.start({
+        "x": None, "y": 2.0, "altitude_m": 2.5,
+        "skip_if_invalid_target": True,
+    })
+    result = action.update({})
+    assert result.done is True
+    assert result.reason == "skipped_missing_target"
+
+
+def test_skip_if_invalid_target_true_skips_on_x_nan():
+    action = GotoWaypointAction()
+    action.start({
+        "x": float("nan"), "y": 2.0, "altitude_m": 2.5,
+        "skip_if_invalid_target": True,
+    })
+    result = action.update({})
+    assert result.done is True
+    assert result.reason == "skipped_missing_target"
+
+
+def test_skip_invalid_altitude_none():
+    action = GotoWaypointAction()
+    action.start({
+        "x": 1.0, "y": 2.0, "altitude_m": None,
+        "skip_if_invalid_target": True,
+    })
+    result = action.update({})
+    assert result.done is True
+    assert result.reason == "skipped_missing_target"
+    assert result.actions == []
+
+
+def test_skip_invalid_altitude_nan():
+    action = GotoWaypointAction()
+    action.start({
+        "x": 1.0, "y": 2.0, "altitude_m": float("nan"),
+        "skip_if_invalid_target": True,
+    })
+    result = action.update({})
+    assert result.done is True
+    assert result.reason == "skipped_missing_target"
+    assert result.actions == []
+
+
+def test_skip_invalid_altitude_inf():
+    action = GotoWaypointAction()
+    action.start({
+        "x": 1.0, "y": 2.0, "altitude_m": float("inf"),
+        "skip_if_invalid_target": True,
+    })
+    result = action.update({})
+    assert result.done is True
+    assert result.reason == "skipped_missing_target"
+    assert result.actions == []
+
+
+def test_skip_invalid_altitude_neginf():
+    action = GotoWaypointAction()
+    action.start({
+        "x": 1.0, "y": 2.0, "altitude_m": float("-inf"),
+        "skip_if_invalid_target": True,
+    })
+    result = action.update({})
+    assert result.done is True
+    assert result.reason == "skipped_missing_target"
+    assert result.actions == []

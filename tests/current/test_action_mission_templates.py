@@ -147,12 +147,31 @@ def test_action_mission_templates_blackboard_references_resolve() -> None:
     blackboard.set(
         "recon_scan",
         {
-            "recon_report": {
-                "barrels": [
-                    {"id": "recon_1", "content": "danger_1", "confidence": 0.8}
-                ]
-            }
+            "localized_objects": [
+                {"id": "r1", "class_name": "bucket", "local_x": 1.0, "local_y": 5.0},
+            ],
         },
+    )
+    blackboard.set(
+        "recon_targets",
+        {
+            "target_slots": [
+                {"valid": True, "id": "r1", "class_name": "bucket", "local_x": 1.0, "local_y": 5.0, "x": 1.0, "y": 5.0, "rank": 1},
+                {"valid": False, "id": "missing_1", "class_name": "", "local_x": None, "local_y": None, "x": None, "y": None, "rank": 2, "status": "missing"},
+                {"valid": False, "id": "missing_2", "class_name": "", "local_x": None, "local_y": None, "x": None, "y": None, "rank": 3, "status": "missing"},
+                {"valid": False, "id": "missing_3", "class_name": "", "local_x": None, "local_y": None, "x": None, "y": None, "rank": 4, "status": "missing"},
+                {"valid": False, "id": "missing_4", "class_name": "", "local_x": None, "local_y": None, "x": None, "y": None, "rank": 5, "status": "missing"},
+            ],
+        },
+    )
+    for i in range(5):
+        blackboard.set(
+            f"recon_result_{i}",
+            {"target_id": f"recon_{i}", "content": "blank", "status": "blank_or_uncertain"},
+        )
+    blackboard.set(
+        "recon_report",
+        {"recon_report": {"barrels": []}, "barrel_count": 5},
     )
 
     for path in TEMPLATE_PATHS:
@@ -165,23 +184,24 @@ def test_action_mission_templates_blackboard_references_resolve() -> None:
 def test_full_rescue_template_contains_recon_scan_after_two_drops() -> None:
     data = _template(FULL_TEMPLATE_PATH)
     steps = data["steps"]
-    names = [step["name"] for step in steps]
+    labels = [step.get("label", "") for step in steps]
     payload_indices = [index for index, step in enumerate(steps) if step["name"] == "payload_release"]
-    recon_index = names.index("recon_scan")
-    land_index = names.index("land")
+    recon_index = labels.index("recon_scan")
+    land_index = labels.index("return_home")
 
     assert len(payload_indices) == 2
     assert payload_indices[1] < recon_index < land_index
-    assert land_index == len(steps) - 1
+    assert steps[-1]["name"] == "land"
+    assert land_index == len(steps) - 2  # return_home is second-to-last, land is last
 
 
 def test_full_rescue_template_save_as_names() -> None:
     data = _template(FULL_TEMPLATE_PATH)
-    by_name = {step["name"]: step for step in data["steps"]}
+    by_label = {step.get("label", ""): step for step in data["steps"]}
 
-    assert by_name["multi_view_localize"]["save_as"] == "drop_scan"
-    assert by_name["select_drop_targets"]["save_as"] == "drop_targets"
-    assert by_name["recon_scan"]["save_as"] == "recon_scan"
+    assert by_label["drop_scan"]["save_as"] == "drop_scan"
+    assert by_label["recon_scan"]["save_as"] == "recon_scan"
+    assert by_label["select_recon_targets"]["save_as"] == "recon_targets"
 
 
 def test_full_rescue_template_failure_policies_are_valid() -> None:

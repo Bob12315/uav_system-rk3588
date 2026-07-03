@@ -47,16 +47,18 @@ const FIELD_DEFAULTS = {
 };
 
 function pointX(obj) {
-  if (Number.isFinite(Number(obj.field_x))) return Number(obj.field_x);
-  if (Number.isFinite(Number(obj.local_x))) return Number(obj.local_x);
-  if (Number.isFinite(Number(obj.x))) return Number(obj.x);
-  return null;
+  const fx = finiteNumber(obj.field_x);
+  if (fx !== null) return fx;
+  const lx = finiteNumber(obj.local_x);
+  if (lx !== null) return lx;
+  return finiteNumber(obj.x);
 }
 function pointY(obj) {
-  if (Number.isFinite(Number(obj.field_y))) return Number(obj.field_y);
-  if (Number.isFinite(Number(obj.local_y))) return Number(obj.local_y);
-  if (Number.isFinite(Number(obj.y))) return Number(obj.y);
-  return null;
+  const fy = finiteNumber(obj.field_y);
+  if (fy !== null) return fy;
+  const ly = finiteNumber(obj.local_y);
+  if (ly !== null) return ly;
+  return finiteNumber(obj.y);
 }
 function localPointToField(point, next) {
   const tf = next.field_transform || {};
@@ -75,6 +77,9 @@ function localPointToField(point, next) {
   };
 }
 function pointForFieldMap(point, next) {
+  if (!point) return null;
+  if (point.valid === false) return null;
+  if (point.status === "skipped_missing_target") return null;
   const fieldX = finiteNumber(point.field_x);
   const fieldY = finiteNumber(point.field_y);
   if (fieldX !== null && fieldY !== null) return {...point, x: fieldX, y: fieldY, field: true};
@@ -139,6 +144,7 @@ function canvasToWorld(screenX, screenY, rect, view = fieldMapView) {
   };
 }
 function finiteNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }

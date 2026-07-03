@@ -569,11 +569,12 @@ function renderReconInspection(result) {
   const report = Array.isArray(result.report) ? result.report : [];
   element.innerHTML = report.length ? report.map((item, index) => {
     const x = pointX(item), y = pointY(item);
-    const status = item.status === "detected"
-      ? `${item.sign_class || "--"} ${num(item.confidence, 2)}`
+    const statusLabel = item.status === "detected"
+      ? `${item.sign_class || item.content || "--"} ${num(item.confidence, 2)}`
       : item.status === "no_sign" ? "无标识"
+        : item.status === "blank_or_uncertain" ? "空白"
         : item.status === "skipped_missing_target" ? "跳过" : "识别失败";
-    return `<div>#${index + 1} &nbsp; x=${num(x, 2)} y=${num(y, 2)} &nbsp; ${escapeHtml(status)}</div>`;
+    return `<div>#${index + 1} &nbsp; x=${num(x, 2)} y=${num(y, 2)} &nbsp; ${escapeHtml(statusLabel)}</div>`;
   }).join("") : `<div class="hint">暂无侦察识别结果。</div>`;
 }
 function renderStatus(next) {

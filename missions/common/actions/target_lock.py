@@ -14,10 +14,31 @@ class TargetLockAction(ActionModule):
 
     def start(self, params: dict[str, Any] | None = None) -> None:
         data = params or {}
+        self.skip_if_invalid_target = bool(data.get("skip_if_invalid_target", False))
         target = data.get("target")
-        if not isinstance(target, dict):
-            raise ValueError("target must be a dict")
-        self.target_x, self.target_y = self._target_xy(target)
+        if self.skip_if_invalid_target:
+            # skip on None, non-dict, explicit valid=false, or invalid coords
+            if not isinstance(target, dict):
+                self._skipped = True
+                self.started = True
+                self.stopped = False
+                return
+            if target.get("valid") is False:
+                self._skipped = True
+                self.started = True
+                self.stopped = False
+                return
+            try:
+                self.target_x, self.target_y = self._target_xy(target)
+            except ValueError:
+                self._skipped = True
+                self.started = True
+                self.stopped = False
+                return
+        else:
+            if not isinstance(target, dict):
+                raise ValueError("target must be a dict")
+            self.target_x, self.target_y = self._target_xy(target)
 
         self.max_match_distance_m = float(data.get("max_match_distance_m", 1.0))
         if self.max_match_distance_m <= 0.0:
@@ -60,6 +81,9 @@ class TargetLockAction(ActionModule):
             return ActionResult(failed=True, reason="action_not_started")
         if self.stopped:
             return ActionResult(done=True, reason="stopped")
+        if getattr(self, "_skipped", False):
+            return ActionResult(done=True, reason="skipped_missing_target",
+                                detail={"status": "skipped_missing_target"})
         if self.done:
             return ActionResult(done=True, reason="target_locked", detail=self._detail())
         if self.failed:
@@ -141,6 +165,8 @@ class TargetLockAction(ActionModule):
         self.stopped = True
 
     def reset(self) -> None:
+        self.skip_if_invalid_target = False
+        self._skipped = False
         self.target_x = 0.0
         self.target_y = 0.0
         self.max_match_distance_m = 1.0

@@ -43,15 +43,24 @@ class AlignDescendConfig:
     image_y_sign: float = -1.0
     max_payload_offset_ex_cam: float = 0.8
     max_payload_offset_ey_cam: float = 0.8
+    # unaligned descent gate for recon mode (default keeps existing behaviour)
+    descent_gate_policy: str = "aligned_or_slow"
+    unaligned_descend_speed_mps: float = 0.0
 
     def __post_init__(self) -> None:
         for name in ("kp_vx", "kp_vy"):
             if float(getattr(self, name)) < 0.0:
                 raise ValueError(f"{name} must be non-negative")
         for name in ("max_vx_mps", "max_vy_mps", "descend_speed_mps"):
-            if float(getattr(self, name)) <= 0.0:
+            value = float(getattr(self, name))
+            if not math.isfinite(value):
+                raise ValueError(f"{name} must be finite")
+            if value <= 0.0:
                 raise ValueError(f"{name} must be positive")
-        if float(self.slow_descend_speed_mps) < 0.0:
+        slow_value = float(self.slow_descend_speed_mps)
+        if not math.isfinite(slow_value):
+            raise ValueError("slow_descend_speed_mps must be finite")
+        if slow_value < 0.0:
             raise ValueError("slow_descend_speed_mps must be non-negative")
         for name in ("max_ex_cam", "max_ey_cam"):
             if float(getattr(self, name)) <= 0.0:
@@ -127,6 +136,18 @@ class AlignDescendConfig:
             raise ValueError("payload_forward_m must be finite")
         if not math.isfinite(float(self.payload_right_m)):
             raise ValueError("payload_right_m must be finite")
+        # descent gate policy validation
+        if self.descent_gate_policy not in ("aligned_or_slow", "allow_unaligned"):
+            raise ValueError("descent_gate_policy must be 'aligned_or_slow' or 'allow_unaligned'")
+        if float(self.unaligned_descend_speed_mps) < 0.0:
+            raise ValueError("unaligned_descend_speed_mps must be non-negative")
+        if not math.isfinite(float(self.unaligned_descend_speed_mps)):
+            raise ValueError("unaligned_descend_speed_mps must be finite")
+        if (
+            self.descent_gate_policy == "allow_unaligned"
+            and float(self.unaligned_descend_speed_mps) > float(self.descend_speed_mps)
+        ):
+            raise ValueError("unaligned_descend_speed_mps must be <= descend_speed_mps")
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,6 +295,9 @@ def compute_align_descend_command(
         elif slow_descend_aligned:
             vz = config.slow_descend_speed_mps
             reason = "descending_slow"
+        elif config.descent_gate_policy == "allow_unaligned" and config.unaligned_descend_speed_mps > 0.0:
+            vz = config.unaligned_descend_speed_mps
+            reason = "descending_unaligned"
         else:
             vz = 0.0
             reason = "aligning"
