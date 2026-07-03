@@ -1,68 +1,90 @@
 # Field Reference：场地原点与方向
 
-Field Reference 把比赛 FIELD 坐标映射到飞控 LOCAL_NED。它由原点、heading、来源、
-确认状态和冻结状态组成。当前代码只有 yaw-based 第一版；本文同时定义后续 GPS
-辅助设计，不代表 Phase 1 已实现这些能力。
+唯一方案：**FieldProfile Centerline Only**
 
-## 来源
+## 唯一方案
 
-```text
-origin_source:
-  - local_position
-  - gps_marker
-  - manual_gps_input
+起飞点锚定 + 4 点以上中轴 GPS profile。
 
-heading_source:
-  - compass_yaw
-  - gps_two_point
-  - manual_angle
-```
+### 流程
 
-- `local_position`：记录确认时的 LOCAL_NED 位置。
-- `gps_marker`：从飞控有效 GPS 状态记录标记点。
-- `manual_gps_input`：用户输入经纬度标记点。
-- `compass_yaw`：确认时使用飞控 yaw。
-- `gps_two_point`：用 GPS A→B 方位角定义 FIELD `+Y`。
-- `manual_angle`：用户明确输入 FIELD `+Y` 的角度。
+1. 创建 FieldProfile JSON（schema v2），包含：
+   - `anchor`：起飞点 GPS 锚点（lat/lon），field (0,0)
+   - `centerline_points`：≥4 个 GPS 点沿场地中轴排列
+   - `field_geometry`：lane/drop/recce 几何参数
+   - `binding_policy`：绑定时 start error 和 centerline residual 的 warn/max 阈值
 
-本机罗盘可能受电池和大电流干扰，因此 FIELD heading 不能只依赖
-`compass_yaw`；它只是可选来源之一。
+2. 起飞前通过 Web UI 或 API：
+   - 选择 profile
+   - 验证 profile（`/api/field-profiles/{id}/validate`）
+   - 绑定当前位置（`/api/field-profiles/{id}/bind-current`）
+   - 确认 freeze（`/api/field-reference/freeze`）
 
-## GPS A/B 推荐方案
+3. 绑定成功后：
+   - `origin_local` = 当前 LOCAL_NED 位置（**不从 GPS 反算**）
+   - `field_heading` = 中心线拟合 heading
+   - `field_reference` confirmed + synced_to_runtime + frozen
 
-```text
-GPS 点 A = 场地原点辅助标记
-GPS 点 B = 场地正前方参考点
-A → B 的方位角 = FIELD +Y heading
-```
+4. Action Mission 启动前 preflight 强制检查：
+   - `field_reference` confirmed
+   - `synced_to_runtime` = true
+   - `frozen` = true
+   - 不满足则拒绝 mission start
 
-- 单个 GPS 点只能定义原点，不能定义方向。
-- A-B 距离太短时不得确认。
-- 建议最小距离至少 5 m，推荐 10 m 以上。
-- 后续实现还必须校验 GPS fix 和精度；具体 EPH/HDOP 阈值需要实机讨论确认。
-- GPS 辅助只负责场地大方向和大范围航点。
-- 最终投放精定位仍依赖视觉对准和激光高度。
+## 关键设计规则
 
-## 确认和冻结
+- **origin_local = 当前起飞点 LOCAL_NED**：GPS 不参与原点计算
+- **current GPS 仅用于检查 start_error**（距离 anchor GPS 的偏差）
+- **yaw/compass 不参与 FIELD heading 控制**：heading 完全来自 profile 中心线拟合
+- **yaw_error 仅显示**：当前 yaw 与 field heading 的差值，纯诊断信息
+- **中心线拟合**：anchor + centerline_points 的 ENU 坐标进行 PCA 直线拟合，方向从 anchor 指向远端
 
-1. 用户选择 origin source 和 heading source。
-2. 系统校验所需位置、GPS、角度和最小基线。
-3. 用户显式确认后才生成可用 Field Reference。
-4. 未确认时必须拒绝实发 FIELD 航点。
-5. Action Mission 开始后 Field Reference 冻结。
-6. yaw 跳变、GPS Home 更新和 EKF Origin 更新不能自动改写已确认值。
-7. 只有停止相关 mission 并由用户重新确认后才能替换；具体解冻时机待实现前裁决。
+## 绑定规则
 
-## 当前实现与后续边界
+| 条件 | 结果 |
+|---|---|
+| `current_start_error_m ≤ warn_start_error_m` | OK |
+| `warn < start_error ≤ max` | Warning, 但 ok=True |
+| `start_error > max` | ok=False，拒绝 |
+| `max_centerline_residual > max_centerline_residual_m` | ok=False，拒绝 |
+| `warn < residual ≤ max` | Warning |
 
-当前 `app/runtime_context.py` 保存 LOCAL_NED 原点、yaw heading 和确认状态，并提供
-FIELD↔LOCAL_NED 转换；Web UI 提供“确认场地方向/原点”按钮。新增的纯逻辑模块：
+## 已删除的旧方案
 
-- `app/field_reference.py` — `FieldReference` 数据结构、验证、GPS A/B 计算和生命周期。
-- `app/coordinate_transform.py` — `CoordinateTransform`（`field_to_local_ned` /
-  `local_ned_to_field`），FIELD↔LOCAL_NED 的唯一实现源。
-- `app/field_reference_service.py` — `FieldReferenceService`，轻量业务封装，不依赖
-  Web UI/飞控/MAVLink。
+以下旧方案入口已返回 410 Gone，不再可用：
 
-后续应将 `runtime_context.py` 中的 FIELD 状态逐步迁移到 `FieldReference` /
-`FieldReferenceService`，而不是建立平行实现。转换公式见 [coordinate_frames.md](coordinate_frames.md)。
+- `/api/field-heading/confirm`
+- `/api/field-reference/mark-origin`
+- `/api/field-reference/mark-forward`
+- `/api/field-reference/use-current-yaw`
+- `/api/field-reference/set-manual-heading`
+- `/api/field-reference/confirm`
+
+旧 enum 值（`compass_yaw`、`gps_two_point`、`manual_angle` 等）保留为内部兼容但不可 API 操作。
+
+## 保留的 API
+
+- `/api/field-reference/status`
+- `/api/field-reference/reset`
+- `/api/field-reference/freeze`
+- `/api/field-profiles`（列表）
+- `/api/field-profiles/{profile_id}`（查看）
+- `/api/field-profiles/{profile_id}/validate`（验证）
+- `/api/field-profiles/{profile_id}/bind-current`（绑定，centerline-only）
+
+## 坐标转换
+
+FIELD ↔ LOCAL_NED 转换仍使用 `app/coordinate_transform.py`：
+- `field_to_local_ned()` 和 `local_ned_to_field()` 保持不变
+- 转换依赖 `FieldReference` 的 origin_local 和 field_heading_yaw_rad
+- 未确认/未同步时拒绝实发 FIELD 航点
+
+## 相关文件
+
+- `app/field_profile.py` — FieldProfile 数据结构、验证、中心线拟合
+- `app/field_profile_service.py` — 加载、验证、绑定逻辑
+- `app/field_reference.py` — FieldReference 核心数据结构
+- `app/field_reference_service.py` — FieldReference 生命周期服务
+- `app/field_reference_controller.py` — HTTP API ↔ 后端桥接
+- `app/coordinate_transform.py` — FIELD ↔ LOCAL_NED 数学
+- `app/runtime_context.py` — RuntimeContextBuilder（内部同步桥）

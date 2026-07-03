@@ -81,6 +81,7 @@
               <div id="fieldMapEmpty" class="field-map-empty">等待 mission 坐标</div>
             </div>
             <div id="fieldMapLegend" class="field-map-legend"></div>
+            <div id="fieldMapCoord" class="field-map-coord" style="font-size:12px;margin-top:4px;color:#aaa">FIELD x/y | lat/lon</div>
           </article>
 
           <article class="panel dashboard-summary-panel">
@@ -300,65 +301,35 @@
         </div>
       </article>
 
-      <article class="panel safety-panel field-heading-panel">
-        <div class="panel-title">场地方向 / Field Heading</div>
-        <div class="field-heading-status-grid" id="fieldHeadingStatus">
-          <div><span>当前 yaw</span><strong id="fieldHeadingCurrentYaw">--</strong></div>
-          <div><span>预解锁 yaw</span><strong id="fieldHeadingPreArmYaw">--</strong></div>
-          <div><span>已确认 yaw</span><strong id="fieldHeadingConfirmedYaw">--</strong></div>
-          <div><span>当前偏差</span><strong id="fieldHeadingDelta">--</strong></div>
-          <div><span>原点 LOCAL X/Y/Z</span><strong id="fieldHeadingOrigin">--</strong></div>
-          <div><span>当前 field X/Y/Z</span><strong id="fieldHeadingCurrentField">--</strong></div>
-          <div><span>确认状态</span><strong id="fieldHeadingConfirmed">--</strong></div>
-          <div><span>来源</span><strong id="fieldHeadingSource">--</strong></div>
-          <div><span>确认时间</span><strong id="fieldHeadingTime">--</strong></div>
-          <div><span>姿态有效</span><strong id="fieldHeadingAttitudeValid">--</strong></div>
-        </div>
-        <div class="button-row field-heading-actions">
-          <button id="confirmFieldHeading" class="warning"
-            data-confirm="确认将当前机头 yaw 和 LOCAL_NED 位置记录为场地方向/原点？请确保飞机放在地上，机头已经对准场地方向。">
-            确认场地方向/原点
-          </button>
-        </div>
-        <div id="fieldHeadingHint" class="hint">
-          起飞前把机头对准场地方向，然后点击确认。程序起飞会自动确认；此按钮用于遥控器起飞前或调试。确认只记录内部 yaw 和任务坐标原点，不发 MAVLink。
-        </div>
-      </article>
-
       <article class="panel safety-panel field-reference-panel">
-        <div class="panel-title">Field Reference 新面板</div>
+        <div class="panel-title">Field Reference / 场地参考 (Centerline Only)</div>
         <div class="field-reference-status-grid" id="fieldReferenceStatus">
           <div><span>confirmed</span><strong id="frConfirmed">--</strong></div>
           <div><span>frozen</span><strong id="frFrozen">--</strong></div>
           <div><span>origin source</span><strong id="frOriginSource">--</strong></div>
           <div><span>heading source</span><strong id="frHeadingSource">--</strong></div>
           <div><span>field heading deg</span><strong id="frHeadingDeg">--</strong></div>
-          <div><span>origin local N / E</span><strong id="frOriginLocal">--</strong></div>
-          <div><span>origin GPS lat / lon</span><strong id="frOriginGps">--</strong></div>
-          <div><span>forward GPS lat / lon</span><strong id="frForwardGps">--</strong></div>
-          <div><span>A-B distance</span><strong id="frDistance">--</strong></div>
-          <div><span>warnings</span><strong id="frWarnings">--</strong></div>
+          <div><span>origin local N/E/Z</span><strong id="frOriginLocal">--</strong></div>
+          <div><span>origin GPS lat/lon</span><strong id="frOriginGps">--</strong></div>
           <div><span>GPS fix / sats</span><strong id="frGpsFix">--</strong></div>
           <div><span>EPH / EPV</span><strong id="frGpsEphEpv">--</strong></div>
           <div><span>GPS valid</span><strong id="frGpsValid">--</strong></div>
           <div><span>has local pos</span><strong id="frHasLocal">--</strong></div>
           <div><span>active source</span><strong id="frActiveSource">--</strong></div>
           <div><span>synced to runtime</span><strong id="frSynced">--</strong></div>
+          <div><span>start error</span><strong id="frStartError">--</strong></div>
+          <div><span>yaw error (display only)</span><strong id="frYawError">--</strong></div>
+          <div><span>max residual</span><strong id="frMaxResidual">--</strong></div>
+          <div><span>RMS residual</span><strong id="frRmsResidual">--</strong></div>
+          <div><span>warnings</span><strong id="frWarnings">--</strong></div>
         </div>
+        <div id="frResidualTable" class="fr-residual-table"></div>
         <div class="button-row">
-          <button id="frMarkOrigin">记录原点 A</button>
-          <button id="frMarkForward">记录前向点 B</button>
-          <button id="frUseCurrentYaw">使用当前 yaw</button>
-          <span style="display:inline-flex;gap:4px;align-items:center">
-            <input id="frManualHeadingDeg" type="number" step="0.1" placeholder="deg" style="width:70px">
-            <button id="frSetManualHeading">手动 heading</button>
-          </span>
-          <button id="frConfirm" class="warning">确认</button>
           <button id="frReset">Reset</button>
           <button id="frFreeze">Freeze</button>
         </div>
         <div id="frHint" class="hint">
-          Field Reference 面板 — 操作只修改后端状态，不发送 MAVLink。
+          Field Reference — centerline profile binding only. Use Field Profile panel below to bind.
         </div>
       </article>
 

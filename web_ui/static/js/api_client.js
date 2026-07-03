@@ -111,34 +111,9 @@ window.UavApi = (function () {
   // ------------------------------------------------------------------
   // Field Heading (legacy)
   // ------------------------------------------------------------------
-  function confirmFieldHeading() {
-    return request("/api/field-heading/confirm", {method: "POST", body: "{}"});
-  }
 
-  // ------------------------------------------------------------------
-  // Field Reference (new panel)
-  // ------------------------------------------------------------------
   function getFieldReferenceStatus() {
     return request("/api/field-reference/status");
-  }
-  function markFieldReferenceOrigin() {
-    return request("/api/field-reference/mark-origin", {method: "POST", body: "{}"});
-  }
-  function markFieldReferenceForward() {
-    return request("/api/field-reference/mark-forward", {method: "POST", body: "{}"});
-  }
-  function useCurrentYawForFieldReference() {
-    return request("/api/field-reference/use-current-yaw", {method: "POST", body: "{}"});
-  }
-  function setManualFieldReferenceHeading(yawDeg) {
-    return request("/api/field-reference/set-manual-heading", {
-      method: "POST",
-      body: JSON.stringify({yaw_deg: yawDeg}),
-      headers: {"Content-Type": "application/json"},
-    });
-  }
-  function confirmFieldReference() {
-    return request("/api/field-reference/confirm", {method: "POST", body: "{}"});
   }
   function resetFieldReference() {
     return request("/api/field-reference/reset", {method: "POST", body: "{}"});
@@ -239,14 +214,8 @@ window.UavApi = (function () {
     tickActionMission: tickActionMission,
     skipCurrentActionMission: skipCurrentActionMission,
 
-    confirmFieldHeading: confirmFieldHeading,
 
     getFieldReferenceStatus: getFieldReferenceStatus,
-    markFieldReferenceOrigin: markFieldReferenceOrigin,
-    markFieldReferenceForward: markFieldReferenceForward,
-    useCurrentYawForFieldReference: useCurrentYawForFieldReference,
-    setManualFieldReferenceHeading: setManualFieldReferenceHeading,
-    confirmFieldReference: confirmFieldReference,
     resetFieldReference: resetFieldReference,
     freezeFieldReference: freezeFieldReference,
 

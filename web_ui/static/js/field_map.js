@@ -60,6 +60,25 @@ function pointY(obj) {
   if (ly !== null) return ly;
   return finiteNumber(obj.y);
 }
+
+// Convert FIELD coordinates to lat/lon using anchor + heading.
+// Requires next.field_reference with origin_lat, origin_lon, field_heading_yaw_rad.
+function fieldXYToLatLon(fieldX, fieldY, next) {
+  const fr = (next || {}).field_reference || {};
+  const lat = fr.origin_lat;
+  const lon = fr.origin_lon;
+  const heading = fr.field_heading_yaw_rad;
+  if (lat == null || lon == null || heading == null) return null;
+  // Inverse of ENU conversion
+  const dNorth = fieldY * Math.cos(heading) - fieldX * Math.sin(heading);
+  const dEast = fieldY * Math.sin(heading) + fieldX * Math.cos(heading);
+  const latDegPerMeter = 1.0 / 111320.0;
+  const lonDegPerMeter = 1.0 / (111320.0 * Math.cos(lat * Math.PI / 180.0));
+  return {
+    lat: lat + dNorth * latDegPerMeter,
+    lon: lon + dEast * lonDegPerMeter,
+  };
+}
 function localPointToField(point, next) {
   const tf = next.field_transform || {};
   if (!tf.confirmed) return null;
@@ -655,6 +674,22 @@ function setupFieldMapInteractions() {
     renderFieldMap();
   }, {passive: false});
 
+  // mousemove: display FIELD x/y and lat/lon coordinates
+  canvas.addEventListener("mousemove", event => {
+    var rect = canvas.getBoundingClientRect();
+    var world = canvasToWorld(event.clientX - rect.left, event.clientY - rect.top, rect);
+    var next = _state();
+    var latLon = fieldXYToLatLon(world.x, world.y, next);
+    var coordEl = document.getElementById("fieldMapCoord");
+    if (coordEl) {
+      var latStr = latLon ? latLon.lat.toFixed(6) : "--";
+      var lonStr = latLon ? latLon.lon.toFixed(6) : "--";
+      coordEl.textContent =
+        "FIELD x=" + world.x.toFixed(2) + " y=" + world.y.toFixed(2) +
+        " | lat=" + latStr + " lon=" + lonStr;
+    }
+  });
+
   // Pointer Events: unify mouse + touch drag/pinch
   const activePointers = new Map();
 
@@ -827,6 +862,7 @@ function renderFieldMap(next) {
     isSelectedDropTarget: isSelectedDropTarget,
     fieldMapModel: fieldMapModel,
     canvasToWorld: canvasToWorld,
+    fieldXYToLatLon: fieldXYToLatLon,
     worldToCanvas: worldToCanvas,
     fitFieldMapToDefaults: fitFieldMapToDefaults,
     setupFieldMapInteractions: setupFieldMapInteractions,

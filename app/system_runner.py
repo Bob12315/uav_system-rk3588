@@ -101,7 +101,7 @@ class SystemRunner:
         self.field_reference_controller = FieldReferenceController(
             field_reference_service=self.field_reference_service,
             runtime_context_builder=self.runtime_context_builder,
-            get_drone_snapshot=self._drone_snapshot_raw,
+            get_drone_snapshot=self._drone_snapshot_for_controller,
         )
         self.web_status_service = WebStatusService(
             runtime_context_builder=self.runtime_context_builder,
@@ -132,7 +132,6 @@ class SystemRunner:
             dispatcher=ActionDispatcher(
                 logger=self.logger,
                 yolo_client=YoloCommandClient(self.config.yolo_command),
-                field_heading_confirmer=self.protected_confirm_field_heading,
             )
         )
         self.action_mission_orchestrator: MissionOrchestrator | None = None
@@ -356,34 +355,17 @@ class SystemRunner:
             snapshot = dict(self.latest_snapshot)
         return self.runtime_context_builder.build_action_context(snapshot)
 
-    def field_heading_status(self) -> dict[str, object]:
-        return self.web_status_service.field_heading_status()
+    # ------------------------------------------------------------------
+    # Field Reference API handlers — centerline only
+    # ------------------------------------------------------------------
 
-    # ------------------------------------------------------------------
-    # Field Reference API handlers (Phase 4C-1)
-    # ------------------------------------------------------------------
+    def _drone_snapshot_for_controller(self) -> dict[str, object]:
+        with self.control_command_log_lock:
+            snapshot = dict(self.latest_snapshot)
+        return snapshot.get("drone", {}) or {}
 
     def field_reference_status(self) -> dict[str, object]:
         return self.field_reference_controller.status()
-
-    def _drone_snapshot_raw(self) -> dict[str, object]:
-        with self.control_command_log_lock:
-            return dict(self.latest_snapshot).get("drone", {}) or {}
-
-    def field_reference_mark_origin(self) -> dict[str, object]:
-        return self.field_reference_controller.mark_origin()
-
-    def field_reference_mark_forward(self) -> dict[str, object]:
-        return self.field_reference_controller.mark_forward()
-
-    def field_reference_use_current_yaw(self) -> dict[str, object]:
-        return self.field_reference_controller.use_current_yaw()
-
-    def field_reference_set_manual_heading(self, yaw_deg: float) -> dict[str, object]:
-        return self.field_reference_controller.set_manual_heading(yaw_deg)
-
-    def field_reference_confirm(self) -> dict[str, object]:
-        return self.field_reference_controller.confirm()
 
     def field_reference_reset(self) -> dict[str, object]:
         return self.field_reference_controller.reset()
@@ -436,23 +418,40 @@ class SystemRunner:
         for d in self._PROFILE_DIRS:
             try:
                 p = FieldProfileService.load_profile(profile_id, profile_dir=d)
+                cl_points = [
+                    {"name": pt.name, "lat": pt.lat, "lon": pt.lon,
+                     "expected_field_y_m": pt.expected_field_y_m}
+                    for pt in p.centerline_points
+                ]
                 return {
                     "ok": True,
                     "profile_id": p.profile_id,
                     "name": p.name,
                     "schema_version": p.schema_version,
-                    "created_at": p.created_at,
-                    "points": {
-                        k: {"name": pt.name, "role": pt.role,
-                            "lat": pt.lat, "lon": pt.lon,
-                            "field_x_m": pt.field_x_m, "field_y_m": pt.field_y_m}
-                        for k, pt in p.points.items()
+                    "anchor": {
+                        "name": p.anchor.name,
+                        "lat": p.anchor.lat,
+                        "lon": p.anchor.lon,
+                        "field_x_m": p.anchor.field_x_m,
+                        "field_y_m": p.anchor.field_y_m,
                     },
+                    "centerline_points": cl_points,
                     "gps_quality": {
                         "min_fix_type": p.gps_quality.min_fix_type,
                         "min_satellites": p.gps_quality.min_satellites,
                         "max_eph": p.gps_quality.max_eph,
                         "max_epv": p.gps_quality.max_epv,
+                    },
+                    "field_geometry": {
+                        "lane_half_width_m": p.field_geometry.lane_half_width_m,
+                        "drop_center_y_m": p.field_geometry.drop_center_y_m,
+                        "recce_center_y_m": p.field_geometry.recce_center_y_m,
+                    },
+                    "binding_policy": {
+                        "max_start_error_m": p.binding_policy.max_start_error_m,
+                        "warn_start_error_m": p.binding_policy.warn_start_error_m,
+                        "max_centerline_residual_m": p.binding_policy.max_centerline_residual_m,
+                        "warn_centerline_residual_m": p.binding_policy.warn_centerline_residual_m,
                     },
                 }
             except FileNotFoundError:
@@ -511,87 +510,6 @@ class SystemRunner:
                 copy["field_x"], copy["field_y"] = converted
             enriched.append(copy)
         return enriched
-
-    def confirm_field_heading_manual(self) -> CommandResult:
-        reference = self.field_reference_service.reference
-        if reference.is_frozen:
-            return CommandResult(
-                False,
-                "FieldReference is frozen; use /api/field-reference/reset to unfreeze before confirming via legacy API",
-            )
-        if reference.is_confirmed or reference.is_ready():
-            return CommandResult(
-                False,
-                "FieldReference is already confirmed; reset it before confirming via legacy API",
-            )
-        with self.control_command_log_lock:
-            snapshot = dict(self.latest_snapshot)
-        drone = snapshot.get("drone", {})
-        if not isinstance(drone, dict):
-            return CommandResult(False, "drone state unavailable")
-        if not bool(drone.get("attitude_valid", False)):
-            return CommandResult(False, "attitude yaw not valid")
-        yaw = RuntimeContextBuilder._float_or_none(drone.get("yaw"))
-        if yaw is None:
-            return CommandResult(False, "attitude yaw not valid")
-        ok = self.protected_confirm_field_heading(
-            yaw_rad=yaw,
-            drone=drone,
-            source="manual_web",
-        )
-        if not ok:
-            return CommandResult(False, "无法确认原点：当前 LOCAL_NED 位置无效")
-        status = self.field_heading_status()
-        yaw_deg = status.get("field_heading_yaw_deg")
-        origin_x = status.get("origin_local_x")
-        origin_y = status.get("origin_local_y")
-        origin_z = status.get("origin_local_z")
-        message = (
-            (
-                f"field heading/origin confirmed yaw={yaw_deg:.1f} deg "
-                f"origin=({origin_x:.2f},{origin_y:.2f},{origin_z:.2f})"
-            )
-            if yaw_deg is not None
-            and origin_x is not None
-            and origin_y is not None
-            and origin_z is not None
-            else "field heading/origin confirmed"
-        )
-        if bool(drone.get("armed", False)):
-            message = f"{message}; vehicle is armed, confirm on ground before flight when possible"
-        self._record_event("OK", message)
-        return CommandResult(True, message)
-
-    def protected_confirm_field_heading(
-        self,
-        yaw_rad: float | None = None,
-        *,
-        drone: dict[str, object] | None = None,
-        source: str = "takeoff_auto",
-    ) -> bool:
-        """Guard the legacy runtime-context field-heading write path.
-
-        A confirmed or frozen FieldReference is authoritative.  Takeoff's
-        compatibility auto-confirm action succeeds as a no-op in that case,
-        so it cannot overwrite a profile binding or fail an otherwise valid
-        mission start.
-        """
-        reference = self.field_reference_service.reference
-        if reference.is_frozen or reference.is_confirmed or reference.is_ready():
-            self.logger.info(
-                "field heading confirm skipped: existing FieldReference "
-                "confirmed=%s ready=%s frozen=%s source=%s",
-                reference.is_confirmed,
-                reference.is_ready(),
-                reference.is_frozen,
-                source,
-            )
-            return True
-        return self.runtime_context_builder.confirm_field_heading(
-            yaw_rad=yaw_rad,
-            drone=drone,
-            source=source,
-        )
 
     def _update_arm_heading(self, drone: dict[str, object]) -> None:
         return self.runtime_context_builder._update_arm_heading(drone)
@@ -920,12 +838,6 @@ class SystemRunner:
                 reason = self._field_mission_preflight_reason()
                 if reason is not None:
                     return self._reject_action_mission_start(reason)
-                freeze_result = self.field_reference_service.freeze()
-                if not bool(freeze_result.get("ok", False)):
-                    return self._reject_action_mission_start(
-                        "field_reference_freeze_failed",
-                        error=str(freeze_result.get("error") or "freeze failed"),
-                    )
             self.action_mission_orchestrator.start(
                 link_manager=self.services.link_manager,
             )
@@ -977,6 +889,10 @@ class SystemRunner:
                 abs_tol=1e-9,
             ):
                 return "field_reference_not_synced"
+
+        if not reference.is_frozen:
+            return "field_reference_not_frozen"
+
         return None
 
     def _reject_action_mission_start(

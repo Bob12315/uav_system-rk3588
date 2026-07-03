@@ -21,17 +21,19 @@ RECOMMENDED_GPS_BASELINE_M = 10.0
 # ---------------------------------------------------------------------------
 
 class OriginSource(str, Enum):
-    LOCAL_POSITION = "local_position"
-    GPS_MARKER = "gps_marker"
-    MANUAL_GPS_INPUT = "manual_gps_input"
-    PROFILE_GPS_BOUND = "profile_gps_bound"
+    LOCAL_POSITION = "local_position"          # internal compatibility only
+    GPS_MARKER = "gps_marker"                  # deprecated — not API-reachable
+    MANUAL_GPS_INPUT = "manual_gps_input"      # deprecated — not API-reachable
+    PROFILE_GPS_BOUND = "profile_gps_bound"    # deprecated — replaced by PROFILE_CENTERLINE
+    PROFILE_CENTERLINE = "profile_centerline"  # current — centerline profile binding
 
 
 class HeadingSource(str, Enum):
-    COMPASS_YAW = "compass_yaw"
-    GPS_TWO_POINT = "gps_two_point"
-    MANUAL_ANGLE = "manual_angle"
-    PROFILE_GPS_TWO_POINT = "profile_gps_two_point"
+    COMPASS_YAW = "compass_yaw"                    # deprecated — not API-reachable
+    GPS_TWO_POINT = "gps_two_point"                # deprecated — not API-reachable
+    MANUAL_ANGLE = "manual_angle"                  # deprecated — not API-reachable
+    PROFILE_GPS_TWO_POINT = "profile_gps_two_point"  # deprecated — replaced by PROFILE_GPS_CENTERLINE
+    PROFILE_GPS_CENTERLINE = "profile_gps_centerline"  # current — centerline profile heading
 
 
 # ---------------------------------------------------------------------------
