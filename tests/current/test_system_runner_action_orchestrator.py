@@ -177,14 +177,24 @@ def test_field_mission_rejects_unsynced_reference():
     assert payload["reason"] == "field_reference_not_synced"
 
 
+def test_field_mission_rejects_not_frozen():
+    """Mission rejects when reference is confirmed + synced but not frozen."""
+    runner = _make_runner()
+    runner.configure_action_mission(_field_steps())
+    _bind_and_sync_no_freeze(runner)
+
+    payload = runner.action_mission_start()
+
+    assert payload["running"] is False
+    assert payload["reason"] == "field_reference_not_frozen"
+
+
 def test_field_mission_rejects_mismatched_runtime_context():
     """Mission rejects when RuntimeContext values don't match FieldReference."""
     runner = _make_runner()
     runner.configure_action_mission(_field_steps())
-    # Bind + apply + sync, but do NOT freeze
-    _bind_and_sync_no_freeze(runner)
+    _bind_centerline_and_sync(runner)
 
-    # Mutate RuntimeContext to mismatch the reference
     runner.runtime_context_builder.field_origin_local_x = (
         runner.runtime_context_builder.field_origin_local_x or 0.0
     ) + 0.01
@@ -228,61 +238,6 @@ def test_non_field_mission_starts_without_field_reference():
 
 
 # ---------------------------------------------------------------------------
-# freeze failure
-# ---------------------------------------------------------------------------
-
-
-def test_field_mission_rejects_freeze_failure(monkeypatch):
-    """Mission rejects when freeze() returns ok=False."""
-    runner = _make_runner()
-    runner.configure_action_mission(_field_steps())
-
-    profile = _make_profile()
-    br = FieldProfileService.takeoff_anchor_centerline(
-        profile=profile,
-        current_lat=profile.anchor.lat,
-        current_lon=profile.anchor.lon,
-        current_local_n_m=10.0,
-        current_local_e_m=20.0,
-        current_local_z_m=-1.0,
-        gps_fix_type=3,
-        satellites_visible=12,
-        gps_eph=1.0,
-        gps_epv=1.0,
-        timestamp=1000.0,
-    )
-    runner.field_reference_service.apply_profile_binding(
-        bind_result=br,
-        profile_id=profile.profile_id,
-        profile_name=profile.name,
-        anchor_lat=profile.anchor.lat,
-        anchor_lon=profile.anchor.lon,
-        timestamp=1000.0,
-    )
-    ref = runner.field_reference_service.reference
-    runner.runtime_context_builder.confirm_field_reference(
-        field_heading_yaw_rad=ref.field_heading_yaw_rad,
-        origin_local_x=ref.origin_local_n_m,
-        origin_local_y=ref.origin_local_e_m,
-        origin_local_z=ref.origin_local_z_m,
-        source="test",
-        timestamp=1000.0,
-    )
-
-    # Mock freeze to fail
-    monkeypatch.setattr(
-        runner.field_reference_service,
-        "freeze",
-        lambda: {"ok": False, "error": "simulated freeze failure"},
-    )
-
-    payload = runner.action_mission_start()
-
-    assert payload["running"] is False
-    assert payload["reason"] == "field_reference_freeze_failed"
-
-
-# ---------------------------------------------------------------------------
 # TakeoffAction — no auto-confirm
 # ---------------------------------------------------------------------------
 
@@ -292,10 +247,8 @@ def test_takeoff_does_not_emit_confirm_field_heading():
     action = TakeoffAction()
     action.start({"altitude_m": 3.0})
 
-    # Phase must be set_mode directly, no confirm_field_heading
     assert action.phase == "set_mode"
 
-    # Check that auto_confirm_field_heading parameter does not exist
     assert not hasattr(action, "auto_confirm_field_heading"), (
         "TakeoffAction must not have auto_confirm_field_heading parameter"
     )

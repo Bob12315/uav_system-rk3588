@@ -838,12 +838,6 @@ class SystemRunner:
                 reason = self._field_mission_preflight_reason()
                 if reason is not None:
                     return self._reject_action_mission_start(reason)
-                freeze_result = self.field_reference_service.freeze()
-                if not bool(freeze_result.get("ok", False)):
-                    return self._reject_action_mission_start(
-                        "field_reference_freeze_failed",
-                        error=str(freeze_result.get("error") or "freeze failed"),
-                    )
             self.action_mission_orchestrator.start(
                 link_manager=self.services.link_manager,
             )
@@ -895,6 +889,10 @@ class SystemRunner:
                 abs_tol=1e-9,
             ):
                 return "field_reference_not_synced"
+
+        if not reference.is_frozen:
+            return "field_reference_not_frozen"
+
         return None
 
     def _reject_action_mission_start(

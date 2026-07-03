@@ -674,6 +674,22 @@ function setupFieldMapInteractions() {
     renderFieldMap();
   }, {passive: false});
 
+  // mousemove: display FIELD x/y and lat/lon coordinates
+  canvas.addEventListener("mousemove", event => {
+    var rect = canvas.getBoundingClientRect();
+    var world = canvasToWorld(event.clientX - rect.left, event.clientY - rect.top, rect);
+    var next = _state();
+    var latLon = fieldXYToLatLon(world.x, world.y, next);
+    var coordEl = document.getElementById("fieldMapCoord");
+    if (coordEl) {
+      var latStr = latLon ? latLon.lat.toFixed(6) : "--";
+      var lonStr = latLon ? latLon.lon.toFixed(6) : "--";
+      coordEl.textContent =
+        "FIELD x=" + world.x.toFixed(2) + " y=" + world.y.toFixed(2) +
+        " | lat=" + latStr + " lon=" + lonStr;
+    }
+  });
+
   // Pointer Events: unify mouse + touch drag/pinch
   const activePointers = new Map();
 

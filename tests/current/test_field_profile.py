@@ -24,3 +24,9 @@ def test_outlier_rejected():
     cl = [CenterlinePoint("c1",34.0001,108.0),CenterlinePoint("c2",34.0002,108.0001),CenterlinePoint("c3",34.0003,108.0),CenterlinePoint("c4",34.0004,108.0)]
     r = fit_centerline(a, cl, BindingPolicy(max_centerline_residual_m=2.5))
     assert not r.diagnostics.ok
+
+def test_anchor_nonzero_field_xy_rejected():
+    data = {"schema_version":2,"profile_id":"test","name":"Test","coordinate_convention":{"field_x_positive":"right","field_y_positive":"forward","altitude_positive":"up"},"anchor":{"name":"a","lat":34.0,"lon":108.0,"field_x_m":1.0,"field_y_m":0.0},"centerline_points":[{"name":"CL_1","lat":34.000075,"lon":108.0},{"name":"CL_2","lat":34.000150,"lon":108.0},{"name":"CL_3","lat":34.000225,"lon":108.0},{"name":"CL_4","lat":34.000300,"lon":108.0}]}
+    p = parse_field_profile(data)
+    assert not validate_field_profile(p).ok
+    assert any("anchor.field_x_m must be 0.0" in e for e in validate_field_profile(p).errors)

@@ -346,6 +346,14 @@ def validate_field_profile(profile: FieldProfile) -> FieldProfileDiagnostics:
         diag.errors.append(f"anchor.field_x_m is not finite: {anchor.field_x_m}")
     if not math.isfinite(anchor.field_y_m):
         diag.errors.append(f"anchor.field_y_m is not finite: {anchor.field_y_m}")
+    if not math.isclose(anchor.field_x_m, 0.0, abs_tol=1e-9):
+        diag.errors.append(
+            f"anchor.field_x_m must be 0.0 (takeoff anchor is FIELD origin), got {anchor.field_x_m}"
+        )
+    if not math.isclose(anchor.field_y_m, 0.0, abs_tol=1e-9):
+        diag.errors.append(
+            f"anchor.field_y_m must be 0.0 (takeoff anchor is FIELD origin), got {anchor.field_y_m}"
+        )
 
     # -- centerline_points ------------------------------------------------
     if len(profile.centerline_points) < 4:
