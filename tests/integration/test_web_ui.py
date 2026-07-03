@@ -113,6 +113,60 @@ class _FakeRunner:
     def confirm_field_heading_manual(self):
         return CommandResult(True, "field heading confirmed yaw=28.6 deg")
 
+    # ---- field reference (for status endpoint) ----
+    def field_reference_status(self):
+        return {"ok": True, "field_reference": {
+            "is_confirmed": True, "is_frozen": False,
+            "origin_source": "profile_gps_bound",
+            "heading_source": "profile_gps_two_point",
+            "field_heading_yaw_rad": 0.5, "field_heading_deg": 28.6,
+            "origin_local_n_m": 0.0, "origin_local_e_m": 0.0, "origin_local_z_m": -10.0,
+            "origin_lat": 34.0, "origin_lon": 108.0,
+            "forward_marker_lat": 34.0003, "forward_marker_lon": 108.0,
+            "distance_m": 33.36, "warnings": [],
+            "synced_to_runtime": True, "active_source": "field_reference",
+            "profile_id": "example_competition_lane",
+            "profile_binding_ok": True,
+            "profile_binding_errors": [], "profile_binding_warnings": [],
+            "profile_binding_diagnostics": {"errors": [], "warnings": []},
+        }, "telemetry": {}}
+
+    # ---- field profile endpoints ----
+    def field_profile_list(self):
+        return {"ok": True, "profiles": [
+            {"profile_id": "example_competition_lane", "name": "Example",
+             "source": "config", "schema_version": 1,
+             "valid": True, "errors": [], "warnings": []},
+        ]}
+
+    def field_profile_get(self, profile_id):
+        if profile_id == "example_competition_lane":
+            return {"ok": True, "profile_id": profile_id, "name": "Example",
+                    "schema_version": 1, "created_at": "2025-01-01",
+                    "points": {
+                        "origin": {"name": "O", "role": "origin", "lat": 34.0, "lon": 108.0, "field_x_m": 0.0, "field_y_m": 0.0},
+                        "forward": {"name": "F", "role": "forward", "lat": 34.0003, "lon": 108.0, "field_x_m": 0.0, "field_y_m": 33.36},
+                    },
+                    "gps_quality": {"min_fix_type": 3, "min_satellites": 10, "max_eph": 2.5, "max_epv": 5.0}}
+        return {"ok": False, "error": "not found"}
+
+    def field_profile_validate(self, profile_id):
+        if profile_id == "example_competition_lane":
+            return {"ok": True, "profile_id": profile_id, "errors": [], "warnings": []}
+        return {"ok": False, "error": "not found"}
+
+    def field_profile_bind_current(self, profile_id):
+        if profile_id == "example_competition_lane":
+            return {"ok": True, "profile_id": profile_id, "synced_to_runtime": True,
+                    "field_heading_yaw_rad": 0.5, "field_heading_deg": 28.6,
+                    "origin_local_n_m": 0.0, "origin_local_e_m": 0.0, "origin_local_z_m": -10.0,
+                    "current_field_x_m": 0.0, "current_field_y_m": 0.0,
+                    "baseline_m": 33.36, "warnings": [], "check_points": [],
+                    "diagnostics": {"errors": [], "warnings": []}}
+        return {"ok": False, "profile_id": profile_id, "error": "bind failed",
+                "errors": ["profile not found"], "warnings": [],
+                "diagnostics": {"errors": ["profile not found"], "warnings": []}}
+
 
 def test_web_api_executes_command_and_records_audit(tmp_path: Path) -> None:
     pytest.importorskip("httpx")
@@ -903,3 +957,87 @@ def test_web_ui_drop_targets_source_contains_red_rendering() -> None:
     # Legend must include Selected count
     assert "Selected:" in fm_script
     assert "dropTargetsSelected.length" in fm_script
+
+
+
+# ── field profile web ui ──────────────────────────────────────────────
+
+
+def test_web_ui_exposes_field_profile_panel() -> None:
+    """Field Profile section must be present in static HTML."""
+    static_dir = Path(__file__).parents[2] / "web_ui" / "static"
+    index = (static_dir / "index.html").read_text(encoding="utf-8")
+    script = (static_dir / "app.js").read_text(encoding="utf-8")
+    fp_script = (static_dir / "js" / "field_profile.js").read_text(encoding="utf-8")
+    styles = (static_dir / "style.css").read_text(encoding="utf-8")
+
+    assert 'id="fpProfileSelect"' in index
+    assert 'id="fpRefreshList"' in index
+    assert 'id="fpValidateProfile"' in index
+    assert 'id="fpBindCurrent"' in index
+    assert 'id="fpProfileDetail"' in index
+    assert 'id="fpBindResult"' in index
+    assert 'id="fpHint"' in index
+    assert "GPS Profile" in index or "场地配置" in index
+    assert '"/static/js/field_profile.js"' in index
+    assert "window.UavFieldProfiles" in fp_script
+    assert "fetchProfileList" in fp_script
+    assert "bindCurrentProfile" in fp_script
+    assert "window.UavFieldProfiles" in script
+    assert "field-profile-panel" in styles
+    assert "field-profile-status-grid" in styles
+
+
+def test_web_api_field_profiles_endpoint() -> None:
+    """GET /api/field-profiles must return ok=true with profiles list."""
+    client = _make_client()
+    resp = client.get("/api/field-profiles")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert "profiles" in data
+    assert any(p["profile_id"] == "example_competition_lane" for p in data["profiles"])
+
+
+def test_web_api_field_profile_get_endpoint() -> None:
+    """GET /api/field-profiles/{id} returns profile data."""
+    client = _make_client()
+    resp = client.get("/api/field-profiles/example_competition_lane")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["profile_id"] == "example_competition_lane"
+
+
+def test_web_api_field_profile_bind_current_success() -> None:
+    """POST bind-current must return ok/synced_to_runtime."""
+    client = _make_client()
+    resp = client.post("/api/field-profiles/example_competition_lane/bind-current")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["synced_to_runtime"] is True
+    assert "field_heading_yaw_rad" in data
+
+
+def test_web_api_field_profile_bind_current_failure() -> None:
+    """POST bind-current on unknown profile returns ok=false with errors."""
+    client = _make_client()
+    resp = client.post("/api/field-profiles/nonexistent/bind-current")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is False
+    assert "errors" in data or "error" in data
+
+
+def _make_client():
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+    from web_ui.server import create_app
+    from app.app_config import UiConfig
+    import os
+    audit = os.path.join("runtime", "test-web-audit.jsonl")
+    app = create_app(_FakeRunner(), UiConfig(True, "127.0.0.1", 8080, audit))
+    return TestClient(app)
+
+

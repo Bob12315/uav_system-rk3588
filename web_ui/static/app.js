@@ -316,6 +316,11 @@ const {
   frSetManualHeading,
 } = window.UavFieldRef;
 
+const {
+  fetchProfileList,
+  fetchFieldReferenceStatus: fpFetchFieldReferenceStatus,
+} = window.UavFieldProfiles || {};
+
 function renderFieldHeading(next) { window.UavFieldRef.renderFieldHeading(next); }
 async function confirmFieldHeading() { return window.UavFieldRef.confirmFieldHeading(); }
 
@@ -1002,6 +1007,9 @@ async function init() {
   window.UavVideoPanel.setupVideoPanel().catch(function (err) {
   console.warn("video panel setup failed", err);
 });
+  if (window.UavFieldProfiles && window.UavFieldProfiles.init) {
+    window.UavFieldProfiles.init();
+  }
   document.querySelectorAll("[data-command]").forEach(button => button.onclick = () => {
     if (button.dataset.confirm && !confirm(button.dataset.confirm)) return;
     execute(button.dataset.command, button.dataset.origin || "BUTTON");

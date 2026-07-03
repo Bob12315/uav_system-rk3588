@@ -362,6 +362,49 @@
         </div>
       </article>
 
+      <article class="panel safety-panel field-profile-panel">
+        <div class="panel-title">Field Profile / 场地配置</div>
+        <div class="field-profile-select-row">
+          <select id="fpProfileSelect"><option value="">-- 选择 Profile --</option></select>
+          <button id="fpRefreshList">刷新列表</button>
+          <button id="fpValidateProfile">验证</button>
+          <button id="fpBindCurrent" class="warning" data-confirm="将使用当前无人机 GPS + LOCAL_NED 绑定所选 Field Profile。该操作不会启动 Mission，不会发送飞控命令，不会 freeze。">绑定当前位置</button>
+        </div>
+        <div id="fpProfileDetail" class="field-profile-detail" style="display:none">
+          <div class="field-profile-status-grid">
+            <div><span>Profile ID</span><strong id="fpProfileId">--</strong></div>
+            <div><span>Name</span><strong id="fpProfileName">--</strong></div>
+            <div><span>Source</span><strong id="fpProfileSource">--</strong></div>
+            <div><span>Schema</span><strong id="fpProfileSchema">--</strong></div>
+            <div><span>O Lat/Lon</span><strong id="fpOriginLatLon">--</strong></div>
+            <div><span>O Field</span><strong id="fpOriginField">--</strong></div>
+            <div><span>F Lat/Lon</span><strong id="fpForwardLatLon">--</strong></div>
+            <div><span>F Field</span><strong id="fpForwardField">--</strong></div>
+            <div><span>L Lat/Lon</span><strong id="fpLeftLatLon">--</strong></div>
+            <div><span>L Field</span><strong id="fpLeftField">--</strong></div>
+            <div><span>R Lat/Lon</span><strong id="fpRightLatLon">--</strong></div>
+            <div><span>R Field</span><strong id="fpRightField">--</strong></div>
+            <div><span>GPS Quality Fix/Sats</span><strong id="fpGpsQualityFixSats">--</strong></div>
+            <div><span>GPS Quality eph/epv</span><strong id="fpGpsQualityEphEpv">--</strong></div>
+          </div>
+        </div>
+        <div id="fpBindResult" class="field-profile-status-grid" style="display:none">
+          <div><span>Bind OK</span><strong id="fpBindOk">--</strong></div>
+          <div><span>Profile ID</span><strong id="fpBindProfileId">--</strong></div>
+          <div><span>Synced Runtime</span><strong id="fpBindSynced">--</strong></div>
+          <div><span>Heading deg</span><strong id="fpBindHeading">--</strong></div>
+          <div><span>Origin Local</span><strong id="fpBindOriginLocal">--</strong></div>
+          <div><span>Current Field</span><strong id="fpBindCurrentField">--</strong></div>
+          <div><span>Baseline</span><strong id="fpBindBaseline">--</strong></div>
+          <div><span>Warnings</span><strong id="fpBindWarnings">--</strong></div>
+          <div><span>Errors</span><strong id="fpBindErrors" class="danger-text">--</strong></div>
+          <div><span>Diagnostics</span><strong id="fpBindDiagnostics">--</strong></div>
+        </div>
+        <div id="fpHint" class="hint">
+          GPS Profile 绑定 ≠ start mission ≠ freeze。Freeze 后不能重新 bind，除非先 reset。绑定只建立 FIELD↔LOCAL_NED 坐标关系。
+        </div>
+      </article>
+
       <article class="panel safety-panel">
         <div class="panel-title">Payload Release Action</div>
         <div class="payload-release-zone">
@@ -484,6 +527,7 @@
   <script src="/static/js/dom_utils.js"></script>
   <script src="/static/js/app_state.js"></script>
   <script src="/static/js/field_reference.js"></script>
+  <script src="/static/js/field_profile.js"></script>
   <script src="/static/js/action_lab.js"></script>
   <script src="/static/js/field_map.js"></script>
   <script src="/static/js/video_panel.js"></script>
