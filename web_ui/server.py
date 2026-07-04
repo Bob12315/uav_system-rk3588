@@ -401,6 +401,13 @@ def create_app(runner, config: UiConfig) -> FastAPI:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    @app.get("/api/field-profiles/{profile_id}/map-preview")
+    def field_profiles_map_preview(profile_id: str):
+        try:
+            return runner.field_profile_map_preview(profile_id)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "profile_id": profile_id}
+
     @app.post("/api/localization/clear")
     def clear_localization():
         clear = getattr(runner, "clear_localization_result", None)

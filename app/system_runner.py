@@ -485,6 +485,19 @@ class SystemRunner:
         with self.action_runtime_lock:
             return self.field_reference_controller.bind_profile_current(profile_id)
 
+    def field_profile_map_preview(self, profile_id: str) -> dict[str, object]:
+        for d in self._PROFILE_DIRS:
+            try:
+                p = FieldProfileService.load_profile(profile_id, profile_dir=d)
+                return FieldProfileService.build_map_preview(p)
+            except FileNotFoundError:
+                continue
+            except Exception as exc:
+                return self._field_profile_error(profile_id, str(exc))
+        return self._field_profile_error(
+            profile_id, f"profile not found: {profile_id}"
+        )
+
     @staticmethod
     def _field_profile_error(profile_id: str, error: str) -> dict[str, object]:
         return {

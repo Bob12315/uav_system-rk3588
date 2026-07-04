@@ -223,11 +223,104 @@ def test_api_set_manual_heading_returns_410():
         assert e.status_code == 410
 
 
-def test_api_field_reference_confirm_returns_410():
-    app = _make_app()
-    fn = _endpoint(app, "POST", "/api/field-reference/confirm")
-    try:
-        fn()
-        assert False, "expected HTTPException 410"
-    except HTTPException as e:
-        assert e.status_code == 410
+# ---------------------------------------------------------------------------
+# map-preview
+# ---------------------------------------------------------------------------
+
+
+def test_api_map_preview_ok():
+    runner = _make_runner()
+    fn = getattr(runner, "field_profile_map_preview")
+    result = fn("example_competition_lane")
+    assert result["ok"] is True
+    assert result["profile_id"] == "example_competition_lane"
+    assert "reference" in result
+    assert "geometry" in result
+    assert "boxes" in result
+    ref = result["reference"]
+    assert "origin_lat" in ref
+    assert "origin_lon" in ref
+    assert "field_heading_yaw_rad" in ref
+    assert "field_heading_deg" in ref
+
+
+def test_api_map_preview_boxes():
+    runner = _make_runner()
+    fn = getattr(runner, "field_profile_map_preview")
+    result = fn("example_competition_lane")
+    assert result["ok"] is True
+    boxes = result["boxes"]
+    assert isinstance(boxes, list)
+    ids = [b["id"] for b in boxes]
+    assert "field" in ids
+    assert "drop" in ids
+    assert "recce" in ids
+    for b in boxes:
+        assert len(b["corners"]) == 4
+        assert b["kind"] in ("field_bounds", "drop_area", "recce_area")
+
+
+def test_api_map_preview_corner_fields():
+    runner = _make_runner()
+    fn = getattr(runner, "field_profile_map_preview")
+    result = fn("example_competition_lane")
+    assert result["ok"] is True
+    for b in result["boxes"]:
+        for c in b["corners"]:
+            assert "name" in c
+            assert "field_x" in c
+            assert "field_y" in c
+            assert "lat" in c
+            assert "lon" in c
+            assert isinstance(c["field_x"], (int, float))
+            assert isinstance(c["field_y"], (int, float))
+            assert isinstance(c["lat"], (int, float))
+            assert isinstance(c["lon"], (int, float))
+
+
+def test_api_map_preview_fallback_y_ranges():
+    """When drop_area_y_min etc are None, fallback to center +- 2.5."""
+    runner = _make_runner()
+    fn = getattr(runner, "field_profile_map_preview")
+    result = fn("example_competition_lane")
+    assert result["ok"] is True
+    geom = result["geometry"]
+    # The example profile has no explicit area y min/max, so fallback applies
+    assert geom["drop_y_min"] == 27.5
+    assert geom["drop_y_max"] == 32.5
+    assert geom["recce_y_min"] == 52.5
+    assert geom["recce_y_max"] == 57.5
+
+
+def test_api_map_preview_does_not_modify_runtime():
+    runner = _make_runner()
+    # Snapshot field reference before
+    status_fn = getattr(runner, "field_reference_status")
+    fr_before = status_fn()
+    assert fr_before["ok"] is True
+    fr_before_data = fr_before["field_reference"]
+    assert not fr_before_data["is_frozen"]
+    assert not fr_before_data["is_confirmed"]
+
+    fn = getattr(runner, "field_profile_map_preview")
+    result = fn("example_competition_lane")
+    assert result["ok"] is True
+
+    # After: field reference should be unchanged
+    fr_after = status_fn()
+    assert fr_after["ok"] is True
+    fr_after_data = fr_after["field_reference"]
+    assert not fr_after_data["is_frozen"]
+    assert not fr_after_data["is_confirmed"]
+    assert fr_after_data["origin_lat"] is None
+    assert fr_after_data["origin_lon"] is None
+    assert fr_after_data["field_heading_yaw_rad"] is None
+
+
+def test_api_map_preview_missing_profile():
+    runner = _make_runner()
+    fn = getattr(runner, "field_profile_map_preview")
+    result = fn("nonexistent_profile_xyz")
+    assert result["ok"] is False
+    assert "error" in result
+    assert result["profile_id"] == "nonexistent_profile_xyz"

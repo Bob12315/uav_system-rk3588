@@ -70,8 +70,26 @@ window.UavFieldProfiles = (function () {
     try {
       var data = await api.request("/api/field-profiles/" + encodeURIComponent(id));
       renderProfileDetail(data);
+      if (data.ok) {
+        fetchMapPreview(id);
+      }
     } catch (e) {
       setText($("fpHint"), "读取 profile 失败: " + e.message, "danger-text");
+    }
+  }
+
+  async function fetchMapPreview(id) {
+    try {
+      var data = await api.request("/api/field-profiles/" + encodeURIComponent(id) + "/map-preview");
+      if (!data.ok) {
+        setText($("fpHint"), "map-preview 加载失败: " + (data.error || "未知错误"), "warning-text");
+        return;
+      }
+      if (window.UavFieldMap && window.UavFieldMap.setProfilePreview) {
+        window.UavFieldMap.setProfilePreview(data);
+      }
+    } catch (e) {
+      setText($("fpHint"), "map-preview 加载失败: " + e.message, "warning-text");
     }
   }
 

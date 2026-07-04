@@ -245,6 +245,24 @@ button.active-choice {
   font-size: 12px;
   pointer-events: none;
 }
+.field-map-info-box {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  max-height: 220px;
+  max-width: 420px;
+  overflow: auto;
+  background: rgba(8,17,26,.88);
+  border: 1px solid rgba(147,168,191,.35);
+  border-radius: 4px;
+  font: 11px Consolas, monospace;
+  color: #93a8bf;
+  padding: 8px 10px;
+  pointer-events: auto;
+  z-index: 2;
+  display: none;
+  white-space: nowrap;
+}
 .field-map-legend {
   display: flex;
   flex-wrap: wrap;

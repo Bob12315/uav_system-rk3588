@@ -28,21 +28,21 @@
   function _clearLocalization() { if (typeof cfg.onClearLocalization === "function") return cfg.onClearLocalization(); }
 
 const FIELD_DEFAULTS = {
-  bounds: {xMin: -8, xMax: 62, yMin: -8, yMax: 8},
+  bounds: {xMin: -8, xMax: 8, yMin: -8, yMax: 62},
   takeoff: {x: 0, y: 0, xLen: 8, yLen: 8, label: "起降区"},
   drop: {x: 0, y: 30, xLen: 8, yLen: 5, label: "投放区"},
   recce: {x: 0, y: 55, xLen: 8, yLen: 5, label: "侦察区"},
   dropSurvey: [
-    {name: "D1", x: 28, y: -1.2},
-    {name: "D2", x: 28, y: 1.2},
-    {name: "D3", x: 32, y: -1.2},
-    {name: "D4", x: 32, y: 1.2},
+    {name: "D1", x: -1.2, y: 28},
+    {name: "D2", x: 1.2, y: 28},
+    {name: "D3", x: -1.2, y: 32},
+    {name: "D4", x: 1.2, y: 32},
   ],
   recceSurvey: [
-    {name: "R1", x: 53, y: -1.2},
-    {name: "R2", x: 53, y: 1.2},
-    {name: "R3", x: 57, y: -1.2},
-    {name: "R4", x: 57, y: 1.2},
+    {name: "R1", x: -1.2, y: 53},
+    {name: "R2", x: 1.2, y: 53},
+    {name: "R3", x: -1.2, y: 57},
+    {name: "R4", x: 1.2, y: 57},
   ],
 };
 
@@ -132,10 +132,17 @@ function pointList(items, fallback, prefix) {
       }))
     : fallback;
 }
-const swapPoint = p => ({...p, x: p.y, y: p.x});
+
+var profilePreview = null;
+
+function setProfilePreview(data) {
+  profilePreview = data || null;
+  renderFieldMap();
+}
+
 const fieldMapView = {
-  centerX: 27,
-  centerY: 0,
+  centerX: 0,
+  centerY: 27,
   scale: 18,
   minScale: 4,
   maxScale: 120,
@@ -147,18 +154,18 @@ const fieldMapView = {
   initialized: false,
 };
 function worldToCanvas(x, y, rect, view = fieldMapView) {
-  const originX = rect.width / 2 + view.centerX * view.scale;
+  const originX = rect.width / 2 - view.centerX * view.scale;
   const originY = rect.height / 2 + view.centerY * view.scale;
   return [
-    originX - Number(x) * view.scale,
+    originX + Number(x) * view.scale,
     originY - Number(y) * view.scale,
   ];
 }
 function canvasToWorld(screenX, screenY, rect, view = fieldMapView) {
-  const originX = rect.width / 2 + view.centerX * view.scale;
+  const originX = rect.width / 2 - view.centerX * view.scale;
   const originY = rect.height / 2 + view.centerY * view.scale;
   return {
-    x: (originX - screenX) / view.scale,
+    x: (screenX - originX) / view.scale,
     y: (originY - screenY) / view.scale,
   };
 }
@@ -289,13 +296,14 @@ function fieldMapModel(next) {
 
   return {
     bounds: FIELD_DEFAULTS.bounds,
+    profilePreview: profilePreview,
     areas: {
-      takeoff: {...FIELD_DEFAULTS.takeoff, x: Number(home.y ?? FIELD_DEFAULTS.takeoff.x), y: Number(home.x ?? FIELD_DEFAULTS.takeoff.y)},
-      drop: {...FIELD_DEFAULTS.drop, x: Number(dropCenter.y ?? FIELD_DEFAULTS.drop.x), y: Number(dropCenter.x ?? FIELD_DEFAULTS.drop.y)},
-      recce: {...FIELD_DEFAULTS.recce, x: Number(recceCenter.y ?? FIELD_DEFAULTS.recce.x), y: Number(recceCenter.x ?? FIELD_DEFAULTS.recce.y)},
+      takeoff: {...FIELD_DEFAULTS.takeoff, x: Number(home.x ?? FIELD_DEFAULTS.takeoff.x), y: Number(home.y ?? FIELD_DEFAULTS.takeoff.y)},
+      drop: {...FIELD_DEFAULTS.drop, x: Number(dropCenter.x ?? FIELD_DEFAULTS.drop.x), y: Number(dropCenter.y ?? FIELD_DEFAULTS.drop.y)},
+      recce: {...FIELD_DEFAULTS.recce, x: Number(recceCenter.x ?? FIELD_DEFAULTS.recce.x), y: Number(recceCenter.y ?? FIELD_DEFAULTS.recce.y)},
     },
-    dropSurvey: pointList(detail.drop_survey_points, FIELD_DEFAULTS.dropSurvey, "D").map(swapPoint),
-    recceSurvey: pointList(detail.recce_survey_points, FIELD_DEFAULTS.recceSurvey, "R").map(swapPoint),
+    dropSurvey: pointList(detail.drop_survey_points, FIELD_DEFAULTS.dropSurvey, "D"),
+    recceSurvey: pointList(detail.recce_survey_points, FIELD_DEFAULTS.recceSurvey, "R"),
     dropTargets: dropTargets.filter(item => Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y)) && Number(item.seen_count || 0) > 0),
     recceTargets: recceTargets.filter(item => Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y)) && Number(item.seen_count || 0) > 0),
     recceStatus,
@@ -441,10 +449,15 @@ function drawCoordinateTicks(ctx, model) {
 function drawField(ctx, model) {
   ctx.clearRect(0, 0, model.rect.width, model.rect.height);
   drawCoordinateTicks(ctx, model);
-  drawArea(ctx, model, model.areas.takeoff, "rgba(147,168,191,.10)", "rgba(147,168,191,.75)");
-  drawArea(ctx, model, model.areas.drop, "rgba(57,200,191,.12)", "rgba(57,200,191,.82)");
-  drawArea(ctx, model, model.areas.recce, "rgba(237,169,61,.14)", "rgba(237,169,61,.85)");
-  drawFieldLabel(ctx, "+x ←", model.rect.width - 50, 22, {color: "#93a8bf"});
+  if (model.profilePreview) {
+    drawProfilePreviewBoxes(ctx, model);
+    drawProfileCornerPoints(ctx, model);
+  } else {
+    drawArea(ctx, model, model.areas.takeoff, "rgba(147,168,191,.10)", "rgba(147,168,191,.75)");
+    drawArea(ctx, model, model.areas.drop, "rgba(57,200,191,.12)", "rgba(57,200,191,.82)");
+    drawArea(ctx, model, model.areas.recce, "rgba(237,169,61,.14)", "rgba(237,169,61,.85)");
+  }
+  drawFieldLabel(ctx, "+x →", model.rect.width - 50, 22, {color: "#93a8bf"});
   drawFieldLabel(ctx, "+y ↑", model.rect.width - 50, 40, {color: "#93a8bf"});
 }
 function drawSurveyPoints(ctx, model) {
@@ -605,6 +618,99 @@ function drawSingleViewTargets(ctx, model) {
     }
   });
 }
+
+function drawProfilePreviewBoxes(ctx, model) {
+  var preview = model.profilePreview;
+  if (!preview || !Array.isArray(preview.boxes)) return;
+  var colors = {
+    field_bounds: {fill: "rgba(147,168,191,.10)", stroke: "rgba(147,168,191,.75)"},
+    drop_area: {fill: "rgba(57,200,191,.12)", stroke: "rgba(57,200,191,.82)"},
+    recce_area: {fill: "rgba(237,169,61,.14)", stroke: "rgba(237,169,61,.85)"},
+  };
+  preview.boxes.forEach(function (box) {
+    var c = colors[box.kind] || {fill: "rgba(147,168,191,.08)", stroke: "rgba(147,168,191,.55)"};
+    var xs = box.corners.map(function (pt) { return pt.field_x; });
+    var ys = box.corners.map(function (pt) { return pt.field_y; });
+    var fxMin = Math.min.apply(null, xs);
+    var fxMax = Math.max.apply(null, xs);
+    var fyMin = Math.min.apply(null, ys);
+    var fyMax = Math.max.apply(null, ys);
+    var area = {x: (fxMin + fxMax) / 2, y: (fyMin + fyMax) / 2, xLen: fxMax - fxMin, yLen: fyMax - fyMin, label: box.label};
+    drawArea(ctx, model, area, c.fill, c.stroke);
+  });
+}
+
+function drawProfileCornerPoints(ctx, model) {
+  var preview = model.profilePreview;
+  if (!preview || !Array.isArray(preview.boxes)) return;
+  preview.boxes.forEach(function (box) {
+    box.corners.forEach(function (pt) {
+      var pos = worldToCanvas(pt.field_x, pt.field_y, model.rect);
+      var cx = pos[0], cy = pos[1];
+      ctx.beginPath();
+      ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+      ctx.fillStyle = "#e6edf6";
+      ctx.strokeStyle = "#08111a";
+      ctx.lineWidth = 1.5;
+      ctx.fill();
+      ctx.stroke();
+      drawFieldLabel(ctx, pt.name, cx + 8, cy - 8, {align: "left", color: "#e6edf6", font: "10px Consolas, monospace"});
+    });
+  });
+}
+
+function renderFieldMapInfoBox(model) {
+  var el = $("fieldMapInfoBox");
+  if (!el) return;
+  var preview = model.profilePreview;
+  if (!preview || !preview.ok) {
+    el.style.display = "none";
+    return;
+  }
+  el.style.display = "block";
+  var lines = [];
+  lines.push("Field Profile: " + escapeHtml(preview.profile_id || "--"));
+  lines.push("Heading: " + (preview.reference && preview.reference.field_heading_deg != null ? preview.reference.field_heading_deg.toFixed(2) + "°" : "--"));
+  lines.push("Origin O: " + (preview.reference ? preview.reference.origin_lat.toFixed(7) + ", " + preview.reference.origin_lon.toFixed(7) : "--"));
+  lines.push("");
+
+  var boxes = preview.boxes || [];
+  var boxTags = {field_bounds: "Field corners", drop_area: "Drop area", recce_area: "Recce area"};
+  boxes.forEach(function (box) {
+    var tag = boxTags[box.kind] || box.label || box.id;
+    lines.push(tag + ":");
+    (box.corners || []).forEach(function (c) {
+      var sx = c.field_x >= 0 ? "+" + c.field_x.toFixed(2) : c.field_x.toFixed(2);
+      var sy = c.field_y >= 0 ? "+" + c.field_y.toFixed(2) : c.field_y.toFixed(2);
+      lines.push(
+        c.name + " x=" + sx + " y=" + sy +
+        " GPS " + c.lat.toFixed(7) + ", " + c.lon.toFixed(7)
+      );
+    });
+  });
+
+  // Merge tube coordinates (drawTargetCoordinateList data)
+  var dropTargets = (model.dropTargets || []).map(function (t) { return {prefix: "D", target: t}; });
+  var recceTargets = (model.recceTargets || []).map(function (t) { return {prefix: "R", target: t}; });
+  var locTargets = (model.localizationTargets || []).map(function (t) { return {prefix: "L", target: t}; });
+  var allTargets = dropTargets.concat(recceTargets).concat(locTargets);
+  if (allTargets.length) {
+    lines.push("");
+    lines.push("Targets:");
+    var maxRows = 8;
+    allTargets.slice(0, maxRows).forEach(function (item) {
+      var t = item.target;
+      var tid = t.target_id != null ? t.target_id : "?";
+      var tx = num(pointX(t), 2);
+      var ty = num(pointY(t), 2);
+      lines.push(item.prefix + "-T" + tid + ": x=" + tx + " y=" + ty);
+    });
+    if (allTargets.length > maxRows) lines.push("... +" + (allTargets.length - maxRows));
+  }
+
+  el.innerHTML = lines.map(function (l) { return escapeHtml(l); }).join("<br>");
+}
+
 function drawTargetCoordinateList(ctx, model) {
   const targets = [
     ...model.dropTargets.map(target => ({...target, prefix: "D"})),
@@ -669,7 +775,7 @@ function setupFieldMapInteractions() {
       Math.min(fieldMapView.maxScale, fieldMapView.scale * zoomFactor)
     );
     const after = canvasToWorld(mouseX, mouseY, rect);
-    fieldMapView.centerX += before.x - after.x;
+    fieldMapView.centerX += after.x - before.x;
     fieldMapView.centerY += before.y - after.y;
     renderFieldMap();
   }, {passive: false});
@@ -752,7 +858,7 @@ function setupFieldMapInteractions() {
       const p = activePointers.get(event.pointerId);
       const dx = p.x - fieldMapView.dragStartX;
       const dy = p.y - fieldMapView.dragStartY;
-      fieldMapView.centerX = fieldMapView.dragStartCenterX + dx / fieldMapView.scale;
+      fieldMapView.centerX = fieldMapView.dragStartCenterX - dx / fieldMapView.scale;
       fieldMapView.centerY = fieldMapView.dragStartCenterY + dy / fieldMapView.scale;
       renderFieldMap();
       return;
@@ -771,7 +877,7 @@ function setupFieldMapInteractions() {
       );
 
       const after = canvasToWorld(mid.x - rect.left, mid.y - rect.top, rect);
-      fieldMapView.centerX += before.x - after.x;
+      fieldMapView.centerX += after.x - before.x;
       fieldMapView.centerY += before.y - after.y;
       renderFieldMap();
     }
@@ -834,7 +940,13 @@ function renderFieldMap(next) {
   drawReconInspectionTargets(ctx, model);
   drawSingleViewTargets(ctx, model);
   drawDrone(ctx, model);
-  drawTargetCoordinateList(ctx, model);
+  if (model.profilePreview) {
+    renderFieldMapInfoBox(model);
+  } else {
+    drawTargetCoordinateList(ctx, model);
+    var infoEl = $("fieldMapInfoBox");
+    if (infoEl) infoEl.style.display = "none";
+  }
   $("fieldMapEmpty").style.display = model.hasMissionPosition ? "none" : "block";
   $("fieldMapLegend").innerHTML = [
     `Stage: ${escapeHtml(model.stage)}`,
@@ -867,5 +979,6 @@ function renderFieldMap(next) {
     fitFieldMapToDefaults: fitFieldMapToDefaults,
     setupFieldMapInteractions: setupFieldMapInteractions,
     renderFieldMap: renderFieldMap,
+    setProfilePreview: setProfilePreview,
   };
 })();

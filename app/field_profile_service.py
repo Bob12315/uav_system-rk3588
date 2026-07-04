@@ -29,6 +29,7 @@ from .field_profile import (
     validate_field_profile,
 )
 from .field_reference import (
+    EARTH_RADIUS_M,
     _gps_bearing_rad,
     _gps_distance_m,
     _gps_enu_deltas,
@@ -453,6 +454,134 @@ class FieldProfileService:
             rms_residual_m=fit_result.rms_residual_m,
             timestamp=timestamp,
         )
+
+
+    # ------------------------------------------------------------------
+    # map preview — pure geometry, no runtime mutation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def build_map_preview(profile: FieldProfile) -> dict:
+        """Build a map-preview response from a loaded FieldProfile.
+
+        Pure geometry: does NOT modify RuntimeContext, does NOT freeze,
+        does NOT send MAVLink commands.
+        """
+        import math as _math
+
+        anchor = profile.anchor
+        geom = profile.field_geometry
+        fit_result = fit_centerline(anchor, profile.centerline_points, profile.binding_policy)
+
+        heading_rad = fit_result.field_heading_yaw_rad
+        heading_deg = fit_result.field_heading_deg
+
+        # ----- helper: FIELD (x, y) -> GPS (lat, lon) --------------------
+        def _field_to_gps(fx: float, fy: float):
+            dx = fx - anchor.field_x_m
+            dy = fy - anchor.field_y_m
+            cos_h = _math.cos(heading_rad)
+            sin_h = _math.sin(heading_rad)
+            d_north = dy * cos_h - dx * sin_h
+            d_east = dy * sin_h + dx * cos_h
+            lat_rad = _math.radians(anchor.lat)
+            lat_deg_out = anchor.lat + _math.degrees(d_north / EARTH_RADIUS_M)
+            lon_deg_out = anchor.lon + _math.degrees(d_east / (EARTH_RADIUS_M * _math.cos(lat_rad)))
+            return lat_deg_out, lon_deg_out
+
+        # ----- geometry helpers -------------------------------------------
+        lw = geom.lane_half_width_m
+        x_min = -lw
+        x_max = +lw
+
+        # field box
+        field_y_max = (
+            geom.recce_area_y_max
+            if geom.recce_area_y_max is not None
+            else geom.recce_center_y_m + 2.5
+        )
+        field_y_min = 0.0
+
+        # drop box
+        drop_y_min = (
+            geom.drop_area_y_min
+            if geom.drop_area_y_min is not None
+            else geom.drop_center_y_m - 2.5
+        )
+        drop_y_max = (
+            geom.drop_area_y_max
+            if geom.drop_area_y_max is not None
+            else geom.drop_center_y_m + 2.5
+        )
+
+        # recce box
+        recce_y_min = (
+            geom.recce_area_y_min
+            if geom.recce_area_y_min is not None
+            else geom.recce_center_y_m - 2.5
+        )
+        recce_y_max = (
+            geom.recce_area_y_max
+            if geom.recce_area_y_max is not None
+            else geom.recce_center_y_m + 2.5
+        )
+
+        def _make_corners(box_id: str, label: str, kind: str,
+                          prefix: str, bx_min: float, bx_max: float,
+                          by_min: float, by_max: float):
+            pts = [
+                (bx_min, by_min),  # bottom-left  (field frame)
+                (bx_max, by_min),  # bottom-right
+                (bx_max, by_max),  # top-right
+                (bx_min, by_max),  # top-left
+            ]
+            corners = []
+            for idx, (fx, fy) in enumerate(pts):
+                lat, lon = _field_to_gps(fx, fy)
+                corners.append({
+                    "name": f"{prefix}{idx + 1}",
+                    "field_x": round(fx, 6),
+                    "field_y": round(fy, 6),
+                    "lat": round(lat, 8),
+                    "lon": round(lon, 8),
+                })
+            return {
+                "id": box_id,
+                "label": label,
+                "kind": kind,
+                "corners": corners,
+            }
+
+        boxes = [
+            _make_corners("field", "比赛场地", "field_bounds", "F",
+                          x_min, x_max, field_y_min, field_y_max),
+            _make_corners("drop", "投放区", "drop_area", "D",
+                          x_min, x_max, drop_y_min, drop_y_max),
+            _make_corners("recce", "侦察区", "recce_area", "R",
+                          x_min, x_max, recce_y_min, recce_y_max),
+        ]
+
+        return {
+            "ok": True,
+            "profile_id": profile.profile_id,
+            "name": profile.name,
+            "reference": {
+                "origin_lat": anchor.lat,
+                "origin_lon": anchor.lon,
+                "field_heading_yaw_rad": round(heading_rad, 8),
+                "field_heading_deg": round(heading_deg, 6),
+            },
+            "geometry": {
+                "lane_half_width_m": lw,
+                "field_y_min": field_y_min,
+                "field_y_max": field_y_max,
+                "drop_y_min": round(drop_y_min, 6),
+                "drop_y_max": round(drop_y_max, 6),
+                "recce_y_min": round(recce_y_min, 6),
+                "recce_y_max": round(recce_y_max, 6),
+            },
+            "boxes": boxes,
+        }
 
 
 def _normalize_angle(rad: float) -> float:
