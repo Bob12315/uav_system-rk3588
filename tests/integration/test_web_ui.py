@@ -93,8 +93,8 @@ def test_field_profile_frontend_dom_and_script_order_are_current():
         "/static/js/format_utils.js",
         "/static/js/dom_utils.js",
         "/static/js/field_reference.js",
-        "/static/js/field_profile.js?v=ui8-field-profile-render",
-        "/static/app.js",
+        "/static/js/field_profile.js?v=field-profile-persist-20260704",
+        "/static/app.js?v=field-ref-bridge-fix-20260704",
     )
     positions = [html.index(script) for script in scripts]
     assert positions == sorted(positions)
