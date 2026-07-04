@@ -249,9 +249,11 @@ button.active-choice {
   position: absolute;
   bottom: 8px;
   left: 8px;
+  width: min(520px, calc(100% - 16px));
+  max-width: calc(100% - 16px);
   max-height: 220px;
-  max-width: 420px;
   overflow: auto;
+  box-sizing: border-box;
   background: rgba(8,17,26,.88);
   border: 1px solid rgba(147,168,191,.35);
   border-radius: 4px;
@@ -259,9 +261,11 @@ button.active-choice {
   color: #93a8bf;
   padding: 8px 10px;
   pointer-events: auto;
-  z-index: 2;
+  z-index: 3;
   display: none;
-  white-space: nowrap;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .field-map-legend {
   display: flex;
