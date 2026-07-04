@@ -120,6 +120,9 @@ class SystemRunner:
             latest_mission_stage=self.latest_mission_stage,
             latest_stage_controller=self.latest_stage_controller,
             latest_hold_reason=self.latest_hold_reason,
+            get_latest_localization_result=lambda: self.latest_localization_result,
+            get_latest_drop_targets_result=lambda: self.latest_drop_targets_result,
+            get_latest_recon_inspection_result=lambda: self.latest_recon_inspection_result,
         )
         self.command_pipeline = CommandPipeline(
             yolo_command_config=self.config.yolo_command,

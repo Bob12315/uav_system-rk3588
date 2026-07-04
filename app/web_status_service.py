@@ -36,6 +36,9 @@ class WebStatusService:
         latest_localization_result: dict[str, object] | None = None,
         latest_drop_targets_result: dict[str, object] | None = None,
         latest_recon_inspection_result: dict[str, object] | None = None,
+        get_latest_localization_result: Callable[[], dict[str, object]] | None = None,
+        get_latest_drop_targets_result: Callable[[], dict[str, object]] | None = None,
+        get_latest_recon_inspection_result: Callable[[], dict[str, object]] | None = None,
         get_link_manager: Callable[[], Any] | None = None,
         latest_mission_name: str = "",
         latest_mission_stage: str = "",
@@ -59,6 +62,9 @@ class WebStatusService:
         self._latest_localization = latest_localization_result
         self._latest_drop_targets = latest_drop_targets_result
         self._latest_recon = latest_recon_inspection_result
+        self._get_latest_localization_result = get_latest_localization_result
+        self._get_latest_drop_targets_result = get_latest_drop_targets_result
+        self._get_latest_recon_inspection_result = get_latest_recon_inspection_result
         self._get_link_manager = get_link_manager
         self._latest_mission_name = latest_mission_name
         self._latest_mission_stage = latest_mission_stage
@@ -95,9 +101,21 @@ class WebStatusService:
                     if self._get_action_mission_status_payload
                     else {}
                 ),
-                "localization": self._latest_localization,
-                "drop_targets": self._latest_drop_targets,
-                "recon_inspection": self._latest_recon,
+                "localization": (
+                    self._get_latest_localization_result()
+                    if self._get_latest_localization_result
+                    else self._latest_localization
+                ) or {},
+                "drop_targets": (
+                    self._get_latest_drop_targets_result()
+                    if self._get_latest_drop_targets_result
+                    else self._latest_drop_targets
+                ) or {},
+                "recon_inspection": (
+                    self._get_latest_recon_inspection_result()
+                    if self._get_latest_recon_inspection_result
+                    else self._latest_recon
+                ) or {},
             })
         manager = self._get_link_manager() if self._get_link_manager else None
         snapshot["active_source"] = (
