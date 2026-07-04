@@ -472,6 +472,7 @@ class MultiViewLocalizeAction(ActionModule):
             "rejected_by_reason": dict(self.rejected_by_reason),
             "allowed_classes": sorted(self.class_names) if self.class_names is not None else None,
             "min_confidence": self.localizer.min_confidence if self.localizer is not None else None,
+            "waypoints": self.waypoints,
         }
         if self.start_yaw_rad is not None:
             detail["start_yaw_rad"] = self.start_yaw_rad
@@ -501,7 +502,6 @@ class MultiViewLocalizeAction(ActionModule):
             detail["localized_objects"] = localized_objects
             detail["object_count"] = len(localized_objects)
             detail["captures"] = self.captures
-            detail["waypoints"] = self.waypoints
             if self.fusion is not None:
                 detail["fusion_debug"] = self.fusion.last_debug
         if extra:

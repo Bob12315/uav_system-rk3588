@@ -346,8 +346,30 @@ function fieldMapModel(next) {
     singleViewDrone: fieldSingleViewDrone,
     dropTargetsSelected: dropTargetsFromSelection.map(item => pointForFieldMap(item, next)).filter(Boolean),
     reconInspectionTargets,
+    multiViewPlan: extractMultiViewPlan(next),
   };
 }
+function extractMultiViewPlan(next) {
+  var al = next.action_lab || _latestActionLab() || {};
+  var status = al.status || al || {};
+  if (status.action_name !== "multi_view_localize") return null;
+  var detail = (status.last_result && status.last_result.detail) || {};
+  var wps = detail.waypoints;
+  if (!Array.isArray(wps) || !wps.length) return null;
+  var plan = {
+    action: "multi_view_localize",
+    phase: detail.phase || "unknown",
+    waypoint_index: typeof detail.waypoint_index === "number" ? detail.waypoint_index : -1,
+    waypoints: wps.map(function (wp, i) {
+      return {name: "MV" + (i + 1), x: Number(wp.x || 0), y: Number(wp.y || 0), altitude_m: Number(wp.altitude_m || 0)};
+    }),
+  };
+  if (plan.waypoint_index >= 0 && plan.waypoint_index < plan.waypoints.length) {
+    plan.target = plan.waypoints[plan.waypoint_index];
+  }
+  return plan;
+}
+
 function resizeFieldCanvas(canvas) {
   const rect = canvas.getBoundingClientRect();
   const rawRatio = window.devicePixelRatio || 1;
@@ -510,6 +532,52 @@ function drawSurveyPoints(ctx, model) {
   model.dropSurvey.forEach((point, index) => drawPoint(point, index, model.dropScanIndex, "#39c8bf"));
   model.recceSurvey.forEach((point, index) => drawPoint(point, index, model.recceScanIndex, "#eda93d"));
 }
+
+function drawMultiViewPlan(ctx, model) {
+  var plan = model.multiViewPlan;
+  if (!plan || !Array.isArray(plan.waypoints)) return;
+  plan.waypoints.forEach(function (wp, i) {
+    var pos = worldToCanvas(wp.x, wp.y, model.rect);
+    var cx = pos[0], cy = pos[1];
+    var isCurrent = i === plan.waypoint_index;
+    var isCompleted = i < plan.waypoint_index;
+    var isPending = i > plan.waypoint_index;
+
+    var r = isCurrent ? 7 : 5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    if (isCompleted) {
+      ctx.fillStyle = "rgba(57,200,191,.55)";
+      ctx.strokeStyle = "rgba(57,200,191,.85)";
+      ctx.lineWidth = 1.5;
+      ctx.fill();
+      ctx.stroke();
+      // checkmark
+      ctx.strokeStyle = "#e6edf6";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx - 3, cy);
+      ctx.lineTo(cx - 1, cy + 2);
+      ctx.lineTo(cx + 3, cy - 3);
+      ctx.stroke();
+    } else if (isCurrent) {
+      ctx.fillStyle = "#e6edf6";
+      ctx.strokeStyle = "#08111a";
+      ctx.lineWidth = 2;
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = "rgba(147,168,191,.25)";
+      ctx.strokeStyle = "rgba(147,168,191,.65)";
+      ctx.lineWidth = 1.5;
+      ctx.fill();
+      ctx.stroke();
+    }
+    var labelColor = isCurrent ? "#e6edf6" : isCompleted ? "#39c8bf" : "#93a8bf";
+    drawFieldLabel(ctx, wp.name, cx + 9, cy - 9, {align: "left", color: labelColor, font: "10px Consolas, monospace"});
+  });
+}
+
 function drawDrone(ctx, model) {
   if (!model.drone || !Number.isFinite(Number(model.drone.x)) || !Number.isFinite(Number(model.drone.y))) return;
   const [x, y] = worldToCanvas(model.drone.x, model.drone.y, model.rect);
@@ -746,6 +814,36 @@ function renderFieldMapInfoBox(model) {
     if (allTargets.length > maxRows) lines.push("... +" + (allTargets.length - maxRows));
   }
 
+  // MultiView plan
+  var mvPlan = model.multiViewPlan;
+  if (mvPlan && Array.isArray(mvPlan.waypoints)) {
+    lines.push("");
+    lines.push("MultiView:");
+    lines.push("phase: " + (mvPlan.phase || "--"));
+    if (mvPlan.waypoint_index >= 0) {
+      lines.push("current: MV" + (mvPlan.waypoint_index + 1));
+    }
+    if (mvPlan.target) {
+      var tx = mvPlan.target.x >= 0 ? "+" + mvPlan.target.x.toFixed(2) : mvPlan.target.x.toFixed(2);
+      var ty = mvPlan.target.y >= 0 ? "+" + mvPlan.target.y.toFixed(2) : mvPlan.target.y.toFixed(2);
+      lines.push("target FIELD: x=" + tx + " y=" + ty + " alt=" + mvPlan.target.altitude_m.toFixed(1));
+      var preview = model.profilePreview;
+      if (preview && preview.ok && preview.reference) {
+        var ref = preview.reference;
+        var h = ref.field_heading_yaw_rad;
+        var fx = mvPlan.target.x, fy = mvPlan.target.y;
+        var cosH = Math.cos(h), sinH = Math.sin(h);
+        var dN = fy * cosH - fx * sinH;
+        var dE = fy * sinH + fx * cosH;
+        var ldm = 1.0 / 111320.0;
+        var lnm = 1.0 / (111320.0 * Math.cos(ref.origin_lat * Math.PI / 180.0));
+        var tLat = ref.origin_lat + dN * ldm;
+        var tLon = ref.origin_lon + dE * lnm;
+        lines.push("target GPS: " + tLat.toFixed(7) + ", " + tLon.toFixed(7));
+      }
+    }
+  }
+
   el.innerHTML = lines.map(function (l) { return escapeHtml(l); }).join("<br>");
 }
 
@@ -976,6 +1074,7 @@ function renderFieldMapNow(next) {
   }
   drawField(ctx, model);
   drawSurveyPoints(ctx, model);
+  drawMultiViewPlan(ctx, model);
   drawTargets(ctx, model);
   drawLocalizationTargets(ctx, model);
   drawReconInspectionTargets(ctx, model);
