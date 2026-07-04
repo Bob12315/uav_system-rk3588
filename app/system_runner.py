@@ -1177,7 +1177,13 @@ class SystemRunner:
         if self.action_mission_orchestrator is None:
             return self.action_mission_status_payload()
         with self.action_runtime_lock:
-            self.action_mission_orchestrator.tick(
+            orch = self.action_mission_orchestrator
+            pre_index = orch.current_index
+            pre_step = orch.steps[pre_index] if 0 <= pre_index < len(orch.steps) else None
+            pre_name = pre_step.name if pre_step else None
+            pre_label = pre_step.label if pre_step else None
+
+            mission_status = orch.tick(
                 self.action_lab_context(),
                 link_manager=self.services.link_manager,
                 send_commands=bool(self.controller_switches.snapshot().send_commands),
@@ -1186,11 +1192,30 @@ class SystemRunner:
             self._maybe_save_localization_result()
             self._maybe_save_drop_targets_result()
             self._maybe_save_recon_inspection_result()
+            # current running action
             last = getattr(self.action_runtime, "last_result", None)
             if isinstance(last, dict):
+                cur_index = orch.current_index
+                cur_step = orch.steps[cur_index] if 0 <= cur_index < len(orch.steps) else None
                 self._save_drop_workflow_from_action_result(
-                    getattr(self.action_runtime, "action_name", None), last)
-            return self.action_mission_status_payload()
+                    cur_step.name if cur_step else getattr(self.action_runtime, "action_name", None),
+                    last,
+                    step_index=cur_index,
+                    step_label=cur_step.label if cur_step else None)
+            # previous step result from orchestrator
+            ms_detail = mission_status.detail if isinstance(mission_status.detail, dict) else {}
+            prev_result = ms_detail.get("previous_action_result")
+            if isinstance(prev_result, dict):
+                self._save_drop_workflow_from_action_result(
+                    pre_name, prev_result,
+                    step_index=pre_index, step_label=pre_label)
+            # final result when mission done
+            final_result = ms_detail.get("action_result")
+            if isinstance(final_result, dict):
+                self._save_drop_workflow_from_action_result(
+                    pre_name, final_result,
+                    step_index=pre_index, step_label=pre_label)
+            return mission_status
 
     def action_mission_skip_current(self) -> dict[str, object]:
         if self.action_mission_orchestrator is None:
