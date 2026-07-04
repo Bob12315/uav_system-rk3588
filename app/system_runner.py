@@ -87,6 +87,7 @@ class SystemRunner:
         self.latest_localization_result: dict[str, object] = {}
         self.latest_drop_targets_result: dict[str, object] = {}
         self.latest_recon_inspection_result: dict[str, object] = {}
+        self.latest_drop_workflow_result: dict[str, object] = {}
         self.camera_recording: dict[str, object] = {
             "recording": False,
             "path": "",
@@ -123,6 +124,7 @@ class SystemRunner:
             get_latest_localization_result=lambda: self.latest_localization_result,
             get_latest_drop_targets_result=lambda: self.latest_drop_targets_result,
             get_latest_recon_inspection_result=lambda: self.latest_recon_inspection_result,
+            get_latest_drop_workflow_result=lambda: self.latest_drop_workflow_result,
         )
         self.command_pipeline = CommandPipeline(
             yolo_command_config=self.config.yolo_command,
@@ -546,6 +548,10 @@ class SystemRunner:
             self._maybe_save_localization_result()
             self._maybe_save_drop_targets_result()
             self._maybe_save_recon_inspection_result()
+            last = getattr(self.action_runtime, "last_result", None)
+            if isinstance(last, dict):
+                self._save_drop_workflow_from_action_result(
+                    getattr(self.action_runtime, "action_name", None), last)
             self.logger.info(
                 "action_lab_tick called current_action=%s dispatch=%s",
                 self.action_runtime.action_name,
@@ -604,6 +610,126 @@ class SystemRunner:
             if isinstance(value, dict) and isinstance(value.get("localized_objects"), list):
                 self._save_localization_from_detail(value, source="multi_view_localize")
                 return  # save only the first valid result
+
+    def _ensure_drop_workflow(self) -> dict[str, object]:
+        if not isinstance(self.latest_drop_workflow_result, dict):
+            self.latest_drop_workflow_result = {}
+        wf = self.latest_drop_workflow_result
+        wf.setdefault("source", "drop_workflow")
+        wf.setdefault("updated_at", time.time())
+        wf.setdefault("selected_targets", [])
+        wf.setdefault("target_lock", {})
+        wf.setdefault("align_descend", {})
+        wf.setdefault("payload_release", {})
+        wf.setdefault("release_events", [])
+        wf.setdefault("released_target_ids", [])
+        return wf
+
+    def _save_drop_workflow_from_action_result(
+        self,
+        action_name: str | None,
+        result: dict[str, object] | None,
+        *,
+        step_index: int | None = None,
+        step_label: str | None = None,
+    ) -> None:
+        if not result or not action_name:
+            return
+        detail = result.get("detail") or {}
+        if not isinstance(detail, dict):
+            return
+
+        if action_name == "select_drop_targets":
+            selected = detail.get("selected_targets")
+            if isinstance(selected, list):
+                wf = self._ensure_drop_workflow()
+                wf["updated_at"] = time.time()
+                wf["selected_targets"] = self._with_field_coordinates(selected)
+                wf["selected_count"] = int(detail.get("selected_count", len(selected)))
+                wf["candidate_count"] = int(detail.get("candidate_count", 0))
+
+        elif action_name == "target_lock":
+            wf = self._ensure_drop_workflow()
+            wf["updated_at"] = time.time()
+            target_raw = detail.get("target")
+            best_raw = detail.get("best_estimate")
+            wf["target_lock"] = {
+                "source": "target_lock",
+                "step_index": step_index,
+                "step_label": step_label,
+                "done": bool(result.get("done")),
+                "failed": bool(result.get("failed")),
+                "reason": str(result.get("reason", "")),
+                "target": self._with_field_coordinates([target_raw])[0]
+                    if isinstance(target_raw, dict) else {},
+                "best_estimate": self._with_field_coordinates([best_raw])[0]
+                    if isinstance(best_raw, dict) else {},
+                "locked_track_id": detail.get("locked_track_id"),
+                "best_distance_m": detail.get("best_distance_m"),
+            }
+
+        elif action_name == "align_descend":
+            wf = self._ensure_drop_workflow()
+            wf["updated_at"] = time.time()
+            wf["align_descend"] = {
+                "source": "align_descend",
+                "step_index": step_index,
+                "step_label": step_label,
+                "done": bool(result.get("done")),
+                "failed": bool(result.get("failed")),
+                "reason": str(result.get("reason", "")),
+                "enabled": detail.get("enabled"),
+                "aligned": detail.get("aligned"),
+                "hold_reason": detail.get("hold_reason"),
+                "height_m": detail.get("height_m"),
+                "current_altitude_m": detail.get("current_altitude_m"),
+                "finish_altitude_m": detail.get("finish_altitude_m"),
+                "min_altitude_m": detail.get("min_altitude_m"),
+                "ex_cam": detail.get("ex_cam"),
+                "ey_cam": detail.get("ey_cam"),
+                "raw_ex_cam": detail.get("raw_ex_cam"),
+                "raw_ey_cam": detail.get("raw_ey_cam"),
+                "desired_ex_cam": detail.get("desired_ex_cam"),
+                "desired_ey_cam": detail.get("desired_ey_cam"),
+                "corrected_ex_cam": detail.get("corrected_ex_cam"),
+                "corrected_ey_cam": detail.get("corrected_ey_cam"),
+                "update_count": detail.get("update_count"),
+                "hold_updates": detail.get("hold_updates"),
+                "lost_updates": detail.get("lost_updates"),
+            }
+
+        elif action_name == "payload_release":
+            wf = self._ensure_drop_workflow()
+            wf["updated_at"] = time.time()
+            release = {
+                "source": "payload_release",
+                "step_index": step_index,
+                "step_label": step_label,
+                "done": bool(result.get("done")),
+                "failed": bool(result.get("failed")),
+                "reason": str(result.get("reason", "")),
+                "state": detail.get("state"),
+                "payload_id": detail.get("payload_id"),
+                "target_id": detail.get("target_id"),
+                "servo_channels": detail.get("servo_channels") or detail.get("channels") or [],
+                "release_sent": bool(detail.get("release_sent")),
+                "hold_sent": bool(detail.get("hold_sent")),
+                "release_pwm": detail.get("release_pwm"),
+                "hold_pwm": detail.get("hold_pwm"),
+                "wait_updates": detail.get("wait_updates"),
+                "release_wait_updates": detail.get("release_wait_updates"),
+            }
+            wf["payload_release"] = release
+            events = wf.setdefault("release_events", [])
+            event_key = "{}:{}".format(release.get("payload_id"), release.get("target_id"))
+            if release["done"] or release["release_sent"]:
+                if not any(e.get("event_key") == event_key for e in events if isinstance(e, dict)):
+                    events.append({**release, "event_key": event_key, "updated_at": time.time()})
+            released = wf.setdefault("released_target_ids", [])
+            tid = release.get("target_id")
+            if tid is not None and (release["done"] or release["release_sent"]):
+                if str(tid) not in [str(x) for x in released]:
+                    released.append(tid)
 
     def clear_localization_result(self) -> CommandResult:
         self.latest_localization_result = {}
@@ -871,6 +997,7 @@ class SystemRunner:
             return self.action_mission_status_payload()
         with self.action_runtime_lock:
             self.latest_recon_inspection_result = {}
+            self.latest_drop_workflow_result = {}
             if self._action_mission_uses_field_coordinates():
                 reason = self._field_mission_preflight_reason()
                 if reason is not None:
@@ -962,6 +1089,7 @@ class SystemRunner:
             return self.action_mission_status_payload()
         with self.action_runtime_lock:
             self.latest_recon_inspection_result = {}
+            self.latest_drop_workflow_result = {}
             self.action_mission_orchestrator.reset(
                 link_manager=self.services.link_manager,
                 hold_current=True,
@@ -981,6 +1109,10 @@ class SystemRunner:
             self._maybe_save_localization_result()
             self._maybe_save_drop_targets_result()
             self._maybe_save_recon_inspection_result()
+            last = getattr(self.action_runtime, "last_result", None)
+            if isinstance(last, dict):
+                self._save_drop_workflow_from_action_result(
+                    getattr(self.action_runtime, "action_name", None), last)
             return self.action_mission_status_payload()
 
     def action_mission_skip_current(self) -> dict[str, object]:

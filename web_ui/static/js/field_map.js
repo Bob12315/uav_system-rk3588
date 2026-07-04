@@ -347,7 +347,44 @@ function fieldMapModel(next) {
     dropTargetsSelected: dropTargetsFromSelection.map(item => pointForFieldMap(item, next)).filter(Boolean),
     reconInspectionTargets,
     multiViewPlan: extractMultiViewPlan(next),
+    dropWorkflow: extractDropWorkflow(next),
+    lockedTarget: pointForFieldMap(getLockedTarget(next), next),
+    releasedTargetIds: (next.drop_workflow || {}).released_target_ids || [],
+    releaseEvents: (next.drop_workflow || {}).release_events || [],
+    alignDescend: (next.drop_workflow || {}).align_descend || {},
+    payloadRelease: (next.drop_workflow || {}).payload_release || {},
   };
+}
+
+function getLockedTarget(next) {
+  var wf = next.drop_workflow || {};
+  var lock = wf.target_lock || {};
+  return (lock.best_estimate || lock.target) || null;
+}
+
+function extractDropWorkflow(next) {
+  var wf = next.drop_workflow || {};
+  if (!wf || typeof wf !== "object") return {};
+  return {
+    selectedTargets: wf.selected_targets || [],
+    targetLock: wf.target_lock || {},
+    alignDescend: wf.align_descend || {},
+    payloadRelease: wf.payload_release || {},
+    releasedTargetIds: Array.isArray(wf.released_target_ids) ? wf.released_target_ids.map(String) : [],
+    releaseEvents: Array.isArray(wf.release_events) ? wf.release_events : [],
+  };
+}
+
+function targetsMatch(a, b, toleranceM) {
+  if (!a || !b) return false;
+  if (toleranceM === undefined) toleranceM = 0.25;
+  var aIds = [a.id, a.target_id, a.object_id].filter(function (v) { return v !== null && v !== undefined; }).map(String);
+  var bIds = [b.id, b.target_id, b.object_id].filter(function (v) { return v !== null && v !== undefined; }).map(String);
+  if (aIds.length && bIds.length && aIds.some(function (id) { return bIds.indexOf(id) >= 0; })) return true;
+  var ax = pointX(a), ay = pointY(a);
+  var bx = pointX(b), by = pointY(b);
+  if (ax === null || ay === null || bx === null || by === null) return false;
+  return Math.hypot(ax - bx, ay - by) <= toleranceM;
 }
 function extractMultiViewPlan(next) {
   var al = next.action_lab || _latestActionLab() || {};
@@ -628,6 +665,10 @@ function drawLocalizationTargets(ctx, model) {
     const id = target.id ?? target.target_id ?? index;
     const count = target.count ?? target.seen_count ?? 0;
     const selected = isSelectedDropTarget(target, model.dropTargetsSelected);
+    const locked = model.lockedTarget && targetsMatch(target, model.lockedTarget, 0.35);
+    var relIds = model.releasedTargetIds || [];
+    var targetId = String(target.id ?? target.target_id ?? "");
+    const dropped = relIds.indexOf(targetId) >= 0;
     const fillColor = selected ? "#ff3b30" : "#2bc277";
     const labelColor = selected ? "#ff3b30" : "#2bc277";
     ctx.beginPath();
@@ -637,7 +678,21 @@ function drawLocalizationTargets(ctx, model) {
     ctx.lineWidth = 2;
     ctx.fill();
     ctx.stroke();
-    drawFieldLabel(ctx, `L${id} ${target.class_name || "obj"}`, x + 10, y - 12, {
+    if (locked) {
+      ctx.beginPath();
+      ctx.arc(x, y, 12, 0, Math.PI * 2);
+      ctx.strokeStyle = "#ffd84d";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      drawFieldLabel(ctx, "LOCKED", x + 10, y - 28, {align: "left", color: "#ffd84d", font: "10px Consolas, monospace"});
+    }
+    if (dropped) {
+      drawFieldLabel(ctx, "RELEASED", x + 10, y + 20, {align: "left", color: "#93a8bf", font: "10px Consolas, monospace"});
+    }
+    var label = `L${id} ${target.class_name || "obj"}`;
+    var selIdx = model.dropTargetsSelected ? model.dropTargetsSelected.findIndex(function (t) { return targetsMatch(target, t, 0.25); }) : -1;
+    if (selIdx >= 0) label += " SEL" + (selIdx + 1);
+    drawFieldLabel(ctx, label, x + 10, y - 12, {
       align: "left",
       color: labelColor,
     });
@@ -876,6 +931,51 @@ function renderFieldMapInfoBox(model) {
         var tLon = ref.origin_lon + dE * lnm;
         lines.push("target GPS: " + tLat.toFixed(7) + ", " + tLon.toFixed(7));
       }
+    }
+  }
+
+  // Drop workflow
+  var wf = model.dropWorkflow;
+  if (wf && (wf.selectedTargets.length || Object.keys(wf.targetLock).length || Object.keys(wf.alignDescend).length || Object.keys(wf.payloadRelease).length)) {
+    lines.push("");
+    lines.push("Drop workflow:");
+    var sel = model.dropTargetsSelected || [];
+    lines.push("selected: " + sel.length);
+    var lock = wf.targetLock || {};
+    if (Object.keys(lock).length) {
+      lines.push(
+        "lock: " +
+        "done=" + Boolean(lock.done) +
+        " reason=" + (lock.reason || "--") +
+        " track=" + (lock.locked_track_id != null ? lock.locked_track_id : "--") +
+        " dist=" + (lock.best_distance_m != null ? Number(lock.best_distance_m).toFixed(2) : "--")
+      );
+    }
+    var align = wf.alignDescend || {};
+    if (Object.keys(align).length) {
+      lines.push(
+        "align: " +
+        "reason=" + (align.reason || align.hold_reason || "--") +
+        " aligned=" + Boolean(align.aligned) +
+        " alt=" + (align.current_altitude_m != null ? Number(align.current_altitude_m).toFixed(2) : "--") +
+        " ex=" + (align.ex_cam != null ? Number(align.ex_cam).toFixed(3) : "--") +
+        " ey=" + (align.ey_cam != null ? Number(align.ey_cam).toFixed(3) : "--")
+      );
+    }
+    var rel = wf.payloadRelease || {};
+    if (Object.keys(rel).length) {
+      lines.push(
+        "release: " +
+        "payload=" + (rel.payload_id || "--") +
+        " target=" + (rel.target_id || "--") +
+        " state=" + (rel.state || "--") +
+        " release_sent=" + Boolean(rel.release_sent) +
+        " hold_sent=" + Boolean(rel.hold_sent)
+      );
+    }
+    var events = wf.releaseEvents || [];
+    if (events.length) {
+      lines.push("released: " + events.map(function (e) { return String(e.payload_id || "?") + "->" + String(e.target_id || "?"); }).join(", "));
     }
   }
 
