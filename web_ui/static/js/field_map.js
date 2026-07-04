@@ -375,6 +375,7 @@ function extractDropWorkflow(next) {
     payloadRelease: wf.payload_release || {},
     releasedTargetIds: Array.isArray(wf.released_target_ids) ? wf.released_target_ids.map(String) : [],
     releaseEvents: Array.isArray(wf.release_events) ? wf.release_events : [],
+    current_rank: wf.current_rank,
   };
 }
 

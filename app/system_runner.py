@@ -625,33 +625,111 @@ class SystemRunner:
         wf.setdefault("released_target_ids", [])
         return wf
 
+    def _workflow_targets(self) -> list[dict[str, object]]:
+        workflow = self._ensure_drop_workflow()
+        targets = workflow.get("selected_targets")
+        if not isinstance(targets, list):
+            return []
+        return [item for item in targets if isinstance(item, dict)]
+
+    def _rank_by_target_id(self, target_id: object) -> int | None:
+        if target_id is None:
+            return None
+        wanted = str(target_id)
+        for index, target in enumerate(self._workflow_targets(), start=1):
+            ids = {
+                str(value)
+                for value in (
+                    target.get("id"),
+                    target.get("target_id"),
+                    target.get("object_id"),
+                )
+                if value is not None
+            }
+            if wanted in ids:
+                return index
+        return None
+
+    def _point_xy(self, item: object) -> tuple[float, float] | None:
+        if not isinstance(item, dict):
+            return None
+        x = item.get("local_x", item.get("x", item.get("field_x")))
+        y = item.get("local_y", item.get("y", item.get("field_y")))
+        try:
+            xf = float(x)
+            yf = float(y)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(xf) or not math.isfinite(yf):
+            return None
+        return xf, yf
+
+    def _rank_by_target_xy(self, target: object, tolerance_m: float = 0.35) -> int | None:
+        xy = self._point_xy(target)
+        if xy is None:
+            return None
+        tx, ty = xy
+        best_rank = None
+        best_dist = None
+        for index, item in enumerate(self._workflow_targets(), start=1):
+            item_xy = self._point_xy(item)
+            if item_xy is None:
+                continue
+            ix, iy = item_xy
+            dist = math.hypot(tx - ix, ty - iy)
+            if dist <= tolerance_m and (best_dist is None or dist < best_dist):
+                best_rank = index
+                best_dist = dist
+        return best_rank
+
     def _drop_rank_from_result(
         self, action_name: str | None, detail: dict[str, object],
         step_index: int | None = None, step_label: str | None = None,
     ) -> int | None:
-        """Infer target rank (1-based) from action name key or payload_id."""
-        if not action_name or not isinstance(detail, dict):
+        if not isinstance(detail, dict):
             return None
+        # 1. ID matching (most reliable)
+        for value in (detail.get("target_id"), detail.get("id"), detail.get("object_id")):
+            rank = self._rank_by_target_id(value)
+            if rank is not None:
+                return rank
+        target = detail.get("target")
+        if isinstance(target, dict):
+            for value in (target.get("target_id"), target.get("id"), target.get("object_id")):
+                rank = self._rank_by_target_id(value)
+                if rank is not None:
+                    return rank
+        best_estimate = detail.get("best_estimate")
+        if isinstance(best_estimate, dict):
+            for value in (best_estimate.get("target_id"), best_estimate.get("id"), best_estimate.get("object_id")):
+                rank = self._rank_by_target_id(value)
+                if rank is not None:
+                    return rank
+        # 2. key / payload_id / step_label inference
         key = str(detail.get("key") or "")
-        pid = str(detail.get("payload_id") or "")
-        # target_lock_0 / target_lock_1 -> rank 1/2
-        if action_name.startswith("target_lock"):
-            # mission steps: target_lock_0, target_lock_1
-            if key.startswith("target_lock_"):
-                try:
-                    r = int(key.rsplit("_", 1)[-1]) + 1
-                    return r
-                except (ValueError, IndexError):
-                    pass
+        payload_id = str(detail.get("payload_id") or "")
+        text = " ".join([str(action_name or ""), key, payload_id, str(step_label or "")])
+        if "target_lock_0" in text or "payload_1" in text or "payload_release_1" in text:
             return 1
-        # payload_release: look at payload_id
-        if action_name == "payload_release" and pid:
-            pid_lower = pid.lower()
-            if "1" in pid_lower:
-                return 1
-            if "2" in pid_lower:
-                return 2
-            return 1
+        if "target_lock_1" in text or "payload_2" in text or "payload_release_2" in text:
+            return 2
+        # 3. xy coordinate matching
+        rank = self._rank_by_target_xy(detail.get("target"))
+        if rank is not None:
+            return rank
+        rank = self._rank_by_target_xy(detail.get("best_estimate"))
+        if rank is not None:
+            return rank
+        # 4. safe fallback: current_rank
+        workflow = self._ensure_drop_workflow()
+        cur = workflow.get("current_rank")
+        try:
+            cur_rank = int(cur) if cur is not None else None
+        except (TypeError, ValueError):
+            cur_rank = None
+        targets = self._workflow_targets()
+        if cur_rank is not None and 1 <= cur_rank <= len(targets):
+            return cur_rank
         return None
 
     def _save_drop_workflow_from_action_result(
@@ -728,7 +806,7 @@ class SystemRunner:
                 "locked_track_id": detail.get("locked_track_id"),
                 "best_distance_m": detail.get("best_distance_m"),
             }
-            if target is not None:
+            if target is not None and not bool(target.get("released")):
                 target["status"] = "locked" if bool(result.get("done")) else "locking"
                 target["locked"] = bool(result.get("done"))
                 target["locked_track_id"] = detail.get("locked_track_id")
@@ -763,7 +841,7 @@ class SystemRunner:
                 "hold_updates": detail.get("hold_updates"),
                 "lost_updates": detail.get("lost_updates"),
             }
-            if target is not None:
+            if target is not None and not bool(target.get("released")):
                 target["status"] = "aligned" if detail.get("aligned") else "aligning"
 
         elif action_name == "payload_release":
