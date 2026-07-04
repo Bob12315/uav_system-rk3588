@@ -9,6 +9,8 @@ window.UavFieldProfiles = (function () {
   var dom = window.UavDom;
   var fmt = window.UavFormat;
 
+  var SELECTED_PROFILE_KEY = "uav.field_profile.selected_id";
+
   function setText(element, value, tone) {
     if (!element) return;
     element.textContent = value == null ? "" : String(value);
@@ -59,6 +61,23 @@ window.UavFieldProfiles = (function () {
       opt.textContent = label;
       sel.appendChild(opt);
     });
+    restoreSelectedProfile(sel);
+  }
+
+  function restoreSelectedProfile(sel) {
+    var savedId = null;
+    try { savedId = localStorage.getItem(SELECTED_PROFILE_KEY); } catch (e) { /* ignore */ }
+    if (!savedId) return;
+    var found = false;
+    for (var i = 0; i < sel.options.length; i++) {
+      if (sel.options[i].value === savedId) { found = true; break; }
+    }
+    if (found) {
+      sel.value = savedId;
+      loadAndRenderProfile(savedId);
+    } else {
+      try { localStorage.removeItem(SELECTED_PROFILE_KEY); } catch (e) { /* ignore */ }
+    }
   }
 
   // ------------------------------------------------------------------
@@ -251,7 +270,16 @@ window.UavFieldProfiles = (function () {
     }
     if ($("fpProfileSelect")) {
       $("fpProfileSelect").onchange = function () {
-        loadAndRenderProfile(this.value);
+        var id = this.value;
+        if (id) {
+          try { localStorage.setItem(SELECTED_PROFILE_KEY, id); } catch (e) { /* ignore */ }
+          loadAndRenderProfile(id);
+        } else {
+          try { localStorage.removeItem(SELECTED_PROFILE_KEY); } catch (e) { /* ignore */ }
+          if (window.UavFieldMap && window.UavFieldMap.setProfilePreview) {
+            window.UavFieldMap.setProfilePreview(null);
+          }
+        }
       };
     }
     // Initial fetch
