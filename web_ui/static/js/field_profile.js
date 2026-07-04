@@ -88,6 +88,7 @@ window.UavFieldProfiles = (function () {
       if (window.UavFieldMap && window.UavFieldMap.setProfilePreview) {
         window.UavFieldMap.setProfilePreview(data);
       }
+      setText($("fpHint"), "map-preview 已加载: " + data.profile_id, "ok-text");
     } catch (e) {
       setText($("fpHint"), "map-preview 加载失败: " + e.message, "warning-text");
     }
