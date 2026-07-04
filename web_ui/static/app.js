@@ -321,7 +321,6 @@ const {
   fetchFieldReferenceStatus: fpFetchFieldReferenceStatus,
 } = window.UavFieldProfiles || {};
 
-function renderFieldHeading(next) { window.UavFieldRef.renderFieldHeading(next); }
 // confirmFieldHeading removed (centerline-only)
 
 function renderMissionSteps(next) {
@@ -599,7 +598,6 @@ function renderStatus(next) {
   setOptionalText("stageController", next.stage_controller || "--");
   setOptionalText("holdReason", next.hold_reason || "none");
   updateControlHighlights(next, drone, controls);
-  renderFieldHeading(next);
   renderMissionSteps(next);
   $("targetCurrent").textContent = target.target_valid
     ? `当前锁定: ${target.class_name} #${target.track_id} (${Number(target.confidence).toFixed(2)})`
