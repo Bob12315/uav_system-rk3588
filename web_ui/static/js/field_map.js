@@ -32,18 +32,6 @@ const FIELD_DEFAULTS = {
   takeoff: {x: 0, y: 0, xLen: 8, yLen: 8, label: "起降区"},
   drop: {x: 0, y: 32.5, xLen: 8, yLen: 5, label: "投放区"},
   recce: {x: 0, y: 57.5, xLen: 8, yLen: 5, label: "侦察区"},
-  dropSurvey: [
-    {name: "D1", x: -1.2, y: 28},
-    {name: "D2", x: 1.2, y: 28},
-    {name: "D3", x: -1.2, y: 32},
-    {name: "D4", x: 1.2, y: 32},
-  ],
-  recceSurvey: [
-    {name: "R1", x: -1.2, y: 53},
-    {name: "R2", x: 1.2, y: 53},
-    {name: "R3", x: -1.2, y: 57},
-    {name: "R4", x: 1.2, y: 57},
-  ],
 };
 
 function pointX(obj) {
