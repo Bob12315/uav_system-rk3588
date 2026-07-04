@@ -550,36 +550,57 @@ class SystemRunner:
             )
             return status
 
+    def _save_localization_from_detail(self, detail: dict[str, object], source: str = "multi_view_localize") -> bool:
+        """Extract localized_objects from *detail* and persist to latest_localization_result.
+        Returns True on success, False if no valid localized_objects found."""
+        if not isinstance(detail, dict):
+            return False
+        localized = detail.get("localized_objects")
+        if not isinstance(localized, list) or not localized:
+            return False
+        self.latest_localization_result = {
+            "source": source,
+            "updated_at": time.time(),
+            "run_id": str(detail.get("run_id", "")),
+            "objects": self._with_field_coordinates(localized),
+            "object_count": int(detail.get("object_count", len(localized))),
+            "raw_estimates_count": int(detail.get("raw_estimates_count", 0)),
+            "captures_count": int(detail.get("captures_count", 0)),
+        }
+        return True
+
     def _maybe_save_localization_result(self) -> None:
-        """If multi_view_localize just completed, persist its result for Web UI display."""
-        name = getattr(self.action_runtime, "action_name", None)
+        """If multi_view_localize just completed (Action Lab path), persist its result."""
+        name = getattr(self.action_runtime, "action_name", None) if self.action_runtime else None
         if name != "multi_view_localize":
             return
         last = getattr(self.action_runtime, "last_result", None)
         if last is None:
             return
-        detail = last.get("detail") if isinstance(last, dict) else getattr(last, "detail", None)
-        if isinstance(detail, dict):
-            detail = detail  # it's a dict
-        elif hasattr(detail, "__dict__"):
-            detail = detail.__dict__  # type: ignore[union-attr]
-        else:
-            detail = {}
         done = last.get("done") if isinstance(last, dict) else getattr(last, "done", False)
         if not done:
             return
-        localized = detail.get("localized_objects")
-        if not isinstance(localized, list):
+        detail = last.get("detail") if isinstance(last, dict) else getattr(last, "detail", None)
+        if isinstance(detail, dict):
+            pass
+        elif hasattr(detail, "__dict__"):
+            detail = detail.__dict__
+        else:
+            detail = {}
+        self._save_localization_from_detail(detail)
+
+    def _maybe_save_localization_from_mission(self) -> None:
+        """Check mission blackboard for localized_objects saved by a completed multi_view step."""
+        orch = getattr(self, "action_mission_orchestrator", None)
+        if orch is None:
             return
-        self.latest_localization_result = {
-            "source": "multi_view_localize",
-            "updated_at": time.time(),
-            "run_id": detail.get("run_id", ""),
-            "objects": self._with_field_coordinates(localized),
-            "object_count": detail.get("object_count", len(localized)),
-            "raw_estimates_count": detail.get("raw_estimates_count", 0),
-            "captures_count": detail.get("captures_count", 0),
-        }
+        bb = getattr(orch, "blackboard", None)
+        if bb is None:
+            return
+        for _key, value in list(getattr(bb, "data", {}).items()):
+            if isinstance(value, dict) and isinstance(value.get("localized_objects"), list):
+                self._save_localization_from_detail(value, source="multi_view_localize")
+                return  # save only the first valid result
 
     def clear_localization_result(self) -> CommandResult:
         self.latest_localization_result = {}
@@ -953,6 +974,7 @@ class SystemRunner:
                 link_manager=self.services.link_manager,
                 send_commands=bool(self.controller_switches.snapshot().send_commands),
             )
+            self._maybe_save_localization_from_mission()
             self._maybe_save_localization_result()
             self._maybe_save_drop_targets_result()
             self._maybe_save_recon_inspection_result()
