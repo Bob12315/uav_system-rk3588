@@ -137,7 +137,26 @@ var profilePreview = null;
 
 function setProfilePreview(data) {
   profilePreview = data || null;
-  renderFieldMap();
+  if (!data) fieldMapInfoBoxKey = "";
+  scheduleFieldMapRender();
+}
+
+var fieldMapRenderPending = false;
+var latestFieldMapState = null;
+var fieldMapInfoBoxKey = "";
+
+function scheduleFieldMapRender(next) {
+  latestFieldMapState = next || latestFieldMapState || _state();
+  if (fieldMapRenderPending) return;
+  fieldMapRenderPending = true;
+  requestAnimationFrame(function () {
+    fieldMapRenderPending = false;
+    renderFieldMapNow(latestFieldMapState || _state());
+  });
+}
+
+function renderFieldMap(next) {
+  scheduleFieldMapRender(next);
 }
 
 const fieldMapView = {
@@ -152,6 +171,7 @@ const fieldMapView = {
   dragStartCenterX: 0,
   dragStartCenterY: 0,
   initialized: false,
+  interacting: false,
 };
 function worldToCanvas(x, y, rect, view = fieldMapView) {
   const originX = rect.width / 2 - view.centerX * view.scale;
@@ -330,7 +350,9 @@ function fieldMapModel(next) {
 }
 function resizeFieldCanvas(canvas) {
   const rect = canvas.getBoundingClientRect();
-  const ratio = window.devicePixelRatio || 1;
+  const rawRatio = window.devicePixelRatio || 1;
+  const coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+  const ratio = coarse ? Math.min(rawRatio, 1.25) : Math.min(rawRatio, 2);
   const width = Math.max(1, Math.round(rect.width * ratio));
   const height = Math.max(1, Math.round(rect.height * ratio));
   if (canvas.width !== width || canvas.height !== height) {
@@ -373,14 +395,21 @@ function drawCoordinateTicks(ctx, model) {
   const vyMin = Math.min(topLeft.y, bottomRight.y);
   const vyMax = Math.max(topLeft.y, bottomRight.y);
 
+  // Auto-increase step to prevent excessive grid lines
+  const maxGridLines = 80;
+  var actualStep = step;
+  while ((vxMax - vxMin) / actualStep > maxGridLines || (vyMax - vyMin) / actualStep > maxGridLines) {
+    actualStep *= 2;
+  }
+
   ctx.strokeStyle = "rgba(147,168,191,.18)";
   ctx.fillStyle = "#93a8bf";
   ctx.lineWidth = 1;
   ctx.font = "11px Consolas, monospace";
 
   // vertical grid lines (constant x)
-  const xStart = Math.floor(vxMin / step) * step;
-  for (let x = xStart; x <= vxMax; x += step) {
+  const xStart = Math.floor(vxMin / actualStep) * actualStep;
+  for (let x = xStart; x <= vxMax; x += actualStep) {
     const [sx1, sy1] = worldToCanvas(x, vyMin, rect, view);
     const [sx2, sy2] = worldToCanvas(x, vyMax, rect, view);
     ctx.beginPath();
@@ -390,8 +419,8 @@ function drawCoordinateTicks(ctx, model) {
   }
 
   // horizontal grid lines (constant y)
-  const yStart = Math.floor(vyMin / step) * step;
-  for (let y = yStart; y <= vyMax; y += step) {
+  const yStart = Math.floor(vyMin / actualStep) * actualStep;
+  for (let y = yStart; y <= vyMax; y += actualStep) {
     const [sx1, sy1] = worldToCanvas(vxMin, y, rect, view);
     const [sx2, sy2] = worldToCanvas(vxMax, y, rect, view);
     ctx.beginPath();
@@ -429,7 +458,9 @@ function drawCoordinateTicks(ctx, model) {
     ctx.lineTo(tickX, tickY + 7);
     ctx.stroke();
     ctx.textAlign = "center";
-    ctx.fillText(`${Math.round(x)}`, tickX, tickY + 9);
+    if (!fieldMapView.interacting || actualStep >= step * 2) {
+      ctx.fillText(`${Math.round(x)}`, tickX, tickY + 9);
+    }
   }
   // y labels at left
   ctx.textBaseline = "middle";
@@ -440,7 +471,9 @@ function drawCoordinateTicks(ctx, model) {
     ctx.lineTo(tickX - 7, tickY);
     ctx.stroke();
     ctx.textAlign = "right";
-    ctx.fillText(`${Math.round(y)}`, tickX - 9, tickY);
+    if (!fieldMapView.interacting || actualStep >= step * 2) {
+      ctx.fillText(`${Math.round(y)}`, tickX - 9, tickY);
+    }
   }
 
   drawFieldLabel(ctx, "x/m", model.rect.width / 2, model.rect.height - 16, {color: "#93a8bf"});
@@ -665,8 +698,13 @@ function renderFieldMapInfoBox(model) {
   var preview = model.profilePreview;
   if (!preview || !preview.ok) {
     el.style.display = "none";
+    fieldMapInfoBoxKey = "";
     return;
   }
+  // Simple key: profile_id + corner GPS summary (changes only on new profile)
+  var key = preview.profile_id + "|" + JSON.stringify(preview.reference);
+  if (key === fieldMapInfoBoxKey) return;
+  fieldMapInfoBoxKey = key;
   el.style.display = "block";
   var lines = [];
   lines.push("Field Profile: " + escapeHtml(preview.profile_id || "--"));
@@ -777,7 +815,7 @@ function setupFieldMapInteractions() {
     const after = canvasToWorld(mouseX, mouseY, rect);
     fieldMapView.centerX += after.x - before.x;
     fieldMapView.centerY += before.y - after.y;
-    renderFieldMap();
+    scheduleFieldMapRender();
   }, {passive: false});
 
   // mousemove: display FIELD x/y and lat/lon coordinates
@@ -832,6 +870,7 @@ function setupFieldMapInteractions() {
 
     if (activePointers.size === 1) {
       fieldMapView.isDragging = true;
+      fieldMapView.interacting = true;
       fieldMapView.dragStartX = event.clientX;
       fieldMapView.dragStartY = event.clientY;
       fieldMapView.dragStartCenterX = fieldMapView.centerX;
@@ -860,7 +899,7 @@ function setupFieldMapInteractions() {
       const dy = p.y - fieldMapView.dragStartY;
       fieldMapView.centerX = fieldMapView.dragStartCenterX - dx / fieldMapView.scale;
       fieldMapView.centerY = fieldMapView.dragStartCenterY + dy / fieldMapView.scale;
-      renderFieldMap();
+      scheduleFieldMapRender();
       return;
     }
 
@@ -879,7 +918,7 @@ function setupFieldMapInteractions() {
       const after = canvasToWorld(mid.x - rect.left, mid.y - rect.top, rect);
       fieldMapView.centerX += after.x - before.x;
       fieldMapView.centerY += before.y - after.y;
-      renderFieldMap();
+      scheduleFieldMapRender();
     }
   });
 
@@ -887,8 +926,10 @@ function setupFieldMapInteractions() {
     activePointers.delete(event.pointerId);
     if (activePointers.size === 0) {
       fieldMapView.isDragging = false;
+      fieldMapView.interacting = false;
       fieldMapView.pinchStartWorld = null;
       canvas.classList.remove("dragging");
+      scheduleFieldMapRender();
     } else if (activePointers.size === 1) {
       const p = Array.from(activePointers.values())[0];
       fieldMapView.isDragging = true;
@@ -906,15 +947,15 @@ function setupFieldMapInteractions() {
   // button handlers
   $("fieldMapZoomIn")?.addEventListener("click", () => {
     fieldMapView.scale = Math.min(fieldMapView.maxScale, fieldMapView.scale * 1.2);
-    renderFieldMap();
+    scheduleFieldMapRender();
   });
   $("fieldMapZoomOut")?.addEventListener("click", () => {
     fieldMapView.scale = Math.max(fieldMapView.minScale, fieldMapView.scale / 1.2);
-    renderFieldMap();
+    scheduleFieldMapRender();
   });
   $("fieldMapReset")?.addEventListener("click", () => {
     fitFieldMapToDefaults();
-    renderFieldMap();
+    scheduleFieldMapRender();
   });
   $("clearLocalization")?.addEventListener("click", () => {
     _clearLocalization().catch(error => {
@@ -922,7 +963,7 @@ function setupFieldMapInteractions() {
     });
   });
 }
-function renderFieldMap(next) {
+function renderFieldMapNow(next) {
   next = next || _state();
   const canvas = $("fieldMap");
   if (!canvas) return;
@@ -940,8 +981,10 @@ function renderFieldMap(next) {
   drawReconInspectionTargets(ctx, model);
   drawSingleViewTargets(ctx, model);
   drawDrone(ctx, model);
-  if (model.profilePreview) {
+  if (model.profilePreview && !fieldMapView.interacting) {
     renderFieldMapInfoBox(model);
+  } else if (model.profilePreview) {
+    // interacting: skip DOM update, keep existing info box visible
   } else {
     drawTargetCoordinateList(ctx, model);
     var infoEl = $("fieldMapInfoBox");
