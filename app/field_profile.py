@@ -75,12 +75,12 @@ class FieldGeometry:
     """Field geometry parameters."""
 
     lane_half_width_m: float = 4.0
-    drop_center_y_m: float = 30.0
-    recce_center_y_m: float = 55.0
-    drop_area_y_min: Optional[float] = None
-    drop_area_y_max: Optional[float] = None
-    recce_area_y_min: Optional[float] = None
-    recce_area_y_max: Optional[float] = None
+    drop_center_y_m: float = 32.5
+    recce_center_y_m: float = 57.5
+    drop_area_y_min: Optional[float] = 30.0
+    drop_area_y_max: Optional[float] = 35.0
+    recce_area_y_min: Optional[float] = 55.0
+    recce_area_y_max: Optional[float] = 60.0
 
 
 @dataclass(slots=True)
@@ -750,16 +750,16 @@ def _parse_field_geometry(data: Dict[str, Any]) -> FieldGeometry:
         return FieldGeometry()
 
     lane = float(raw.get("lane_half_width_m", 4.0))
-    drop_y = float(raw.get("drop_center_y_m", 30.0))
-    recce_y = float(raw.get("recce_center_y_m", 55.0))
+    drop_y = float(raw.get("drop_center_y_m", 32.5))
+    recce_y = float(raw.get("recce_center_y_m", 57.5))
     return FieldGeometry(
         lane_half_width_m=lane,
         drop_center_y_m=drop_y,
         recce_center_y_m=recce_y,
-        drop_area_y_min=raw.get("drop_area_y_min"),
-        drop_area_y_max=raw.get("drop_area_y_max"),
-        recce_area_y_min=raw.get("recce_area_y_min"),
-        recce_area_y_max=raw.get("recce_area_y_max"),
+        drop_area_y_min=raw.get("drop_area_y_min", 30.0),
+        drop_area_y_max=raw.get("drop_area_y_max", 35.0),
+        recce_area_y_min=raw.get("recce_area_y_min", 55.0),
+        recce_area_y_max=raw.get("recce_area_y_max", 60.0),
     )
 
 

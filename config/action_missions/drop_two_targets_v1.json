@@ -20,7 +20,7 @@
       "save_as": "drop_scan",
       "params": {
         "waypoint_mode": "field",
-        "altitude_m": 4.5,
+        "altitude_m": 5,
         "yaw_mode": "field_heading",
         "waypoints": [
           {
@@ -44,12 +44,12 @@
             "altitude_m": 5
           }
         ],
-        "capture_updates_per_waypoint": 3,
-        "settle_updates_per_waypoint": 2,
+        "capture_updates_per_waypoint": 5,
+        "settle_updates_per_waypoint": 3,
         "max_updates_per_waypoint": 100,
-        "tolerance_xy_m": 0.35,
-        "tolerance_z_m": 0.35,
-        "goto_min_hold_updates": 1,
+        "tolerance_xy_m": 0.25,
+        "tolerance_z_m": 0.30,
+        "goto_min_hold_updates": 3,
         "detection_source": "scene",
         "class_names": [
           "bucket_1",
@@ -65,8 +65,8 @@
           "image_y_sign": -1.0
         },
         "fusion": {
-          "cluster_radius_m": 0.8,
-          "outlier_radius_m": 0.8,
+          "cluster_radius_m": 0.55,
+          "outlier_radius_m": 0.65,
           "min_cluster_size": 2,
           "center_weight_power": 1.0
         },

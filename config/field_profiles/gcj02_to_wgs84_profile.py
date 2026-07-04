@@ -157,8 +157,12 @@ def main() -> None:
         },
         "field_geometry": {
             "lane_half_width_m": 4.0,
-            "drop_center_y_m": 30.0,
-            "recce_center_y_m": 55.0,
+            "drop_center_y_m": 32.5,
+            "recce_center_y_m": 57.5,
+            "drop_area_y_min": 30.0,
+            "drop_area_y_max": 35.0,
+            "recce_area_y_min": 55.0,
+            "recce_area_y_max": 60.0,
         },
         "binding_policy": {
             "max_start_error_m": 3.0,
