@@ -947,7 +947,10 @@ function renderFieldMap(next) {
     var infoEl = $("fieldMapInfoBox");
     if (infoEl) infoEl.style.display = "none";
   }
-  $("fieldMapEmpty").style.display = model.hasMissionPosition ? "none" : "block";
+  const hasProfilePreview = Boolean(model.profilePreview && model.profilePreview.ok);
+  const hasDronePosition = Boolean(model.drone);
+  $("fieldMapEmpty").style.display =
+    (model.hasMissionPosition || hasProfilePreview || hasDronePosition) ? "none" : "block";
   $("fieldMapLegend").innerHTML = [
     `Stage: ${escapeHtml(model.stage)}`,
     `Drop: ${model.dropCount}/${model.requiredDrops}`,
@@ -957,7 +960,7 @@ function renderFieldMap(next) {
     `Localization: ${model.localizationTargets.length}`,
     `SingleView: ${model.singleViewTargets.length}`,
     `Recon inspect: ${model.reconInspectionTargets.length}`,
-    model.hasMissionPosition ? "Coord: mission" : "Coord: local fallback",
+    hasProfilePreview ? "Coord: profile preview" : model.hasMissionPosition ? "Coord: mission" : hasDronePosition && model.drone.field ? "Coord: field" : "Coord: local fallback",
   ].map(item => `<span>${item}</span>`).join("");
 }
 
