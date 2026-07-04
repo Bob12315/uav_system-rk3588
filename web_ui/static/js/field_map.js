@@ -358,7 +358,6 @@ function buildWorkflowTargets(next) {
   if (!Array.isArray(targets)) return [];
   return targets.map(function (t) { return pointForFieldMap(t, next); }).filter(Boolean);
 }
-}
 
 function getLockedTarget(next) {
   var wf = next.drop_workflow || {};
