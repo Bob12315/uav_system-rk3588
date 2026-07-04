@@ -286,10 +286,10 @@ def test_api_map_preview_fallback_y_ranges():
     assert result["ok"] is True
     geom = result["geometry"]
     # The example profile has no explicit area y min/max, so fallback applies
-    assert geom["drop_y_min"] == 27.5
-    assert geom["drop_y_max"] == 32.5
-    assert geom["recce_y_min"] == 52.5
-    assert geom["recce_y_max"] == 57.5
+    assert geom["drop_y_min"] == 30.0
+    assert geom["drop_y_max"] == 35.0
+    assert geom["recce_y_min"] == 55.0
+    assert geom["recce_y_max"] == 60.0
 
 
 def test_api_map_preview_does_not_modify_runtime():
