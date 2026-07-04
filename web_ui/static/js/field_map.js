@@ -641,7 +641,9 @@ function drawLocalizationTargets(ctx, model) {
       align: "left",
       color: labelColor,
     });
-    drawFieldLabel(ctx, `x=${num(tx, 2)} y=${num(ty, 2)} n=${count}`, x + 10, y + 5, {
+    var meta = `x=${num(tx, 2)} y=${num(ty, 2)} n=${count}`;
+    if (target.confidence != null) meta += ` conf=${num(target.confidence, 2)}`;
+    drawFieldLabel(ctx, meta, x + 10, y + 5, {
       align: "left",
       color: "#93a8bf",
       font: "11px Consolas, monospace",
@@ -798,8 +800,7 @@ function renderFieldMapInfoBox(model) {
   // Merge tube coordinates (drawTargetCoordinateList data)
   var dropTargets = (model.dropTargets || []).map(function (t) { return {prefix: "D", target: t}; });
   var recceTargets = (model.recceTargets || []).map(function (t) { return {prefix: "R", target: t}; });
-  var locTargets = (model.localizationTargets || []).map(function (t) { return {prefix: "L", target: t}; });
-  var allTargets = dropTargets.concat(recceTargets).concat(locTargets);
+  var allTargets = dropTargets.concat(recceTargets);
   if (allTargets.length) {
     lines.push("");
     lines.push("Targets:");
@@ -812,6 +813,40 @@ function renderFieldMapInfoBox(model) {
       lines.push(item.prefix + "-T" + tid + ": x=" + tx + " y=" + ty);
     });
     if (allTargets.length > maxRows) lines.push("... +" + (allTargets.length - maxRows));
+  }
+
+  // Localized objects (multi_view_localize fusion results)
+  var locTargets = model.localizationTargets || [];
+  if (locTargets.length) {
+    lines.push("");
+    lines.push("Localized (" + locTargets.length + "):");
+    var preview = model.profilePreview;
+    var hasRef = preview && preview.ok && preview.reference;
+    locTargets.forEach(function (t) {
+      var tid = t.target_id != null ? t.target_id : "?";
+      var cn = t.class_name || "obj";
+      var conf = t.confidence != null ? " conf=" + Number(t.confidence).toFixed(2) : "";
+      var sc = t.seen_count != null ? " seen=" + t.seen_count : (t.count != null ? " seen=" + t.count : "");
+      var tx = pointX(t) != null ? num(pointX(t), 2) : "?";
+      var ty = pointY(t) != null ? num(pointY(t), 2) : "?";
+      var line = "L" + tid + " " + cn + " x=" + tx + " y=" + ty + conf + sc;
+      if (hasRef) {
+        var ref = preview.reference;
+        var h = ref.field_heading_yaw_rad;
+        var fx = Number(pointX(t)), fy = Number(pointY(t));
+        if (Number.isFinite(fx) && Number.isFinite(fy)) {
+          var cosH = Math.cos(h), sinH = Math.sin(h);
+          var dN = fy * cosH - fx * sinH;
+          var dE = fy * sinH + fx * cosH;
+          var ldm = 1.0 / 111320.0;
+          var lnm = 1.0 / (111320.0 * Math.cos(ref.origin_lat * Math.PI / 180.0));
+          var tLat = ref.origin_lat + dN * ldm;
+          var tLon = ref.origin_lon + dE * lnm;
+          line += " GPS " + tLat.toFixed(7) + ", " + tLon.toFixed(7);
+        }
+      }
+      lines.push(line);
+    });
   }
 
   // MultiView plan
