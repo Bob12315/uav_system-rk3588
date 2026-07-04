@@ -1,0 +1,60 @@
+{
+  "schema_version": 2,
+  "profile_id": "XSYU",
+  "name": "XSYU",
+  "coordinate_convention": {
+    "field_x_positive": "right",
+    "field_y_positive": "forward",
+    "altitude_positive": "up"
+  },
+  "anchor": {
+    "name": "takeoff_anchor",
+    "lat": 34.10528356,
+    "lon": 108.63816579,
+    "field_x_m": 0.0, 
+    "field_y_m": 0.0
+  },
+  "centerline_points": [
+    {
+      "name": "CL_1",
+      "lat": 34.10528622,
+      "lon": 108.63827545,
+      "expected_field_y_m": 10.101
+    },
+    {
+      "name": "CL_2",
+      "lat": 34.10527453,
+      "lon": 108.63851971,
+      "expected_field_y_m": 32.601
+    },
+    {
+      "name": "CL_3",
+      "lat": 34.10528309,
+      "lon": 108.63861309,
+      "expected_field_y_m": 41.183
+    },
+    {
+      "name": "CL_4",
+      "lat": 34.10528495,
+      "lon": 108.63887159,
+      "expected_field_y_m": 64.983
+    }
+  ],
+  "gps_quality": {
+    "min_fix_type": 3,
+    "min_satellites": 6,
+    "max_eph": 5.0,
+    "max_epv": 8.0
+  },
+  "field_geometry": {
+    "lane_half_width_m": 4.0,
+    "drop_center_y_m": 30.0,
+    "recce_center_y_m": 55.0
+  },
+  "binding_policy": {
+    "max_start_error_m": 3.0,
+    "warn_start_error_m": 1.5,
+    "max_centerline_residual_m": 2.5,
+    "warn_centerline_residual_m": 1.5
+  }
+}

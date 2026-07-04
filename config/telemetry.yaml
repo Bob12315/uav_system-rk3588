@@ -23,8 +23,8 @@ active_source: real
 # -----------------------------------------------------------------------------
 sitl:
   # 可选值：serial / udp / tcp / eth。
-  # SITL 常用 tcp，ArduPilot SITL 常见端口为 5762。
-  connection_type: tcp
+  # SITL 常用 udp，ArduPilot SITL 常见端口为 5762。
+  connection_type: udp
 
   # connection_type=serial 时使用。
   serial_port: /dev/ttyUSB1

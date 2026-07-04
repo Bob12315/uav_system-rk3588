@@ -31,23 +31,23 @@
         "waypoints": [
           {
             "x": -1.5,
-            "y": 4.0,
-            "altitude_m": 4.5
+            "y": 56.5,
+            "altitude_m": 5
           },
           {
             "x": 1.5,
-            "y": 4.0,
-            "altitude_m": 4.5
+            "y": 56.5,
+            "altitude_m": 5
           },
           {
             "x": 1.5,
-            "y": 6.0,
-            "altitude_m": 4.5
+            "y": 58.5,
+            "altitude_m": 5
           },
           {
             "x": -1.5,
-            "y": 6.0,
-            "altitude_m": 4.5
+            "y": 58.5,
+            "altitude_m": 5
           }
         ],
         "capture_updates_per_waypoint": 4,
