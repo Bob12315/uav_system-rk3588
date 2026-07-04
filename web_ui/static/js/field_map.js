@@ -348,12 +348,16 @@ function fieldMapModel(next) {
     reconInspectionTargets,
     multiViewPlan: extractMultiViewPlan(next),
     dropWorkflow: extractDropWorkflow(next),
-    lockedTarget: pointForFieldMap(getLockedTarget(next), next),
-    releasedTargetIds: (next.drop_workflow || {}).released_target_ids || [],
-    releaseEvents: (next.drop_workflow || {}).release_events || [],
-    alignDescend: (next.drop_workflow || {}).align_descend || {},
-    payloadRelease: (next.drop_workflow || {}).payload_release || {},
+    workflowTargets: buildWorkflowTargets(next),
   };
+}
+
+function buildWorkflowTargets(next) {
+  var wf = next.drop_workflow || {};
+  var targets = wf.selected_targets || [];
+  if (!Array.isArray(targets)) return [];
+  return targets.map(function (t) { return pointForFieldMap(t, next); }).filter(Boolean);
+}
 }
 
 function getLockedTarget(next) {
@@ -665,12 +669,17 @@ function drawLocalizationTargets(ctx, model) {
     const id = target.id ?? target.target_id ?? index;
     const count = target.count ?? target.seen_count ?? 0;
     const selected = isSelectedDropTarget(target, model.dropTargetsSelected);
-    const locked = model.lockedTarget && targetsMatch(target, model.lockedTarget, 0.35);
-    var relIds = model.releasedTargetIds || [];
-    var targetId = String(target.id ?? target.target_id ?? "");
-    const dropped = relIds.indexOf(targetId) >= 0;
-    const fillColor = selected ? "#ff3b30" : "#2bc277";
-    const labelColor = selected ? "#ff3b30" : "#2bc277";
+    var wfTargets = model.workflowTargets || [];
+    var wfTarget = null;
+    for (var wi = 0; wi < wfTargets.length; wi++) {
+      if (targetsMatch(target, wfTargets[wi], 0.35)) { wfTarget = wfTargets[wi]; break; }
+    }
+    var status = wfTarget ? wfTarget.status : "";
+    var locked = wfTarget && wfTarget.locked;
+    var dropped = wfTarget && wfTarget.released;
+    var rank = wfTarget ? wfTarget.rank : 0;
+    var fillColor = selected ? "#ff3b30" : "#2bc277";
+    var labelColor = selected ? "#ff3b30" : "#2bc277";
     ctx.beginPath();
     ctx.arc(x, y, selected ? 8 : 7, 0, Math.PI * 2);
     ctx.fillStyle = fillColor;
@@ -936,42 +945,29 @@ function renderFieldMapInfoBox(model) {
 
   // Drop workflow
   var wf = model.dropWorkflow;
-  if (wf && (wf.selectedTargets.length || Object.keys(wf.targetLock).length || Object.keys(wf.alignDescend).length || Object.keys(wf.payloadRelease).length)) {
+  var wfSel = wf && Array.isArray(wf.selectedTargets) ? wf.selectedTargets : [];
+  if (wf && (wfSel.length || Object.keys(wf.targetLock || {}).length || Object.keys(wf.alignDescend || {}).length || Object.keys(wf.payloadRelease || {}).length)) {
     lines.push("");
     lines.push("Drop workflow:");
-    var sel = model.dropTargetsSelected || [];
-    lines.push("selected: " + sel.length);
+    lines.push("selected: " + wfSel.length + " cur_rank=" + (wf.current_rank != null ? wf.current_rank : "--"));
+    wfSel.forEach(function (st) {
+      var cn = st.class_name || "obj";
+      var tid = st.target_id || st.id || "?";
+      lines.push(
+        "SEL" + (st.rank || "?") + " L?/" + cn +
+        " status=" + (st.status || "--") +
+        " locked=" + Boolean(st.locked) +
+        " released=" + Boolean(st.released) +
+        " payload=" + (st.payload_id || "--")
+      );
+    });
     var lock = wf.targetLock || {};
     if (Object.keys(lock).length) {
-      lines.push(
-        "lock: " +
-        "done=" + Boolean(lock.done) +
-        " reason=" + (lock.reason || "--") +
-        " track=" + (lock.locked_track_id != null ? lock.locked_track_id : "--") +
-        " dist=" + (lock.best_distance_m != null ? Number(lock.best_distance_m).toFixed(2) : "--")
-      );
+      lines.push("lock: rank=" + (wf.current_rank || "--") + " track=" + (lock.locked_track_id != null ? lock.locked_track_id : "--") + " dist=" + (lock.best_distance_m != null ? Number(lock.best_distance_m).toFixed(2) : "--"));
     }
     var align = wf.alignDescend || {};
     if (Object.keys(align).length) {
-      lines.push(
-        "align: " +
-        "reason=" + (align.reason || align.hold_reason || "--") +
-        " aligned=" + Boolean(align.aligned) +
-        " alt=" + (align.current_altitude_m != null ? Number(align.current_altitude_m).toFixed(2) : "--") +
-        " ex=" + (align.ex_cam != null ? Number(align.ex_cam).toFixed(3) : "--") +
-        " ey=" + (align.ey_cam != null ? Number(align.ey_cam).toFixed(3) : "--")
-      );
-    }
-    var rel = wf.payloadRelease || {};
-    if (Object.keys(rel).length) {
-      lines.push(
-        "release: " +
-        "payload=" + (rel.payload_id || "--") +
-        " target=" + (rel.target_id || "--") +
-        " state=" + (rel.state || "--") +
-        " release_sent=" + Boolean(rel.release_sent) +
-        " hold_sent=" + Boolean(rel.hold_sent)
-      );
+      lines.push("align: aligned=" + Boolean(align.aligned) + " alt=" + (align.current_altitude_m != null ? Number(align.current_altitude_m).toFixed(2) : "--") + " ex=" + (align.ex_cam != null ? Number(align.ex_cam).toFixed(3) : "--") + " ey=" + (align.ey_cam != null ? Number(align.ey_cam).toFixed(3) : "--"));
     }
     var events = wf.releaseEvents || [];
     if (events.length) {

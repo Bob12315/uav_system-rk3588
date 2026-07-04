@@ -625,6 +625,35 @@ class SystemRunner:
         wf.setdefault("released_target_ids", [])
         return wf
 
+    def _drop_rank_from_result(
+        self, action_name: str | None, detail: dict[str, object],
+        step_index: int | None = None, step_label: str | None = None,
+    ) -> int | None:
+        """Infer target rank (1-based) from action name key or payload_id."""
+        if not action_name or not isinstance(detail, dict):
+            return None
+        key = str(detail.get("key") or "")
+        pid = str(detail.get("payload_id") or "")
+        # target_lock_0 / target_lock_1 -> rank 1/2
+        if action_name.startswith("target_lock"):
+            # mission steps: target_lock_0, target_lock_1
+            if key.startswith("target_lock_"):
+                try:
+                    r = int(key.rsplit("_", 1)[-1]) + 1
+                    return r
+                except (ValueError, IndexError):
+                    pass
+            return 1
+        # payload_release: look at payload_id
+        if action_name == "payload_release" and pid:
+            pid_lower = pid.lower()
+            if "1" in pid_lower:
+                return 1
+            if "2" in pid_lower:
+                return 2
+            return 1
+        return None
+
     def _save_drop_workflow_from_action_result(
         self,
         action_name: str | None,
@@ -644,13 +673,45 @@ class SystemRunner:
             if isinstance(selected, list):
                 wf = self._ensure_drop_workflow()
                 wf["updated_at"] = time.time()
-                wf["selected_targets"] = self._with_field_coordinates(selected)
+                targets = []
+                for i, t in enumerate(self._with_field_coordinates(selected), start=1):
+                    targets.append({
+                        **t,
+                        "rank": int(t.get("rank") or i),
+                        "status": "selected",
+                        "locked": False,
+                        "released": False,
+                        "payload_id": None,
+                        "release_sent": False,
+                        "hold_sent": False,
+                    })
+                wf["selected_targets"] = targets
                 wf["selected_count"] = int(detail.get("selected_count", len(selected)))
                 wf["candidate_count"] = int(detail.get("candidate_count", 0))
+                wf["current_rank"] = 1 if targets else None
+            return
 
-        elif action_name == "target_lock":
-            wf = self._ensure_drop_workflow()
-            wf["updated_at"] = time.time()
+        wf = self._ensure_drop_workflow()
+        wf["updated_at"] = time.time()
+        rank = self._drop_rank_from_result(action_name, detail, step_index, step_label)
+        targets = wf.setdefault("selected_targets", [])
+        target = None
+        if rank is not None and 1 <= rank <= len(targets):
+            target = targets[rank - 1]
+        elif targets:
+            # fallback: use current_rank or first un-released
+            cur = wf.get("current_rank")
+            if isinstance(cur, int) and 1 <= cur <= len(targets) and not targets[cur - 1].get("released"):
+                rank = cur
+                target = targets[cur - 1]
+            else:
+                for i, t in enumerate(targets):
+                    if not t.get("released"):
+                        rank = i + 1
+                        target = t
+                        break
+
+        if action_name == "target_lock":
             target_raw = detail.get("target")
             best_raw = detail.get("best_estimate")
             wf["target_lock"] = {
@@ -667,10 +728,15 @@ class SystemRunner:
                 "locked_track_id": detail.get("locked_track_id"),
                 "best_distance_m": detail.get("best_distance_m"),
             }
+            if target is not None:
+                target["status"] = "locked" if bool(result.get("done")) else "locking"
+                target["locked"] = bool(result.get("done"))
+                target["locked_track_id"] = detail.get("locked_track_id")
+                target["best_distance_m"] = detail.get("best_distance_m")
+                target["lock_reason"] = str(result.get("reason", ""))
+            wf["current_rank"] = rank
 
         elif action_name == "align_descend":
-            wf = self._ensure_drop_workflow()
-            wf["updated_at"] = time.time()
             wf["align_descend"] = {
                 "source": "align_descend",
                 "step_index": step_index,
@@ -697,10 +763,10 @@ class SystemRunner:
                 "hold_updates": detail.get("hold_updates"),
                 "lost_updates": detail.get("lost_updates"),
             }
+            if target is not None:
+                target["status"] = "aligned" if detail.get("aligned") else "aligning"
 
         elif action_name == "payload_release":
-            wf = self._ensure_drop_workflow()
-            wf["updated_at"] = time.time()
             release = {
                 "source": "payload_release",
                 "step_index": step_index,
@@ -720,16 +786,27 @@ class SystemRunner:
                 "release_wait_updates": detail.get("release_wait_updates"),
             }
             wf["payload_release"] = release
+            released_flag = release["done"] or release["release_sent"]
+            if target is not None and released_flag:
+                target["status"] = "released"
+                target["released"] = True
+                target["payload_id"] = release.get("payload_id")
+                target["release_sent"] = bool(release.get("release_sent"))
+                target["hold_sent"] = bool(release.get("hold_sent"))
+                target["servo_channels"] = release.get("servo_channels")
+            # advance current_rank
+            if rank is not None and rank + 1 <= len(targets):
+                wf["current_rank"] = rank + 1
+            else:
+                wf["current_rank"] = None
+            # release events
             events = wf.setdefault("release_events", [])
-            event_key = "{}:{}".format(release.get("payload_id"), release.get("target_id"))
-            if release["done"] or release["release_sent"]:
+            payload_id = str(release.get("payload_id") or "")
+            target_id = str(release.get("target_id") or "")
+            event_key = "{}:{}:{}".format(payload_id, target_id, rank or "")
+            if released_flag:
                 if not any(e.get("event_key") == event_key for e in events if isinstance(e, dict)):
                     events.append({**release, "event_key": event_key, "updated_at": time.time()})
-            released = wf.setdefault("released_target_ids", [])
-            tid = release.get("target_id")
-            if tid is not None and (release["done"] or release["release_sent"]):
-                if str(tid) not in [str(x) for x in released]:
-                    released.append(tid)
 
     def clear_localization_result(self) -> CommandResult:
         self.latest_localization_result = {}
