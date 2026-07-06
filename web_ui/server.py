@@ -59,9 +59,9 @@ class ManualStepMoveRequest(BaseModel):
 
 ACTION_MISSION_TEMPLATE_DIR = ROOT_DIR / "config" / "action_missions"
 ACTION_MISSION_TEMPLATE_NAMES = {
-    "drop_two_targets_v1": "Two Drop Targets v1",
-    "rescue_2026_full_auto": "Full Rescue 2026",
-    "recon_inspect_5_targets_stepwise_v1": "Recon Inspect 5 Targets Stepwise v1",
+    "drop_two_targets_v1": "双目标投放 v1",
+    "rescue_2026_full_auto_v2": "2026 完整救援 v2",
+    "recon_inspect_5_targets_stepwise_v1": "侦察逐筒检查 5 目标 v1",
 }
 
 

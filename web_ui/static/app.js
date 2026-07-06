@@ -891,11 +891,10 @@ async function loadActionMissionTemplates() {
   try {
     const result = await json("/api/action-mission/templates");
     if (!result.ok) throw new Error(result.error || "模板列表加载失败");
+    element.classList.add("action-mission-presets", "primary");
     element.innerHTML = (result.templates || []).map(template =>
-      `<button class="mission-template-item" data-action-mission-template="${escapeHtml(template.name)}">
-        <strong>${escapeHtml(template.label || template.name)}</strong>
-        · ${escapeHtml(template.step_count)} 个步骤<br>
-        <span>${escapeHtml(template.description || template.path)}</span>
+      `<button data-action-mission-template="${escapeHtml(template.name)}">
+        ${escapeHtml(template.label || template.name)}
       </button>`
     ).join("");
     element.querySelectorAll("[data-action-mission-template]").forEach(button => {
@@ -1109,7 +1108,7 @@ async function init() {
   $("actionReset").onclick = () => resetActionLabAction().catch(error => { $("completionHint").textContent = error.message; });
   $("actionRefresh").onclick = () => refreshActionStatus().catch(error => { $("completionHint").textContent = error.message; });
   if ($("actionMissionSteps")) {
-    await loadActionMissionTemplate("rescue_2026_full_auto", {confirmOverwrite: false});
+    await loadActionMissionTemplate("rescue_2026_full_auto_v2", {confirmOverwrite: false});
   }
   if ($("actionMissionConfigure")) $("actionMissionConfigure").onclick = () => configureActionMission().catch(error => { $("completionHint").textContent = error.message; });
   if ($("actionMissionStart")) $("actionMissionStart").onclick = () => startActionMission().catch(error => { $("completionHint").textContent = error.message; });
