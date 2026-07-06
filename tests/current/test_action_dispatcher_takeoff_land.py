@@ -178,3 +178,39 @@ def test_clear_continuous_commands_no_link_manager_skipped() -> None:
         link_manager=None,
     )
     assert len(dispatch["skipped"]) == 1
+
+
+def test_two_clear_actions_with_unique_keys_both_dispatch() -> None:
+    """Two clear_continuous_commands with different keys must both be sent.
+
+    This guards against the once=True dedup bug: if keys were identical,
+    the second action would be skipped with once_already_dispatched.
+    """
+    fake_link = FakeLinkManagerWithClear()
+    dispatcher = _dispatcher(send_actions=True)
+    dispatch = dispatcher.dispatch_actions(
+        [
+            {
+                "action_type": "clear_continuous_commands",
+                "params": {"clear_pending_local_position": False},
+                "key": "drop_sequence_clear_continuous_before_climb_t0_p1_u3",
+                "once": True,
+                "priority": 10,
+            },
+            {
+                "action_type": "clear_continuous_commands",
+                "params": {"clear_pending_local_position": False},
+                "key": "drop_sequence_clear_continuous_before_goto_t1_p1_u0",
+                "once": True,
+                "priority": 10,
+            },
+        ],
+        action_name="drop_sequence",
+        send_commands=True,
+        link_manager=fake_link,
+    )
+    assert len(dispatch["sent"]) == 2, (
+        f"expected 2 sent, got {len(dispatch['sent'])}; "
+        f"skipped={dispatch['skipped']}"
+    )
+    assert fake_link.calls.count("clear_continuous_commands") == 2

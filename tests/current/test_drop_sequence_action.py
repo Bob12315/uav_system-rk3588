@@ -680,3 +680,86 @@ def test_payload_release_failed_emits_clear_continuous() -> None:
     assert "clear_continuous_commands" in types, (
         "payload_release_failed missing clear_continuous_commands"
     )
+
+
+def test_two_release_to_climb_transitions_have_unique_keys() -> None:
+    """Two separate release→climb transitions must produce different clear keys."""
+    targets = _make_targets((1.0, 5.0), (-1.0, 6.0))
+    params = _base_params(
+        targets=targets, payloads=_make_payloads(2),
+        goto_max_updates=5, target_lock_max_updates=5,
+        align_descend_max_updates=5, release_wait_updates=2,
+        climb_max_updates=1,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    # t0: full cycle to first release done
+    _run_until_phase(a, GOTO_CTX, "lock_target")
+    _run_until_phase(a, LOCK_OK_CTX, "align_descend")
+    _run_until_phase(a, ALIGN_DONE_CTX, "release_payload")
+
+    clear_keys: list[str] = []
+    for _ in range(10):
+        r = a.update({})
+        if a.phase != "release_payload":
+            # capture clear_continuous_commands key from transition
+            for act in r.actions:
+                if act.get("action_type") == "clear_continuous_commands":
+                    clear_keys.append(act["key"])
+            break
+
+    # climb timeout → t1 goto → lock → align → second release
+    _run_until_phase(a, CLIMB_FAR_CTX, "goto_target")
+    _run_until_phase(a, GOTO_CTX, "lock_target")
+    _run_until_phase(a, LOCK_OK_CTX, "align_descend")
+    _run_until_phase(a, ALIGN_DONE_CTX, "release_payload")
+
+    for _ in range(10):
+        r = a.update({})
+        if a.phase != "release_payload" or r.done:
+            for act in r.actions:
+                if act.get("action_type") == "clear_continuous_commands":
+                    clear_keys.append(act["key"])
+            break
+
+    assert len(clear_keys) == 2, f"expected 2 clear keys, got {clear_keys}"
+    assert clear_keys[0] != clear_keys[1], (
+        f"duplicate clear keys: {clear_keys[0]}"
+    )
+
+
+def test_two_climb_to_goto_transitions_have_unique_keys() -> None:
+    """Two separate climb→goto transitions must produce different clear keys."""
+    targets = _make_targets((1.0, 5.0), (-1.0, 6.0), (0.5, 7.0))
+    params = _base_params(
+        targets=targets, payloads=_make_payloads(3),
+        max_payloads=3, max_target_candidates=3,
+        goto_max_updates=5, target_lock_max_updates=5,
+        align_descend_max_updates=5, climb_max_updates=1,
+        release_wait_updates=2,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    clear_keys: list[str] = []
+
+    for cycle in range(2):
+        _run_until_phase(a, GOTO_CTX, "lock_target")
+        _run_until_phase(a, LOCK_OK_CTX, "align_descend")
+        _run_until_phase(a, ALIGN_DONE_CTX, "release_payload")
+        _run_until_phase(a, {}, "climb_after_release")
+
+        # climb timeout → transition
+        for _ in range(20):
+            r = a.update(CLIMB_FAR_CTX)
+            if a.phase == "goto_target":
+                for act in r.actions:
+                    if act.get("action_type") == "clear_continuous_commands":
+                        clear_keys.append(act["key"])
+                break
+
+    assert len(clear_keys) == 2, f"expected 2 clear keys, got {clear_keys}"
+    assert clear_keys[0] != clear_keys[1], (
+        f"duplicate clear keys: {clear_keys[0]}"
+    )

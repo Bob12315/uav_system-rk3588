@@ -579,11 +579,20 @@ class DropSequenceAction(ActionModule):
         )
 
     def _clear_continuous_action(self, key_suffix: str) -> dict[str, Any]:
-        """Build a clear_continuous_commands action for phase transitions."""
+        """Build a clear_continuous_commands action for phase transitions.
+
+        Key includes target_index, payload_index, and phase_update_count
+        so that every transition within the same drop_sequence run produces
+        a unique key — preventing the dispatcher's once=True dedup from
+        skipping subsequent clear actions.
+        """
         return {
             "action_type": "clear_continuous_commands",
             "params": {"clear_pending_local_position": False},
-            "key": f"drop_sequence_clear_continuous_{key_suffix}",
+            "key": (
+                f"drop_sequence_clear_continuous_{key_suffix}"
+                f"_t{self.target_index}_p{self.payload_index}_u{self.phase_update_count}"
+            ),
             "once": True,
             "priority": 10,
         }
