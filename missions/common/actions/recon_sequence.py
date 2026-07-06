@@ -284,7 +284,15 @@ class ReconSequenceAction(ActionModule):
         self.phase_update_count += 1
         result = self._current_action.update(context)  # type: ignore[union-attr]
 
-        if result.done or result.failed or self.phase_update_count > self.observe_max_updates:
+        is_timeout = self.phase_update_count > self.observe_max_updates
+
+        if result.done or result.failed or is_timeout:
+            # If timeout is triggered by outer limit (not sub-action itself),
+            # stop the sub-action to release resources.
+            if is_timeout and not (result.done or result.failed):
+                if self._current_action is not None:
+                    self._current_action.stop()
+
             # Record observation result from ReconDescendObserveAction detail
             detail = dict(result.detail)
             status = detail.get("status", "blank_or_uncertain")
@@ -301,12 +309,10 @@ class ReconSequenceAction(ActionModule):
             # Start climb (or finish if last target)
             self._start_climb()
 
-            # Emit zero velocity + clear continuous before climb
-            actions: list[Any] = []
-            zero = self._zero_velocity_action_from_detail(result.detail)
-            if zero:
-                actions.append(zero)
-            actions.append(self._clear_continuous_action("before_climb"))
+            # Pass through child zero flight_command, THEN clear continuous.
+            actions = self._actions_with_child_then_clear(
+                result.actions, "after_observe",
+            )
             return ActionResult(
                 actions=actions,
                 reason=f"transition_to_{self.phase}",
@@ -379,7 +385,7 @@ class ReconSequenceAction(ActionModule):
     # ── result recording ───────────────────────────────────────────────
 
     def _record_result(self, status: str, reason: str) -> None:
-        """Record a skipped/failed target result."""
+        """Record a skipped/failed target result — also enters recon_result_items."""
         target = self.valid_targets[self.target_index] if self.target_index < len(self.valid_targets) else {}
         item = {
             "target_index": self.target_index,
@@ -390,6 +396,7 @@ class ReconSequenceAction(ActionModule):
             "reason": status,
         }
         self.results.append(item)
+        self.recon_result_items.append(dict(item))
         self.skipped_count += 1
 
     def _record_observation(
@@ -409,17 +416,11 @@ class ReconSequenceAction(ActionModule):
             "reason": observe_detail.get("align_reason", "observe_done"),
         }
         self.results.append(result_item)
+        # All processed targets enter recon_result_items (detected + blank)
+        self.recon_result_items.append(dict(result_item))
 
         if status == "detected":
             self.observed_count += 1
-            # Also add to recon_result_items for build_recon_report
-            self.recon_result_items.append({
-                "target_index": self.target_index,
-                "target_id": target_id,
-                "content": content,
-                "confidence": confidence,
-                "status": "detected",
-            })
         else:
             self.blank_count += 1
 
@@ -432,18 +433,16 @@ class ReconSequenceAction(ActionModule):
             detail=self._make_detail(),
         )
 
-    def _zero_velocity_action_from_detail(self, detail: dict[str, Any]) -> dict[str, Any] | None:
-        """Extract zero velocity command from sub-action detail."""
-        command = detail.get("command") if isinstance(detail, dict) else None
-        if not isinstance(command, dict):
-            return None
-        return {
-            "action_type": "flight_command",
-            "params": command,
-            "key": f"recon_sequence_zero_t{self.target_index}_p{self.phase_update_count}",
-            "once": False,
-            "priority": 3,
-        }
+    def _actions_with_child_then_clear(
+        self, child_actions: list[Any] | None, suffix: str,
+    ) -> list[Any]:
+        """Pass through child actions, then append clear_continuous_commands.
+
+        Ensures sub-action zero flight_command is emitted before clear.
+        """
+        actions = list(child_actions or [])
+        actions.append(self._clear_continuous_action(suffix))
+        return actions
 
     def _clear_continuous_action(self, key_suffix: str) -> dict[str, Any]:
         """Build a clear_continuous_commands action for phase transitions.

@@ -461,7 +461,8 @@ def test_multiple_targets_continue_after_failure() -> None:
     assert a.skipped_count == 1  # t0 lock failed
     assert a.observed_count == 2  # t1, t2 detected
     assert len(a.results) == 3
-    assert len(a.recon_result_items) == 2
+    # All 3 processed targets enter recon_result_items (1 skipped + 2 detected)
+    assert len(a.recon_result_items) == 3
 
 
 def test_observe_to_climb_emits_clear_continuous() -> None:
@@ -688,3 +689,271 @@ def test_clear_keys_unique_across_transitions() -> None:
     assert len(clear_keys) == len(set(clear_keys)), (
         f"duplicate clear keys found: {clear_keys}"
     )
+
+
+# ── Codex FAIL 修复测试 ───────────────────────────────────────────────
+
+
+def _observe_done_with_zero_factory() -> _FakeAction:
+    """Fake observe that returns done with a zero flight_command in actions."""
+    zero_cmd = {
+        "action_type": "flight_command",
+        "params": {
+            "vx_body_mps": 0.0,
+            "vy_body_mps": 0.0,
+            "vz_body_mps": 0.0,
+            "yaw_rate_cmd": 0.0,
+        },
+        "key": "observe_zero",
+        "once": False,
+        "priority": 3,
+    }
+    return _FakeAction(
+        [
+            ActionResult(
+                done=True,
+                reason="sign_detected",
+                actions=[zero_cmd],
+                detail={
+                    "status": "detected",
+                    "content": "baozha",
+                    "confidence": 0.72,
+                    "align_reason": "sign_detected",
+                },
+            )
+        ]
+    )
+
+
+def _observe_failed_with_zero_factory() -> _FakeAction:
+    """Fake observe that returns failed with a zero flight_command in actions."""
+    zero_cmd = {
+        "action_type": "flight_command",
+        "params": {
+            "vx_body_mps": 0.0,
+            "vy_body_mps": 0.0,
+            "vz_body_mps": 0.0,
+            "yaw_rate_cmd": 0.0,
+        },
+        "key": "observe_zero_failed",
+        "once": False,
+        "priority": 3,
+    }
+    return _FakeAction(
+        [
+            ActionResult(
+                failed=True,
+                reason="align_failed",
+                actions=[zero_cmd],
+                detail={
+                    "status": "blank_or_uncertain",
+                    "content": "blank",
+                    "confidence": 0.0,
+                    "align_reason": "align_failed",
+                },
+            )
+        ]
+    )
+
+
+def test_observe_done_preserves_child_zero_before_clear() -> None:
+    """observe done → child zero flight_command must come before clear_continuous_commands."""
+    targets = _make_targets((1.0, 5.0))
+    params = _base_params(targets=targets, climb_max_updates=1)
+    a = ReconSequenceAction()
+    a.start(params)
+
+    observe = _observe_done_with_zero_factory()
+    climb = _climb_done_factory()
+
+    transition_result = None
+    with (
+        patch(
+            "missions.common.actions.recon_sequence.GotoWaypointAction",
+            side_effect=[_goto_done_factory(targets[0]), climb],
+        ),
+        patch(
+            "missions.common.actions.recon_sequence.TargetLockAction",
+            return_value=_lock_done_factory(targets[0]),
+        ),
+        patch(
+            "missions.common.actions.recon_sequence.ReconDescendObserveAction",
+            return_value=observe,
+        ),
+    ):
+        for _ in range(50):
+            r = a.update({})
+            if a.phase == "climb_after_observe":
+                transition_result = r
+                break
+
+    assert transition_result is not None
+    action_types = [act.get("action_type") for act in transition_result.actions]
+    # flight_command (zero) must be present and before clear_continuous_commands
+    assert "flight_command" in action_types, "observe→climb missing child zero flight_command"
+    assert "clear_continuous_commands" in action_types, "observe→climb missing clear"
+    fc_idx = action_types.index("flight_command")
+    cl_idx = action_types.index("clear_continuous_commands")
+    assert fc_idx < cl_idx, (
+        f"zero flight_command (idx={fc_idx}) must come before clear (idx={cl_idx})"
+    )
+
+
+def test_observe_failed_preserves_child_zero_before_clear() -> None:
+    """observe failed → child zero flight_command must come before clear_continuous_commands."""
+    targets = _make_targets((1.0, 5.0))
+    params = _base_params(targets=targets, climb_max_updates=1)
+    a = ReconSequenceAction()
+    a.start(params)
+
+    observe = _observe_failed_with_zero_factory()
+    climb = _climb_done_factory()
+
+    transition_result = None
+    with (
+        patch(
+            "missions.common.actions.recon_sequence.GotoWaypointAction",
+            side_effect=[_goto_done_factory(targets[0]), climb],
+        ),
+        patch(
+            "missions.common.actions.recon_sequence.TargetLockAction",
+            return_value=_lock_done_factory(targets[0]),
+        ),
+        patch(
+            "missions.common.actions.recon_sequence.ReconDescendObserveAction",
+            return_value=observe,
+        ),
+    ):
+        for _ in range(50):
+            r = a.update({})
+            if a.phase == "climb_after_observe":
+                transition_result = r
+                break
+
+    assert transition_result is not None
+    action_types = [act.get("action_type") for act in transition_result.actions]
+    assert "flight_command" in action_types, "observe failed→climb missing child zero"
+    assert "clear_continuous_commands" in action_types, "observe failed→climb missing clear"
+    fc_idx = action_types.index("flight_command")
+    cl_idx = action_types.index("clear_continuous_commands")
+    assert fc_idx < cl_idx, (
+        f"zero flight_command (idx={fc_idx}) must come before clear (idx={cl_idx})"
+    )
+
+
+def test_report_items_include_blank_and_skipped_targets() -> None:
+    """All processed valid targets must appear in recon_result_items (not just detected)."""
+    targets = _make_targets((1.0, 5.0), (-1.0, 6.0), (0.5, 7.0))
+    params = _base_params(targets=targets, goto_max_updates=1)
+    a = ReconSequenceAction()
+    a.start(params)
+
+    # Flow: t0 goto→lock_fail, t1 goto→lock→observe→climb, t2 goto(timeout)
+    # GotoWaypointAction calls: t0_goto, t1_goto, t1_climb, t2_goto
+    all_goto = [
+        _goto_done_factory(targets[0]),   # t0 goto
+        _goto_done_factory(targets[1]),   # t1 goto
+        _climb_done_factory(),            # t1 climb
+        _FakeAction([ActionResult(reason="goto_active", actions=[])]),  # t2: timeout
+    ]
+    lock_results = [
+        _FakeAction([ActionResult(failed=True, reason="target_lock_timeout")]),
+        _lock_done_factory(targets[1]),
+    ]
+    observe_results = [
+        _observe_detected_factory("baozha", 0.72),
+    ]
+
+    with (
+        patch(
+            "missions.common.actions.recon_sequence.GotoWaypointAction",
+            side_effect=all_goto,
+        ),
+        patch(
+            "missions.common.actions.recon_sequence.TargetLockAction",
+            side_effect=lock_results,
+        ),
+        patch(
+            "missions.common.actions.recon_sequence.ReconDescendObserveAction",
+            side_effect=observe_results,
+        ),
+    ):
+        _run_to_done(a, CLIMB_FAR_CTX)
+
+    assert a._done is True
+    # 3 valid targets processed → 3 items in recon_result_items
+    assert len(a.recon_result_items) == 3, (
+        f"expected 3 recon_result_items, got {len(a.recon_result_items)}: "
+        f"{a.recon_result_items}"
+    )
+
+    # Verify each item has required fields
+    for item in a.recon_result_items:
+        for key in ("target_index", "target_id", "content", "confidence", "status", "reason"):
+            assert key in item, f"missing key '{key}' in recon_result_item: {item}"
+
+    # t0: lock_failed → blank
+    assert a.recon_result_items[0]["status"] == "blank_or_uncertain"
+    assert a.recon_result_items[0]["content"] == "blank"
+    assert a.recon_result_items[0]["reason"] == "target_lock_failed"
+
+    # t1: detected
+    assert a.recon_result_items[1]["status"] == "detected"
+    assert a.recon_result_items[1]["content"] == "baozha"
+
+    # t2: goto_failed → blank
+    assert a.recon_result_items[2]["status"] == "blank_or_uncertain"
+    assert a.recon_result_items[2]["content"] == "blank"
+    assert a.recon_result_items[2]["reason"] == "goto_failed"
+
+
+def test_build_recon_report_accepts_recon_sequence_items() -> None:
+    """BuildReconReportAction must accept recon_result_items with blank/skipped entries."""
+    from missions.common.actions.build_recon_report import BuildReconReportAction
+
+    items = [
+        {
+            "target_index": 0,
+            "target_id": "r0",
+            "content": "blank",
+            "confidence": 0.0,
+            "status": "blank_or_uncertain",
+            "reason": "target_lock_failed",
+        },
+        {
+            "target_index": 1,
+            "target_id": "r1",
+            "content": "baozha",
+            "confidence": 0.72,
+            "status": "detected",
+            "reason": "sign_detected",
+        },
+        {
+            "target_index": 2,
+            "target_id": "r2",
+            "content": "blank",
+            "confidence": 0.0,
+            "status": "blank_or_uncertain",
+            "reason": "goto_failed",
+        },
+    ]
+
+    action = BuildReconReportAction()
+    action.start({"items": items})
+    r = action.update({})
+
+    assert r.done is True
+    detail = r.detail
+    assert detail["barrel_count"] == 3
+    assert detail["detected_count"] == 1
+    assert detail["blank_count"] == 2  # blank_or_uncertain counted as blank
+    assert detail["skipped_count"] == 0
+
+    barrels = detail["recon_report"]["barrels"]
+    assert len(barrels) == 3
+    assert barrels[0]["status"] == "blank_or_uncertain"
+    assert barrels[0]["content"] == "blank"
+    assert barrels[1]["status"] == "detected"
+    assert barrels[1]["content"] == "baozha"
+    assert barrels[2]["status"] == "blank_or_uncertain"
+    assert barrels[2]["content"] == "blank"
