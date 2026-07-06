@@ -146,7 +146,7 @@
         "release_all_payloads_if_only_one_target": true,
         "continue_after_any_failure": true,
         "goto": {
-          "waypoint_mode": "field",
+          "waypoint_mode": "absolute",
           "yaw_mode": "field_heading",
           "tolerance_xy_m": 0.35,
           "tolerance_z_m": 0.35,

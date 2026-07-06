@@ -305,22 +305,27 @@ def test_payload_release_two_phase_complete() -> None:
 
     assert a.phase == "release_payload"
 
-    # update 1: release servo action
+    # update 1: zero velocity + release servo action
     r1 = a.update({})
-    servo_types_1 = [act.get("action_type") for act in r1.actions]
-    assert "set_servo" in servo_types_1
+    action_types_1 = [act.get("action_type") for act in r1.actions]
+    assert "flight_command" in action_types_1   # zero velocity
+    assert "set_servo" in action_types_1
     assert r1.reason == "release_sent"
 
-    # update 2: waiting
+    # update 2: zero velocity + waiting
     r2 = a.update({})
+    action_types_2 = [act.get("action_type") for act in r2.actions]
+    assert "flight_command" in action_types_2   # zero velocity every tick
     assert r2.reason == "release_waiting"
 
-    # update 3: hold servo action + done
+    # update 3: zero velocity + hold servo action + sequence done
     r3 = a.update({})
-    servo_types_3 = [act.get("action_type") for act in r3.actions]
-    assert "set_servo" in servo_types_3
+    action_types_3 = [act.get("action_type") for act in r3.actions]
+    assert "flight_command" in action_types_3   # zero velocity
+    assert "set_servo" in action_types_3
     assert r3.done is True
-    assert r3.reason == "payload_released"
+    # Fix1: sequence done uses drop_sequence_done, not sub-action reason
+    assert r3.reason == "drop_sequence_done"
 
 
 def test_climb_timeout_does_not_fail_sequence() -> None:
@@ -412,3 +417,138 @@ def test_max_target_candidates_respected() -> None:
     a = DropSequenceAction()
     a.start(params)
     assert len(a.valid_targets) == 2
+
+
+# ── Codex FAIL 修复测试 ───────────────────────────────────────────────────
+
+
+def test_runner_done_not_propagated_after_first_payload() -> None:
+    """First payload hold done ≠ sequence done when more payloads remain."""
+    targets = _make_targets((1.0, 5.0))
+    params = _base_params(
+        targets=targets, payloads=_make_payloads(2),
+        goto_max_updates=5, target_lock_max_updates=5,
+        align_descend_max_updates=5, release_wait_updates=2,
+        climb_max_updates=1,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    _run_until_phase(a, GOTO_CTX, "lock_target")
+    _run_until_phase(a, LOCK_OK_CTX, "align_descend")
+    _run_until_phase(a, ALIGN_DONE_CTX, "release_payload")
+
+    # run release to completion (3 ticks: release, wait, hold)
+    release_done_result = None
+    for _ in range(10):
+        r = a.update({})
+        if a.phase != "release_payload" or r.done:
+            release_done_result = r
+            break
+
+    # Key: sequence NOT done after first payload
+    assert a._done is False
+    assert release_done_result is not None
+    assert release_done_result.done is False
+    assert release_done_result.reason == "payload_released_continue"
+
+    # continue: climb → timeout → second release → sequence done
+    _run_to_done(a, CLIMB_FAR_CTX)
+    assert a._done is True
+    assert a.released_count == 2
+
+
+def test_release_phase_emits_zero_velocity_every_tick() -> None:
+    """release/wait/hold each emit action_type=flight_command zero velocity."""
+    targets = _make_targets((1.0, 5.0))
+    params = _base_params(
+        targets=targets, payloads=_make_payloads(1),
+        goto_max_updates=5, target_lock_max_updates=5,
+        align_descend_max_updates=5, release_wait_updates=2,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    _run_until_phase(a, GOTO_CTX, "lock_target")
+    _run_until_phase(a, LOCK_OK_CTX, "align_descend")
+    _run_until_phase(a, ALIGN_DONE_CTX, "release_payload")
+
+    # 3 release ticks: release / wait / hold
+    for tick_idx in range(3):
+        r = a.update({})
+        types = [act.get("action_type") for act in r.actions]
+        assert "flight_command" in types, f"tick {tick_idx} missing flight_command"
+
+
+def test_align_to_release_transition_emits_zero_velocity() -> None:
+    """align done/failed → release transition tick includes zero flight_command."""
+    targets = _make_targets((1.0, 5.0))
+    params = _base_params(
+        targets=targets, payloads=_make_payloads(1),
+        goto_max_updates=5, target_lock_max_updates=5,
+        align_descend_max_updates=5,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    _run_until_phase(a, GOTO_CTX, "lock_target")
+    _run_until_phase(a, LOCK_OK_CTX, "align_descend")
+
+    # align done → transition to release_payload
+    # We need to catch the transition result
+    transition_result = None
+    for _ in range(20):
+        r = a.update(ALIGN_DONE_CTX)
+        if a.phase == "release_payload":
+            transition_result = r
+            break
+
+    assert transition_result is not None
+    types = [act.get("action_type") for act in transition_result.actions]
+    assert "flight_command" in types, "align→release transition missing zero velocity"
+
+
+def test_drop_sequence_goto_uses_absolute_waypoint_mode() -> None:
+    """Both v2 templates must use absolute waypoint_mode for drop_sequence.goto."""
+    import json
+    import pathlib
+
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+    paths = [
+        repo_root / "config" / "action_missions" / "drop_two_targets_v2.json",
+        repo_root / "config" / "profiles" / "rk3588-sitl" / "action_missions" / "drop_two_targets_v2.json",
+    ]
+    for path in paths:
+        data = json.loads(path.read_text())
+        drop_step = next(s for s in data["steps"] if s.get("name") == "drop_sequence")
+        goto_mode = drop_step["params"]["goto"]["waypoint_mode"]
+        assert goto_mode == "absolute", f"{path.name}: goto.waypoint_mode={goto_mode!r}, expected 'absolute'"
+
+
+def test_payload_release_failed_returns_failed() -> None:
+    """If PayloadReleaseAction fails internally, sequence returns failed=True."""
+    targets = _make_targets((1.0, 5.0))
+    params = _base_params(
+        targets=targets, payloads=_make_payloads(1),
+        goto_max_updates=5, target_lock_max_updates=5,
+        align_descend_max_updates=5,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    _run_until_phase(a, GOTO_CTX, "lock_target")
+    _run_until_phase(a, LOCK_OK_CTX, "align_descend")
+    _run_until_phase(a, ALIGN_DONE_CTX, "release_payload")
+
+    # Simulate PayloadReleaseAction internal failure
+    a._current_action.state = "invalid_force_fail"
+    a._current_action.failed = True
+
+    r = a.update({})
+    assert r.failed is True
+    assert r.reason == "payload_release_failed"
+    # Must include zero velocity even on failure
+    types = [act.get("action_type") for act in r.actions]
+    assert "flight_command" in types
+    # Sequence must not hang — _done is set
+    assert a._done is True

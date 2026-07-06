@@ -310,10 +310,11 @@ class DropSequenceAction(ActionModule):
 
         if result.done:
             self._start_release_payload("aligned_release")
-            return self._phase_transition_result()
+            # Fix2: emit zero velocity on align→release transition tick
+            return self._transition_result_with_zero(result.detail)
         if result.failed:
             self._start_release_payload("align_failed_release")
-            return self._phase_transition_result()
+            return self._transition_result_with_zero(result.detail)
 
         actions: list[Any] = []
         if isinstance(command, dict) and command.get("active"):
@@ -347,6 +348,22 @@ class DropSequenceAction(ActionModule):
         self.phase_update_count += 1
         result = self._current_action.update(context)  # type: ignore[union-attr]
 
+        # Fix4: handle PayloadRelease internal failure — never hang in release phase
+        if result.failed:
+            actions = self._actions_with_zero(result.detail, result.actions)
+            self._done = True
+            self._last_reason = "payload_release_failed"
+            self._last_detail = self._make_detail(status="failed")
+            return ActionResult(
+                actions=actions,
+                failed=True,
+                reason="payload_release_failed",
+                detail=self._last_detail,
+            )
+
+        # Fix2: every release tick emits zero velocity flight_command
+        actions = self._actions_with_zero(result.detail, result.actions)
+
         if result.done:
             target = self.valid_targets[self.target_index] if self.target_index < len(self.valid_targets) else {}
             reason = getattr(self, "_current_release_reason", "aligned_release")
@@ -364,17 +381,22 @@ class DropSequenceAction(ActionModule):
             if is_fallback:
                 self.fallback_release_count += 1
             self._advance_after_payload()
-            # Pass through sub-action result (includes set_servo hold action)
+            # Fix1: only propagate done=True when the entire sequence is done
+            if self._done:
+                self._last_detail = self._make_detail(status="done")
+                return ActionResult(
+                    actions=actions, done=True,
+                    reason="drop_sequence_done",
+                    detail=self._last_detail,
+                )
             return ActionResult(
-                actions=list(result.actions),
-                done=result.done,
-                failed=result.failed,
-                reason=result.reason,
+                actions=actions,
+                reason="payload_released_continue",
                 detail=self._make_detail(),
             )
 
         return ActionResult(
-            actions=list(result.actions),
+            actions=actions,
             reason=result.reason or "release_active",
             detail=self._make_detail(),
         )
@@ -514,6 +536,38 @@ class DropSequenceAction(ActionModule):
             "once": False,
             "priority": self.goto_params.get("priority", 5),
         }
+
+    def _zero_velocity_action_from_detail(self, detail: dict[str, Any]) -> dict[str, Any] | None:
+        """Extract zero velocity command from PayloadReleaseAction detail."""
+        command = detail.get("command") if isinstance(detail, dict) else None
+        if not isinstance(command, dict):
+            return None
+        return {
+            "action_type": "flight_command",
+            "params": command,
+            "key": f"drop_sequence_zero_payload_{self.payload_index}",
+            "once": False,
+            "priority": 3,
+        }
+
+    def _actions_with_zero(self, detail: dict[str, Any], extra: list[Any] | None = None) -> list[Any]:
+        """Combine zero velocity + servo actions for release ticks."""
+        actions: list[Any] = []
+        zero = self._zero_velocity_action_from_detail(detail)
+        if zero:
+            actions.append(zero)
+        if extra:
+            actions.extend(extra)
+        return actions
+
+    def _transition_result_with_zero(self, sub_detail: dict[str, Any]) -> ActionResult:
+        """Phase transition that also emits zero velocity (align→release boundary)."""
+        actions = self._actions_with_zero(sub_detail)
+        return ActionResult(
+            actions=actions,
+            reason=f"transition_to_{self.phase}",
+            detail=self._make_detail(),
+        )
 
     def _make_detail(self, *, status: str = "") -> dict[str, Any]:
         detail: dict[str, Any] = {
