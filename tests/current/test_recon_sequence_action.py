@@ -957,3 +957,147 @@ def test_build_recon_report_accepts_recon_sequence_items() -> None:
     assert barrels[1]["content"] == "baozha"
     assert barrels[2]["status"] == "blank_or_uncertain"
     assert barrels[2]["content"] == "blank"
+
+
+# ── Codex 二审修复测试 ───────────────────────────────────────────────
+
+
+def _observe_active_nonzero_factory() -> _FakeAction:
+    """Fake observe that returns active with a non-zero flight_command.
+
+    This simulates the dangerous case where outer timeout would otherwise
+    pass through an active descend command before clear.
+    """
+    nonzero_cmd = {
+        "action_type": "flight_command",
+        "params": {
+            "valid": True,
+            "active": True,
+            "vx_cmd": 0.1,
+            "vy_cmd": 0.0,
+            "vz_cmd": 0.3,
+            "yaw_rate_cmd": 0.0,
+        },
+        "once": False,
+        "priority": 5,
+    }
+    return _FakeAction(
+        [
+            ActionResult(
+                reason="observe_active",
+                actions=[nonzero_cmd],
+                detail={
+                    "status": "blank_or_uncertain",
+                    "content": "blank",
+                    "confidence": 0.0,
+                    "align_reason": "align_active",
+                },
+            )
+        ]
+    )
+
+
+def test_observe_outer_timeout_drops_nonzero_child_action() -> None:
+    """Outer timeout must NOT pass through active non-zero child flight_command."""
+    targets = _make_targets((1.0, 5.0))
+    params = _base_params(
+        targets=targets,
+        observe_max_updates=1,  # timeout on first update
+        climb_max_updates=1,
+    )
+    a = ReconSequenceAction()
+    a.start(params)
+
+    observe = _observe_active_nonzero_factory()
+    climb = _climb_done_factory()
+
+    transition_result = None
+    with (
+        patch(
+            "missions.common.actions.recon_sequence.GotoWaypointAction",
+            side_effect=[_goto_done_factory(targets[0]), climb],
+        ),
+        patch(
+            "missions.common.actions.recon_sequence.TargetLockAction",
+            return_value=_lock_done_factory(targets[0]),
+        ),
+        patch(
+            "missions.common.actions.recon_sequence.ReconDescendObserveAction",
+            return_value=observe,
+        ),
+    ):
+        for _ in range(50):
+            r = a.update({})
+            if a.phase == "climb_after_observe":
+                transition_result = r
+                break
+
+    assert transition_result is not None
+    assert transition_result.reason == "observe_timeout_continue"
+
+    action_types = [act.get("action_type") for act in transition_result.actions]
+
+    # Must contain flight_command (explicit zero)
+    assert "flight_command" in action_types, "timeout missing zero flight_command"
+    # Must contain clear_continuous_commands
+    assert "clear_continuous_commands" in action_types, "timeout missing clear"
+
+    # Verify order: zero before clear
+    fc_idx = action_types.index("flight_command")
+    cl_idx = action_types.index("clear_continuous_commands")
+    assert fc_idx < cl_idx, (
+        f"zero (idx={fc_idx}) must come before clear (idx={cl_idx})"
+    )
+
+    # Verify zero command is all-zero, NOT the child's non-zero (vz_cmd=0.3)
+    flight_cmds = [
+        act for act in transition_result.actions
+        if act.get("action_type") == "flight_command"
+    ]
+    for cmd_dict in flight_cmds:
+        params = cmd_dict.get("params") or {}
+        for key in ("vx_cmd", "vy_cmd", "vz_cmd", "yaw_rate_cmd"):
+            if key in params:
+                assert float(params[key]) == 0.0, (
+                    f"zero command has non-zero {key}={params[key]}; "
+                    f"child active command was leaked!"
+                )
+
+
+def test_observe_outer_timeout_stops_child_action() -> None:
+    """Outer timeout must call child.stop() to release resources."""
+    targets = _make_targets((1.0, 5.0))
+    params = _base_params(
+        targets=targets,
+        observe_max_updates=1,
+        climb_max_updates=1,
+    )
+    a = ReconSequenceAction()
+    a.start(params)
+
+    observe = _observe_active_nonzero_factory()
+    climb = _climb_done_factory()
+
+    with (
+        patch(
+            "missions.common.actions.recon_sequence.GotoWaypointAction",
+            side_effect=[_goto_done_factory(targets[0]), climb],
+        ),
+        patch(
+            "missions.common.actions.recon_sequence.TargetLockAction",
+            return_value=_lock_done_factory(targets[0]),
+        ),
+        patch(
+            "missions.common.actions.recon_sequence.ReconDescendObserveAction",
+            return_value=observe,
+        ),
+    ):
+        for _ in range(50):
+            r = a.update({})
+            if a.phase == "climb_after_observe":
+                break
+
+    # Child action must be stopped after outer timeout
+    assert observe.stopped is True, (
+        "outer timeout did not call child.stop(); resources may leak"
+    )

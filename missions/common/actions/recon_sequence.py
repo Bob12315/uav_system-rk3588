@@ -287,12 +287,6 @@ class ReconSequenceAction(ActionModule):
         is_timeout = self.phase_update_count > self.observe_max_updates
 
         if result.done or result.failed or is_timeout:
-            # If timeout is triggered by outer limit (not sub-action itself),
-            # stop the sub-action to release resources.
-            if is_timeout and not (result.done or result.failed):
-                if self._current_action is not None:
-                    self._current_action.stop()
-
             # Record observation result from ReconDescendObserveAction detail
             detail = dict(result.detail)
             status = detail.get("status", "blank_or_uncertain")
@@ -306,10 +300,30 @@ class ReconSequenceAction(ActionModule):
 
             self._record_observation(status, content, confidence, detail)
 
+            # Save child before _start_climb replaces _current_action
+            child = self._current_action
+
             # Start climb (or finish if last target)
             self._start_climb()
 
-            # Pass through child zero flight_command, THEN clear continuous.
+            if is_timeout and not (result.done or result.failed):
+                # Outer timeout: stop child, explicit zero + clear.
+                # Must NOT pass through result.actions — it may contain
+                # an active non-zero flight_command from the child.
+                if child is not None:
+                    child.stop()
+                actions: list[Any] = [
+                    self._zero_flight_command_action("observe_timeout"),
+                    self._clear_continuous_action("after_observe_timeout"),
+                ]
+                return ActionResult(
+                    actions=actions,
+                    reason="observe_timeout_continue",
+                    detail=self._make_detail(),
+                )
+
+            # Child done or failed: pass through child zero flight_command,
+            # THEN clear continuous commands.
             actions = self._actions_with_child_then_clear(
                 result.actions, "after_observe",
             )
@@ -432,6 +446,28 @@ class ReconSequenceAction(ActionModule):
             reason=f"transition_to_{self.phase}",
             detail=self._make_detail(),
         )
+
+    def _zero_flight_command_action(self, key_suffix: str) -> dict[str, Any]:
+        """Build an explicit zero velocity flight_command for safety stops."""
+        return {
+            "action_type": "flight_command",
+            "params": {
+                "type": "flight_command",
+                "valid": True,
+                "active": True,
+                "vx_cmd": 0.0,
+                "vy_cmd": 0.0,
+                "vz_cmd": 0.0,
+                "yaw_rate_cmd": 0.0,
+                "priority": 3,
+            },
+            "key": (
+                f"recon_sequence_zero_{key_suffix}"
+                f"_t{self.target_index}_u{self.phase_update_count}"
+            ),
+            "once": False,
+            "priority": 3,
+        }
 
     def _actions_with_child_then_clear(
         self, child_actions: list[Any] | None, suffix: str,
