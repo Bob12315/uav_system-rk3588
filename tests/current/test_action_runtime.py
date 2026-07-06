@@ -1,9 +1,43 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from app.action_runtime import ActionRuntimeService
 
 
-def test_clear_navigation_queue_does_not_leave_zero_velocity_by_default() -> None:
+def test_clear_navigation_queue_default_calls_stop_and_clear() -> None:
+    """Default path uses atomic stop_and_clear, NOT stop_body + clear."""
+    calls: list[str] = []
+
+    class FakeLink:
+        def stop_body_velocity_and_clear(self) -> None:
+            calls.append("stop_body_velocity_and_clear")
+
+        def stop_body_velocity(self) -> None:
+            calls.append("stop_body_velocity")
+
+        def clear_continuous_commands(self) -> None:
+            calls.append("clear_continuous_commands")
+
+        def clear_pending_local_position_actions(self) -> None:
+            calls.append("clear_pending_local_position_actions")
+
+    ActionRuntimeService.clear_navigation_queue(FakeLink())
+
+    # Must call stop_body_velocity_and_clear, NOT the separate pair
+    assert "stop_body_velocity_and_clear" in calls
+    assert "stop_body_velocity" not in calls, (
+        "default path must NOT call stop_body_velocity; use stop_and_clear"
+    )
+    assert "clear_continuous_commands" not in calls, (
+        "default path must NOT call clear_continuous_commands right after stop; "
+        "stop_and_clear handles atomic clear internally"
+    )
+    assert "clear_pending_local_position_actions" in calls
+
+
+def test_clear_navigation_queue_fallback_without_stop_and_clear() -> None:
+    """If stop_body_velocity_and_clear is unavailable, fallback to stop_body WITHOUT clear."""
     calls: list[str] = []
 
     class FakeLink:
@@ -18,17 +52,22 @@ def test_clear_navigation_queue_does_not_leave_zero_velocity_by_default() -> Non
 
     ActionRuntimeService.clear_navigation_queue(FakeLink())
 
-    assert calls == [
-        "stop_body_velocity",
-        "clear_continuous_commands",
-        "clear_pending_local_position_actions",
-    ]
+    # Fallback: no stop_and_clear → stop_body is called, but NOT followed by clear
+    assert "stop_body_velocity" in calls
+    assert "clear_continuous_commands" not in calls, (
+        "fallback must NOT immediately clear STOP; leave it queued for CommandSender"
+    )
+    assert "clear_pending_local_position_actions" in calls
 
 
 def test_clear_navigation_queue_can_leave_stop_for_payload_transition() -> None:
+    """leave_stop_queued=True preserves old semantics."""
     calls: list[str] = []
 
     class FakeLink:
+        def stop_body_velocity_and_clear(self) -> None:
+            calls.append("stop_body_velocity_and_clear")
+
         def stop_body_velocity(self) -> None:
             calls.append("stop_body_velocity")
 
@@ -47,9 +86,69 @@ def test_clear_navigation_queue_can_leave_stop_for_payload_transition() -> None:
         leave_stop_queued=True,
     )
 
+    # leave_stop_queued: clear first, then persistent STOP — NO stop_and_clear
     assert calls == [
         "clear_continuous_commands",
         "clear_pending_local_position_actions",
         "stop_body_velocity",
         "hold_current_local_position",
     ]
+
+
+# ── SITL 前安全修复：stop() / reset() 路径确认 ──────────────────────
+
+
+def test_stop_calls_clear_navigation_queue_with_stop_and_clear() -> None:
+    """ActionRuntimeService.stop() triggers stop_body_velocity_and_clear via clear_navigation_queue."""
+    calls: list[str] = []
+
+    class FakeLink:
+        def stop_body_velocity_and_clear(self) -> None:
+            calls.append("stop_body_velocity_and_clear")
+
+        def stop_body_velocity(self) -> None:
+            calls.append("stop_body_velocity")
+
+        def clear_continuous_commands(self) -> None:
+            calls.append("clear_continuous_commands")
+
+        def clear_pending_local_position_actions(self) -> None:
+            calls.append("clear_pending_local_position_actions")
+
+    from app.action_dispatcher import ActionDispatcher
+    from missions.common.actions.runner import ActionRunner
+
+    svc = ActionRuntimeService(runner=ActionRunner(), dispatcher=ActionDispatcher())
+    svc.stop(FakeLink())
+
+    assert "stop_body_velocity_and_clear" in calls
+    assert "stop_body_velocity" not in calls
+    assert "clear_continuous_commands" not in calls
+
+
+def test_reset_calls_clear_navigation_queue_with_stop_and_clear() -> None:
+    """ActionRuntimeService.reset() triggers stop_body_velocity_and_clear via clear_navigation_queue."""
+    calls: list[str] = []
+
+    class FakeLink:
+        def stop_body_velocity_and_clear(self) -> None:
+            calls.append("stop_body_velocity_and_clear")
+
+        def stop_body_velocity(self) -> None:
+            calls.append("stop_body_velocity")
+
+        def clear_continuous_commands(self) -> None:
+            calls.append("clear_continuous_commands")
+
+        def clear_pending_local_position_actions(self) -> None:
+            calls.append("clear_pending_local_position_actions")
+
+    from app.action_dispatcher import ActionDispatcher
+    from missions.common.actions.runner import ActionRunner
+
+    svc = ActionRuntimeService(runner=ActionRunner(), dispatcher=ActionDispatcher())
+    svc.reset(FakeLink())
+
+    assert "stop_body_velocity_and_clear" in calls
+    assert "stop_body_velocity" not in calls
+    assert "clear_continuous_commands" not in calls

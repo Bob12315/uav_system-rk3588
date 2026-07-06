@@ -116,19 +116,26 @@ class ActionRuntimeService:
     ) -> None:
         """Clear continuous commands and pending LOCAL_POSITION; optionally send a hold.
 
-        Order is important:
-        By default the STOP sample is cleared too, so starting takeoff or a
-        position action cannot inherit a persistent zero-velocity override.
-        Only the align_descend -> payload_release transition opts into leaving
-        STOP queued until payload_release starts refreshing its own zero command.
+        Default path uses atomic stop-and-clear to guarantee the STOP is
+        transmitted before the queue is cleared.  This avoids the race where
+        stop_body_velocity() writes a STOP and the immediate
+        clear_continuous_commands() removes it before CommandSender sends it.
+
+        leave_stop_queued=True preserves the old semantics for the
+        align_descend → payload_release transition where a persistent STOP
+        must remain queued.
         """
         if link_manager is None:
             return
 
+        stop_and_clear = getattr(link_manager, "stop_body_velocity_and_clear", None)
         stop_body = getattr(link_manager, "stop_body_velocity", None)
         clear_continuous = getattr(link_manager, "clear_continuous_commands", None)
         clear_nav = getattr(link_manager, "clear_pending_local_position_actions", None)
+
         if leave_stop_queued:
+            # Preserve old semantics: clear first, then enqueue a persistent
+            # STOP that stays in the queue for the next action to refresh.
             if callable(clear_continuous):
                 clear_continuous()
             if callable(clear_nav):
@@ -137,11 +144,19 @@ class ActionRuntimeService:
                 _log.info("queue persistent stop BODY_NED velocity for payload transition")
                 stop_body()
         else:
-            if callable(stop_body):
-                _log.info("queue transient stop BODY_NED velocity before clearing")
+            # Atomic stop-and-clear: STOP is guaranteed to be sent before clear.
+            if callable(stop_and_clear):
+                _log.info("queue stop-and-clear BODY_NED velocity before clearing navigation")
+                stop_and_clear()
+            elif callable(stop_body):
+                _log.warning(
+                    "stop_body_velocity_and_clear unavailable; "
+                    "queue STOP without immediate clear (stop will be sent by CommandSender)"
+                )
                 stop_body()
-            if callable(clear_continuous):
-                clear_continuous()
+            else:
+                if callable(clear_continuous):
+                    clear_continuous()
             if callable(clear_nav):
                 clear_nav()
 

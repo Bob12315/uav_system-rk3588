@@ -571,12 +571,14 @@ def test_hold_current_local_position_returns_false_when_position_invalid() -> No
 
 def test_clear_navigation_queue_with_hold_calls_both() -> None:
     """ActionRuntimeService.clear_navigation_queue with hold_current=True
-    calls stop_body -> clear_continuous -> clear_local_position -> hold in order."""
+    calls stop_and_clear -> clear_local_position -> hold in order."""
     from app.action_runtime import ActionRuntimeService
 
     calls: list[str] = []
 
     class FakeLink:
+        def stop_body_velocity_and_clear(self) -> None:
+            calls.append("stop_and_clear")
         def stop_body_velocity(self) -> None:
             calls.append("stop_body")
         def clear_continuous_commands(self) -> None:
@@ -588,16 +590,18 @@ def test_clear_navigation_queue_with_hold_calls_both() -> None:
             return True
 
     ActionRuntimeService.clear_navigation_queue(FakeLink(), hold_current=True)
-    assert calls == ["stop_body", "clear_continuous", "clear_local_position", "hold_current"]
+    assert calls == ["stop_and_clear", "clear_local_position", "hold_current"]
 
 
 def test_clear_navigation_queue_without_hold_skips_hold() -> None:
-    """Without hold_current, stop then clear continuous + local position."""
+    """Without hold_current, stop_and_clear + clear_local_position only."""
     from app.action_runtime import ActionRuntimeService
 
     calls: list[str] = []
 
     class FakeLink:
+        def stop_body_velocity_and_clear(self) -> None:
+            calls.append("stop_and_clear")
         def stop_body_velocity(self) -> None:
             calls.append("stop_body")
         def clear_continuous_commands(self) -> None:
@@ -609,7 +613,7 @@ def test_clear_navigation_queue_without_hold_skips_hold() -> None:
             return True
 
     ActionRuntimeService.clear_navigation_queue(FakeLink(), hold_current=False)
-    assert calls == ["stop_body", "clear_continuous", "clear_local_position"]
+    assert calls == ["stop_and_clear", "clear_local_position"]
 
 
 def test_local_pos_command_parses_yaw_rad() -> None:
