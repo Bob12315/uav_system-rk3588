@@ -28,14 +28,19 @@ const ACTION_ZH_LABELS = {
   land: "降落",
   goto_waypoint: "飞到航点",
   survey_area: "区域扫描",
+  fixed_view_localize: "固定视角定位",
   single_view_localize: "单视角定位",
   multi_view_localize: "多视角定位",
   target_lock: "目标锁定",
   align_descend: "对准下降",
+  recon_descend_observe: "侦察下降观察",
   payload_release: "载荷投放",
   select_drop_targets: "选择投放目标",
-  recon_scan: "侦察扫描",
+  drop_sequence: "投放流程",
   select_recon_targets: "选择侦察目标",
+  recon_sequence: "侦察流程",
+  build_recon_report: "生成侦察报告",
+  recon_scan: "侦察扫描",
   recon_inspect_target: "单筒侦察识别",
 };
 const DEFAULT_ACTION_MISSION_STEPS = [
@@ -887,16 +892,25 @@ async function loadActionMissionTemplates() {
     const result = await json("/api/action-mission/templates");
     if (!result.ok) throw new Error(result.error || "模板列表加载失败");
     element.innerHTML = (result.templates || []).map(template =>
-      `<div><strong>${escapeHtml(template.label || template.name)}</strong> · ${escapeHtml(template.step_count)} 个步骤<br>${escapeHtml(template.description || template.path)}</div>`
+      `<button class="mission-template-item" data-action-mission-template="${escapeHtml(template.name)}">
+        <strong>${escapeHtml(template.label || template.name)}</strong>
+        · ${escapeHtml(template.step_count)} 个步骤<br>
+        <span>${escapeHtml(template.description || template.path)}</span>
+      </button>`
     ).join("");
+    element.querySelectorAll("[data-action-mission-template]").forEach(button => {
+      button.onclick = () => loadActionMissionTemplate(button.dataset.actionMissionTemplate)
+        .catch(error => { $("completionHint").textContent = error.message; });
+    });
   } catch (error) {
     element.textContent = `模板接口不可用：${error.message}`;
   }
 }
-async function loadActionMissionTemplate(name) {
+async function loadActionMissionTemplate(name, options = {}) {
+  const {confirmOverwrite = true} = options;
   const current = $("actionMissionSteps")?.value.trim();
   const defaultText = JSON.stringify(DEFAULT_ACTION_MISSION_STEPS, null, 2).trim();
-  if (current && current !== defaultText && !window.confirm("当前 Mission JSON 将被覆盖，确认？")) return;
+  if (confirmOverwrite && current && current !== defaultText && !window.confirm("当前 Mission JSON 将被覆盖，确认？")) return;
   const result = await json(`/api/action-mission/template/${encodeURIComponent(name)}`);
   if (!result.ok) throw new Error(result.error || "模板加载失败");
   setActionMissionEditorValue(result.template);
@@ -1094,7 +1108,9 @@ async function init() {
   if ($("actionStop")) $("actionStop").onclick = () => stopActionLabAction().catch(error => { $("completionHint").textContent = error.message; });
   $("actionReset").onclick = () => resetActionLabAction().catch(error => { $("completionHint").textContent = error.message; });
   $("actionRefresh").onclick = () => refreshActionStatus().catch(error => { $("completionHint").textContent = error.message; });
-  if ($("actionMissionSteps")) setActionMissionEditorValue(DEFAULT_ACTION_MISSION_STEPS);
+  if ($("actionMissionSteps")) {
+    await loadActionMissionTemplate("rescue_2026_full_auto", {confirmOverwrite: false});
+  }
   if ($("actionMissionConfigure")) $("actionMissionConfigure").onclick = () => configureActionMission().catch(error => { $("completionHint").textContent = error.message; });
   if ($("actionMissionStart")) $("actionMissionStart").onclick = () => startActionMission().catch(error => { $("completionHint").textContent = error.message; });
   if ($("actionMissionStop")) $("actionMissionStop").onclick = () => stopActionMission().catch(error => { $("completionHint").textContent = error.message; });
