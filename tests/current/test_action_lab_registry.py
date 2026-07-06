@@ -13,6 +13,7 @@ def test_create_action_lab_registry_lists_supported_actions() -> None:
     assert registry.list() == [
         "align_descend",
         "build_recon_report",
+        "fixed_view_localize",
         "goto_waypoint",
         "land",
         "multi_view_localize",
@@ -55,6 +56,7 @@ def test_action_lab_specs_are_json_serializable() -> None:
         "select_recon_targets",
         "recon_inspect_target",
         "recon_descend_observe",
+        "fixed_view_localize",
         "build_recon_report",
     ]
 
@@ -161,6 +163,7 @@ def test_action_lab_does_not_auto_register_default_registry() -> None:
         "select_recon_targets",
         "recon_inspect_target",
         "recon_descend_observe",
+        "fixed_view_localize",
         "build_recon_report",
     ):
         assert name not in default_registry.list()
