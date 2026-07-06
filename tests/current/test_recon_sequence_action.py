@@ -757,7 +757,7 @@ def _observe_failed_with_zero_factory() -> _FakeAction:
 
 
 def test_observe_done_preserves_child_zero_before_clear() -> None:
-    """observe done → child zero flight_command must come before clear_continuous_commands."""
+    """observe done → clear appended with send_stop_first=True after child actions."""
     targets = _make_targets((1.0, 5.0))
     params = _base_params(targets=targets, climb_max_updates=1)
     a = ReconSequenceAction()
@@ -789,18 +789,21 @@ def test_observe_done_preserves_child_zero_before_clear() -> None:
 
     assert transition_result is not None
     action_types = [act.get("action_type") for act in transition_result.actions]
-    # flight_command (zero) must be present and before clear_continuous_commands
-    assert "flight_command" in action_types, "observe→climb missing child zero flight_command"
+    # flight_command (zero) may be present from child pass-through
+    # clear_continuous_commands must be present with send_stop_first=True
     assert "clear_continuous_commands" in action_types, "observe→climb missing clear"
-    fc_idx = action_types.index("flight_command")
-    cl_idx = action_types.index("clear_continuous_commands")
-    assert fc_idx < cl_idx, (
-        f"zero flight_command (idx={fc_idx}) must come before clear (idx={cl_idx})"
+    clear_acts = [
+        act for act in transition_result.actions
+        if act.get("action_type") == "clear_continuous_commands"
+    ]
+    assert len(clear_acts) >= 1
+    assert clear_acts[-1]["params"].get("send_stop_first") is True, (
+        "observe→climb clear must have send_stop_first=True"
     )
 
 
 def test_observe_failed_preserves_child_zero_before_clear() -> None:
-    """observe failed → child zero flight_command must come before clear_continuous_commands."""
+    """observe failed → clear appended with send_stop_first=True after child actions."""
     targets = _make_targets((1.0, 5.0))
     params = _base_params(targets=targets, climb_max_updates=1)
     a = ReconSequenceAction()
@@ -832,12 +835,15 @@ def test_observe_failed_preserves_child_zero_before_clear() -> None:
 
     assert transition_result is not None
     action_types = [act.get("action_type") for act in transition_result.actions]
-    assert "flight_command" in action_types, "observe failed→climb missing child zero"
+    # clear_continuous_commands must be present with send_stop_first=True
     assert "clear_continuous_commands" in action_types, "observe failed→climb missing clear"
-    fc_idx = action_types.index("flight_command")
-    cl_idx = action_types.index("clear_continuous_commands")
-    assert fc_idx < cl_idx, (
-        f"zero flight_command (idx={fc_idx}) must come before clear (idx={cl_idx})"
+    clear_acts = [
+        act for act in transition_result.actions
+        if act.get("action_type") == "clear_continuous_commands"
+    ]
+    assert len(clear_acts) >= 1
+    assert clear_acts[-1]["params"].get("send_stop_first") is True, (
+        "observe failed→climb clear must have send_stop_first=True"
     )
 
 
@@ -998,7 +1004,11 @@ def _observe_active_nonzero_factory() -> _FakeAction:
 
 
 def test_observe_outer_timeout_drops_nonzero_child_action() -> None:
-    """Outer timeout must NOT pass through active non-zero child flight_command."""
+    """Outer timeout must NOT pass through active non-zero child flight_command.
+
+    Instead, the timeout path emits a single clear_continuous_commands
+    with send_stop_first=True for atomic stop-and-clear.
+    """
     targets = _make_targets((1.0, 5.0))
     params = _base_params(
         targets=targets,
@@ -1037,31 +1047,22 @@ def test_observe_outer_timeout_drops_nonzero_child_action() -> None:
 
     action_types = [act.get("action_type") for act in transition_result.actions]
 
-    # Must contain flight_command (explicit zero)
-    assert "flight_command" in action_types, "timeout missing zero flight_command"
-    # Must contain clear_continuous_commands
+    # Must NOT contain flight_command (timeout path uses atomic clear, not separate zero)
+    assert "flight_command" not in action_types, (
+        "timeout path must NOT emit separate flight_command; "
+        "use send_stop_first clear instead"
+    )
+    # Must contain clear_continuous_commands with send_stop_first=True
     assert "clear_continuous_commands" in action_types, "timeout missing clear"
 
-    # Verify order: zero before clear
-    fc_idx = action_types.index("flight_command")
-    cl_idx = action_types.index("clear_continuous_commands")
-    assert fc_idx < cl_idx, (
-        f"zero (idx={fc_idx}) must come before clear (idx={cl_idx})"
-    )
-
-    # Verify zero command is all-zero, NOT the child's non-zero (vz_cmd=0.3)
-    flight_cmds = [
+    clear_acts = [
         act for act in transition_result.actions
-        if act.get("action_type") == "flight_command"
+        if act.get("action_type") == "clear_continuous_commands"
     ]
-    for cmd_dict in flight_cmds:
-        params = cmd_dict.get("params") or {}
-        for key in ("vx_cmd", "vy_cmd", "vz_cmd", "yaw_rate_cmd"):
-            if key in params:
-                assert float(params[key]) == 0.0, (
-                    f"zero command has non-zero {key}={params[key]}; "
-                    f"child active command was leaked!"
-                )
+    assert len(clear_acts) == 1
+    assert clear_acts[0]["params"].get("send_stop_first") is True, (
+        "timeout clear must have send_stop_first=True"
+    )
 
 
 def test_observe_outer_timeout_stops_child_action() -> None:

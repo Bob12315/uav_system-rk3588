@@ -145,7 +145,7 @@ def test_flight_command_key_contains_target_index() -> None:
 
 
 def test_zero_on_finalize() -> None:
-    """Finalize returns zero-velocity + clear in Dispatcher envelope."""
+    """Finalize returns atomic stop-and-clear (NO separate flight_command)."""
     action = ReconDescendObserveAction()
     action.start(_make_params(finish_altitude_m=3.0, record_start_altitude_m=4.0,
                               align_descend={"expected_dt_s": 0.1, "lost_timeout_updates": 2,
@@ -160,19 +160,15 @@ def test_zero_on_finalize() -> None:
             break
     assert result is not None
     assert result.done is True
-    assert len(result.actions) >= 2
-    types = [a["action_type"] for a in result.actions]
-    assert "flight_command" in types, "finalize must include zero velocity"
-    assert "clear_continuous_commands" in types, "finalize must include clear_continuous_commands"
+    assert len(result.actions) == 1
     a = result.actions[0]
-    assert a["action_type"] == "flight_command"
-    assert a["once"] is False
-    assert a["params"]["vx_cmd"] == pytest.approx(0.0)
-    assert a["params"]["vy_cmd"] == pytest.approx(0.0)
-    assert a["params"]["vz_cmd"] == pytest.approx(0.0)
-    assert a["params"]["enable_body"] is True
-    assert a["params"]["active"] is True
-    assert a["params"]["valid"] is True
+    assert a["action_type"] == "clear_continuous_commands", (
+        "finalize must use stop-first clear, not separate flight_command"
+    )
+    assert a["params"].get("send_stop_first") is True, (
+        "finalize clear must have send_stop_first=True"
+    )
+    assert a.get("once") is True
 
 
 def test_zero_on_stop() -> None:
@@ -320,7 +316,7 @@ def test_low_score_outputs_blank() -> None:
 # ── align failed yields blank + zero ────────────────────────────────────
 
 
-def test_align_failed_yields_blank_and_zero() -> None:
+def test_align_failed_yields_blank_and_clear() -> None:
     action = ReconDescendObserveAction()
     action.start(_make_params(
         align_descend={
@@ -348,11 +344,15 @@ def test_align_failed_yields_blank_and_zero() -> None:
     assert result.detail["status"] in ("blank_or_uncertain", "align_failed")
     assert result.detail["align_failed"] is True
     assert result.detail["content"] == "blank"
-    # must have zero action
+    # must have atomic stop-and-clear (NOT separate flight_command zero)
     assert len(result.actions) >= 1
-    z = result.actions[0]
-    assert z["action_type"] == "flight_command"
-    assert z["params"]["vz_cmd"] == pytest.approx(0.0)
+    a = result.actions[0]
+    assert a["action_type"] == "clear_continuous_commands", (
+        "align_failed must use stop-first clear, not flight_command zero"
+    )
+    assert a["params"].get("send_stop_first") is True, (
+        "align_failed clear must have send_stop_first=True"
+    )
 
 
 # ── registry ────────────────────────────────────────────────────────────
@@ -434,11 +434,24 @@ def test_dispatcher_policy_no_body_velocity() -> None:
     assert "recon_descend_observe" not in bv_policy.allowed_actions
 
 
-# ── SITL 前安全修复：inactive command → zero+clear ──────────────────────
+# ── dispatcher policy: recon_descend_observe clear_continuous_commands ──
+
+
+def test_dispatcher_policy_allows_clear_continuous() -> None:
+    """recon_descend_observe must be allowed to dispatch clear_continuous_commands."""
+    from app.dispatch.policy import ACTION_DISPATCH_POLICY
+    cc_policy = ACTION_DISPATCH_POLICY.get("clear_continuous_commands")
+    assert cc_policy is not None
+    assert "recon_descend_observe" in cc_policy.allowed_actions, (
+        "recon_descend_observe must have clear_continuous_commands permission"
+    )
+
+
+# ── SITL 前安全修复：inactive command → stop-and-clear ──────────────────
 
 
 def test_inactive_align_command_emits_zero_and_clear() -> None:
-    """AlignDescend produces active=False → recon_descend_observe emits zero+clear."""
+    """AlignDescend produces active=False → recon_descend_observe emits stop-first clear."""
     action = ReconDescendObserveAction()
     action.start(_make_params())
 
@@ -455,16 +468,13 @@ def test_inactive_align_command_emits_zero_and_clear() -> None:
     # Should not be done (still aligning)
     assert result.done is False
     types = [act.get("action_type") for act in result.actions]
-    assert "flight_command" in types, (
-        "inactive command must still emit flight_command (zero)"
+    assert "flight_command" not in types, (
+        "inactive tick must NOT emit flight_command; use send_stop_first clear instead"
     )
     assert "clear_continuous_commands" in types, (
-        "inactive command must emit clear_continuous_commands"
+        "inactive command must emit clear_continuous_commands with send_stop_first"
     )
-    fc = [act for act in result.actions if act.get("action_type") == "flight_command"][0]
-    p = fc.get("params") or {}
-    for key in ("vx_cmd", "vy_cmd", "vz_cmd", "yaw_rate_cmd"):
-        val = p.get(key)
-        if val is not None:
-            assert float(val) == 0.0, f"zero command {key}={val}, expected 0"
-    assert p.get("active") is True, "zero command must have active=True"
+    clear_act = [act for act in result.actions if act.get("action_type") == "clear_continuous_commands"][0]
+    assert clear_act["params"].get("send_stop_first") is True, (
+        "inactive clear must have send_stop_first=True"
+    )

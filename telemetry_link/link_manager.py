@@ -683,6 +683,30 @@ class LinkManager:
         """Stop BODY_NED velocity control by sending zero body-frame velocity."""
         self.stop_control(frame=BODY_NED)
 
+    def stop_body_velocity_and_clear(self) -> None:
+        """Atomically stop BODY_NED velocity and clear the continuous queue.
+
+        Puts a STOP command with clear_after_send=True into the queue.
+        The CommandSender will:
+        1. Send the zero-velocity STOP to the flight controller.
+        2. Clear the queue entry only if no newer command replaced it.
+
+        This guarantees the STOP is actually transmitted before the
+        queue is cleared, unlike the previous zero-then-clear pattern.
+        """
+        self.submit_control_command(
+            ControlCommand(
+                command_type=ControlType.STOP,
+                vx=0.0,
+                vy=0.0,
+                vz=0.0,
+                yaw_rate=0.0,
+                timestamp=time.time(),
+                frame=BODY_NED,
+                clear_after_send=True,
+            )
+        )
+
     # ------------------------------------------------------------------
     # semantic wrappers (added T1 — zero behavioural change)
     # ------------------------------------------------------------------

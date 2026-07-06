@@ -187,6 +187,60 @@ def test_stop_body_velocity_queues_stop_with_body_ned_frame() -> None:
     assert cmd.frame == BODY_NED
 
 
+# ── stop_body_velocity_and_clear (atomic stop-and-clear) ─────────────
+
+
+def test_stop_body_velocity_and_clear_queues_stop_with_clear_after_send() -> None:
+    """stop_body_velocity_and_clear queues a STOP with clear_after_send=True."""
+    from telemetry_link.frames import BODY_NED
+
+    manager = LinkManager(_config())
+    manager.stop_body_velocity_and_clear()
+
+    cmd = _cq(manager).peek_control()
+    assert cmd is not None
+    assert cmd.command_type == ControlType.STOP
+    assert cmd.vx == 0.0
+    assert cmd.vy == 0.0
+    assert cmd.vz == 0.0
+    assert cmd.yaw_rate == 0.0
+    assert cmd.frame == BODY_NED
+    assert getattr(cmd, "clear_after_send", False) is True, (
+        "stop_body_velocity_and_clear must set clear_after_send=True"
+    )
+
+
+def test_stop_body_velocity_and_clear_replaces_old_nonzero_control() -> None:
+    """stop_body_velocity_and_clear replaces old non-zero control with STOP."""
+    manager = LinkManager(_config())
+    # First put a non-zero velocity control
+    manager.send_velocity_command(1.0, 2.0, 3.0)
+    assert _cq(manager).peek_control() is not None
+    assert _cq(manager).peek_control().vx == pytest.approx(1.0)
+
+    # Then call stop_body_velocity_and_clear
+    manager.stop_body_velocity_and_clear()
+
+    cmd = _cq(manager).peek_control()
+    assert cmd is not None
+    assert cmd.command_type == ControlType.STOP
+    assert cmd.vx == 0.0
+    assert getattr(cmd, "clear_after_send", False) is True
+
+
+def test_stop_body_velocity_is_not_affected_by_stop_and_clear() -> None:
+    """stop_body_velocity must NOT set clear_after_send — only stop_and_clear does."""
+    manager = LinkManager(_config())
+    manager.stop_body_velocity()
+
+    cmd = _cq(manager).peek_control()
+    assert cmd is not None
+    assert cmd.command_type == ControlType.STOP
+    assert getattr(cmd, "clear_after_send", False) is False, (
+        "stop_body_velocity must NOT set clear_after_send"
+    )
+
+
 # ── set_servo ────────────────────────────────────────────────────────
 
 

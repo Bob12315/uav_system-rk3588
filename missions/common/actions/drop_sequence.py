@@ -310,11 +310,11 @@ class DropSequenceAction(ActionModule):
 
         if result.done:
             self._start_release_payload("aligned_release")
-            # Fix2: emit zero velocity + clear on align→release transition
-            return self._transition_result_with_zero(result.detail)
+            # Stop stale BODY_NED atomically before releasing payload.
+            return self._transition_result_with_stop_clear(result.detail)
         if result.failed:
             self._start_release_payload("align_failed_release")
-            return self._transition_result_with_zero(result.detail)
+            return self._transition_result_with_stop_clear(result.detail)
 
         # Active phase: check if AlignDescend is actively controlling
         if isinstance(command, dict) and command.get("active"):
@@ -326,12 +326,10 @@ class DropSequenceAction(ActionModule):
             )
 
         # Inactive command: control gate closed (control_allowed=false,
-        # target lost, etc.) — emit zero velocity + clear to stop stale
-        # continuous commands from previous ticks.
-        zero = self._zero_velocity_command()
-        clear = self._clear_continuous_action("align_inactive")
+        # target lost, etc.) — atomic stop-and-clear via send_stop_first.
+        clear = self._clear_continuous_action("align_inactive", send_stop_first=True)
         return ActionResult(
-            actions=[zero, clear],
+            actions=[clear],
             reason=result.reason or "align_inactive",
             detail=self._make_detail(),
         )
@@ -362,7 +360,7 @@ class DropSequenceAction(ActionModule):
         # Fix4: handle PayloadRelease internal failure — never hang in release phase
         if result.failed:
             actions = self._actions_with_zero(result.detail, result.actions)
-            actions.append(self._clear_continuous_action("release_failed"))
+            actions.append(self._clear_continuous_action("release_failed", send_stop_first=True))
             self._done = True
             self._last_reason = "payload_release_failed"
             self._last_detail = self._make_detail(status="failed")
@@ -393,8 +391,8 @@ class DropSequenceAction(ActionModule):
             if is_fallback:
                 self.fallback_release_count += 1
             self._advance_after_payload()
-            # Always clear continuous commands before climb or done
-            actions.append(self._clear_continuous_action("before_climb"))
+            # Atomic stop-and-clear before climb or done
+            actions.append(self._clear_continuous_action("before_climb", send_stop_first=True))
             # Fix1: only propagate done=True when the entire sequence is done
             if self._done:
                 self._last_detail = self._make_detail(status="done")
@@ -580,15 +578,24 @@ class DropSequenceAction(ActionModule):
             actions.extend(extra)
         return actions
 
-    def _transition_result_with_zero(self, sub_detail: dict[str, Any]) -> ActionResult:
-        """Phase transition that emits zero velocity + clear (align→release boundary)."""
-        actions = self._actions_with_zero(sub_detail)
-        actions.append(self._clear_continuous_action("align_transition"))
+    def _transition_result_with_stop_clear(self, sub_detail: dict[str, Any]) -> ActionResult:
+        """Phase transition that atomically stops and clears (align→release boundary)."""
+        actions: list[Any] = []
+        # Still pass through the child's zero velocity detail into the
+        # dispatcher envelope so it can be logged and accounted for.
+        zero = self._zero_velocity_action_from_detail(sub_detail)
+        if zero:
+            actions.append(zero)
+        actions.append(self._clear_continuous_action("align_transition", send_stop_first=True))
         return ActionResult(
             actions=actions,
             reason=f"transition_to_{self.phase}",
             detail=self._make_detail(),
         )
+
+    def _transition_result_with_zero(self, sub_detail: dict[str, Any]) -> ActionResult:
+        """DEPRECATED: use _transition_result_with_stop_clear instead."""
+        return self._transition_result_with_stop_clear(sub_detail)
 
     def _zero_velocity_command(self) -> dict[str, Any]:
         """Return a zero-velocity BODY_NED flight_command (active=True)."""
@@ -610,17 +617,24 @@ class DropSequenceAction(ActionModule):
             "priority": 3,
         }
 
-    def _clear_continuous_action(self, key_suffix: str) -> dict[str, Any]:
+    def _clear_continuous_action(self, key_suffix: str, *, send_stop_first: bool = False) -> dict[str, Any]:
         """Build a clear_continuous_commands action for phase transitions.
 
         Key includes target_index, payload_index, and phase_update_count
         so that every transition within the same drop_sequence run produces
         a unique key — preventing the dispatcher's once=True dedup from
         skipping subsequent clear actions.
+
+        When send_stop_first=True, the dispatcher calls
+        stop_body_velocity_and_clear() to atomically send a zero STOP
+        before clearing the continuous queue.
         """
         return {
             "action_type": "clear_continuous_commands",
-            "params": {"clear_pending_local_position": False},
+            "params": {
+                "clear_pending_local_position": False,
+                "send_stop_first": send_stop_first,
+            },
             "key": (
                 f"drop_sequence_clear_continuous_{key_suffix}"
                 f"_t{self.target_index}_p{self.payload_index}_u{self.phase_update_count}"

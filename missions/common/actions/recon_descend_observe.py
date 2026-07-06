@@ -114,9 +114,8 @@ class ReconDescendObserveAction(ActionModule):
                 current_actions = [self._flight_action(command)]
             else:
                 # Inactive command: control gate closed (control_allowed=false,
-                # target lost, etc.) — emit zero velocity + clear to stop stale
-                # continuous commands from previous ticks.
-                current_actions = [self._zero_action(), self._clear_action()]
+                # target lost, etc.) — atomic stop-and-clear via send_stop_first.
+                current_actions = [self._clear_action()]
 
             align_height = self._align_detail.get("height_m")
             if align_height is not None:
@@ -289,14 +288,13 @@ class ReconDescendObserveAction(ActionModule):
                 stats["conf_max"] = best_conf
 
     def _finalize(self) -> ActionResult:
-        """Determine best sign class and produce final result with zero-velocity + clear."""
+        """Determine best sign class and produce final result with atomic stop-and-clear."""
         self._done = True
-        zero = self._zero_action()
         clear = self._clear_action()
 
         if self._skipped:
             return ActionResult(
-                actions=[zero, clear],
+                actions=[clear],
                 done=True,
                 reason="skipped_missing_target",
                 detail=self._make_detail(status="skipped_missing_target"),
@@ -310,7 +308,7 @@ class ReconDescendObserveAction(ActionModule):
                 align_failed=self._align_failed,
             )
             return ActionResult(
-                actions=[zero, clear],
+                actions=[clear],
                 done=True,
                 reason=self._align_reason or "done",
                 detail=depth,
@@ -326,7 +324,7 @@ class ReconDescendObserveAction(ActionModule):
             margin_ratio=self._margin_ratio,
         )
         return ActionResult(
-            actions=[zero, clear],
+            actions=[clear],
             done=True,
             reason=self._align_reason or "done",
             detail=depth,
@@ -448,18 +446,22 @@ class ReconDescendObserveAction(ActionModule):
         }
 
     def _clear_action(self) -> dict[str, Any]:
-        """Return a clear_continuous_commands action to stop stale BODY_NED commands."""
+        """Return a clear_continuous_commands action with send_stop_first=True
+        to atomically stop and clear stale BODY_NED commands."""
         uc = getattr(self._align_descend, 'update_count', 0) if self._align_descend is not None else 0
         return {
             "action_type": "clear_continuous_commands",
-            "params": {"clear_pending_local_position": False},
+            "params": {
+                "clear_pending_local_position": False,
+                "send_stop_first": True,
+            },
             "key": f"recon_descend_observe_clear_t{self.target_index}_u{uc}",
             "once": True,
             "priority": 10,
         }
 
     def _zero_action(self) -> dict[str, Any]:
-        """Return a zero-velocity BODY_NED action in Dispatcher envelope."""
+        """DEPRECATED: kept for stop() path which only emits a zero."""
         return {
             "action_type": "flight_command",
             "params": {
