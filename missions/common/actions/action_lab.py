@@ -14,6 +14,7 @@ from .recon_inspect_target import ReconInspectTargetAction
 from .registry import ActionRegistry
 from .select_drop_targets import SelectDropTargetsAction
 from .select_recon_targets import SelectReconTargetsAction
+from .fixed_view_localize import FixedViewLocalizeAction
 from .single_view_localize import SingleViewLocalizeAction
 from .survey_area import SurveyAreaAction
 from .takeoff import TakeoffAction
@@ -37,6 +38,7 @@ def create_action_lab_registry() -> ActionRegistry:
     registry.register("recon_scan", ReconScanAction)
     registry.register("recon_descend_observe", ReconDescendObserveAction)
     registry.register("build_recon_report", BuildReconReportAction)
+    registry.register("fixed_view_localize", FixedViewLocalizeAction)
     return registry
 
 
@@ -406,6 +408,33 @@ def action_lab_specs() -> list[dict[str, Any]]:
                         "require_target_locked": False,
                         "payload_offset_enabled": False,
                     },
+                },
+            },
+        },
+        {
+            "name": "fixed_view_localize",
+            "label": "Fixed View Localize",
+            "description": "Stay at current point, collect multiple YOLO frames, and fuse localized objects.",
+            "default_params": {
+                "detection_source": "scene",
+                "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
+                "min_confidence": 0.35,
+                "settle_updates": 8,
+                "capture_updates": 12,
+                "max_updates": 40,
+                "camera": {
+                    "fov_x_deg": 85.0,
+                    "fov_y_deg": 69.0,
+                    "image_x_sign": 1.0,
+                    "image_y_sign": -1.0,
+                },
+                "fusion": {
+                    "cluster_radius_m": 0.7,
+                    "outlier_radius_m": 0.8,
+                    "min_cluster_size": 2,
+                    "max_cluster_radius_m": 0.9,
+                    "center_weight_power": 1.0,
+                    "max_objects": 5,
                 },
             },
         },

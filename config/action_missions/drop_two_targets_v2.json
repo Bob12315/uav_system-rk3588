@@ -1,0 +1,141 @@
+{
+  "name": "drop_two_targets_v2",
+  "description": "Phase1 fixed-view drop scan and target slot selection only.",
+  "steps": [
+    {
+      "name": "takeoff",
+      "label": "takeoff_5m",
+      "params": {
+        "mode": "GUIDED",
+        "altitude_m": 5.0,
+        "altitude_tolerance_m": 0.35,
+        "require_armed": true,
+        "max_updates": 150,
+        "priority": 2,
+        "arm_priority": 1,
+        "mode_priority": 2
+      }
+    },
+    {
+      "name": "goto_waypoint",
+      "label": "goto_drop_scan_center",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "return_home",
+        "max_attempts": 1
+      },
+      "params": {
+        "x": 0.0,
+        "y": 32.5,
+        "altitude_m": 5.0,
+        "waypoint_mode": "field",
+        "yaw_mode": "field_heading",
+        "tolerance_xy_m": 0.4,
+        "tolerance_z_m": 0.4,
+        "min_hold_updates": 10,
+        "priority": 5,
+        "key": "goto_drop_scan_center"
+      }
+    },
+    {
+      "name": "fixed_view_localize",
+      "label": "drop_fixed_view_scan",
+      "save_as": "drop_scan",
+      "on_failed": {
+        "action": "retry_current",
+        "max_attempts": 2
+      },
+      "params": {
+        "detection_source": "scene",
+        "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
+        "min_confidence": 0.35,
+        "settle_updates": 8,
+        "capture_updates": 12,
+        "max_updates": 40,
+        "camera": {
+          "fov_x_deg": 85.0,
+          "fov_y_deg": 69.0,
+          "image_x_sign": 1.0,
+          "image_y_sign": -1.0
+        },
+        "fusion": {
+          "cluster_radius_m": 0.7,
+          "outlier_radius_m": 0.8,
+          "min_cluster_size": 2,
+          "max_cluster_radius_m": 0.9,
+          "center_weight_power": 1.0,
+          "max_objects": 5
+        },
+        "save_result": true
+      }
+    },
+    {
+      "name": "select_drop_targets",
+      "label": "select_drop_targets",
+      "save_as": "drop_targets",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "return_home",
+        "max_attempts": 1
+      },
+      "params": {
+        "objects": "$drop_scan.localized_objects",
+        "target_count": 3,
+        "allow_fewer": true,
+        "score_table": {
+          "bucket_1": 500,
+          "bucket_2": 300,
+          "bucket_3": 100,
+          "bucket": 50
+        },
+        "min_seen_count": 2,
+        "min_raw_count": 0,
+        "min_weight": 0.0,
+        "deduplicate_radius_m": 0.8,
+        "prefer_class_order": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
+        "zone_center": {
+          "x": 0.0,
+          "y": 32.5
+        },
+        "single_target_servo_outputs": [
+          { "channel": 8, "release_pwm": 1750, "hold_pwm": 1250 },
+          { "channel": 9, "release_pwm": 1815, "hold_pwm": 1185 }
+        ],
+        "multi_target_first_servo_outputs": [
+          { "channel": 8, "release_pwm": 1750, "hold_pwm": 1250 }
+        ]
+      }
+    },
+    {
+      "name": "goto_waypoint",
+      "label": "return_home",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "land_home",
+        "max_attempts": 1
+      },
+      "params": {
+        "x": 0.0,
+        "y": 0.0,
+        "altitude_m": 5.0,
+        "waypoint_mode": "field",
+        "yaw_mode": "field_heading",
+        "tolerance_xy_m": 0.7,
+        "tolerance_z_m": 0.5,
+        "min_hold_updates": 2,
+        "priority": 5,
+        "key": "return_home"
+      }
+    },
+    {
+      "name": "land",
+      "label": "land_home",
+      "params": {
+        "land_altitude_threshold_m": 0.25,
+        "max_updates": 250,
+        "priority": 2,
+        "key": "land_home"
+      }
+    }
+  ]
+}

@@ -254,7 +254,51 @@ class SelectDropTargetsAction(ActionModule):
             )
             if outputs is not None:
                 detail["first_release_servo_outputs"] = [dict(item) for item in outputs]
+        detail["target_slots"] = self._build_target_slots(selected)
         return detail
+
+    def _build_target_slots(self, selected: list[_Candidate]) -> list[dict[str, Any]]:
+        slots: list[dict[str, Any]] = []
+        for rank_index in range(self.target_count):
+            if rank_index < len(selected):
+                candidate = selected[rank_index]
+                slots.append({
+                    "valid": True,
+                    "id": candidate.id,
+                    "target_id": candidate.target_id,
+                    "class_name": candidate.class_name,
+                    "local_x": candidate.local_x,
+                    "local_y": candidate.local_y,
+                    "x": candidate.local_x,
+                    "y": candidate.local_y,
+                    "score": candidate.score,
+                    "seen_count": candidate.seen_count,
+                    "count": candidate.seen_count,
+                    "raw_count": candidate.raw_count,
+                    "weight": candidate.weight,
+                    "track_ids": list(candidate.original.get("track_ids") or []),
+                    "rank": rank_index + 1,
+                })
+            else:
+                slots.append({
+                    "valid": False,
+                    "id": f"missing_drop_target_{rank_index}",
+                    "target_id": None,
+                    "class_name": "",
+                    "local_x": None,
+                    "local_y": None,
+                    "x": None,
+                    "y": None,
+                    "score": 0.0,
+                    "seen_count": 0,
+                    "count": 0,
+                    "raw_count": 0,
+                    "weight": 0.0,
+                    "track_ids": [],
+                    "rank": rank_index + 1,
+                    "status": "missing",
+                })
+        return slots
 
     @staticmethod
     def _bool_param(value: Any, name: str) -> bool:
