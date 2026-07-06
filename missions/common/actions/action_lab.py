@@ -14,6 +14,7 @@ from .recon_inspect_target import ReconInspectTargetAction
 from .registry import ActionRegistry
 from .select_drop_targets import SelectDropTargetsAction
 from .select_recon_targets import SelectReconTargetsAction
+from .drop_sequence import DropSequenceAction
 from .fixed_view_localize import FixedViewLocalizeAction
 from .single_view_localize import SingleViewLocalizeAction
 from .survey_area import SurveyAreaAction
@@ -39,6 +40,7 @@ def create_action_lab_registry() -> ActionRegistry:
     registry.register("recon_descend_observe", ReconDescendObserveAction)
     registry.register("build_recon_report", BuildReconReportAction)
     registry.register("fixed_view_localize", FixedViewLocalizeAction)
+    registry.register("drop_sequence", DropSequenceAction)
     return registry
 
 
@@ -436,6 +438,38 @@ def action_lab_specs() -> list[dict[str, Any]]:
                     "center_weight_power": 1.0,
                     "max_objects": 5,
                 },
+            },
+        },
+        {
+            "name": "drop_sequence",
+            "label": "Drop Sequence",
+            "description": (
+                "Composite drop action: goto target → lock → align-descend → release payload → climb. "
+                "Handles up to max_payloads payloads across max_target_candidates targets with "
+                "fallback release and single-target release-all modes."
+            ),
+            "default_params": {
+                "targets": [],
+                "payloads": [
+                    {
+                        "payload_id": "payload_1",
+                        "servo_outputs": [{"channel": 8, "release_pwm": 1750, "hold_pwm": 1250}],
+                        "payload_forward_m": -0.06,
+                        "payload_right_m": 0.0,
+                    },
+                ],
+                "max_target_candidates": 3,
+                "max_payloads": 2,
+                "approach_altitude_m": 2.5,
+                "finish_altitude_m": 1.5,
+                "climb_after_drop_m": 3.5,
+                "goto_max_updates": 120,
+                "target_lock_max_updates": 50,
+                "align_descend_max_updates": 250,
+                "climb_max_updates": 100,
+                "fallback_release_when_last_target_failed": True,
+                "release_all_payloads_if_only_one_target": True,
+                "continue_after_any_failure": True,
             },
         },
         {

@@ -283,6 +283,8 @@ class ActionDispatcher:
             return self._dispatch_flight_command(action, link_manager=link_manager)
         if action_type == "yolo_lock_target":
             return self._dispatch_yolo_lock_target(action, link_manager=link_manager)
+        if action_type == "clear_continuous_commands":
+            return self._dispatch_clear_continuous_commands(action, link_manager=link_manager)
         return {"status": "skipped", "reason": "unsupported_action_type"}
 
     # ------------------------------------------------------------------
@@ -537,6 +539,39 @@ class ActionDispatcher:
             self._logger.exception("yolo_lock_target dispatch failed")
             return {"status": "error", "reason": str(exc), "detail": detail}
         return {"status": "sent", "detail": detail}
+
+    def _dispatch_clear_continuous_commands(
+        self,
+        action: dict[str, object],
+        *,
+        link_manager: object | None,
+    ) -> dict[str, object]:
+        if link_manager is None:
+            return {"status": "skipped", "reason": "link_manager_not_available"}
+
+        clear_continuous = getattr(link_manager, "clear_continuous_commands", None)
+        clear_nav = getattr(link_manager, "clear_pending_local_position_actions", None)
+
+        if not callable(clear_continuous):
+            return {
+                "status": "skipped",
+                "reason": "clear_continuous_commands_not_available",
+            }
+
+        clear_continuous()
+
+        params = self._action_params(action)
+        clear_pending_local_position = bool(params.get("clear_pending_local_position", False))
+        if clear_pending_local_position and callable(clear_nav):
+            clear_nav()
+
+        return {
+            "status": "sent",
+            "detail": {
+                "action_type": "clear_continuous_commands",
+                "clear_pending_local_position": clear_pending_local_position,
+            },
+        }
 
     # ------------------------------------------------------------------
     # helpers

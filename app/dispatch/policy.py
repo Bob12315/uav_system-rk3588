@@ -48,12 +48,12 @@ class DispatchRule:
 
 ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
     "local_position": DispatchRule(
-        allowed_actions={"goto_waypoint", "survey_area", "multi_view_localize", "recon_scan", "recon_inspect_target"},
+        allowed_actions={"goto_waypoint", "survey_area", "multi_view_localize", "recon_scan", "recon_inspect_target", "drop_sequence"},
         requires_send_actions=True,
         requires_send_commands=True,
     ),
     "flight_command": DispatchRule(
-        allowed_actions={"align_descend", "recon_inspect_target", "payload_release", "recon_descend_observe"},
+        allowed_actions={"align_descend", "recon_inspect_target", "payload_release", "recon_descend_observe", "drop_sequence"},
         requires_send_actions=True,
         requires_send_commands=True,
         continuous=True,
@@ -67,7 +67,7 @@ ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
         once_respected=False,
     ),
     "set_servo": DispatchRule(
-        allowed_actions={"payload_release"},
+        allowed_actions={"payload_release", "drop_sequence"},
         requires_send_actions=True,
         requires_send_commands=True,
     ),
@@ -92,8 +92,13 @@ ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
         requires_send_commands=True,
     ),
     "yolo_lock_target": DispatchRule(
-        allowed_actions={"target_lock", "recon_inspect_target"},
+        allowed_actions={"target_lock", "recon_inspect_target", "drop_sequence"},
         requires_send_actions=True,
         requires_send_commands=False,
+    ),
+    "clear_continuous_commands": DispatchRule(
+        allowed_actions={"drop_sequence"},
+        requires_send_actions=True,
+        requires_send_commands=True,
     ),
 }
