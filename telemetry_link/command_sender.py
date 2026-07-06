@@ -103,6 +103,11 @@ class CommandSender(threading.Thread):
             else:
                 return
             self.state_cache.update_link(last_tx_time=time.time())
+            # Atomic stop-and-clear: after successfully sending a STOP
+            # that requested clear_after_send, clear the queue entry
+            # only if it hasn't been replaced by a newer command.
+            if getattr(command, "clear_after_send", False):
+                self.command_queue.clear_control_if_same(command)
         except Exception as exc:
             self.logger.warning("failed to send control command: %s", exc)
 

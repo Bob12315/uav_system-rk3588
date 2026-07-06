@@ -549,19 +549,28 @@ class ActionDispatcher:
         if link_manager is None:
             return {"status": "skipped", "reason": "link_manager_not_available"}
 
-        clear_continuous = getattr(link_manager, "clear_continuous_commands", None)
-        clear_nav = getattr(link_manager, "clear_pending_local_position_actions", None)
-
-        if not callable(clear_continuous):
-            return {
-                "status": "skipped",
-                "reason": "clear_continuous_commands_not_available",
-            }
-
-        clear_continuous()
-
         params = self._action_params(action)
+        send_stop_first = bool(params.get("send_stop_first", False))
         clear_pending_local_position = bool(params.get("clear_pending_local_position", False))
+
+        if send_stop_first:
+            stop_and_clear = getattr(link_manager, "stop_body_velocity_and_clear", None)
+            if not callable(stop_and_clear):
+                return {
+                    "status": "skipped",
+                    "reason": "stop_body_velocity_and_clear_not_available",
+                }
+            stop_and_clear()
+        else:
+            clear_continuous = getattr(link_manager, "clear_continuous_commands", None)
+            if not callable(clear_continuous):
+                return {
+                    "status": "skipped",
+                    "reason": "clear_continuous_commands_not_available",
+                }
+            clear_continuous()
+
+        clear_nav = getattr(link_manager, "clear_pending_local_position_actions", None)
         if clear_pending_local_position and callable(clear_nav):
             clear_nav()
 
@@ -570,6 +579,7 @@ class ActionDispatcher:
             "detail": {
                 "action_type": "clear_continuous_commands",
                 "clear_pending_local_position": clear_pending_local_position,
+                "send_stop_first": send_stop_first,
             },
         }
 

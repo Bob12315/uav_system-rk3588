@@ -38,6 +38,18 @@ class CommandQueue:
         with self._lock:
             self._latest_control = None
 
+    def clear_control_if_same(self, command: ControlCommand) -> bool:
+        """Clear latest control only if it is still the same object.
+
+        Returns True if the control was cleared, False if a newer command
+        has already replaced it.
+        """
+        with self._lock:
+            if self._latest_control is command:
+                self._latest_control = None
+                return True
+            return False
+
     def put_gimbal_rate(self, command: GimbalRateCommand) -> None:
         with self._lock:
             self._latest_gimbal_rate = command

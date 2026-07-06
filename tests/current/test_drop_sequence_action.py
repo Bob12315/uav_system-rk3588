@@ -558,7 +558,7 @@ def test_payload_release_failed_returns_failed() -> None:
 
 
 def test_release_to_climb_emits_clear_continuous() -> None:
-    """payload_release hold done → climb: actions must contain clear_continuous_commands."""
+    """payload_release hold done → climb: clear must have send_stop_first=True."""
     targets = _make_targets((1.0, 5.0))
     params = _base_params(
         targets=targets, payloads=_make_payloads(2),
@@ -588,10 +588,14 @@ def test_release_to_climb_emits_clear_continuous() -> None:
     assert "clear_continuous_commands" in types, (
         "release→climb missing clear_continuous_commands"
     )
+    clear_act = [act for act in release_done_result.actions if act.get("action_type") == "clear_continuous_commands"][0]
+    assert clear_act["params"].get("send_stop_first") is True, (
+        "release→climb clear must have send_stop_first=True"
+    )
 
 
 def test_climb_to_goto_emits_clear_continuous() -> None:
-    """climb timeout → next goto: transition actions contain clear_continuous_commands."""
+    """climb timeout → next goto: clear does NOT need send_stop_first (just cleanup)."""
     targets = _make_targets((1.0, 5.0), (-1.0, 6.0))
     params = _base_params(
         targets=targets, payloads=_make_payloads(2),
@@ -619,6 +623,10 @@ def test_climb_to_goto_emits_clear_continuous() -> None:
     types = [act.get("action_type") for act in transition_result.actions]
     assert "clear_continuous_commands" in types, (
         "climb→goto missing clear_continuous_commands"
+    )
+    clear_act = [act for act in transition_result.actions if act.get("action_type") == "clear_continuous_commands"][0]
+    assert clear_act["params"].get("send_stop_first") is False, (
+        "climb→goto clear should use send_stop_first=False (no BODY_NED to stop)"
     )
 
 
@@ -762,4 +770,117 @@ def test_two_climb_to_goto_transitions_have_unique_keys() -> None:
     assert len(clear_keys) == 2, f"expected 2 clear keys, got {clear_keys}"
     assert clear_keys[0] != clear_keys[1], (
         f"duplicate clear keys: {clear_keys[0]}"
+    )
+
+
+# ── SITL 前安全修复：旧 BODY_NED 停止测试 ────────────────────────────────
+
+CTX_CONTROL_FALSE = {
+    "relative_altitude": 2.5, "target_valid": True,
+    "ex_cam": 0.0, "ey_cam": 0.0, "target_locked": True, "control_allowed": False,
+}
+CTX_TARGET_INVALID = {
+    "relative_altitude": 2.5, "target_valid": False,
+    "ex_cam": 0.0, "ey_cam": 0.0, "target_locked": False, "control_allowed": True,
+}
+
+
+def test_align_control_allowed_false_emits_zero_and_clear() -> None:
+    """control_allowed true→false: next tick returns send_stop_first clear, NO flight_command."""
+    targets = _make_targets((1.0, 5.0))
+    params = _base_params(
+        targets=targets, payloads=_make_payloads(1),
+        goto_max_updates=5, target_lock_max_updates=5,
+        align_descend_max_updates=50,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    # goto → lock → align
+    _run_until_phase(a, GOTO_CTX, "lock_target")
+    _run_until_phase(a, LOCK_OK_CTX, "align_descend")
+
+    # Tick 1: active control (non-zero velocities possible)
+    r1 = a.update(ALIGN_ACTIVE_CTX)
+    types1 = [act.get("action_type") for act in r1.actions]
+    assert "flight_command" in types1, "first active tick should emit flight_command"
+
+    # Tick 2: control_allowed=False → clear with send_stop_first=True (NO flight_command)
+    r2 = a.update(CTX_CONTROL_FALSE)
+    types2 = [act.get("action_type") for act in r2.actions]
+    assert "flight_command" not in types2, (
+        "inactive tick must NOT emit flight_command; use send_stop_first clear instead"
+    )
+    assert "clear_continuous_commands" in types2, (
+        "inactive tick must emit clear_continuous_commands with send_stop_first"
+    )
+    clear_act = [act for act in r2.actions if act.get("action_type") == "clear_continuous_commands"][0]
+    assert clear_act["params"].get("send_stop_first") is True, (
+        "inactive clear must have send_stop_first=True"
+    )
+
+
+def test_align_target_invalid_emits_zero_and_clear() -> None:
+    """target_valid true→false: next tick returns send_stop_first clear, NO flight_command."""
+    targets = _make_targets((1.0, 5.0))
+    params = _base_params(
+        targets=targets, payloads=_make_payloads(1),
+        goto_max_updates=5, target_lock_max_updates=5,
+        align_descend_max_updates=50,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    _run_until_phase(a, GOTO_CTX, "lock_target")
+    _run_until_phase(a, LOCK_OK_CTX, "align_descend")
+
+    # Tick 1: active control
+    a.update(ALIGN_ACTIVE_CTX)
+
+    # Tick 2: target lost
+    r2 = a.update(CTX_TARGET_INVALID)
+    types2 = [act.get("action_type") for act in r2.actions]
+    assert "flight_command" not in types2, (
+        "target lost tick must NOT emit flight_command; use send_stop_first clear instead"
+    )
+    assert "clear_continuous_commands" in types2, (
+        "target lost tick must emit clear_continuous_commands"
+    )
+    clear_act = [act for act in r2.actions if act.get("action_type") == "clear_continuous_commands"][0]
+    assert clear_act["params"].get("send_stop_first") is True, (
+        "target lost clear must have send_stop_first=True"
+    )
+
+
+def test_align_to_release_transition_emits_clear() -> None:
+    """align done → release transition emits clear_continuous_commands with send_stop_first."""
+    targets = _make_targets((1.0, 5.0))
+    params = _base_params(
+        targets=targets, payloads=_make_payloads(1),
+        goto_max_updates=5, target_lock_max_updates=5,
+        align_descend_max_updates=50,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    _run_until_phase(a, GOTO_CTX, "lock_target")
+    _run_until_phase(a, LOCK_OK_CTX, "align_descend")
+
+    # align done → transition
+    transition_result = None
+    for _ in range(20):
+        r = a.update(ALIGN_DONE_CTX)
+        if a.phase == "release_payload":
+            transition_result = r
+            break
+
+    assert transition_result is not None
+    types = [act.get("action_type") for act in transition_result.actions]
+    assert "clear_continuous_commands" in types, (
+        "align→release transition missing clear_continuous_commands"
+    )
+    # clear must have send_stop_first=True
+    clear_act = [act for act in transition_result.actions if act.get("action_type") == "clear_continuous_commands"][0]
+    assert clear_act["params"].get("send_stop_first") is True, (
+        "align→release clear must have send_stop_first=True"
     )

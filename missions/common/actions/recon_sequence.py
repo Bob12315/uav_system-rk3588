@@ -307,14 +307,13 @@ class ReconSequenceAction(ActionModule):
             self._start_climb()
 
             if is_timeout and not (result.done or result.failed):
-                # Outer timeout: stop child, explicit zero + clear.
+                # Outer timeout: stop child, atomic stop-and-clear.
                 # Must NOT pass through result.actions — it may contain
                 # an active non-zero flight_command from the child.
                 if child is not None:
                     child.stop()
                 actions: list[Any] = [
-                    self._zero_flight_command_action("observe_timeout"),
-                    self._clear_continuous_action("after_observe_timeout"),
+                    self._clear_continuous_action("after_observe_timeout", send_stop_first=True),
                 ]
                 return ActionResult(
                     actions=actions,
@@ -322,10 +321,10 @@ class ReconSequenceAction(ActionModule):
                     detail=self._make_detail(),
                 )
 
-            # Child done or failed: pass through child zero flight_command,
-            # THEN clear continuous commands.
+            # Child done or failed: pass through child actions,
+            # THEN atomic stop-and-clear.
             actions = self._actions_with_child_then_clear(
-                result.actions, "after_observe",
+                result.actions, "after_observe", send_stop_first=True,
             )
             return ActionResult(
                 actions=actions,
@@ -471,24 +470,33 @@ class ReconSequenceAction(ActionModule):
 
     def _actions_with_child_then_clear(
         self, child_actions: list[Any] | None, suffix: str,
+        *,
+        send_stop_first: bool = False,
     ) -> list[Any]:
         """Pass through child actions, then append clear_continuous_commands.
 
-        Ensures sub-action zero flight_command is emitted before clear.
+        When send_stop_first=True, the clear is atomic (stop→send→clear).
         """
         actions = list(child_actions or [])
-        actions.append(self._clear_continuous_action(suffix))
+        actions.append(self._clear_continuous_action(suffix, send_stop_first=send_stop_first))
         return actions
 
-    def _clear_continuous_action(self, key_suffix: str) -> dict[str, Any]:
+    def _clear_continuous_action(self, key_suffix: str, *, send_stop_first: bool = False) -> dict[str, Any]:
         """Build a clear_continuous_commands action for phase transitions.
 
         Key includes target_index and phase_update_count so every
         transition within the same run produces a unique key.
+
+        When send_stop_first=True, the dispatcher calls
+        stop_body_velocity_and_clear() to atomically send a zero STOP
+        before clearing the continuous queue.
         """
         return {
             "action_type": "clear_continuous_commands",
-            "params": {"clear_pending_local_position": False},
+            "params": {
+                "clear_pending_local_position": False,
+                "send_stop_first": send_stop_first,
+            },
             "key": (
                 f"recon_sequence_clear_{key_suffix}"
                 f"_t{self.target_index}_u{self.phase_update_count}"

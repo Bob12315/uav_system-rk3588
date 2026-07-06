@@ -123,6 +123,7 @@ class ControlCommand:
     yaw_rate: float = 0.0
     timestamp: float = 0.0
     frame: int = 1
+    clear_after_send: bool = False
 
 
 @dataclass(slots=True)

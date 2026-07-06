@@ -584,3 +584,118 @@ def test_command_sender_release_payload_does_not_emit_mavlink_without_mapping() 
     )
 
     assert client.master.mav.command_long_calls == []
+
+
+# ── SITL 前安全修复：CommandQueue / CommandSender 原子 stop-and-clear ────
+
+
+def test_clear_control_if_same_only_clears_exact_object() -> None:
+    """clear_control_if_same uses identity (is) check — only clears the exact object."""
+    from telemetry_link.command_queue import CommandQueue
+
+    q = CommandQueue()
+    cmd_a = ControlCommand(command_type=ControlType.VELOCITY, vx=1.0)
+    cmd_b = ControlCommand(command_type=ControlType.STOP, vx=0.0, clear_after_send=True)
+
+    q.put_control(cmd_a)
+    # clear with cmd_b should NOT clear cmd_a (different object)
+    result = q.clear_control_if_same(cmd_b)
+    assert result is False
+    assert q.peek_control() is cmd_a
+
+    # clear with cmd_a should clear it
+    result = q.clear_control_if_same(cmd_a)
+    assert result is True
+    assert q.peek_control() is None
+
+
+def test_clear_control_if_same_does_not_clear_newer_command() -> None:
+    """If a newer command replaces the STOP, clear_control_if_same must not clear it."""
+    from telemetry_link.command_queue import CommandQueue
+
+    q = CommandQueue()
+    stop_cmd = ControlCommand(command_type=ControlType.STOP, vx=0.0, clear_after_send=True)
+    new_cmd = ControlCommand(command_type=ControlType.VELOCITY, vx=0.5)
+
+    q.put_control(stop_cmd)
+    assert q.peek_control() is stop_cmd
+
+    # New command replaces STOP before it was sent
+    q.put_control(new_cmd)
+    assert q.peek_control() is new_cmd
+
+    # Clearing the old STOP must NOT affect the new command
+    result = q.clear_control_if_same(stop_cmd)
+    assert result is False, "must not clear newer command"
+    assert q.peek_control() is new_cmd
+
+
+def test_command_sender_sends_stop_and_clears_queue() -> None:
+    """CommandSender sends STOP with clear_after_send then clears the queue entry."""
+    sender, client = _sender_with_fake_client()
+    stop_cmd = ControlCommand(
+        command_type=ControlType.STOP,
+        vx=0.0, vy=0.0, vz=0.0, yaw_rate=0.0,
+        frame=8,
+        clear_after_send=True,
+    )
+    sender.command_queue.put_control(stop_cmd)
+    assert sender.command_queue.peek_control() is stop_cmd
+
+    sender._send_control(stop_cmd)
+
+    # After sending, the queue entry should be cleared
+    assert sender.command_queue.peek_control() is None
+    # Verify mavlink actually received a velocity setpoint
+    assert len(client.master.mav.local_position_calls) >= 1
+    call = client.master.mav.local_position_calls[-1]
+    # Vx, Vy, Vz = 0.0
+    assert call[8:11] == (0.0, 0.0, 0.0)
+
+
+def test_command_sender_does_not_clear_on_send_failure() -> None:
+    """If _send_control raises, the STOP must remain in queue for retry."""
+    sender, client = _sender_with_fake_client()
+    stop_cmd = ControlCommand(
+        command_type=ControlType.STOP,
+        vx=0.0, vy=0.0, vz=0.0, yaw_rate=0.0,
+        frame=8,
+        clear_after_send=True,
+    )
+    sender.command_queue.put_control(stop_cmd)
+
+    # Simulate send failure by making send_raw_message raise
+    def failing_send(_callback):
+        raise RuntimeError("simulated send failure")
+
+    client.send_raw_message = failing_send
+
+    try:
+        sender._send_control(stop_cmd)
+    except RuntimeError:
+        pass
+
+    # Queue must still contain the STOP for retry
+    assert sender.command_queue.peek_control() is stop_cmd, (
+        "STOP must remain in queue after send failure for retry"
+    )
+
+
+def test_regular_stop_without_clear_after_send_does_not_clear_queue() -> None:
+    """Regular stop_body_velocity (without clear_after_send) must NOT clear the queue."""
+    sender, client = _sender_with_fake_client()
+    regular_stop = ControlCommand(
+        command_type=ControlType.STOP,
+        vx=0.0, vy=0.0, vz=0.0, yaw_rate=0.0,
+        frame=8,
+        # clear_after_send defaults to False
+    )
+    sender.command_queue.put_control(regular_stop)
+    assert sender.command_queue.peek_control() is regular_stop
+
+    sender._send_control(regular_stop)
+
+    # Regular STOP without clear_after_send must remain in queue
+    assert sender.command_queue.peek_control() is regular_stop, (
+        "regular STOP must stay in queue for continuous rate sending"
+    )

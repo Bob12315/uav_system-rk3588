@@ -398,3 +398,64 @@ def test_sitl_profile_matches_base_full_template() -> None:
     base = _template(FULL_TEMPLATE_PATH)
     sitl = _template(sitl_path)
     assert sitl == base
+
+
+# ── SITL 前安全修复：空中失败 fallback 测试 ─────────────────────────────
+
+def test_takeoff_failed_jumps_to_land_home() -> None:
+    """takeoff failed → jump_to land_home, not mission failed."""
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    policy = by_label["takeoff_5m"]["on_failed"]
+    assert policy["action"] == "jump_to"
+    assert policy["target"] == "land_home"
+
+
+def test_drop_scan_failed_jumps_to_recon_scan_center() -> None:
+    """drop fixed_view_localize failed → jump_to recon scan instead of mission failed."""
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    policy = by_label["drop_scan"]["on_failed"]
+    assert policy["action"] == "jump_to"
+    assert policy["target"] == "goto_recon_scan_center"
+
+
+def test_select_drop_targets_failed_jumps_to_recon_scan_center() -> None:
+    """select_drop_targets failed → jump_to recon scan instead of return_home."""
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    policy = by_label["select_drop_targets"]["on_failed"]
+    assert policy["action"] == "jump_to"
+    assert policy["target"] == "goto_recon_scan_center"
+
+
+def test_recon_scan_failed_jumps_to_return_home() -> None:
+    """recon fixed_view_localize failed → jump_to return_home."""
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    policy = by_label["recon_scan"]["on_failed"]
+    assert policy["action"] == "jump_to"
+    assert policy["target"] == "return_home"
+
+
+def test_select_recon_targets_failed_jumps_to_return_home() -> None:
+    """select_recon_targets failed → jump_to return_home."""
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    policy = by_label["select_recon_targets"]["on_failed"]
+    assert policy["action"] == "jump_to"
+    assert policy["target"] == "return_home"
+
+
+def test_drop_sequence_failed_continues_to_recon() -> None:
+    """drop_sequence failed → continue to recon scan (test via continue action)."""
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    assert by_label["drop_sequence"]["on_failed"]["action"] == "continue"
+
+
+def test_return_home_failed_continues_to_land() -> None:
+    """return_home failed → continue to land_home."""
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    assert by_label["return_home"]["on_failed"]["action"] == "continue"

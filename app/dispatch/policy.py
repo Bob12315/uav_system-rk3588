@@ -97,7 +97,7 @@ ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
         requires_send_commands=False,
     ),
     "clear_continuous_commands": DispatchRule(
-        allowed_actions={"drop_sequence", "recon_sequence"},
+        allowed_actions={"drop_sequence", "recon_sequence", "recon_descend_observe"},
         requires_send_actions=True,
         requires_send_commands=True,
     ),

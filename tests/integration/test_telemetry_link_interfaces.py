@@ -187,6 +187,60 @@ def test_stop_body_velocity_queues_stop_with_body_ned_frame() -> None:
     assert cmd.frame == BODY_NED
 
 
+# ── stop_body_velocity_and_clear (atomic stop-and-clear) ─────────────
+
+
+def test_stop_body_velocity_and_clear_queues_stop_with_clear_after_send() -> None:
+    """stop_body_velocity_and_clear queues a STOP with clear_after_send=True."""
+    from telemetry_link.frames import BODY_NED
+
+    manager = LinkManager(_config())
+    manager.stop_body_velocity_and_clear()
+
+    cmd = _cq(manager).peek_control()
+    assert cmd is not None
+    assert cmd.command_type == ControlType.STOP
+    assert cmd.vx == 0.0
+    assert cmd.vy == 0.0
+    assert cmd.vz == 0.0
+    assert cmd.yaw_rate == 0.0
+    assert cmd.frame == BODY_NED
+    assert getattr(cmd, "clear_after_send", False) is True, (
+        "stop_body_velocity_and_clear must set clear_after_send=True"
+    )
+
+
+def test_stop_body_velocity_and_clear_replaces_old_nonzero_control() -> None:
+    """stop_body_velocity_and_clear replaces old non-zero control with STOP."""
+    manager = LinkManager(_config())
+    # First put a non-zero velocity control
+    manager.send_velocity_command(1.0, 2.0, 3.0)
+    assert _cq(manager).peek_control() is not None
+    assert _cq(manager).peek_control().vx == pytest.approx(1.0)
+
+    # Then call stop_body_velocity_and_clear
+    manager.stop_body_velocity_and_clear()
+
+    cmd = _cq(manager).peek_control()
+    assert cmd is not None
+    assert cmd.command_type == ControlType.STOP
+    assert cmd.vx == 0.0
+    assert getattr(cmd, "clear_after_send", False) is True
+
+
+def test_stop_body_velocity_is_not_affected_by_stop_and_clear() -> None:
+    """stop_body_velocity must NOT set clear_after_send — only stop_and_clear does."""
+    manager = LinkManager(_config())
+    manager.stop_body_velocity()
+
+    cmd = _cq(manager).peek_control()
+    assert cmd is not None
+    assert cmd.command_type == ControlType.STOP
+    assert getattr(cmd, "clear_after_send", False) is False, (
+        "stop_body_velocity must NOT set clear_after_send"
+    )
+
+
 # ── set_servo ────────────────────────────────────────────────────────
 
 
@@ -517,12 +571,14 @@ def test_hold_current_local_position_returns_false_when_position_invalid() -> No
 
 def test_clear_navigation_queue_with_hold_calls_both() -> None:
     """ActionRuntimeService.clear_navigation_queue with hold_current=True
-    calls stop_body -> clear_continuous -> clear_local_position -> hold in order."""
+    calls stop_and_clear -> clear_local_position -> hold in order."""
     from app.action_runtime import ActionRuntimeService
 
     calls: list[str] = []
 
     class FakeLink:
+        def stop_body_velocity_and_clear(self) -> None:
+            calls.append("stop_and_clear")
         def stop_body_velocity(self) -> None:
             calls.append("stop_body")
         def clear_continuous_commands(self) -> None:
@@ -534,16 +590,18 @@ def test_clear_navigation_queue_with_hold_calls_both() -> None:
             return True
 
     ActionRuntimeService.clear_navigation_queue(FakeLink(), hold_current=True)
-    assert calls == ["stop_body", "clear_continuous", "clear_local_position", "hold_current"]
+    assert calls == ["stop_and_clear", "clear_local_position", "hold_current"]
 
 
 def test_clear_navigation_queue_without_hold_skips_hold() -> None:
-    """Without hold_current, stop then clear continuous + local position."""
+    """Without hold_current, stop_and_clear + clear_local_position only."""
     from app.action_runtime import ActionRuntimeService
 
     calls: list[str] = []
 
     class FakeLink:
+        def stop_body_velocity_and_clear(self) -> None:
+            calls.append("stop_and_clear")
         def stop_body_velocity(self) -> None:
             calls.append("stop_body")
         def clear_continuous_commands(self) -> None:
@@ -555,7 +613,7 @@ def test_clear_navigation_queue_without_hold_skips_hold() -> None:
             return True
 
     ActionRuntimeService.clear_navigation_queue(FakeLink(), hold_current=False)
-    assert calls == ["stop_body", "clear_continuous", "clear_local_position"]
+    assert calls == ["stop_and_clear", "clear_local_position"]
 
 
 def test_local_pos_command_parses_yaw_rad() -> None:

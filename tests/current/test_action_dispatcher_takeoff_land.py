@@ -115,6 +115,9 @@ class FakeLinkManagerWithClear:
     def stop_body_velocity(self) -> None:
         self.calls.append("stop_body_velocity")
 
+    def stop_body_velocity_and_clear(self) -> None:
+        self.calls.append("stop_body_velocity_and_clear")
+
 
 def test_clear_continuous_commands_dispatch_calls_clear() -> None:
     """clear_continuous_commands action calls link_manager.clear_continuous_commands."""
@@ -139,6 +142,34 @@ def test_clear_continuous_commands_dispatch_calls_clear() -> None:
     assert "stop_body_velocity" not in fake_link.calls
     # clear_pending_local_position=False → must not clear nav
     assert "clear_pending_local_position_actions" not in fake_link.calls
+
+
+# ── SITL 前安全修复：zero+clear 连续队列无残留 ──────────────────────────
+
+
+def test_zero_clear_dispatches_without_stop_body_velocity() -> None:
+    """clear_continuous_commands dispatches without calling stop_body_velocity."""
+    fake_link = FakeLinkManagerWithClear()
+    dispatcher = _dispatcher(send_actions=True)
+
+    clear = {
+        "action_type": "clear_continuous_commands",
+        "params": {"clear_pending_local_position": False},
+        "key": "drop_sequence_clear_continuous_align_inactive_t0_p0_u5",
+        "once": True,
+        "priority": 10,
+    }
+    dispatch = dispatcher.dispatch_actions(
+        [clear],
+        action_name="drop_sequence",
+        send_commands=True,
+        link_manager=fake_link,
+    )
+    assert len(dispatch["sent"]) == 1
+    assert dispatch["sent"][0]["action_type"] == "clear_continuous_commands"
+    assert "clear_continuous_commands" in fake_link.calls
+    # Must NOT call stop_body_velocity (that would create a new continuous zero)
+    assert "stop_body_velocity" not in fake_link.calls
 
 
 def test_clear_continuous_commands_with_pending_local_position() -> None:
@@ -254,3 +285,38 @@ def test_recon_sequence_clear_continuous_dispatch() -> None:
     assert len(dispatch["sent"]) == 1
     assert dispatch["sent"][0]["action_type"] == "clear_continuous_commands"
     assert "clear_continuous_commands" in fake_link.calls
+
+
+# ── SITL 前安全修复：send_stop_first 原子 stop-and-clear ──────────────
+
+
+def test_clear_continuous_send_stop_first_calls_stop_and_clear() -> None:
+    """send_stop_first=True → stop_body_velocity_and_clear, NOT clear_continuous_commands."""
+    fake_link = FakeLinkManagerWithClear()
+    dispatcher = _dispatcher(send_actions=True)
+    dispatch = dispatcher.dispatch_actions(
+        [{
+            "action_type": "clear_continuous_commands",
+            "params": {"clear_pending_local_position": False, "send_stop_first": True},
+            "key": "test_send_stop_first",
+            "once": True,
+            "priority": 10,
+        }],
+        action_name="recon_descend_observe",
+        send_commands=True,
+        link_manager=fake_link,
+    )
+    assert len(dispatch["sent"]) == 1
+    assert dispatch["sent"][0]["action_type"] == "clear_continuous_commands"
+    # Must call stop_body_velocity_and_clear, NOT clear_continuous_commands
+    assert "stop_body_velocity_and_clear" in fake_link.calls
+    assert "clear_continuous_commands" not in fake_link.calls
+
+
+def test_recon_descend_observe_clear_continuous_policy_allowed() -> None:
+    """recon_descend_observe must be allowed to dispatch clear_continuous_commands."""
+    rule = ACTION_DISPATCH_POLICY.get("clear_continuous_commands")
+    assert rule is not None
+    assert "recon_descend_observe" in rule.allowed_actions, (
+        "recon_descend_observe must have clear_continuous_commands permission"
+    )
