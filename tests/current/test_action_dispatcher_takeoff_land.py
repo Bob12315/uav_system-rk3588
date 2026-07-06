@@ -214,3 +214,43 @@ def test_two_clear_actions_with_unique_keys_both_dispatch() -> None:
         f"skipped={dispatch['skipped']}"
     )
     assert fake_link.calls.count("clear_continuous_commands") == 2
+
+
+# ── recon_sequence dispatch policy tests ───────────────────────────────
+
+
+def test_recon_sequence_dispatch_policy_allows_all_required_types() -> None:
+    """recon_sequence must be in allowed_actions for these 4 action types."""
+    required_types = [
+        "local_position",
+        "flight_command",
+        "yolo_lock_target",
+        "clear_continuous_commands",
+    ]
+    for action_type in required_types:
+        rule = ACTION_DISPATCH_POLICY.get(action_type)
+        assert rule is not None, f"missing policy rule for {action_type}"
+        assert "recon_sequence" in rule.allowed_actions, (
+            f"recon_sequence not in {action_type}.allowed_actions"
+        )
+
+
+def test_recon_sequence_clear_continuous_dispatch() -> None:
+    """recon_sequence can dispatch clear_continuous_commands."""
+    fake_link = FakeLinkManagerWithClear()
+    dispatcher = _dispatcher(send_actions=True)
+    dispatch = dispatcher.dispatch_actions(
+        [{
+            "action_type": "clear_continuous_commands",
+            "params": {"clear_pending_local_position": False},
+            "key": "recon_sequence_clear_before_climb_t0_u1",
+            "once": True,
+            "priority": 10,
+        }],
+        action_name="recon_sequence",
+        send_commands=True,
+        link_manager=fake_link,
+    )
+    assert len(dispatch["sent"]) == 1
+    assert dispatch["sent"][0]["action_type"] == "clear_continuous_commands"
+    assert "clear_continuous_commands" in fake_link.calls
