@@ -552,3 +552,131 @@ def test_payload_release_failed_returns_failed() -> None:
     assert "flight_command" in types
     # Sequence must not hang — _done is set
     assert a._done is True
+
+
+# ── Phase2 二次修复测试：clear_continuous_commands ────────────────────────────
+
+
+def test_release_to_climb_emits_clear_continuous() -> None:
+    """payload_release hold done → climb: actions must contain clear_continuous_commands."""
+    targets = _make_targets((1.0, 5.0))
+    params = _base_params(
+        targets=targets, payloads=_make_payloads(2),
+        goto_max_updates=5, target_lock_max_updates=5,
+        align_descend_max_updates=5, release_wait_updates=2,
+        climb_max_updates=1,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    _run_until_phase(a, GOTO_CTX, "lock_target")
+    _run_until_phase(a, LOCK_OK_CTX, "align_descend")
+    _run_until_phase(a, ALIGN_DONE_CTX, "release_payload")
+
+    # Run release to completion (3 ticks: release, wait, hold)
+    release_done_result = None
+    for _ in range(10):
+        r = a.update({})
+        if a.phase != "release_payload" or r.done:
+            release_done_result = r
+            break
+
+    assert release_done_result is not None
+    assert release_done_result.done is False  # not done yet, 2nd payload remains
+    types = [act.get("action_type") for act in release_done_result.actions]
+    assert "set_servo" in types, "release→climb missing hold servo"
+    assert "clear_continuous_commands" in types, (
+        "release→climb missing clear_continuous_commands"
+    )
+
+
+def test_climb_to_goto_emits_clear_continuous() -> None:
+    """climb timeout → next goto: transition actions contain clear_continuous_commands."""
+    targets = _make_targets((1.0, 5.0), (-1.0, 6.0))
+    params = _base_params(
+        targets=targets, payloads=_make_payloads(2),
+        goto_max_updates=5, target_lock_max_updates=5,
+        align_descend_max_updates=5, climb_max_updates=1,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    # t0: full cycle to climb
+    _run_until_phase(a, GOTO_CTX, "lock_target")
+    _run_until_phase(a, LOCK_OK_CTX, "align_descend")
+    _run_until_phase(a, ALIGN_DONE_CTX, "release_payload")
+    _run_until_phase(a, {}, "climb_after_release")
+
+    # climb timeout → transition to goto_target
+    transition_result = None
+    for _ in range(20):
+        r = a.update(CLIMB_FAR_CTX)
+        if a.phase == "goto_target":
+            transition_result = r
+            break
+
+    assert transition_result is not None
+    types = [act.get("action_type") for act in transition_result.actions]
+    assert "clear_continuous_commands" in types, (
+        "climb→goto missing clear_continuous_commands"
+    )
+
+
+def test_zero_command_values_are_all_zero() -> None:
+    """flight_command zero velocity must have vx=vy=vz=yaw_rate=0, once=False."""
+    targets = _make_targets((1.0, 5.0))
+    params = _base_params(
+        targets=targets, payloads=_make_payloads(1),
+        goto_max_updates=5, target_lock_max_updates=5,
+        align_descend_max_updates=5, release_wait_updates=2,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    _run_until_phase(a, GOTO_CTX, "lock_target")
+    _run_until_phase(a, LOCK_OK_CTX, "align_descend")
+    _run_until_phase(a, ALIGN_DONE_CTX, "release_payload")
+
+    r = a.update({})
+    flight_cmds = [
+        act for act in r.actions
+        if act.get("action_type") == "flight_command"
+    ]
+    assert len(flight_cmds) >= 1, "no flight_command in release tick"
+    cmd = flight_cmds[0]
+    p = cmd.get("params") or {}
+    # All velocity components must be zero
+    for key in ("vx_body_mps", "vy_body_mps", "vz_body_mps", "yaw_rate_cmd",
+                "vx_cmd", "vy_cmd", "vz_cmd"):
+        val = p.get(key)
+        if val is not None:
+            assert float(val) == 0.0, f"zero command {key}={val}, expected 0"
+    # Must be continuous (once=False) to keep refreshing
+    assert cmd.get("once") is False, "zero velocity must be continuous (once=False)"
+
+
+def test_payload_release_failed_emits_clear_continuous() -> None:
+    """PayloadRelease failure must also emit clear_continuous_commands."""
+    targets = _make_targets((1.0, 5.0))
+    params = _base_params(
+        targets=targets, payloads=_make_payloads(1),
+        goto_max_updates=5, target_lock_max_updates=5,
+        align_descend_max_updates=5,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    _run_until_phase(a, GOTO_CTX, "lock_target")
+    _run_until_phase(a, LOCK_OK_CTX, "align_descend")
+    _run_until_phase(a, ALIGN_DONE_CTX, "release_payload")
+
+    # Simulate PayloadReleaseAction internal failure
+    a._current_action.state = "invalid_force_fail"
+    a._current_action.failed = True
+
+    r = a.update({})
+    assert r.failed is True
+    types = [act.get("action_type") for act in r.actions]
+    assert "clear_continuous_commands" in types, (
+        "payload_release_failed missing clear_continuous_commands"
+    )

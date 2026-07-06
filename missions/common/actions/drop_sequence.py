@@ -351,6 +351,7 @@ class DropSequenceAction(ActionModule):
         # Fix4: handle PayloadRelease internal failure — never hang in release phase
         if result.failed:
             actions = self._actions_with_zero(result.detail, result.actions)
+            actions.append(self._clear_continuous_action("release_failed"))
             self._done = True
             self._last_reason = "payload_release_failed"
             self._last_detail = self._make_detail(status="failed")
@@ -381,6 +382,8 @@ class DropSequenceAction(ActionModule):
             if is_fallback:
                 self.fallback_release_count += 1
             self._advance_after_payload()
+            # Always clear continuous commands before climb or done
+            actions.append(self._clear_continuous_action("before_climb"))
             # Fix1: only propagate done=True when the entire sequence is done
             if self._done:
                 self._last_detail = self._make_detail(status="done")
@@ -428,7 +431,13 @@ class DropSequenceAction(ActionModule):
 
         if result.done or self.phase_update_count > self.climb_max_updates:
             self._advance_to_next_cycle()
-            return self._phase_transition_result()
+            # Always clear stale continuous commands before next navigation phase
+            actions = [self._clear_continuous_action("before_goto")]
+            return ActionResult(
+                actions=actions,
+                reason=f"transition_to_{self.phase}",
+                detail=self._make_detail(),
+            )
 
         return ActionResult(
             actions=list(result.actions),
@@ -568,6 +577,16 @@ class DropSequenceAction(ActionModule):
             reason=f"transition_to_{self.phase}",
             detail=self._make_detail(),
         )
+
+    def _clear_continuous_action(self, key_suffix: str) -> dict[str, Any]:
+        """Build a clear_continuous_commands action for phase transitions."""
+        return {
+            "action_type": "clear_continuous_commands",
+            "params": {"clear_pending_local_position": False},
+            "key": f"drop_sequence_clear_continuous_{key_suffix}",
+            "once": True,
+            "priority": 10,
+        }
 
     def _make_detail(self, *, status: str = "") -> dict[str, Any]:
         detail: dict[str, Any] = {
