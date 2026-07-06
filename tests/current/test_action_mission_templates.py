@@ -353,10 +353,12 @@ def test_drop_sequence_on_failed_is_continue() -> None:
     assert by_label["drop_sequence"]["on_failed"]["action"] == "continue"
 
 
-def test_recon_sequence_on_failed_is_continue() -> None:
+def test_recon_sequence_on_failed_jumps_to_return_home() -> None:
     data = _template(FULL_TEMPLATE_PATH)
     by_label = {step.get("label", ""): step for step in data["steps"]}
-    assert by_label["recon_sequence"]["on_failed"]["action"] == "continue"
+    policy = by_label["recon_sequence"]["on_failed"]
+    assert policy["action"] == "jump_to"
+    assert policy["target"] == "return_home"
 
 
 def test_build_recon_report_on_failed_is_continue() -> None:
@@ -369,3 +371,30 @@ def test_return_home_on_failed_is_continue() -> None:
     data = _template(FULL_TEMPLATE_PATH)
     by_label = {step.get("label", ""): step for step in data["steps"]}
     assert by_label["return_home"]["on_failed"]["action"] == "continue"
+
+
+# ── Phase4 fix: drop candidate count tests ─────────────────────────────
+
+def test_select_drop_targets_target_count_is_3() -> None:
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    assert by_label["select_drop_targets"]["params"]["target_count"] == 3
+
+
+def test_drop_sequence_max_target_candidates_is_3() -> None:
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    assert by_label["drop_sequence"]["params"]["max_target_candidates"] == 3
+
+
+def test_drop_sequence_max_payloads_is_2() -> None:
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    assert by_label["drop_sequence"]["params"]["max_payloads"] == 2
+
+
+def test_sitl_profile_matches_base_full_template() -> None:
+    sitl_path = Path("config/profiles/rk3588-sitl/action_missions/rescue_2026_full_auto.json")
+    base = _template(FULL_TEMPLATE_PATH)
+    sitl = _template(sitl_path)
+    assert sitl == base

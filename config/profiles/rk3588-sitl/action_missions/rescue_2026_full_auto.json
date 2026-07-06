@@ -70,7 +70,7 @@
       },
       "params": {
         "objects": "$drop_scan.localized_objects",
-        "target_count": 2,
+        "target_count": 3,
         "allow_fewer": true,
         "score_table": {
           "bucket_1": 500,
@@ -255,7 +255,9 @@
       "label": "recon_sequence",
       "save_as": "recon_sequence",
       "on_failed": {
-        "action": "continue"
+        "action": "jump_to",
+        "target": "return_home",
+        "max_attempts": 1
       },
       "params": {
         "targets": "$recon_targets.target_slots",
