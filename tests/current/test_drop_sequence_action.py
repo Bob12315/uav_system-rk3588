@@ -763,3 +763,120 @@ def test_two_climb_to_goto_transitions_have_unique_keys() -> None:
     assert clear_keys[0] != clear_keys[1], (
         f"duplicate clear keys: {clear_keys[0]}"
     )
+
+
+# ── SITL 前安全修复：旧 BODY_NED 停止测试 ────────────────────────────────
+
+CTX_CONTROL_FALSE = {
+    "relative_altitude": 2.5, "target_valid": True,
+    "ex_cam": 0.0, "ey_cam": 0.0, "target_locked": True, "control_allowed": False,
+}
+CTX_TARGET_INVALID = {
+    "relative_altitude": 2.5, "target_valid": False,
+    "ex_cam": 0.0, "ey_cam": 0.0, "target_locked": False, "control_allowed": True,
+}
+
+
+def test_align_control_allowed_false_emits_zero_and_clear() -> None:
+    """control_allowed true→false: next tick returns zero + clear_continuous."""
+    targets = _make_targets((1.0, 5.0))
+    params = _base_params(
+        targets=targets, payloads=_make_payloads(1),
+        goto_max_updates=5, target_lock_max_updates=5,
+        align_descend_max_updates=50,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    # goto → lock → align
+    _run_until_phase(a, GOTO_CTX, "lock_target")
+    _run_until_phase(a, LOCK_OK_CTX, "align_descend")
+
+    # Tick 1: active control (non-zero velocities possible)
+    r1 = a.update(ALIGN_ACTIVE_CTX)
+    types1 = [act.get("action_type") for act in r1.actions]
+    assert "flight_command" in types1, "first active tick should emit flight_command"
+
+    # Tick 2: control_allowed=False → zero + clear
+    r2 = a.update(CTX_CONTROL_FALSE)
+    types2 = [act.get("action_type") for act in r2.actions]
+    assert "flight_command" in types2, "inactive tick must emit flight_command (zero)"
+    assert "clear_continuous_commands" in types2, (
+        "inactive tick must emit clear_continuous_commands"
+    )
+    # Verify zero velocity
+    fc = [act for act in r2.actions if act.get("action_type") == "flight_command"][0]
+    p = fc.get("params") or {}
+    for key in ("vx_cmd", "vy_cmd", "vz_cmd", "yaw_rate_cmd"):
+        val = p.get(key)
+        if val is not None:
+            assert float(val) == 0.0, f"zero command {key}={val}, expected 0"
+    assert p.get("active") is True, "zero command must have active=True"
+    assert p.get("valid") is True, "zero command must have valid=True"
+
+
+def test_align_target_invalid_emits_zero_and_clear() -> None:
+    """target_valid true→false: next tick returns zero + clear_continuous."""
+    targets = _make_targets((1.0, 5.0))
+    params = _base_params(
+        targets=targets, payloads=_make_payloads(1),
+        goto_max_updates=5, target_lock_max_updates=5,
+        align_descend_max_updates=50,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    _run_until_phase(a, GOTO_CTX, "lock_target")
+    _run_until_phase(a, LOCK_OK_CTX, "align_descend")
+
+    # Tick 1: active control
+    a.update(ALIGN_ACTIVE_CTX)
+
+    # Tick 2: target lost
+    r2 = a.update(CTX_TARGET_INVALID)
+    types2 = [act.get("action_type") for act in r2.actions]
+    assert "flight_command" in types2, "target lost tick must emit flight_command (zero)"
+    assert "clear_continuous_commands" in types2, (
+        "target lost tick must emit clear_continuous_commands"
+    )
+    fc = [act for act in r2.actions if act.get("action_type") == "flight_command"][0]
+    p = fc.get("params") or {}
+    for key in ("vx_cmd", "vy_cmd", "vz_cmd", "yaw_rate_cmd"):
+        val = p.get(key)
+        if val is not None:
+            assert float(val) == 0.0, f"zero command {key}={val}, expected 0"
+
+
+def test_align_to_release_transition_emits_clear() -> None:
+    """align done → release transition emits clear_continuous_commands."""
+    targets = _make_targets((1.0, 5.0))
+    params = _base_params(
+        targets=targets, payloads=_make_payloads(1),
+        goto_max_updates=5, target_lock_max_updates=5,
+        align_descend_max_updates=50,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    _run_until_phase(a, GOTO_CTX, "lock_target")
+    _run_until_phase(a, LOCK_OK_CTX, "align_descend")
+
+    # align done → transition
+    transition_result = None
+    for _ in range(20):
+        r = a.update(ALIGN_DONE_CTX)
+        if a.phase == "release_payload":
+            transition_result = r
+            break
+
+    assert transition_result is not None
+    types = [act.get("action_type") for act in transition_result.actions]
+    assert "clear_continuous_commands" in types, (
+        "align→release transition missing clear_continuous_commands"
+    )
+    # Zero must come before clear
+    fc_idx = types.index("flight_command")
+    cc_idx = types.index("clear_continuous_commands")
+    assert fc_idx < cc_idx, (
+        f"zero (idx={fc_idx}) must be before clear (idx={cc_idx})"
+    )

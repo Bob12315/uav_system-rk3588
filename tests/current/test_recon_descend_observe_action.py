@@ -145,7 +145,7 @@ def test_flight_command_key_contains_target_index() -> None:
 
 
 def test_zero_on_finalize() -> None:
-    """Finalize returns zero-velocity action in Dispatcher envelope."""
+    """Finalize returns zero-velocity + clear in Dispatcher envelope."""
     action = ReconDescendObserveAction()
     action.start(_make_params(finish_altitude_m=3.0, record_start_altitude_m=4.0,
                               align_descend={"expected_dt_s": 0.1, "lost_timeout_updates": 2,
@@ -153,12 +153,17 @@ def test_zero_on_finalize() -> None:
                                              "max_updates": 10, "finish_altitude_m": 1.5,
                                              "config": {"min_altitude_m": 1.5, "require_target_locked": False}}))
     # Run to completion, capturing the final ActionResult
+    result = None
     for _ in range(30):
         result = action.update(_make_context(height_m=1.4))
         if result.done:
             break
+    assert result is not None
     assert result.done is True
-    assert len(result.actions) >= 1
+    assert len(result.actions) >= 2
+    types = [a["action_type"] for a in result.actions]
+    assert "flight_command" in types, "finalize must include zero velocity"
+    assert "clear_continuous_commands" in types, "finalize must include clear_continuous_commands"
     a = result.actions[0]
     assert a["action_type"] == "flight_command"
     assert a["once"] is False
@@ -427,3 +432,39 @@ def test_dispatcher_policy_no_body_velocity() -> None:
     bv_policy = ACTION_DISPATCH_POLICY.get("body_velocity")
     assert bv_policy is not None
     assert "recon_descend_observe" not in bv_policy.allowed_actions
+
+
+# ── SITL 前安全修复：inactive command → zero+clear ──────────────────────
+
+
+def test_inactive_align_command_emits_zero_and_clear() -> None:
+    """AlignDescend produces active=False → recon_descend_observe emits zero+clear."""
+    action = ReconDescendObserveAction()
+    action.start(_make_params())
+
+    # Context with control_allowed=False → AlignDescend produces inactive command
+    ctx = {
+        "drone": {"relative_altitude": 2.5},
+        "target_valid": True,
+        "target_locked": True,
+        "control_allowed": False,
+        "ex_cam": 0.02,
+        "ey_cam": 0.02,
+    }
+    result = action.update(ctx)
+    # Should not be done (still aligning)
+    assert result.done is False
+    types = [act.get("action_type") for act in result.actions]
+    assert "flight_command" in types, (
+        "inactive command must still emit flight_command (zero)"
+    )
+    assert "clear_continuous_commands" in types, (
+        "inactive command must emit clear_continuous_commands"
+    )
+    fc = [act for act in result.actions if act.get("action_type") == "flight_command"][0]
+    p = fc.get("params") or {}
+    for key in ("vx_cmd", "vy_cmd", "vz_cmd", "yaw_rate_cmd"):
+        val = p.get(key)
+        if val is not None:
+            assert float(val) == 0.0, f"zero command {key}={val}, expected 0"
+    assert p.get("active") is True, "zero command must have active=True"

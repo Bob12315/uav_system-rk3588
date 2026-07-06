@@ -5,6 +5,11 @@
     {
       "name": "takeoff",
       "label": "takeoff_5m",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "land_home",
+        "max_attempts": 1
+      },
       "params": {
         "mode": "GUIDED",
         "altitude_m": 5.0,
@@ -42,8 +47,9 @@
       "label": "drop_scan",
       "save_as": "drop_scan",
       "on_failed": {
-        "action": "retry_current",
-        "max_attempts": 2
+        "action": "jump_to",
+        "target": "goto_recon_scan_center",
+        "max_attempts": 1
       },
       "params": {
         "altitude_m": 5.0,
@@ -65,7 +71,7 @@
       "save_as": "drop_targets",
       "on_failed": {
         "action": "jump_to",
-        "target": "return_home",
+        "target": "goto_recon_scan_center",
         "max_attempts": 1
       },
       "params": {
@@ -212,8 +218,9 @@
       "label": "recon_scan",
       "save_as": "recon_scan",
       "on_failed": {
-        "action": "retry_current",
-        "max_attempts": 2
+        "action": "jump_to",
+        "target": "return_home",
+        "max_attempts": 1
       },
       "params": {
         "altitude_m": 5.0,

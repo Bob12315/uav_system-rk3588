@@ -141,6 +141,34 @@ def test_clear_continuous_commands_dispatch_calls_clear() -> None:
     assert "clear_pending_local_position_actions" not in fake_link.calls
 
 
+# ── SITL 前安全修复：zero+clear 连续队列无残留 ──────────────────────────
+
+
+def test_zero_clear_dispatches_without_stop_body_velocity() -> None:
+    """clear_continuous_commands dispatches without calling stop_body_velocity."""
+    fake_link = FakeLinkManagerWithClear()
+    dispatcher = _dispatcher(send_actions=True)
+
+    clear = {
+        "action_type": "clear_continuous_commands",
+        "params": {"clear_pending_local_position": False},
+        "key": "drop_sequence_clear_continuous_align_inactive_t0_p0_u5",
+        "once": True,
+        "priority": 10,
+    }
+    dispatch = dispatcher.dispatch_actions(
+        [clear],
+        action_name="drop_sequence",
+        send_commands=True,
+        link_manager=fake_link,
+    )
+    assert len(dispatch["sent"]) == 1
+    assert dispatch["sent"][0]["action_type"] == "clear_continuous_commands"
+    assert "clear_continuous_commands" in fake_link.calls
+    # Must NOT call stop_body_velocity (that would create a new continuous zero)
+    assert "stop_body_velocity" not in fake_link.calls
+
+
 def test_clear_continuous_commands_with_pending_local_position() -> None:
     """clear_pending_local_position=True also clears navigation queue."""
     fake_link = FakeLinkManagerWithClear()

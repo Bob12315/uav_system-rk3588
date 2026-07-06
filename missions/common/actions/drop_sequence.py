@@ -310,18 +310,29 @@ class DropSequenceAction(ActionModule):
 
         if result.done:
             self._start_release_payload("aligned_release")
-            # Fix2: emit zero velocity on align→release transition tick
+            # Fix2: emit zero velocity + clear on align→release transition
             return self._transition_result_with_zero(result.detail)
         if result.failed:
             self._start_release_payload("align_failed_release")
             return self._transition_result_with_zero(result.detail)
 
-        actions: list[Any] = []
+        # Active phase: check if AlignDescend is actively controlling
         if isinstance(command, dict) and command.get("active"):
             actions = [self._flight_command_action(command)]
+            return ActionResult(
+                actions=actions,
+                reason=result.reason,
+                detail=self._make_detail(),
+            )
+
+        # Inactive command: control gate closed (control_allowed=false,
+        # target lost, etc.) — emit zero velocity + clear to stop stale
+        # continuous commands from previous ticks.
+        zero = self._zero_velocity_command()
+        clear = self._clear_continuous_action("align_inactive")
         return ActionResult(
-            actions=actions,
-            reason=result.reason,
+            actions=[zero, clear],
+            reason=result.reason or "align_inactive",
             detail=self._make_detail(),
         )
 
@@ -570,13 +581,34 @@ class DropSequenceAction(ActionModule):
         return actions
 
     def _transition_result_with_zero(self, sub_detail: dict[str, Any]) -> ActionResult:
-        """Phase transition that also emits zero velocity (align→release boundary)."""
+        """Phase transition that emits zero velocity + clear (align→release boundary)."""
         actions = self._actions_with_zero(sub_detail)
+        actions.append(self._clear_continuous_action("align_transition"))
         return ActionResult(
             actions=actions,
             reason=f"transition_to_{self.phase}",
             detail=self._make_detail(),
         )
+
+    def _zero_velocity_command(self) -> dict[str, Any]:
+        """Return a zero-velocity BODY_NED flight_command (active=True)."""
+        return {
+            "action_type": "flight_command",
+            "params": {
+                "type": "flight_command",
+                "valid": True,
+                "active": True,
+                "enable_body": True,
+                "vx_cmd": 0.0,
+                "vy_cmd": 0.0,
+                "vz_cmd": 0.0,
+                "yaw_rate_cmd": 0.0,
+                "priority": 3,
+            },
+            "key": f"drop_sequence_zero_align_p{self.payload_index}_u{self.phase_update_count}",
+            "once": False,
+            "priority": 3,
+        }
 
     def _clear_continuous_action(self, key_suffix: str) -> dict[str, Any]:
         """Build a clear_continuous_commands action for phase transitions.
