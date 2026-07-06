@@ -10,16 +10,21 @@ from missions.common.actions.action_lab import create_action_lab_registry
 
 TEMPLATE_PATHS = [
     Path("config/action_missions/drop_two_targets_v1.json"),
+    Path("config/action_missions/recon_sequence_v1.json"),
     Path("config/action_missions/rescue_2026_full_auto.json"),
 ]
 DROP_TEMPLATE_PATH = TEMPLATE_PATHS[0]
-FULL_TEMPLATE_PATH = TEMPLATE_PATHS[1]
+RECON_SEQUENCE_TEMPLATE_PATH = TEMPLATE_PATHS[1]
+FULL_TEMPLATE_PATH = TEMPLATE_PATHS[2]
 REQUIRED_REFERENCES = {
     "$drop_scan.localized_objects",
-    "$drop_targets.selected_targets.0.local_x",
-    "$drop_targets.selected_targets.0.local_y",
-    "$drop_targets.selected_targets.1.local_x",
-    "$drop_targets.selected_targets.1.local_y",
+}
+FULL_TEMPLATE_REQUIRED_REFERENCES = {
+    "$drop_scan.localized_objects",
+    "$drop_targets.target_slots",
+    "$recon_scan.localized_objects",
+    "$recon_targets.target_slots",
+    "$recon_sequence.recon_result_items",
 }
 ALLOWED_FAILURE_ACTIONS = {"fail", "retry_current", "jump_to", "continue"}
 
@@ -106,11 +111,19 @@ def test_drop_two_targets_template_save_as_names() -> None:
 
 
 def test_action_mission_templates_contain_required_blackboard_refs() -> None:
-    for path in TEMPLATE_PATHS:
-        data = _template(path)
-        refs = _references(data["steps"])
+    # Full template must contain all composite-action refs
+    full_refs = _references(_template(FULL_TEMPLATE_PATH)["steps"])
+    assert FULL_TEMPLATE_REQUIRED_REFERENCES <= full_refs
 
-        assert REQUIRED_REFERENCES <= refs
+    # drop_two_targets template must have drop_scan ref
+    drop_refs = _references(_template(DROP_TEMPLATE_PATH)["steps"])
+    assert "$drop_scan.localized_objects" in drop_refs
+
+    # recon_sequence template must have recon refs
+    recon_refs = _references(_template(RECON_SEQUENCE_TEMPLATE_PATH)["steps"])
+    assert "$recon_scan.localized_objects" in recon_refs
+    assert "$recon_targets.target_slots" in recon_refs
+    assert "$recon_sequence.recon_result_items" in recon_refs
 
 
 def test_action_mission_templates_construct_mission_action_steps() -> None:
@@ -127,8 +140,10 @@ def test_action_mission_templates_construct_mission_action_steps() -> None:
         ]
 
         assert len(steps) == len(data["steps"])
-        assert steps[1].save_as == "drop_scan"
-        assert steps[2].save_as == "drop_targets"
+        by_save_as = {step.get("save_as", ""): step for step in data["steps"] if step.get("save_as")}
+        if "drop_scan" in by_save_as:
+            assert by_save_as["drop_scan"]["name"] in ("multi_view_localize", "fixed_view_localize")
+            assert by_save_as["drop_targets"]["name"] == "select_drop_targets"
 
 
 def test_action_mission_templates_blackboard_references_resolve() -> None:
@@ -145,6 +160,10 @@ def test_action_mission_templates_blackboard_references_resolve() -> None:
     blackboard.set(
         "drop_targets",
         {
+            "target_slots": [
+                {"valid": True, "id": "b1", "local_x": 1.0, "local_y": 30.0, "x": 1.0, "y": 30.0},
+                {"valid": True, "id": "b2", "local_x": -1.0, "local_y": 31.0, "x": -1.0, "y": 31.0},
+            ],
             "selected_targets": [
                 {"id": "b1", "local_x": 1.0, "local_y": 30.0},
                 {"id": "b2", "local_x": -1.0, "local_y": 31.0},
@@ -153,6 +172,10 @@ def test_action_mission_templates_blackboard_references_resolve() -> None:
                 {"channel": 8, "release_pwm": 1750, "hold_pwm": 1250},
             ],
         },
+    )
+    blackboard.set(
+        "drop_sequence",
+        {"released_count": 2, "fallback_release_count": 0, "skipped_target_count": 0},
     )
     blackboard.set(
         "recon_scan",
@@ -174,11 +197,15 @@ def test_action_mission_templates_blackboard_references_resolve() -> None:
             ],
         },
     )
-    for i in range(5):
-        blackboard.set(
-            f"recon_result_{i}",
-            {"target_id": f"recon_{i}", "content": "blank", "status": "blank_or_uncertain"},
-        )
+    blackboard.set(
+        "recon_sequence",
+        {
+            "recon_result_items": [
+                {"target_id": "r1", "content": "shenghua", "status": "detected"},
+                {"target_id": "missing_1", "content": "blank", "status": "skipped_missing_target"},
+            ],
+        },
+    )
     blackboard.set(
         "recon_report",
         {"recon_report": {"barrels": []}, "barrel_count": 5},
@@ -195,14 +222,21 @@ def test_full_rescue_template_contains_recon_scan_after_two_drops() -> None:
     data = _template(FULL_TEMPLATE_PATH)
     steps = data["steps"]
     labels = [step.get("label", "") for step in steps]
-    payload_indices = [index for index, step in enumerate(steps) if step["name"] == "payload_release"]
-    recon_index = labels.index("recon_scan")
-    land_index = labels.index("return_home")
+    names = [step["name"] for step in steps]
 
-    assert len(payload_indices) == 2
-    assert payload_indices[1] < recon_index < land_index
+    # Order: drop_scan → drop_targets → drop_sequence → recon_scan → recon_targets → recon_sequence → report → return → land
+    drop_scan_idx = labels.index("drop_scan")
+    drop_seq_idx = labels.index("drop_sequence")
+    recon_scan_idx = labels.index("recon_scan")
+    recon_seq_idx = labels.index("recon_sequence")
+    report_idx = labels.index("build_recon_report")
+    return_idx = labels.index("return_home")
+
+    assert drop_scan_idx < drop_seq_idx < recon_scan_idx < recon_seq_idx
+    assert recon_seq_idx < report_idx < return_idx
     assert steps[-1]["name"] == "land"
-    assert land_index == len(steps) - 2  # return_home is second-to-last, land is last
+    assert "drop_sequence" in names
+    assert "recon_sequence" in names
 
 
 def test_full_rescue_template_save_as_names() -> None:
@@ -228,3 +262,110 @@ def test_full_rescue_template_failure_policies_are_valid() -> None:
         assert policy["action"] in ALLOWED_FAILURE_ACTIONS
         if policy["action"] == "jump_to":
             assert policy["target"] in label_set
+
+
+# ── Phase4 full mission template tests ─────────────────────────────────
+
+def test_full_rescue_includes_drop_sequence() -> None:
+    data = _template(FULL_TEMPLATE_PATH)
+    names = [step["name"] for step in data["steps"]]
+    assert "drop_sequence" in names
+
+
+def test_full_rescue_includes_recon_sequence() -> None:
+    data = _template(FULL_TEMPLATE_PATH)
+    names = [step["name"] for step in data["steps"]]
+    assert "recon_sequence" in names
+
+
+def test_drop_sequence_after_select_drop_targets() -> None:
+    data = _template(FULL_TEMPLATE_PATH)
+    labels = [step.get("label", "") for step in data["steps"]]
+    select_idx = labels.index("select_drop_targets")
+    drop_seq_idx = labels.index("drop_sequence")
+    assert select_idx < drop_seq_idx
+
+
+def test_recon_sequence_after_select_recon_targets() -> None:
+    data = _template(FULL_TEMPLATE_PATH)
+    labels = [step.get("label", "") for step in data["steps"]]
+    select_idx = labels.index("select_recon_targets")
+    recon_seq_idx = labels.index("recon_sequence")
+    assert select_idx < recon_seq_idx
+
+
+def test_build_recon_report_uses_recon_sequence_items() -> None:
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    items = by_label["build_recon_report"]["params"]["items"]
+    assert items == "$recon_sequence.recon_result_items"
+
+
+def test_drop_scan_center_waypoint_mode_field() -> None:
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    step = by_label["goto_drop_scan_center"]
+    assert step["params"]["waypoint_mode"] == "field"
+    assert step["params"]["x"] == 0.0
+    assert step["params"]["y"] == 32.5
+
+
+def test_recon_scan_center_waypoint_mode_field() -> None:
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    step = by_label["goto_recon_scan_center"]
+    assert step["params"]["waypoint_mode"] == "field"
+    assert step["params"]["x"] == 0.0
+    assert step["params"]["y"] == 57.5
+
+
+def test_return_home_waypoint_mode_field() -> None:
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    step = by_label["return_home"]
+    assert step["params"]["waypoint_mode"] == "field"
+    assert step["params"]["x"] == 0.0
+    assert step["params"]["y"] == 0.0
+
+
+def test_drop_sequence_goto_waypoint_mode_absolute() -> None:
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    goto = by_label["drop_sequence"]["params"]["goto"]
+    assert goto["waypoint_mode"] == "absolute"
+
+
+def test_recon_sequence_goto_waypoint_mode_absolute() -> None:
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    goto = by_label["recon_sequence"]["params"]["goto"]
+    assert goto["waypoint_mode"] == "absolute"
+
+
+def test_full_rescue_has_12_steps() -> None:
+    data = _template(FULL_TEMPLATE_PATH)
+    assert len(data["steps"]) == 12
+
+
+def test_drop_sequence_on_failed_is_continue() -> None:
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    assert by_label["drop_sequence"]["on_failed"]["action"] == "continue"
+
+
+def test_recon_sequence_on_failed_is_continue() -> None:
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    assert by_label["recon_sequence"]["on_failed"]["action"] == "continue"
+
+
+def test_build_recon_report_on_failed_is_continue() -> None:
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    assert by_label["build_recon_report"]["on_failed"]["action"] == "continue"
+
+
+def test_return_home_on_failed_is_continue() -> None:
+    data = _template(FULL_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    assert by_label["return_home"]["on_failed"]["action"] == "continue"
