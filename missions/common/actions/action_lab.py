@@ -15,6 +15,7 @@ from .registry import ActionRegistry
 from .select_drop_targets import SelectDropTargetsAction
 from .select_recon_targets import SelectReconTargetsAction
 from .drop_sequence import DropSequenceAction
+from .recon_sequence import ReconSequenceAction
 from .fixed_view_localize import FixedViewLocalizeAction
 from .single_view_localize import SingleViewLocalizeAction
 from .survey_area import SurveyAreaAction
@@ -41,6 +42,7 @@ def create_action_lab_registry() -> ActionRegistry:
     registry.register("build_recon_report", BuildReconReportAction)
     registry.register("fixed_view_localize", FixedViewLocalizeAction)
     registry.register("drop_sequence", DropSequenceAction)
+    registry.register("recon_sequence", ReconSequenceAction)
     return registry
 
 
@@ -478,6 +480,26 @@ def action_lab_specs() -> list[dict[str, Any]]:
             "description": "Aggregate recon_descend_observe results into a summary report — no flight commands.",
             "default_params": {
                 "items": [],
+            },
+        },
+        {
+            "name": "recon_sequence",
+            "label": "Recon Sequence",
+            "description": (
+                "Composite recon action: goto target → lock → descend-observe → climb. "
+                "Iterates over valid recon targets, recording danger sign detection results."
+            ),
+            "default_params": {
+                "targets": [],
+                "max_targets": 5,
+                "approach_altitude_m": 2.5,
+                "finish_altitude_m": 1.5,
+                "climb_after_observe_m": 2.5,
+                "goto_max_updates": 120,
+                "target_lock_max_updates": 40,
+                "observe_max_updates": 200,
+                "climb_max_updates": 100,
+                "continue_after_target_failure": True,
             },
         },
     ]

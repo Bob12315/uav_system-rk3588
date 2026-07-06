@@ -22,6 +22,7 @@ def test_create_action_lab_registry_lists_supported_actions() -> None:
         "recon_descend_observe",
         "recon_inspect_target",
         "recon_scan",
+        "recon_sequence",
         "select_drop_targets",
         "select_recon_targets",
         "single_view_localize",
@@ -60,6 +61,7 @@ def test_action_lab_specs_are_json_serializable() -> None:
         "fixed_view_localize",
         "drop_sequence",
         "build_recon_report",
+        "recon_sequence",
     ]
 
 
@@ -168,6 +170,7 @@ def test_action_lab_does_not_auto_register_default_registry() -> None:
         "fixed_view_localize",
         "drop_sequence",
         "build_recon_report",
+        "recon_sequence",
     ):
         assert name not in default_registry.list()
 

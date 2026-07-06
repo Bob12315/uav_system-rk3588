@@ -282,6 +282,14 @@ def _smoke_blackboard() -> MissionBlackboard:
         "recon_report",
         {"recon_report": {"barrels": []}, "barrel_count": 5, "detected_count": 0, "blank_count": 5, "skipped_count": 0},
     )
+    blackboard.set(
+        "recon_sequence",
+        {
+            "recon_result_items": [
+                {"target_index": 0, "target_id": "r1", "content": "baozha", "confidence": 0.72, "status": "detected"},
+            ],
+        },
+    )
     return blackboard
 
 
