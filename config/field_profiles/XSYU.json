@@ -9,8 +9,8 @@
   },
   "anchor": {
     "name": "takeoff_anchor",
-    "lat": 34.1036246,
-    "lon": 108.6426454,
+    "lat": 34.103688,
+    "lon": 108.642667,
     "field_x_m": 0.0, 
     "field_y_m": 0.0
   },
@@ -19,25 +19,25 @@
       "name": "CL_1",
       "lat": 34.1036255,
       "lon": 108.6428492,
-      "expected_field_y_m": 10.101
+      "expected_field_y_m": 17.661
     },
     {
       "name": "CL_2",
       "lat": 34.1036243,
       "lon": 108.6429759,
-      "expected_field_y_m": 32.601
+      "expected_field_y_m": 29.202
     },
     {
       "name": "CL_3",
       "lat": 34.1036236,
       "lon": 108.6431711,
-      "expected_field_y_m": 41.183
+      "expected_field_y_m": 46.962
     },
     {
       "name": "CL_4",
       "lat": 34.1036241,
       "lon": 108.6433094,
-      "expected_field_y_m": 64.983
+      "expected_field_y_m": 59.528
     }
   ],
   "gps_quality": {
