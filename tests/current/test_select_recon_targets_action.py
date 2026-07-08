@@ -89,11 +89,46 @@ def test_zone_center_mode_field_with_complete_context():
         "field_origin_local_x": 100.0,
         "field_origin_local_y": 200.0,
     }
-    # zone_center (field_x=0, field_y=10) with heading=0 → local (100, 210)
-    result = _run(_objects(5), context=ctx, zone_center={"x": 0.0, "y": 10.0},
-                  zone_center_mode="field")
+    # zone_center field (0,10) with heading=0, origin=(100,200) → local (110, 200)
+    # near: (110,200) distance=0, far: (100,210) distance≈14.14 → near wins
+    near = {"id": "near", "class_name": "bucket", "local_x": 110.0, "local_y": 200.0,
+            "seen_count": 1, "raw_count": 1, "weight": 1.0}
+    far = {"id": "far", "class_name": "bucket", "local_x": 100.0, "local_y": 210.0,
+           "seen_count": 1, "raw_count": 1, "weight": 1.0}
+    action = SelectReconTargetsAction()
+    action.start({"objects": [far, near], "target_count": 1, "allow_fewer": True,
+                  "deduplicate_radius_m": 0.45, "zone_center": {"x": 0.0, "y": 10.0},
+                  "zone_center_mode": "field"})
+    result = action.update(ctx)
     assert result.done
-    assert result.detail["selected_count"] == 5
+    assert result.detail["selected_count"] == 1
+    assert result.detail["selected_targets"][0]["id"] == "near"
+
+
+def test_zone_center_mode_field_heading_pi_over_2():
+    """zone_center_mode=field heading=π/2 时转换及排序正确。"""
+    import math
+    ctx = {
+        "field_heading_confirmed": True,
+        "field_origin_confirmed": True,
+        "field_heading_yaw_rad": math.pi / 2,
+        "field_origin_local_x": 0.0,
+        "field_origin_local_y": 0.0,
+    }
+    # zone_center field (0,10), origin=(0,0), heading=π/2 → local (0, 10)
+    # near: (0,10) distance=0, far: (10,0) distance≈14.14 → near wins
+    near = {"id": "near", "class_name": "bucket", "local_x": 0.0, "local_y": 10.0,
+            "seen_count": 1, "raw_count": 1, "weight": 1.0}
+    far = {"id": "far", "class_name": "bucket", "local_x": 10.0, "local_y": 0.0,
+           "seen_count": 1, "raw_count": 1, "weight": 1.0}
+    action = SelectReconTargetsAction()
+    action.start({"objects": [far, near], "target_count": 1, "allow_fewer": True,
+                  "deduplicate_radius_m": 0.45, "zone_center": {"x": 0.0, "y": 10.0},
+                  "zone_center_mode": "field"})
+    result = action.update(ctx)
+    assert result.done
+    assert result.detail["selected_count"] == 1
+    assert result.detail["selected_targets"][0]["id"] == "near"
 
 
 def test_zone_center_mode_field_missing_confirmed():
