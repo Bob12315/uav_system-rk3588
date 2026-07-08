@@ -11,6 +11,7 @@ let currentActionMission = null;
 let currentActionMissionSteps = [];
 let lastActionMissionStatus = null;
 let lastActionMissionResult = null;
+let lastActionMissionSummaryHtml = "";
 let actionMissionAutoTickTimer = null;
 // latestCameraRecording moved to video_panel.js (WU-6 v2)
 const fallbackStageModes = ["AUTO", "IDLE", "APPROACH_TRACK", "OVERHEAD_HOLD", "CORRIDOR_FOLLOW"];
@@ -385,8 +386,14 @@ function summarizeDropTargets(blackboard) {
   return `<div class="mission-result-group"><strong>已选择投放目标</strong><div>投放目标数：${selected.length}</div>${rows}</div>`;
 }
 function summarizeReconReport(blackboard) {
-  const report = getPathValue(blackboard, ["recon_scan", "recon_report"]);
+  const report = getPathValue(blackboard, ["recon_report", "recon_report"])
+    || getPathValue(blackboard, ["recon_scan", "recon_report"]);
   if (!report || typeof report !== "object") return "";
+  const reportBlock = blackboard.recon_report || {};
+  const barrelCount = reportBlock.barrel_count ?? "--";
+  const detectedCount = reportBlock.detected_count ?? "--";
+  const blankCount = reportBlock.blank_count ?? "--";
+  const skippedCount = reportBlock.skipped_count ?? "--";
   const barrels = Array.isArray(report.barrels) ? report.barrels : [];
   const rows = barrels.slice(0, 8).map((barrel, index) => {
     const id = barrel.id || `recon_${index + 1}`;
@@ -394,7 +401,7 @@ function summarizeReconReport(blackboard) {
     const confidence = barrel.confidence !== undefined ? ` conf=${Number(barrel.confidence).toFixed(2)}` : "";
     return `<div>${escapeHtml(id)}: ${escapeHtml(content)}${escapeHtml(confidence)}</div>`;
   }).join("");
-  return `<div class="mission-result-group"><strong>侦察报告</strong><div>侦察桶数：${barrels.length}</div>${rows}</div>`;
+  return `<div class="mission-result-group"><strong>侦察报告</strong><div>桶数：${barrelCount} / detected：${detectedCount} / blank：${blankCount} / skipped：${skippedCount}</div>${rows}</div>`;
 }
 function renderActionMissionSummary(actionMission) {
   const element = $("actionMissionResults");
@@ -404,8 +411,13 @@ function renderActionMissionSummary(actionMission) {
     summarizeDropScan(blackboard),
     summarizeDropTargets(blackboard),
     summarizeReconReport(blackboard),
-  ].filter(Boolean).join("");
-  element.innerHTML = html || `<div class="hint">暂无任务结果详情。</div>`;
+  ].filter(Boolean).join("") || `<div class="hint">暂无任务结果详情。</div>`;
+
+  if (html === lastActionMissionSummaryHtml && element.innerHTML === html) {
+    return;
+  }
+  lastActionMissionSummaryHtml = html;
+  element.innerHTML = html;
 }
 function updateActionMissionAutoTickButton() {
   const button = $("actionMissionAutoTick");
@@ -738,6 +750,7 @@ async function configureActionMission() {
   });
   if (!result.ok) throw new Error(result.error || "Action Mission 配置失败");
   $("completionHint").textContent = "Action Mission 已配置";
+  lastActionMissionSummaryHtml = "";
   renderActionMissionStatus(result.action_mission || null);
 }
 async function startActionMission() {
@@ -749,6 +762,7 @@ async function startActionMission() {
   const result = await json("/api/action-mission/start", {method: "POST", body: "{}"});
   if (!result.ok) throw new Error(result.error || "Action Mission 启动失败");
   $("completionHint").textContent = "Action Mission 已启动";
+  lastActionMissionSummaryHtml = "";
   renderActionMissionStatus(result.action_mission || null);
 }
 async function stopActionMission() {
@@ -763,6 +777,7 @@ async function resetActionMission() {
   const result = await json("/api/action-mission/reset", {method: "POST", body: "{}"});
   if (!result.ok) throw new Error(result.error || "Action Mission 重置失败");
   $("completionHint").textContent = "Action Mission 已重置";
+  lastActionMissionSummaryHtml = "";
   renderActionMissionStatus(result.action_mission || null);
 }
 async function tickActionMission() {

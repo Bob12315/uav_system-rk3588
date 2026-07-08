@@ -85,3 +85,27 @@ def test_app_js_init_no_load_action_mission_templates():
     assert "loadActionLab()]);" in js
     # 函数定义仍可以保留
     assert "function loadActionMissionTemplates" in js
+
+
+def test_app_js_summary_html_cache_variable():
+    """app.js 有 lastActionMissionSummaryHtml 变量用于防闪烁。"""
+    js = _read_js("web_ui/static/app.js")
+    assert "lastActionMissionSummaryHtml" in js
+
+
+def test_app_js_summary_html_comparison():
+    """renderActionMissionSummary 使用 html === lastActionMissionSummaryHtml 比对。"""
+    js = _read_js("web_ui/static/app.js")
+    assert "html === lastActionMissionSummaryHtml" in js
+
+
+def test_app_js_recon_report_path_v2_first():
+    """summarizeReconReport 优先读取 recon_report.recon_report。"""
+    js = _read_js("web_ui/static/app.js")
+    assert '["recon_report", "recon_report"]' in js
+
+
+def test_app_js_recon_report_path_fallback():
+    """summarizeReconReport 保留 recon_scan.recon_report 兼容路径。"""
+    js = _read_js("web_ui/static/app.js")
+    assert '["recon_scan", "recon_report"]' in js
