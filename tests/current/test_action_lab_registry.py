@@ -23,6 +23,7 @@ def test_create_action_lab_registry_lists_supported_actions() -> None:
         "recon_inspect_target",
         "recon_scan",
         "recon_sequence",
+        "resolve_gps_targets",
         "select_drop_targets",
         "select_recon_targets",
         "single_view_localize",

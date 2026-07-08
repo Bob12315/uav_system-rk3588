@@ -17,6 +17,7 @@ from .select_recon_targets import SelectReconTargetsAction
 from .drop_sequence import DropSequenceAction
 from .recon_sequence import ReconSequenceAction
 from .fixed_view_localize import FixedViewLocalizeAction
+from .resolve_gps_targets import ResolveGpsTargetsAction
 from .single_view_localize import SingleViewLocalizeAction
 from .survey_area import SurveyAreaAction
 from .takeoff import TakeoffAction
@@ -43,6 +44,7 @@ def create_action_lab_registry() -> ActionRegistry:
     registry.register("recon_descend_observe", ReconDescendObserveAction)
     registry.register("build_recon_report", BuildReconReportAction)
     registry.register("fixed_view_localize", FixedViewLocalizeAction)
+    registry.register("resolve_gps_targets", ResolveGpsTargetsAction)
     registry.register("drop_sequence", DropSequenceAction)
     registry.register("recon_sequence", ReconSequenceAction)
     return registry

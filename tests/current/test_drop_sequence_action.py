@@ -884,3 +884,49 @@ def test_align_to_release_transition_emits_clear() -> None:
     assert clear_act["params"].get("send_stop_first") is True, (
         "align→release clear must have send_stop_first=True"
     )
+
+
+# ── GPS-to-local v2: single-target rejection ───────────────────────────
+
+
+def test_single_target_release_all_disabled_no_fallback() -> None:
+    """With release_all_payloads_if_only_one_target=False and
+    fallback_release_when_last_target_failed=False, a single valid target
+    should consume exactly one payload and stop — no dual-drop on same target.
+    """
+    targets = _make_targets((1.0, 5.0))
+    params = _base_params(
+        targets=targets, payloads=_make_payloads(2),
+        target_lock_max_updates=5, goto_max_updates=5,
+        align_descend_max_updates=5, climb_max_updates=1,
+        release_wait_updates=2,
+        release_all_payloads_if_only_one_target=False,
+        fallback_release_when_last_target_failed=False,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    assert a._only_one_target is True
+    assert len(a.valid_targets) == 1
+    assert a.release_all_payloads_if_only_one_target is False
+    assert a.fallback_release_when_last_target_failed is False
+
+    # t0: goto done → lock success → align done → release payload_1
+    _run_until_phase(a, GOTO_CTX, "lock_target")
+    _run_until_phase(a, LOCK_OK_CTX, "align_descend")
+    _run_until_phase(a, ALIGN_DONE_CTX, "release_payload")
+
+    # Run release to completion
+    _run_to_done(a, {})
+
+    assert a._done is True
+    # Only one payload released (not both on same target)
+    assert a.released_count == 1, (
+        f"expected 1 release on single target, got {a.released_count}"
+    )
+    assert a.fallback_release_count == 0
+    # Verify payload_2 was NOT released
+    payload_ids = [pr.get("payload_id") for pr in a.payload_results]
+    assert "payload_2" not in payload_ids, (
+        f"payload_2 should not be released when release_all is disabled; released: {payload_ids}"
+    )

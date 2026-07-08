@@ -160,7 +160,36 @@ def test_action_mission_templates_blackboard_references_resolve() -> None:
             "localized_objects": [
                 {"id": "b1", "local_x": 1.0, "local_y": 30.0},
                 {"id": "b2", "local_x": -1.0, "local_y": 31.0},
-            ]
+            ],
+            "raw_estimates": [
+                {"track_id": 1, "class_name": "bucket_1", "local_x": 1.0, "local_y": 30.0, "source": {"ex": 0.1, "ey": 0.05}},
+                {"track_id": 2, "class_name": "bucket_2", "local_x": -1.0, "local_y": 31.0, "source": {"ex": -0.1, "ey": 0.08}},
+            ],
+        },
+    )
+    blackboard.set(
+        "drop_center",
+        {
+            "resolved_targets": [
+                {"valid": True, "source": "field", "local_x": 100.0, "local_y": 232.5, "z_down_m": -5.0},
+            ],
+        },
+    )
+    blackboard.set(
+        "drop_buckets",
+        {
+            "resolved_targets": [
+                {"valid": True, "source": "vision", "class_name": "bucket_1", "local_x": 101.0, "local_y": 230.0, "z_down_m": -5.0},
+                {"valid": True, "source": "vision", "class_name": "bucket_2", "local_x": 99.0, "local_y": 231.0, "z_down_m": -5.0},
+            ],
+        },
+    )
+    blackboard.set(
+        "home_waypoint",
+        {
+            "resolved_targets": [
+                {"valid": True, "source": "home", "local_x": 100.0, "local_y": 200.0, "z_down_m": -5.0},
+            ],
         },
     )
     blackboard.set(
@@ -334,11 +363,44 @@ def test_return_home_waypoint_mode_field() -> None:
     assert step["params"]["y"] == 0.0
 
 
-def test_drop_two_targets_v2_outer_gotos_use_global_targets() -> None:
+def test_drop_two_targets_v2_outer_gotos_use_local_targets() -> None:
     data = _template(DROP_V2_TEMPLATE_PATH)
     by_label = {step.get("label", ""): step for step in data["steps"]}
-    assert by_label["goto_drop_scan_center"]["params"]["target_frame"] == "global"
-    assert by_label["return_home"]["params"]["target_frame"] == "global"
+    assert by_label["goto_drop_scan_center"]["params"]["target_frame"] == "local"
+    assert by_label["goto_drop_scan_center"]["params"]["waypoint_mode"] == "absolute"
+    assert by_label["return_home"]["params"]["target_frame"] == "local"
+    assert by_label["return_home"]["params"]["waypoint_mode"] == "absolute"
+
+
+def test_drop_two_targets_v2_contains_resolve_gps_targets() -> None:
+    """v2 mission must include resolve_gps_targets steps."""
+    data = _template(DROP_V2_TEMPLATE_PATH)
+    names = [s["name"] for s in data["steps"]]
+    assert names.count("resolve_gps_targets") >= 3, (
+        f"expected >=3 resolve_gps_targets steps, got {names.count('resolve_gps_targets')}"
+    )
+
+
+def test_drop_two_targets_v2_no_global_target_frame() -> None:
+    """No step in v2 mission uses target_frame: global."""
+    data = _template(DROP_V2_TEMPLATE_PATH)
+    for step in data["steps"]:
+        tf = step.get("params", {}).get("target_frame")
+        assert tf != "global", f"step {step['label']} has target_frame=global"
+
+
+def test_drop_two_targets_v2_no_dangerous_true_flags() -> None:
+    """v2 mission must not have release_all/falseback/continue_after as true."""
+    data = _template(DROP_V2_TEMPLATE_PATH)
+    for step in data["steps"]:
+        p = step.get("params", {})
+        for flag in ("release_all_payloads_if_only_one_target",
+                     "fallback_release_when_last_target_failed",
+                     "continue_after_any_failure"):
+            if flag in p:
+                assert p[flag] is not True, (
+                    f"step {step['label']} has {flag}=true"
+                )
 
 
 def test_drop_sequence_goto_waypoint_mode_absolute() -> None:
@@ -585,7 +647,7 @@ def test_select_recon_targets_v2_zone_center_mode_field() -> None:
 
 def test_full_rescue_v2_has_12_steps() -> None:
     data = _template(FULL_V2_TEMPLATE_PATH)
-    assert len(data["steps"]) == 12
+    assert len(data["steps"]) == 16
 
 
 def test_sitl_profile_matches_base_full_v2_template() -> None:

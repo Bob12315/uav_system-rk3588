@@ -1,6 +1,6 @@
 {
   "name": "drop_two_targets_v2",
-  "description": "投放任务 v2：固定视角扫描、目标选择、投放序列、返航降落。",
+  "description": "投放任务 v2：resolve GPS→local、固定视角扫描、目标选择、投放序列、返航降落。",
   "steps": [
     {
       "name": "takeoff",
@@ -35,6 +35,28 @@
       }
     },
     {
+      "name": "resolve_gps_targets",
+      "label": "resolve_drop_center",
+      "save_as": "drop_center",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "land_home",
+        "max_attempts": 1
+      },
+      "params": {
+        "targets": [
+          {
+            "source": "field",
+            "field_x_m": 0.0,
+            "field_y_m": 32.5,
+            "altitude_m": 5.0,
+            "class_name": "drop_center"
+          }
+        ],
+        "key": "resolve_drop_center"
+      }
+    },
+    {
       "name": "goto_waypoint",
       "label": "goto_drop_scan_center",
       "on_failed": {
@@ -43,35 +65,17 @@
         "max_attempts": 1
       },
       "params": {
-        "x": 0.0,
-        "y": 32.5,
+        "x": "$drop_center.resolved_targets.0.local_x",
+        "y": "$drop_center.resolved_targets.0.local_y",
         "altitude_m": 5.0,
-        "waypoint_mode": "field",
-        "target_frame": "global",
+        "waypoint_mode": "absolute",
+        "target_frame": "local",
         "yaw_mode": "field_heading",
         "tolerance_xy_m": 0.4,
         "tolerance_z_m": 0.4,
         "min_hold_updates": 10,
         "priority": 5,
         "key": "goto_drop_scan_center"
-      }
-    },
-    {
-      "name": "yaw_align",
-      "label": "yaw_align_before_fixed_view",
-      "on_failed": {
-        "action": "jump_to",
-        "target": "return_home",
-        "max_attempts": 1
-      },
-      "params": {
-        "yaw_mode": "field_heading",
-        "tolerance_deg": 3.0,
-        "yaw_speed_deg_s": 25.0,
-        "min_hold_updates": 5,
-        "max_updates": 80,
-        "priority": 4,
-        "key": "yaw_align_before_fixed_view"
       }
     },
     {
@@ -108,6 +112,27 @@
       }
     },
     {
+      "name": "resolve_gps_targets",
+      "label": "resolve_drop_buckets",
+      "save_as": "drop_buckets",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "return_home",
+        "max_attempts": 1
+      },
+      "params": {
+        "targets": "$drop_scan.raw_estimates",
+        "default_source": "vision",
+        "camera": {
+          "fov_x_deg": 85.0,
+          "fov_y_deg": 69.0,
+          "image_x_sign": 1.0,
+          "image_y_sign": -1.0
+        },
+        "key": "resolve_drop_buckets"
+      }
+    },
+    {
       "name": "select_drop_targets",
       "label": "select_drop_targets",
       "save_as": "drop_targets",
@@ -117,9 +142,10 @@
         "max_attempts": 1
       },
       "params": {
-        "objects": "$drop_scan.localized_objects",
+        "objects": "$drop_buckets.resolved_targets",
+        "input_key": "resolved_targets",
         "target_count": 3,
-        "allow_fewer": true,
+        "allow_fewer": false,
         "score_table": {
           "bucket_1": 500,
           "bucket_2": 300,
@@ -143,24 +169,6 @@
         "multi_target_first_servo_outputs": [
           { "channel": 8, "release_pwm": 1750, "hold_pwm": 1250 }
         ]
-      }
-    },
-    {
-      "name": "yaw_align",
-      "label": "yaw_align_before_drop_sequence",
-      "on_failed": {
-        "action": "jump_to",
-        "target": "return_home",
-        "max_attempts": 1
-      },
-      "params": {
-        "yaw_mode": "field_heading",
-        "tolerance_deg": 3.0,
-        "yaw_speed_deg_s": 25.0,
-        "min_hold_updates": 5,
-        "max_updates": 80,
-        "priority": 4,
-        "key": "yaw_align_before_drop_sequence"
       }
     },
     {
@@ -199,9 +207,9 @@
         "target_lock_max_updates": 50,
         "align_descend_max_updates": 250,
         "climb_max_updates": 100,
-        "fallback_release_when_last_target_failed": true,
-        "release_all_payloads_if_only_one_target": true,
-        "continue_after_any_failure": true,
+        "fallback_release_when_last_target_failed": false,
+        "release_all_payloads_if_only_one_target": false,
+        "continue_after_any_failure": false,
         "goto": {
           "waypoint_mode": "absolute",
           "yaw_mode": "field_heading",
@@ -266,19 +274,22 @@
       }
     },
     {
-      "name": "yaw_align",
-      "label": "yaw_align_before_return_home",
+      "name": "resolve_gps_targets",
+      "label": "resolve_home",
+      "save_as": "home_waypoint",
       "on_failed": {
-        "action": "continue"
+        "action": "jump_to",
+        "target": "land_home",
+        "max_attempts": 1
       },
       "params": {
-        "yaw_mode": "field_heading",
-        "tolerance_deg": 3.0,
-        "yaw_speed_deg_s": 25.0,
-        "min_hold_updates": 5,
-        "max_updates": 80,
-        "priority": 4,
-        "key": "yaw_align_before_return_home"
+        "targets": [
+          {
+            "source": "home",
+            "altitude_m": 5.0
+          }
+        ],
+        "key": "resolve_home"
       }
     },
     {
@@ -290,11 +301,11 @@
         "max_attempts": 1
       },
       "params": {
-        "x": 0.0,
-        "y": 0.0,
+        "x": "$home_waypoint.resolved_targets.0.local_x",
+        "y": "$home_waypoint.resolved_targets.0.local_y",
         "altitude_m": 5.0,
-        "waypoint_mode": "field",
-        "target_frame": "global",
+        "waypoint_mode": "absolute",
+        "target_frame": "local",
         "yaw_mode": "field_heading",
         "tolerance_xy_m": 0.7,
         "tolerance_z_m": 0.5,
