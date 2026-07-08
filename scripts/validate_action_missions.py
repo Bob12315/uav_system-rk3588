@@ -20,6 +20,7 @@ DEFAULT_TEMPLATE_PATHS = [
     ROOT / "config/action_missions/drop_two_targets_v2.json",
     ROOT / "config/action_missions/recon_inspect_5_targets_stepwise_v1.json",
     ROOT / "config/action_missions/rescue_2026_full_auto.json",
+    ROOT / "config/action_missions/rescue_2026_full_auto_v2.json",
 ]
 ALLOWED_FAILURE_ACTIONS = {"fail", "retry_current", "retry_current_then_jump_to", "jump_to", "continue"}
 

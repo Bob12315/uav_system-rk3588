@@ -218,9 +218,9 @@
       "label": "recon_scan",
       "save_as": "recon_scan",
       "on_failed": {
-        "action": "jump_to",
-        "target": "return_home",
-        "max_attempts": 1
+        "action": "retry_current_then_jump_to",
+        "max_attempts": 2,
+        "target": "return_home"
       },
       "params": {
         "altitude_m": 5.0,
@@ -233,6 +233,17 @@
           "fov_y_deg": 69.0,
           "image_x_sign": 1.0,
           "image_y_sign": -1.0
+        },
+        "settle_updates": 8,
+        "max_updates": 40,
+        "save_result": true,
+        "fusion": {
+          "cluster_radius_m": 0.7,
+          "outlier_radius_m": 0.8,
+          "min_cluster_size": 2,
+          "max_cluster_radius_m": 0.9,
+          "center_weight_power": 1.0,
+          "max_objects": 8
         }
       }
     },
@@ -254,7 +265,8 @@
         "min_weight": 0.0,
         "deduplicate_radius_m": 0.45,
         "class_names": ["recon_bucket", "white_bucket", "bucket"],
-        "zone_center": {"x": 0.0, "y": 57.5}
+        "zone_center": {"x": 0.0, "y": 57.5},
+        "zone_center_mode": "field"
       }
     },
     {
@@ -289,7 +301,13 @@
           "max_match_distance_m": 1.2,
           "detection_source": "scene",
           "class_names": ["recon_bucket", "white_bucket", "bucket"],
-          "min_confidence": 0.25
+          "min_confidence": 0.25,
+          "camera": {
+            "fov_x_deg": 85.0,
+            "fov_y_deg": 69.0,
+            "image_x_sign": 1.0,
+            "image_y_sign": -1.0
+          }
         },
         "observe": {
           "record_start_altitude_m": 2.0,

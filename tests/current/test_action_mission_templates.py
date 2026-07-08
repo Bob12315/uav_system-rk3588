@@ -15,10 +15,12 @@ TEMPLATE_PATHS = [
     Path("config/action_missions/drop_two_targets_v1.json"),
     Path("config/action_missions/recon_sequence_v1.json"),
     Path("config/action_missions/rescue_2026_full_auto.json"),
+    Path("config/action_missions/rescue_2026_full_auto_v2.json"),
 ]
 DROP_TEMPLATE_PATH = TEMPLATE_PATHS[0]
 RECON_SEQUENCE_TEMPLATE_PATH = TEMPLATE_PATHS[1]
 FULL_TEMPLATE_PATH = TEMPLATE_PATHS[2]
+FULL_V2_TEMPLATE_PATH = TEMPLATE_PATHS[3]
 REQUIRED_REFERENCES = {
     "$drop_scan.localized_objects",
 }
@@ -540,3 +542,54 @@ def test_validator_rejects_retry_current_then_jump_to_zero_max_attempts(tmp_path
     path = _write_temp_template(tmp_path, data)
     with pytest.raises(ValueError, match="max_attempts must be >= 1"):
         validate_templates([path])
+
+
+# ── rescue_2026_full_auto_v2 tests ─────────────────────────────────────
+
+
+def test_recon_scan_v2_retries_then_returns_home() -> None:
+    """rescue_2026_full_auto_v2: recon_scan failed → retry_current_then_jump_to return_home."""
+    data = _template(FULL_V2_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    policy = by_label["recon_scan"]["on_failed"]
+    assert policy["action"] == "retry_current_then_jump_to"
+    assert policy["max_attempts"] == 2
+    assert policy["target"] == "return_home"
+
+
+def test_recon_sequence_v2_target_lock_camera() -> None:
+    """rescue_2026_full_auto_v2: recon_sequence target_lock has camera 85/69/1/-1."""
+    data = _template(FULL_V2_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    camera = by_label["recon_sequence"]["params"]["target_lock"]["camera"]
+    assert camera["fov_x_deg"] == 85.0
+    assert camera["fov_y_deg"] == 69.0
+    assert camera["image_x_sign"] == 1.0
+    assert camera["image_y_sign"] == -1.0
+
+
+def test_select_recon_targets_v2_zone_center_mode_field() -> None:
+    """rescue_2026_full_auto_v2: select_recon_targets zone_center_mode is field."""
+    data = _template(FULL_V2_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    assert by_label["select_recon_targets"]["params"]["zone_center_mode"] == "field"
+
+
+def test_full_rescue_v2_has_12_steps() -> None:
+    data = _template(FULL_V2_TEMPLATE_PATH)
+    assert len(data["steps"]) == 12
+
+
+def test_sitl_profile_matches_base_full_v2_template() -> None:
+    """rk3588-sitl profile 下的 rescue_2026_full_auto_v2 与 base 保持一致。"""
+    sitl_path = Path("config/profiles/rk3588-sitl/action_missions/rescue_2026_full_auto_v2.json")
+    base = _template(FULL_V2_TEMPLATE_PATH)
+    sitl = _template(sitl_path)
+    assert sitl == base
+
+
+def test_validator_includes_rescue_2026_full_auto_v2_by_default() -> None:
+    """validator 默认包含 rescue_2026_full_auto_v2。"""
+    from scripts.validate_action_missions import DEFAULT_TEMPLATE_PATHS as v_paths
+    v2_path = Path("config/action_missions/rescue_2026_full_auto_v2.json")
+    assert any(p.name == v2_path.name for p in v_paths)

@@ -7,11 +7,11 @@ def _objects(count: int):
              "weight": float(count - i)} for i in range(count)]
 
 
-def _run(objects, **params):
+def _run(objects, context=None, **params):
     action = SelectReconTargetsAction()
     action.start({"objects": objects, "target_count": 5, "allow_fewer": True,
                   "deduplicate_radius_m": 0.45, **params})
-    return action.update({})
+    return action.update(context or {})
 
 
 def test_selects_five_recon_targets():
@@ -68,3 +68,61 @@ def test_allow_fewer_false_zero_targets_still_fails():
     action.start({"objects": [], "target_count": 5, "allow_fewer": False, "deduplicate_radius_m": 0.45})
     result = action.update({})
     assert result.failed is True
+
+
+# ── zone_center_mode tests ──────────────────────────────────────────────
+
+
+def test_zone_center_mode_local_default():
+    """zone_center_mode 默认 local，行为与旧版一致。"""
+    result = _run(_objects(5), zone_center={"x": 0.0, "y": 0.0})
+    assert result.done
+    assert result.detail["selected_count"] == 5
+
+
+def test_zone_center_mode_field_with_complete_context():
+    """zone_center_mode=field 且有完整 field reference 时正确转换并排序。"""
+    ctx = {
+        "field_heading_confirmed": True,
+        "field_origin_confirmed": True,
+        "field_heading_yaw_rad": 0.0,
+        "field_origin_local_x": 100.0,
+        "field_origin_local_y": 200.0,
+    }
+    # zone_center (field_x=0, field_y=10) with heading=0 → local (100, 210)
+    result = _run(_objects(5), context=ctx, zone_center={"x": 0.0, "y": 10.0},
+                  zone_center_mode="field")
+    assert result.done
+    assert result.detail["selected_count"] == 5
+
+
+def test_zone_center_mode_field_missing_confirmed():
+    """zone_center_mode=field 但 field_heading_confirmed 缺失 → failed。"""
+    ctx = {
+        "field_heading_confirmed": False,
+        "field_origin_confirmed": True,
+    }
+    action = SelectReconTargetsAction()
+    action.start({"objects": _objects(5), "target_count": 5, "allow_fewer": True,
+                  "deduplicate_radius_m": 0.45, "zone_center": {"x": 0.0, "y": 10.0},
+                  "zone_center_mode": "field"})
+    result = action.update(ctx)
+    assert result.failed
+    assert result.reason == "missing_field_reference_for_zone_center"
+
+
+def test_zone_center_mode_field_missing_values():
+    """zone_center_mode=field 但 field_heading_yaw_rad 缺失 → failed。"""
+    ctx = {
+        "field_heading_confirmed": True,
+        "field_origin_confirmed": True,
+        "field_origin_local_x": 100.0,
+        "field_origin_local_y": 200.0,
+    }
+    action = SelectReconTargetsAction()
+    action.start({"objects": _objects(5), "target_count": 5, "allow_fewer": True,
+                  "deduplicate_radius_m": 0.45, "zone_center": {"x": 0.0, "y": 10.0},
+                  "zone_center_mode": "field"})
+    result = action.update(ctx)
+    assert result.failed
+    assert result.reason == "missing_field_reference_for_zone_center"

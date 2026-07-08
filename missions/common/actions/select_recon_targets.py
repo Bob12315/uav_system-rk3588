@@ -6,6 +6,8 @@ from typing import Any
 
 from .base import ActionModule
 from .result import ActionResult
+from app.coordinate_transform import field_to_local_ned
+from app.field_reference import FieldReference
 
 
 DEFAULT_CLASSES = ["bucket_1", "bucket_2", "bucket_3", "bucket", "recon_bucket", "white_bucket"]
@@ -51,6 +53,9 @@ class SelectReconTargetsAction(ActionModule):
         self.class_names = {str(value) for value in classes}
         self.allow_fewer = self._bool_value(data.get("allow_fewer", True), "allow_fewer")
         self.zone_center = self._zone_center(data.get("zone_center"))
+        self.zone_center_mode = str(data.get("zone_center_mode", "local"))
+        if self.zone_center_mode not in ("local", "field"):
+            raise ValueError("zone_center_mode must be 'local' or 'field'")
         self.objects = list(objects)
         self.started = True
         self.stopped = False
@@ -63,6 +68,35 @@ class SelectReconTargetsAction(ActionModule):
             return ActionResult(done=True, reason="stopped", detail=self._detail([], [], 0))
         if self.last_result is not None:
             return self.last_result
+
+        zone_center = self.zone_center
+        if self.zone_center_mode == "field":
+            ctx = context or {}
+            if not bool(ctx.get("field_heading_confirmed", False)) or not bool(
+                ctx.get("field_origin_confirmed", False)
+            ):
+                self.last_result = ActionResult(
+                    failed=True, reason="missing_field_reference_for_zone_center"
+                )
+                return self.last_result
+            heading_yaw = self._float_context(ctx, "field_heading_yaw_rad")
+            origin_x = self._float_context(ctx, "field_origin_local_x")
+            origin_y = self._float_context(ctx, "field_origin_local_y")
+            if heading_yaw is None or origin_x is None or origin_y is None:
+                self.last_result = ActionResult(
+                    failed=True, reason="missing_field_reference_for_zone_center"
+                )
+                return self.last_result
+            ref = FieldReference()
+            ref.is_confirmed = True
+            ref.origin_local_n_m = origin_x
+            ref.origin_local_e_m = origin_y
+            ref.field_heading_yaw_rad = heading_yaw
+            local = field_to_local_ned(
+                self.zone_center[0], self.zone_center[1], 0.0, reference=ref,
+            )
+            zone_center = (local.north_m, local.east_m)
+        self._effective_zone_center = zone_center
 
         candidates: list[_Candidate] = []
         rejected: list[dict[str, Any]] = []
@@ -109,6 +143,8 @@ class SelectReconTargetsAction(ActionModule):
         self.deduplicate_radius_m = 0.45
         self.class_names = set(DEFAULT_CLASSES)
         self.zone_center = (0.0, 0.0)
+        self.zone_center_mode = "local"
+        self._effective_zone_center = (0.0, 0.0)
         self.started = False
         self.stopped = False
         self.last_result: ActionResult | None = None
@@ -137,7 +173,7 @@ class SelectReconTargetsAction(ActionModule):
             return None, {**base, "reason": "low_raw_count"}
         if weight < self.min_weight:
             return None, {**base, "reason": "low_weight"}
-        distance = math.hypot(x - self.zone_center[0], y - self.zone_center[1])
+        distance = math.hypot(x - self._effective_zone_center[0], y - self._effective_zone_center[1])
         return _Candidate(item, index, object_id, class_name, x, y, seen, raw, weight, distance), None
 
     def _detail(self, selected: list[_Candidate], rejected: list[dict[str, Any]], candidate_count: int) -> dict[str, Any]:
@@ -222,3 +258,14 @@ class SelectReconTargetsAction(ActionModule):
             return result if math.isfinite(result) else 0.0
         except (TypeError, ValueError):
             return 0.0
+
+    @staticmethod
+    def _float_context(context: dict[str, Any], name: str) -> float | None:
+        value = context.get(name)
+        if value is None:
+            return None
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            return None
+        return result if math.isfinite(result) else None
