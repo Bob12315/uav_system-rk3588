@@ -109,3 +109,27 @@ def test_app_js_recon_report_path_fallback():
     """summarizeReconReport 保留 recon_scan.recon_report 兼容路径。"""
     js = _read_js("web_ui/static/app.js")
     assert '["recon_scan", "recon_report"]' in js
+
+
+def test_field_map_x_mirrored_world_to_canvas():
+    """field_map.js worldToCanvas 中 X 轴使用 originX - x 镜像映射。"""
+    js = _read_js("web_ui/static/js/field_map.js")
+    assert "originX - Number(x) * view.scale" in js
+
+
+def test_field_map_x_mirrored_canvas_to_world():
+    """field_map.js canvasToWorld 中 X 轴使用 (originX - screenX) 逆映射。"""
+    js = _read_js("web_ui/static/js/field_map.js")
+    assert "x: (originX - screenX) / view.scale" in js
+
+
+def test_field_map_x_old_direct_mapping_removed():
+    """field_map.js 不再使用旧的 originX + x 直接映射。"""
+    js = _read_js("web_ui/static/js/field_map.js")
+    assert "originX + Number(x) * view.scale" not in js
+
+
+def test_field_map_x_old_inverse_mapping_removed():
+    """field_map.js 不再使用旧的 (screenX - originX) 逆映射。"""
+    js = _read_js("web_ui/static/js/field_map.js")
+    assert "x: (screenX - originX) / view.scale" not in js

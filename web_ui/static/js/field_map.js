@@ -162,18 +162,18 @@ const fieldMapView = {
   interacting: false,
 };
 function worldToCanvas(x, y, rect, view = fieldMapView) {
-  const originX = rect.width / 2 - view.centerX * view.scale;
+  const originX = rect.width / 2 + view.centerX * view.scale;
   const originY = rect.height / 2 + view.centerY * view.scale;
   return [
-    originX + Number(x) * view.scale,
+    originX - Number(x) * view.scale,
     originY - Number(y) * view.scale,
   ];
 }
 function canvasToWorld(screenX, screenY, rect, view = fieldMapView) {
-  const originX = rect.width / 2 - view.centerX * view.scale;
+  const originX = rect.width / 2 + view.centerX * view.scale;
   const originY = rect.height / 2 + view.centerY * view.scale;
   return {
-    x: (screenX - originX) / view.scale,
+    x: (originX - screenX) / view.scale,
     y: (originY - screenY) / view.scale,
   };
 }
