@@ -56,7 +56,7 @@
     "recce_area_y_max": 60.0
   },
   "binding_policy": {
-    "max_start_error_m": 3.0,
+    "max_start_error_m": 5.0,
     "warn_start_error_m": 1.5,
     "max_centerline_residual_m": 5.0,
     "warn_centerline_residual_m": 3.0
