@@ -58,7 +58,7 @@
   "binding_policy": {
     "max_start_error_m": 3.0,
     "warn_start_error_m": 1.5,
-    "max_centerline_residual_m": 2.5,
-    "warn_centerline_residual_m": 1.5
+    "max_centerline_residual_m": 5.0,
+    "warn_centerline_residual_m": 3.0
   }
 }
