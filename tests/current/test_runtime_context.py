@@ -17,12 +17,24 @@ def _builder():
     return RuntimeContextBuilder()
 
 
-def _confirm(builder, yaw=0.5, ox=10.0, oy=20.0, oz=-1.0, source="test", ts=1000.0):
+def _confirm(
+    builder,
+    yaw=0.5,
+    ox=10.0,
+    oy=20.0,
+    oz=-1.0,
+    origin_lat=None,
+    origin_lon=None,
+    source="test",
+    ts=1000.0,
+):
     return builder.confirm_field_reference(
         field_heading_yaw_rad=yaw,
         origin_local_x=ox,
         origin_local_y=oy,
         origin_local_z=oz,
+        origin_lat=origin_lat,
+        origin_lon=origin_lon,
         source=source,
         timestamp=ts,
     )
@@ -46,13 +58,25 @@ def test_confirm_sets_confirmed_flags():
 
 def test_confirm_stores_values():
     b = _builder()
-    _confirm(b, yaw=0.8, ox=1.0, oy=2.0, oz=-3.0, source="unit_test", ts=1234.5)
+    _confirm(
+        b,
+        yaw=0.8,
+        ox=1.0,
+        oy=2.0,
+        oz=-3.0,
+        origin_lat=34.0,
+        origin_lon=108.0,
+        source="unit_test",
+        ts=1234.5,
+    )
     assert b.field_heading_yaw_rad == pytest.approx(0.8)
     assert b.field_heading_source == "unit_test"
     assert b.field_heading_time == pytest.approx(1234.5)
     assert b.field_origin_local_x == pytest.approx(1.0)
     assert b.field_origin_local_y == pytest.approx(2.0)
     assert b.field_origin_local_z == pytest.approx(-3.0)
+    assert b.field_origin_lat == pytest.approx(34.0)
+    assert b.field_origin_lon == pytest.approx(108.0)
     assert b.field_origin_time == pytest.approx(1234.5)
 
 

@@ -31,6 +31,8 @@ class RuntimeContextBuilder:
         self.field_origin_local_x: float | None = None
         self.field_origin_local_y: float | None = None
         self.field_origin_local_z: float | None = None
+        self.field_origin_lat: float | None = None
+        self.field_origin_lon: float | None = None
         self.field_origin_time: float | None = None
         self.field_origin_confirmed: bool = False
 
@@ -59,6 +61,8 @@ class RuntimeContextBuilder:
             context["field_origin_local_x"] = self.field_origin_local_x
             context["field_origin_local_y"] = self.field_origin_local_y
             context["field_origin_local_z"] = self.field_origin_local_z
+            context["field_origin_lat"] = self.field_origin_lat
+            context["field_origin_lon"] = self.field_origin_lon
             context["field_origin_time"] = self.field_origin_time
         context["field_origin_confirmed"] = bool(self.field_origin_confirmed)
         context["field_transform"] = self.field_transform()
@@ -84,6 +88,8 @@ class RuntimeContextBuilder:
                 context["field_origin_local_x"] = self.field_origin_local_x
                 context["field_origin_local_y"] = self.field_origin_local_y
                 context["field_origin_local_z"] = self.field_origin_local_z
+                context["field_origin_lat"] = self.field_origin_lat
+                context["field_origin_lon"] = self.field_origin_lon
                 context["field_origin_time"] = self.field_origin_time
             context["field_origin_confirmed"] = bool(self.field_origin_confirmed)
 
@@ -137,6 +143,8 @@ class RuntimeContextBuilder:
             "origin_local_x": self.field_origin_local_x,
             "origin_local_y": self.field_origin_local_y,
             "origin_local_z": self.field_origin_local_z,
+            "origin_lat": self.field_origin_lat,
+            "origin_lon": self.field_origin_lon,
             "confirmed": self.field_transform_ready(),
             "convention": "field_y_forward_field_x_right",
         }
@@ -187,6 +195,8 @@ class RuntimeContextBuilder:
         origin_local_x: float,
         origin_local_y: float,
         origin_local_z: float | None = None,
+        origin_lat: float | None = None,
+        origin_lon: float | None = None,
         source: str = "field_reference",
         timestamp: float | None = None,
     ) -> bool:
@@ -210,12 +220,15 @@ class RuntimeContextBuilder:
         self.field_origin_local_x = ox
         self.field_origin_local_y = oy
         self.field_origin_local_z = self._float_or_none(origin_local_z)
+        self.field_origin_lat = self._float_or_none(origin_lat)
+        self.field_origin_lon = self._float_or_none(origin_lon)
         self.field_origin_time = now
         self.field_origin_confirmed = True
         self.logger.info(
-            "field reference synced yaw_rad=%s origin=(%s,%s,%s) source=%s",
+            "field reference synced yaw_rad=%s origin=(%s,%s,%s) gps=(%s,%s) source=%s",
             self.field_heading_yaw_rad,
             ox, oy, self.field_origin_local_z,
+            self.field_origin_lat, self.field_origin_lon,
             source,
         )
         return True
@@ -229,6 +242,8 @@ class RuntimeContextBuilder:
         self.field_origin_local_x = None
         self.field_origin_local_y = None
         self.field_origin_local_z = None
+        self.field_origin_lat = None
+        self.field_origin_lon = None
         self.field_origin_time = None
         self.field_origin_confirmed = False
         self.logger.info("field heading cleared via FieldReference reset")

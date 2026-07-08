@@ -180,3 +180,7 @@ def test_action_lab_does_not_auto_register_default_registry() -> None:
 
 def test_recon_scan_local_position_dispatch_policy_enabled() -> None:
     assert "recon_scan" in ACTION_DISPATCH_POLICY["local_position"].allowed_actions
+
+
+def test_goto_waypoint_global_goto_dispatch_policy_enabled() -> None:
+    assert "goto_waypoint" in ACTION_DISPATCH_POLICY["global_goto"].allowed_actions

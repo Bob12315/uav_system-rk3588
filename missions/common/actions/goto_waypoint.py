@@ -3,8 +3,9 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from app.coordinate_transform import field_to_local_ned
+from app.coordinate_transform import field_to_gps, field_to_local_ned
 from app.field_reference import FieldReference
+from telemetry_link.frames import GLOBAL_RELATIVE_ALT_INT, LOCAL_NED
 
 from .base import ActionModule
 from .result import ActionResult
@@ -48,6 +49,9 @@ class GotoWaypointAction(ActionModule):
         waypoint_mode = str(data.get("waypoint_mode", "absolute")).strip().lower()
         if waypoint_mode not in {"absolute", "field"}:
             raise ValueError("waypoint_mode must be absolute or field")
+        target_frame = str(data.get("target_frame", "local")).strip().lower()
+        if target_frame not in {"local", "global"}:
+            raise ValueError("target_frame must be local or global")
 
         yaw_mode = str(data.get("yaw_mode", "arm_heading")).strip().lower()
         if yaw_mode not in {"hold", "fixed", "arm_heading", "field_heading"}:
@@ -72,9 +76,11 @@ class GotoWaypointAction(ActionModule):
         self.altitude_m = altitude_m
         self.target_z = -altitude_m
         self.waypoint_mode = waypoint_mode
+        self.target_frame = target_frame
         self.yaw_mode = yaw_mode
         self.yaw_rad = yaw_rad
-        self.frame = int(data.get("frame", 1))
+        default_frame = GLOBAL_RELATIVE_ALT_INT if target_frame == "global" else LOCAL_NED
+        self.frame = int(data.get("frame", default_frame))
         self.tolerance_xy_m = tolerance_xy_m
         self.tolerance_z_m = tolerance_z_m
         self.min_hold_updates = min_hold_updates
@@ -112,11 +118,11 @@ class GotoWaypointAction(ActionModule):
                 reason="missing_field_heading_yaw",
                 detail=detail,
             )
-        target = self._local_target(context_data)
+        target = self._target(context_data)
         if target is None:
             detail = self._detail(None, None, None, context_data)
             detail["note"] = (
-                "field waypoint rejected: confirm field heading/origin before field -> LOCAL_NED conversion"
+                "field waypoint rejected: confirm field heading/origin before coordinate conversion"
             )
             return ActionResult(
                 failed=True,
@@ -133,11 +139,7 @@ class GotoWaypointAction(ActionModule):
                 detail=self._detail(None, None, None, context_data),
             )
 
-        dx = target["x"] - current["x"]
-        dy = target["y"] - current["y"]
-        dz = target["z"] - current["z"]
-        distance_xy_m = math.sqrt(dx * dx + dy * dy)
-        z_error_m = abs(dz)
+        distance_xy_m, z_error_m = self._target_error(target, current)
         reached = (
             distance_xy_m <= self.tolerance_xy_m
             and z_error_m <= self.tolerance_z_m
@@ -169,9 +171,10 @@ class GotoWaypointAction(ActionModule):
         self.target_z = 0.0
         self.altitude_m = 0.0
         self.waypoint_mode = "absolute"
+        self.target_frame = "local"
         self.yaw_mode = "arm_heading"
         self.yaw_rad: float | None = None
-        self.frame = 1
+        self.frame = LOCAL_NED
         self.tolerance_xy_m = 0.3
         self.tolerance_z_m = 0.3
         self.min_hold_updates = 1
@@ -186,7 +189,29 @@ class GotoWaypointAction(ActionModule):
         field_heading_yaw_rad: float | None = None,
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        target_data = target or {"x": self.target_x, "y": self.target_y, "z": self.target_z}
+        target_data = target or self._raw_target()
+        context_data = context or {}
+        if self.target_frame == "global":
+            action = {
+                "action_type": "global_goto",
+                "params": {
+                    "lat": target_data["lat"],
+                    "lon": target_data["lon"],
+                    "alt": target_data["alt"],
+                    "frame": self.frame,
+                },
+                "input_frame": "field" if self.waypoint_mode == "field" else "global",
+                "input_target": {"x": self.target_x, "y": self.target_y, "z": self.target_z},
+                "global_target": dict(target_data),
+                "key": self.key,
+                "once": False,
+                "priority": self.priority,
+            }
+            action["field_origin_lat"] = self._float_context(context_data, "field_origin_lat")
+            action["field_origin_lon"] = self._float_context(context_data, "field_origin_lon")
+            action["field_heading_yaw_rad"] = field_heading_yaw_rad
+            return action
+
         params: dict[str, Any] = {
             "x": target_data["x"],
             "y": target_data["y"],
@@ -209,7 +234,6 @@ class GotoWaypointAction(ActionModule):
             "once": False,
             "priority": self.priority,
         }
-        context_data = context or {}
         action["field_origin_local_x"] = self._float_context(context_data, "field_origin_local_x")
         action["field_origin_local_y"] = self._float_context(context_data, "field_origin_local_y")
         action["field_heading_yaw_rad"] = field_heading_yaw_rad
@@ -236,16 +260,27 @@ class GotoWaypointAction(ActionModule):
             "reached_updates": self.reached_updates,
             "yaw_mode": self.yaw_mode,
             "waypoint_mode": self.waypoint_mode,
-            "input_frame": "field" if self.waypoint_mode == "field" else "local_ned",
+            "target_frame": self.target_frame,
+            "input_frame": (
+                "field" if self.waypoint_mode == "field"
+                else ("global" if self.target_frame == "global" else "local_ned")
+            ),
             "input_target": {"x": self.target_x, "y": self.target_y, "z": self.target_z},
             "field_origin_local_x": self._float_context(context_data, "field_origin_local_x"),
             "field_origin_local_y": self._float_context(context_data, "field_origin_local_y"),
+            "field_origin_lat": self._float_context(context_data, "field_origin_lat"),
+            "field_origin_lon": self._float_context(context_data, "field_origin_lon"),
         }
-        local_target = self._local_target(context_data)
-        if local_target is not None:
-            detail["local_target"] = local_target
+        target = self._target(context_data)
+        if target is not None:
+            if self.target_frame == "global":
+                detail["global_target"] = target
+            else:
+                detail["local_target"] = target
             detail["note"] = (
-                "field -> LOCAL_NED converted" if self.waypoint_mode == "field"
+                "field -> GPS converted" if self.waypoint_mode == "field" and self.target_frame == "global"
+                else "field -> LOCAL_NED converted" if self.waypoint_mode == "field"
+                else "GPS input used directly" if self.target_frame == "global"
                 else "LOCAL_NED input used directly"
             )
         arm_heading_yaw_rad = self._arm_heading_yaw(context_data)
@@ -262,6 +297,11 @@ class GotoWaypointAction(ActionModule):
             detail["field_heading_source"] = context_data.get("field_heading_source")
         return detail
 
+    def _raw_target(self) -> dict[str, float]:
+        if self.target_frame == "global":
+            return {"lat": self.target_x, "lon": self.target_y, "alt": self.altitude_m}
+        return {"x": self.target_x, "y": self.target_y, "z": self.target_z}
+
     def _arm_heading_yaw(self, context: dict[str, Any]) -> float | None:
         value = context.get("arm_heading_yaw_rad")
         if value is None:
@@ -271,6 +311,11 @@ class GotoWaypointAction(ActionModule):
         except (TypeError, ValueError):
             return None
         return result if math.isfinite(result) else None
+
+    def _target(self, context: dict[str, Any]) -> dict[str, float] | None:
+        if self.target_frame == "global":
+            return self._global_target(context)
+        return self._local_target(context)
 
     def _field_heading_yaw(self, context: dict[str, Any]) -> float | None:
         value = context.get("field_heading_yaw_rad")
@@ -307,6 +352,31 @@ class GotoWaypointAction(ActionModule):
         )
         return {"x": result.north_m, "y": result.east_m, "z": result.z_down_m}
 
+    def _global_target(self, context: dict[str, Any]) -> dict[str, float] | None:
+        if self.waypoint_mode == "absolute":
+            return {"lat": self.target_x, "lon": self.target_y, "alt": self.altitude_m}
+
+        if not bool(context.get("field_heading_confirmed", False)) or not bool(
+            context.get("field_origin_confirmed", False)
+        ):
+            return None
+        field_heading_yaw_rad = self._field_heading_yaw(context)
+        origin_lat = self._float_context(context, "field_origin_lat")
+        origin_lon = self._float_context(context, "field_origin_lon")
+        if field_heading_yaw_rad is None or origin_lat is None or origin_lon is None:
+            return None
+
+        ref = FieldReference()
+        ref.is_confirmed = True
+        ref.origin_lat = origin_lat
+        ref.origin_lon = origin_lon
+        ref.field_heading_yaw_rad = field_heading_yaw_rad
+
+        result = field_to_gps(
+            self.target_x, self.target_y, self.altitude_m, reference=ref,
+        )
+        return {"lat": result.lat, "lon": result.lon, "alt": result.alt_m}
+
     @staticmethod
     def _float_context(context: dict[str, Any], name: str) -> float | None:
         value = context.get(name)
@@ -319,6 +389,8 @@ class GotoWaypointAction(ActionModule):
         return result if math.isfinite(result) else None
 
     def _current_position(self, context: dict[str, Any]) -> dict[str, float] | None:
+        if self.target_frame == "global":
+            return self._current_global_position(context)
         value = context.get("local_position")
         if value is None:
             drone = context.get("drone")
@@ -334,6 +406,55 @@ class GotoWaypointAction(ActionModule):
             }
         except (KeyError, TypeError, ValueError):
             return None
+
+    def _current_global_position(self, context: dict[str, Any]) -> dict[str, float] | None:
+        drone = context.get("drone")
+        if not isinstance(drone, dict) or not bool(drone.get("global_position_valid", False)):
+            return None
+        try:
+            lat = float(drone["lat"])
+            lon = float(drone["lon"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        alt = None
+        for name in ("relative_altitude", "relative_altitude_m", "altitude_m"):
+            if name not in drone:
+                continue
+            try:
+                alt = float(drone[name])
+                break
+            except (TypeError, ValueError):
+                continue
+        if alt is None or not (math.isfinite(lat) and math.isfinite(lon) and math.isfinite(alt)):
+            return None
+        return {"lat": lat, "lon": lon, "alt": alt}
+
+    def _target_error(
+        self,
+        target: dict[str, float],
+        current: dict[str, float],
+    ) -> tuple[float, float]:
+        if self.target_frame == "global":
+            distance_xy_m = self._gps_distance_m(
+                current["lat"], current["lon"], target["lat"], target["lon"]
+            )
+            return distance_xy_m, abs(target["alt"] - current["alt"])
+
+        dx = target["x"] - current["x"]
+        dy = target["y"] - current["y"]
+        dz = target["z"] - current["z"]
+        return math.sqrt(dx * dx + dy * dy), abs(dz)
+
+    @staticmethod
+    def _gps_distance_m(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> float:
+        lat_a_rad = math.radians(lat_a)
+        d_north = (math.radians(lat_b) - lat_a_rad) * 6371000.0
+        d_east = (
+            (math.radians(lon_b) - math.radians(lon_a))
+            * 6371000.0
+            * math.cos(lat_a_rad)
+        )
+        return math.sqrt(d_north * d_north + d_east * d_east)
 
     @staticmethod
     def _is_invalid_coord(value: Any) -> bool:

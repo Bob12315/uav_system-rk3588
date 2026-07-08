@@ -21,6 +21,7 @@ DROP_TEMPLATE_PATH = TEMPLATE_PATHS[0]
 RECON_SEQUENCE_TEMPLATE_PATH = TEMPLATE_PATHS[1]
 FULL_TEMPLATE_PATH = TEMPLATE_PATHS[2]
 FULL_V2_TEMPLATE_PATH = TEMPLATE_PATHS[3]
+DROP_V2_TEMPLATE_PATH = Path("config/action_missions/drop_two_targets_v2.json")
 REQUIRED_REFERENCES = {
     "$drop_scan.localized_objects",
 }
@@ -331,6 +332,13 @@ def test_return_home_waypoint_mode_field() -> None:
     assert step["params"]["waypoint_mode"] == "field"
     assert step["params"]["x"] == 0.0
     assert step["params"]["y"] == 0.0
+
+
+def test_drop_two_targets_v2_outer_gotos_use_global_targets() -> None:
+    data = _template(DROP_V2_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    assert by_label["goto_drop_scan_center"]["params"]["target_frame"] == "global"
+    assert by_label["return_home"]["params"]["target_frame"] == "global"
 
 
 def test_drop_sequence_goto_waypoint_mode_absolute() -> None:

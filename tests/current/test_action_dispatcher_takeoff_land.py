@@ -29,6 +29,16 @@ class FakeLinkManager:
     ) -> None:
         self.calls.append(("condition_yaw", yaw_deg, yaw_speed_deg_s, direction, relative, priority))
 
+    def global_goto(
+        self,
+        lat: float,
+        lon: float,
+        alt: float,
+        frame: int,
+        priority: int = 4,
+    ) -> None:
+        self.calls.append(("global_goto", lat, lon, alt, frame, priority))
+
 def _dispatcher(send_actions: bool = True) -> ActionDispatcher:
     dispatcher = ActionDispatcher()
     dispatcher.send_actions = send_actions
@@ -131,6 +141,27 @@ def test_condition_yaw_dispatches_for_yaw_align() -> None:
 
     assert dispatch["sent"][0]["action_type"] == "condition_yaw"
     assert fake_link.calls == [("condition_yaw", 90.0, 25.0, 0, False, 4)]
+
+
+def test_global_goto_dispatches_for_goto_waypoint() -> None:
+    dispatch, fake_link = _dispatch(
+        {
+            "action_type": "global_goto",
+            "params": {
+                "lat": 34.0,
+                "lon": 108.0,
+                "alt": 5.0,
+                "frame": 6,
+            },
+            "key": "goto_global",
+            "once": False,
+            "priority": 5,
+        },
+        action_name="goto_waypoint",
+    )
+
+    assert dispatch["sent"][0]["action_type"] == "global_goto"
+    assert fake_link.calls == [("global_goto", 34.0, 108.0, 5.0, 6, 5)]
 
 @pytest.mark.skip(reason="uses removed confirm_field_heading dispatch")
 def test_takeoff_dispatches_when_gates_enabled() -> None:

@@ -52,6 +52,11 @@ ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
         requires_send_actions=True,
         requires_send_commands=True,
     ),
+    "global_goto": DispatchRule(
+        allowed_actions={"goto_waypoint"},
+        requires_send_actions=True,
+        requires_send_commands=True,
+    ),
     "flight_command": DispatchRule(
         allowed_actions={"align_descend", "recon_inspect_target", "payload_release", "recon_descend_observe", "drop_sequence", "recon_sequence"},
         requires_send_actions=True,

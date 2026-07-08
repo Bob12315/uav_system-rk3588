@@ -12,6 +12,7 @@ from app.dispatch.types import empty_dispatch
 from app.dispatch.normalizer import get_action_params, optional_float, format_log_float
 from app.dispatch.servo_handler import dispatch_set_servo
 from app.dispatch.local_position_handler import dispatch_local_position
+from app.dispatch.global_position_handler import dispatch_global_goto
 from app.dispatch.flight_mode_handler import (
     dispatch_set_mode, dispatch_arm, dispatch_takeoff, dispatch_land,
     dispatch_condition_yaw,
@@ -282,6 +283,8 @@ class ActionDispatcher:
             return self._dispatch_condition_yaw(action, link_manager=link_manager)
         if action_type == "local_position":
             return self._dispatch_local_position(action, link_manager=link_manager)
+        if action_type == "global_goto":
+            return self._dispatch_global_goto(action, link_manager=link_manager)
         if action_type in ("flight_command", "body_velocity"):
             return self._dispatch_flight_command(action, link_manager=link_manager)
         if action_type == "yolo_lock_target":
@@ -353,6 +356,17 @@ class ActionDispatcher:
         link_manager: object | None,
     ) -> dict[str, object]:
         return dispatch_land(action, link_manager=link_manager)
+
+    def _dispatch_global_goto(
+        self,
+        action: dict[str, object],
+        *,
+        link_manager: object | None,
+    ) -> dict[str, object]:
+        result, log_msg = dispatch_global_goto(action, link_manager=link_manager)
+        if log_msg is not None:
+            self._logger.info(log_msg)
+        return result
 
     def _dispatch_condition_yaw(
         self,

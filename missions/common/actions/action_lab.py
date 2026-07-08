@@ -93,12 +93,13 @@ def action_lab_specs() -> list[dict[str, Any]]:
         {
             "name": "goto_waypoint",
             "label": "Goto Waypoint",
-            "description": "FIELD waypoint (x right, y forward), converted to LOCAL_NED before dispatch.",
+            "description": "FIELD waypoint (x right, y forward), converted to LOCAL_NED or GPS before dispatch.",
             "default_params": {
                 "x": 0.0,
                 "y": 5.5,
                 "altitude_m": 3.5,
                 "waypoint_mode": "field",
+                "target_frame": "local",
                 "yaw_mode": "field_heading",
                 "tolerance_xy_m": 0.35,
                 "tolerance_z_m": 0.35,

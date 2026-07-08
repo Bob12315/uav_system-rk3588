@@ -29,6 +29,8 @@ def test_start_rejects_invalid_altitude_and_yaw_options() -> None:
         action.start({"x": 1, "y": 2, "altitude_m": 5, "yaw_mode": "spin"})
     with pytest.raises(ValueError):
         action.start({"x": 1, "y": 2, "altitude_m": 5, "yaw_mode": "fixed"})
+    with pytest.raises(ValueError):
+        action.start({"x": 1, "y": 2, "altitude_m": 5, "target_frame": "mars"})
 
 
 def test_default_arm_heading_yaw_outputs_context_yaw() -> None:
@@ -206,6 +208,60 @@ def test_field_axes_convert_to_expected_local_ned(
         "x": expected_x, "y": expected_y, "z": -3.0,
     })
     assert result.detail["note"] == "field -> LOCAL_NED converted"
+
+
+def test_field_waypoint_global_target_frame_converts_to_gps() -> None:
+    action = GotoWaypointAction()
+    action.start({
+        "x": 0.0,
+        "y": 10.0,
+        "altitude_m": 5.0,
+        "waypoint_mode": "field",
+        "target_frame": "global",
+        "yaw_mode": "field_heading",
+    })
+
+    result = action.update({
+        "field_heading_yaw_rad": 0.0,
+        "field_heading_confirmed": True,
+        "field_origin_confirmed": True,
+        "field_origin_lat": 34.0,
+        "field_origin_lon": 108.0,
+    })
+
+    emitted = result.actions[0]
+    assert emitted["action_type"] == "global_goto"
+    assert emitted["input_frame"] == "field"
+    assert emitted["params"]["lat"] == pytest.approx(34.0000899, rel=1e-5)
+    assert emitted["params"]["lon"] == pytest.approx(108.0)
+    assert emitted["params"]["alt"] == pytest.approx(5.0)
+    assert emitted["params"]["frame"] != 1
+    assert result.detail["global_target"] == pytest.approx(emitted["global_target"])
+    assert result.detail["note"] == "field -> GPS converted"
+
+
+def test_global_target_uses_gps_position_for_completion() -> None:
+    action = GotoWaypointAction()
+    action.start({
+        "x": 34.0,
+        "y": 108.0,
+        "altitude_m": 5.0,
+        "target_frame": "global",
+        "yaw_mode": "hold",
+    })
+
+    result = action.update({
+        "drone": {
+            "global_position_valid": True,
+            "lat": 34.0,
+            "lon": 108.0,
+            "relative_altitude": 5.0,
+        }
+    })
+
+    assert result.done is True
+    assert result.reason == "waypoint_reached"
+    assert result.actions == []
 
 
 def test_field_waypoint_without_confirmation_never_emits_action() -> None:

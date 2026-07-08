@@ -292,6 +292,8 @@ class FieldReferenceController:
             "field_origin_local_x": self._builder.field_origin_local_x,
             "field_origin_local_y": self._builder.field_origin_local_y,
             "field_origin_local_z": self._builder.field_origin_local_z,
+            "field_origin_lat": self._builder.field_origin_lat,
+            "field_origin_lon": self._builder.field_origin_lon,
             "field_origin_time": self._builder.field_origin_time,
             "field_origin_confirmed": self._builder.field_origin_confirmed,
         }
@@ -304,6 +306,8 @@ class FieldReferenceController:
                 origin_local_x=ref.origin_local_n_m,
                 origin_local_y=ref.origin_local_e_m,
                 origin_local_z=ref.origin_local_z_m,
+                origin_lat=ref.origin_lat,
+                origin_lon=ref.origin_lon,
                 source=source,
                 timestamp=ts,
             )
@@ -322,6 +326,8 @@ class FieldReferenceController:
             self._builder.field_origin_local_x = saved_rt["field_origin_local_x"]
             self._builder.field_origin_local_y = saved_rt["field_origin_local_y"]
             self._builder.field_origin_local_z = saved_rt["field_origin_local_z"]
+            self._builder.field_origin_lat = saved_rt["field_origin_lat"]
+            self._builder.field_origin_lon = saved_rt["field_origin_lon"]
             self._builder.field_origin_time = saved_rt["field_origin_time"]
             return self._bind_failure_response(
                 profile_id,

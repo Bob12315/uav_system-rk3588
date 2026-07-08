@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from .field_reference import FieldReference, FieldReferenceError
+from .field_reference import EARTH_RADIUS_M, FieldReference, FieldReferenceError
 
 
 # ---------------------------------------------------------------------------
@@ -34,6 +34,19 @@ class FieldPoint:
     field_x_m: float
     field_y_m: float
     altitude_m: float
+
+
+@dataclass(slots=True)
+class GpsPoint:
+    """A point in global GPS coordinates.
+
+    ``alt_m`` follows the MAVLink global frame selected by the caller
+    (relative altitude for ``GLOBAL_RELATIVE_ALT_INT``).
+    """
+
+    lat: float
+    lon: float
+    alt_m: float
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +102,55 @@ def field_to_local_ned(
         east_m=local_e,
         z_down_m=-altitude_m,
     )
+
+
+def field_to_gps(
+    field_x_m: float,
+    field_y_m: float,
+    altitude_m: float,
+    reference: FieldReference,
+) -> GpsPoint:
+    """Convert FIELD coordinates to GPS lat/lon.
+
+    Uses the confirmed FIELD +Y heading and the profile GPS origin.  This
+    is intended for fixed competition maps where FIELD targets should become
+    global guided targets instead of LOCAL_NED offsets.
+    """
+    if (
+        not reference.is_confirmed
+        or reference.field_heading_yaw_rad is None
+        or reference.origin_lat is None
+        or reference.origin_lon is None
+    ):
+        raise FieldReferenceError(
+            "FieldReference is not ready for field -> GPS conversion"
+        )
+
+    heading = float(reference.field_heading_yaw_rad)
+    origin_lat = float(reference.origin_lat)
+    origin_lon = float(reference.origin_lon)
+    if not (
+        math.isfinite(heading)
+        and math.isfinite(origin_lat)
+        and math.isfinite(origin_lon)
+    ):
+        raise FieldReferenceError(
+            "FieldReference contains non-finite field -> GPS values"
+        )
+
+    cos_h = math.cos(heading)
+    sin_h = math.sin(heading)
+    d_north = field_y_m * cos_h - field_x_m * sin_h
+    d_east = field_y_m * sin_h + field_x_m * cos_h
+
+    origin_lat_rad = math.radians(origin_lat)
+    cos_lat = math.cos(origin_lat_rad)
+    if abs(cos_lat) < 1e-9:
+        raise FieldReferenceError("origin latitude is too close to pole")
+
+    lat = origin_lat + math.degrees(d_north / EARTH_RADIUS_M)
+    lon = origin_lon + math.degrees(d_east / (EARTH_RADIUS_M * cos_lat))
+    return GpsPoint(lat=lat, lon=lon, alt_m=altitude_m)
 
 
 def local_ned_to_field(

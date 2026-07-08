@@ -282,8 +282,9 @@ class LinkManager:
         self._active_runtime().command_queue.put_latest_action(command)
 
     def clear_pending_local_position_actions(self) -> None:
-        """Remove all queued LOCAL_POSITION commands so stale targets don't linger."""
+        """Remove queued navigation position targets so stale targets don't linger."""
         self._active_runtime().command_queue.clear_actions(ActionType.LOCAL_POSITION)
+        self._active_runtime().command_queue.clear_actions(ActionType.GLOBAL_GOTO)
 
     def hold_current_local_position(self, priority: int = 0) -> bool:
         """Send a LOCAL_POSITION hold at the current drone position.
@@ -367,6 +368,7 @@ class LinkManager:
         runtime.command_queue.clear_control()
         runtime.command_queue.clear_gimbal_rate()
         runtime.command_queue.clear_actions(ActionType.LOCAL_POSITION)
+        runtime.command_queue.clear_actions(ActionType.GLOBAL_GOTO)
         self.submit_action_command(
             ActionCommand(
                 action_type=ActionType.LAND,
@@ -445,7 +447,7 @@ class LinkManager:
         frame: int,
         priority: int = 4,
     ) -> None:
-        self.submit_action_command(
+        self.submit_latest_action_command(
             ActionCommand(
                 action_type=ActionType.GLOBAL_GOTO,
                 params={"lat": float(lat), "lon": float(lon), "alt": float(alt), "frame": int(frame)},
