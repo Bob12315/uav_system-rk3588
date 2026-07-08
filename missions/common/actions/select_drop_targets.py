@@ -6,6 +6,8 @@ from typing import Any
 
 from .base import ActionModule
 from .result import ActionResult
+from app.coordinate_transform import field_to_local_ned
+from app.field_reference import FieldReference
 
 
 DEFAULT_SCORE_TABLE = {
@@ -84,6 +86,9 @@ class SelectDropTargetsAction(ActionModule):
         )
         self.key = str(data.get("key") or "").strip() or "select_drop_targets"
         self.zone_center = self._zone_center(data.get("zone_center"))
+        self.zone_center_mode = str(data.get("zone_center_mode", "local"))
+        if self.zone_center_mode not in ("local", "field"):
+            raise ValueError("zone_center_mode must be 'local' or 'field'")
         self.started = True
         self.stopped = False
         self.done = False
@@ -97,6 +102,45 @@ class SelectDropTargetsAction(ActionModule):
             return ActionResult(done=True, reason="stopped", detail=self._base_detail([], []))
         if self.done or self.failed:
             return self._clone_result(self.last_result)
+
+        self._effective_zone_center = self.zone_center
+        if self.zone_center_mode == "field":
+            ctx = context or {}
+            if not bool(ctx.get("field_heading_confirmed", False)) or not bool(
+                ctx.get("field_origin_confirmed", False)
+            ):
+                self.done = False
+                self.failed = True
+                self.last_result = ActionResult(
+                    failed=True, reason="missing_field_reference_for_zone_center"
+                )
+                return self.last_result
+            heading_yaw = self._float_context(ctx, "field_heading_yaw_rad")
+            origin_x = self._float_context(ctx, "field_origin_local_x")
+            origin_y = self._float_context(ctx, "field_origin_local_y")
+            if heading_yaw is None or origin_x is None or origin_y is None:
+                self.done = False
+                self.failed = True
+                self.last_result = ActionResult(
+                    failed=True, reason="missing_field_reference_for_zone_center"
+                )
+                return self.last_result
+            if self.zone_center is None:
+                self.done = False
+                self.failed = True
+                self.last_result = ActionResult(
+                    failed=True, reason="missing_field_reference_for_zone_center"
+                )
+                return self.last_result
+            ref = FieldReference()
+            ref.is_confirmed = True
+            ref.origin_local_n_m = origin_x
+            ref.origin_local_e_m = origin_y
+            ref.field_heading_yaw_rad = heading_yaw
+            local = field_to_local_ned(
+                self.zone_center[0], self.zone_center[1], 0.0, reference=ref,
+            )
+            self._effective_zone_center = (local.north_m, local.east_m)
 
         result = self._select()
         self.done = result.done
@@ -121,6 +165,8 @@ class SelectDropTargetsAction(ActionModule):
         self.single_target_servo_outputs: list[dict[str, Any]] | None = None
         self.multi_target_first_servo_outputs: list[dict[str, Any]] | None = None
         self.zone_center: tuple[float, float] | None = None
+        self.zone_center_mode = "local"
+        self._effective_zone_center: tuple[float, float] | None = None
         self.key = "select_drop_targets"
         self.started = False
         self.stopped = False
@@ -390,9 +436,10 @@ class SelectDropTargetsAction(ActionModule):
         return x, y
 
     def _zone_distance(self, x: float, y: float) -> float | None:
-        if self.zone_center is None:
+        effective = getattr(self, '_effective_zone_center', None)
+        if effective is None:
             return None
-        return math.hypot(x - self.zone_center[0], y - self.zone_center[1])
+        return math.hypot(x - effective[0], y - effective[1])
 
     def _clone_result(self, result: ActionResult | None) -> ActionResult:
         if result is None:
@@ -427,3 +474,14 @@ class SelectDropTargetsAction(ActionModule):
             return float(value)
         except (TypeError, ValueError):
             return default
+
+    @staticmethod
+    def _float_context(context: dict[str, Any], name: str) -> float | None:
+        value = context.get(name)
+        if value is None:
+            return None
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            return None
+        return result if math.isfinite(result) else None

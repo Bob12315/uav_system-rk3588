@@ -98,6 +98,7 @@
           "x": 0.0,
           "y": 32.5
         },
+        "zone_center_mode": "field",
         "single_target_servo_outputs": [
           { "channel": 8, "release_pwm": 1750, "hold_pwm": 1250 },
           { "channel": 9, "release_pwm": 1815, "hold_pwm": 1185 }

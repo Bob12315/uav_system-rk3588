@@ -593,3 +593,20 @@ def test_validator_includes_rescue_2026_full_auto_v2_by_default() -> None:
     from scripts.validate_action_missions import DEFAULT_TEMPLATE_PATHS as v_paths
     v2_path = Path("config/action_missions/rescue_2026_full_auto_v2.json")
     assert any(p.name == v2_path.name for p in v_paths)
+
+
+# ── zone_center_mode template tests ─────────────────────────────────────
+
+
+def test_select_drop_targets_v2_zone_center_mode_field() -> None:
+    """rescue_2026_full_auto_v2: select_drop_targets zone_center_mode is field."""
+    data = _template(FULL_V2_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    assert by_label["select_drop_targets"]["params"]["zone_center_mode"] == "field"
+
+
+def test_drop_two_targets_v2_select_drop_targets_zone_center_mode_field() -> None:
+    """drop_two_targets_v2: select_drop_targets zone_center_mode is field."""
+    data = _template(Path("config/action_missions/drop_two_targets_v2.json"))
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    assert by_label["select_drop_targets"]["params"]["zone_center_mode"] == "field"

@@ -89,7 +89,8 @@
         "min_weight": 0.0,
         "deduplicate_radius_m": 0.6,
         "prefer_class_order": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
-        "zone_center": {"x": 0.0, "y": 32.5}
+        "zone_center": {"x": 0.0, "y": 32.5},
+        "zone_center_mode": "field"
       }
     },
     {

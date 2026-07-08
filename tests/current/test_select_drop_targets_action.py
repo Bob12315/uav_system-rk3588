@@ -215,3 +215,56 @@ def test_select_drop_targets_done_update_returns_cached_result() -> None:
     assert second.done is True
     assert second.reason == first.reason
     assert second.detail == first.detail
+
+
+# ── zone_center_mode tests ──────────────────────────────────────────────
+
+
+def test_select_drop_targets_zone_center_mode_local_default():
+    """zone_center_mode 默认 local，行为与旧版一致。"""
+    result = _select(
+        [
+            {"id": "far", "class_name": "bucket", "local_x": 5.0, "local_y": 30.0, "seen_count": 3},
+            {"id": "near", "class_name": "bucket", "local_x": 0.1, "local_y": 30.0, "seen_count": 3},
+        ],
+        target_count=1,
+        zone_center={"x": 0.0, "y": 30.0},
+    )
+    assert result.detail["selected_targets"][0]["id"] == "near"
+
+
+def test_select_drop_targets_zone_center_mode_field_heading_zero():
+    """zone_center_mode=field heading=0 时 field 中心转换正确并影响排序。"""
+    ctx = {
+        "field_heading_confirmed": True,
+        "field_origin_confirmed": True,
+        "field_heading_yaw_rad": 0.0,
+        "field_origin_local_x": 100.0,
+        "field_origin_local_y": 200.0,
+    }
+    # field zone_center (0, 32.5) at origin (100,200) → local (132.5, 200)
+    # near: (132.5, 200) distance=0, far: (100, 232.5) distance≈45.96
+    near = {"id": "near", "class_name": "bucket", "local_x": 132.5, "local_y": 200.0,
+            "seen_count": 3}
+    far = {"id": "far", "class_name": "bucket", "local_x": 100.0, "local_y": 232.5,
+           "seen_count": 3}
+    action = SelectDropTargetsAction()
+    action.start({"objects": [far, near], "target_count": 1, "allow_fewer": True,
+                  "zone_center": {"x": 0.0, "y": 32.5},
+                  "zone_center_mode": "field"})
+    result = action.update(ctx)
+    assert result.done
+    assert result.detail["selected_targets"][0]["id"] == "near"
+
+
+def test_select_drop_targets_zone_center_mode_field_missing_context():
+    """zone_center_mode=field 但 context 缺失 → failed。"""
+    action = SelectDropTargetsAction()
+    action.start({"objects": [{"id": "b1", "class_name": "bucket", "local_x": 1, "local_y": 2,
+                               "seen_count": 3}],
+                  "target_count": 1, "allow_fewer": True,
+                  "zone_center": {"x": 0.0, "y": 32.5},
+                  "zone_center_mode": "field"})
+    result = action.update({})
+    assert result.failed
+    assert result.reason == "missing_field_reference_for_zone_center"
