@@ -17,6 +17,24 @@
       }
     },
     {
+      "name": "yaw_align",
+      "label": "yaw_align_after_takeoff",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "land_home",
+        "max_attempts": 1
+      },
+      "params": {
+        "yaw_mode": "field_heading",
+        "tolerance_deg": 3.0,
+        "yaw_speed_deg_s": 25.0,
+        "min_hold_updates": 5,
+        "max_updates": 120,
+        "priority": 4,
+        "key": "yaw_align_after_takeoff"
+      }
+    },
+    {
       "name": "goto_waypoint",
       "label": "goto_drop_scan_center",
       "on_failed": {
@@ -35,6 +53,24 @@
         "min_hold_updates": 10,
         "priority": 5,
         "key": "goto_drop_scan_center"
+      }
+    },
+    {
+      "name": "yaw_align",
+      "label": "yaw_align_before_fixed_view",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "return_home",
+        "max_attempts": 1
+      },
+      "params": {
+        "yaw_mode": "field_heading",
+        "tolerance_deg": 3.0,
+        "yaw_speed_deg_s": 25.0,
+        "min_hold_updates": 5,
+        "max_updates": 80,
+        "priority": 4,
+        "key": "yaw_align_before_fixed_view"
       }
     },
     {
@@ -106,6 +142,24 @@
         "multi_target_first_servo_outputs": [
           { "channel": 8, "release_pwm": 1750, "hold_pwm": 1250 }
         ]
+      }
+    },
+    {
+      "name": "yaw_align",
+      "label": "yaw_align_before_drop_sequence",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "return_home",
+        "max_attempts": 1
+      },
+      "params": {
+        "yaw_mode": "field_heading",
+        "tolerance_deg": 3.0,
+        "yaw_speed_deg_s": 25.0,
+        "min_hold_updates": 5,
+        "max_updates": 80,
+        "priority": 4,
+        "key": "yaw_align_before_drop_sequence"
       }
     },
     {
@@ -211,6 +265,22 @@
       }
     },
     {
+      "name": "yaw_align",
+      "label": "yaw_align_before_return_home",
+      "on_failed": {
+        "action": "continue"
+      },
+      "params": {
+        "yaw_mode": "field_heading",
+        "tolerance_deg": 3.0,
+        "yaw_speed_deg_s": 25.0,
+        "min_hold_updates": 5,
+        "max_updates": 80,
+        "priority": 4,
+        "key": "yaw_align_before_return_home"
+      }
+    },
+    {
       "name": "goto_waypoint",
       "label": "return_home",
       "on_failed": {
@@ -229,6 +299,22 @@
         "min_hold_updates": 2,
         "priority": 5,
         "key": "return_home"
+      }
+    },
+    {
+      "name": "yaw_align",
+      "label": "yaw_align_before_land",
+      "on_failed": {
+        "action": "continue"
+      },
+      "params": {
+        "yaw_mode": "field_heading",
+        "tolerance_deg": 3.0,
+        "yaw_speed_deg_s": 25.0,
+        "min_hold_updates": 5,
+        "max_updates": 80,
+        "priority": 4,
+        "key": "yaw_align_before_land"
       }
     },
     {

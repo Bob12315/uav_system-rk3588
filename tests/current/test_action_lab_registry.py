@@ -29,6 +29,7 @@ def test_create_action_lab_registry_lists_supported_actions() -> None:
         "survey_area",
         "takeoff",
         "target_lock",
+        "yaw_align",
     ]
 
 
@@ -46,6 +47,7 @@ def test_action_lab_specs_are_json_serializable() -> None:
     assert [item["name"] for item in specs] == [
         "takeoff",
         "land",
+        "yaw_align",
         "goto_waypoint",
         "survey_area",
         "single_view_localize",
@@ -161,6 +163,7 @@ def test_action_lab_does_not_auto_register_default_registry() -> None:
         "payload_release",
         "multi_view_localize",
         "takeoff",
+        "yaw_align",
         "land",
         "select_drop_targets",
         "recon_scan",

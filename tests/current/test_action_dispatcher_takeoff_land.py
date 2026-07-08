@@ -19,6 +19,16 @@ class FakeLinkManager:
     def land(self, priority: int = 2) -> None:
         self.calls.append(("land", priority))
 
+    def condition_yaw(
+        self,
+        yaw_deg: float,
+        yaw_speed_deg_s: float = 20.0,
+        direction: int = 0,
+        relative: bool = False,
+        priority: int = 4,
+    ) -> None:
+        self.calls.append(("condition_yaw", yaw_deg, yaw_speed_deg_s, direction, relative, priority))
+
 def _dispatcher(send_actions: bool = True) -> ActionDispatcher:
     dispatcher = ActionDispatcher()
     dispatcher.send_actions = send_actions
@@ -71,6 +81,56 @@ def test_arm_dispatches_when_gates_enabled() -> None:
 
     assert dispatch["sent"][0]["action_type"] == "arm"
     assert fake_link.calls == [("arm", 1)]
+
+
+class FakeLandLinkManager(FakeLinkManager):
+    def clear_continuous_commands(self) -> None:
+        self.calls.append(("clear_continuous_commands",))
+
+    def clear_pending_local_position_actions(self) -> None:
+        self.calls.append(("clear_pending_local_position_actions",))
+
+
+def test_land_dispatch_clears_motion_queues_before_land() -> None:
+    dispatch, fake_link = _dispatch(
+        {
+            "action_type": "land",
+            "params": {},
+            "key": "land_home_command",
+            "once": True,
+            "priority": 2,
+        },
+        action_name="land",
+        link_manager=FakeLandLinkManager(),
+    )
+
+    assert dispatch["sent"][0]["action_type"] == "land"
+    assert fake_link.calls == [
+        ("clear_continuous_commands",),
+        ("clear_pending_local_position_actions",),
+        ("land", 2),
+    ]
+
+
+def test_condition_yaw_dispatches_for_yaw_align() -> None:
+    dispatch, fake_link = _dispatch(
+        {
+            "action_type": "condition_yaw",
+            "params": {
+                "yaw_deg": 90.0,
+                "yaw_speed_deg_s": 25.0,
+                "direction": 0,
+                "relative": False,
+            },
+            "key": "yaw_align_condition_yaw",
+            "once": True,
+            "priority": 4,
+        },
+        action_name="yaw_align",
+    )
+
+    assert dispatch["sent"][0]["action_type"] == "condition_yaw"
+    assert fake_link.calls == [("condition_yaw", 90.0, 25.0, 0, False, 4)]
 
 @pytest.mark.skip(reason="uses removed confirm_field_heading dispatch")
 def test_takeoff_dispatches_when_gates_enabled() -> None:

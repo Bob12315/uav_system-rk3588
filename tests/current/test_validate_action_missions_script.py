@@ -19,7 +19,7 @@ def _write_template(tmp_path: Path, data: dict) -> Path:
 def test_validate_templates_accepts_default_templates() -> None:
     messages = validate_templates(DEFAULT_TEMPLATE_PATHS)
 
-    assert len(messages) == 3
+    assert len(messages) == len(DEFAULT_TEMPLATE_PATHS)
     assert all(message.startswith("OK ") for message in messages)
 
 

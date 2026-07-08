@@ -26,6 +26,7 @@
 
   var ACTION_UI_ALLOWED_NAMES = new Set([
     "takeoff",
+    "yaw_align",
     "land",
     "goto_waypoint",
     "fixed_view_localize",

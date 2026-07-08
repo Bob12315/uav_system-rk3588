@@ -88,6 +88,12 @@ def dispatch_land(
     key = str(action.get("key") or "")
     if link_manager is None:
         return {"status": "error", "reason": "telemetry_not_connected"}
+    clear_continuous = getattr(link_manager, "clear_continuous_commands", None)
+    if callable(clear_continuous):
+        clear_continuous()
+    clear_nav = getattr(link_manager, "clear_pending_local_position_actions", None)
+    if callable(clear_nav):
+        clear_nav()
     sender = getattr(link_manager, "land", None)
     if not callable(sender):
         return {"status": "error", "reason": "land_not_callable"}
@@ -96,5 +102,37 @@ def dispatch_land(
         "status": "sent",
         "detail": {
             "action_type": "land", "priority": priority, "key": key,
+        },
+    }
+
+
+def dispatch_condition_yaw(
+    action: dict[str, object],
+    *,
+    link_manager: object | None,
+) -> dict[str, object]:
+    params = get_action_params(action)
+    yaw_deg = float(params["yaw_deg"])
+    yaw_speed_deg_s = float(params.get("yaw_speed_deg_s", 20.0))
+    direction = int(params.get("direction", 0))
+    relative = bool(params.get("relative", False))
+    priority = int(action.get("priority", params.get("priority", 4)))
+    key = str(action.get("key") or "")
+    if link_manager is None:
+        return {"status": "error", "reason": "telemetry_not_connected"}
+    sender = getattr(link_manager, "condition_yaw", None)
+    if not callable(sender):
+        return {"status": "error", "reason": "condition_yaw_not_callable"}
+    sender(yaw_deg, yaw_speed_deg_s, direction, relative, priority=priority)
+    return {
+        "status": "sent",
+        "detail": {
+            "action_type": "condition_yaw",
+            "yaw_deg": yaw_deg,
+            "yaw_speed_deg_s": yaw_speed_deg_s,
+            "direction": direction,
+            "relative": relative,
+            "priority": priority,
+            "key": key,
         },
     }

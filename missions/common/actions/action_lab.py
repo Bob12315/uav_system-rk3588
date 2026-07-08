@@ -21,11 +21,13 @@ from .single_view_localize import SingleViewLocalizeAction
 from .survey_area import SurveyAreaAction
 from .takeoff import TakeoffAction
 from .target_lock import TargetLockAction
+from .yaw_align import YawAlignAction
 
 
 def create_action_lab_registry() -> ActionRegistry:
     registry = ActionRegistry()
     registry.register("takeoff", TakeoffAction)
+    registry.register("yaw_align", YawAlignAction)
     registry.register("land", LandAction)
     registry.register("goto_waypoint", GotoWaypointAction)
     registry.register("survey_area", SurveyAreaAction)
@@ -72,6 +74,20 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "max_updates": 250,
                 "priority": 2,
                 "key": "land_home",
+            },
+        },
+        {
+            "name": "yaw_align",
+            "label": "Yaw Align",
+            "description": "Turn vehicle yaw to the confirmed field heading and wait until aligned.",
+            "default_params": {
+                "yaw_mode": "field_heading",
+                "tolerance_deg": 3.0,
+                "yaw_speed_deg_s": 25.0,
+                "min_hold_updates": 5,
+                "max_updates": 120,
+                "priority": 4,
+                "key": "yaw_align_field",
             },
         },
         {

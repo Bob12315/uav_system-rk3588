@@ -91,6 +91,11 @@ ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
         requires_send_actions=True,
         requires_send_commands=True,
     ),
+    "condition_yaw": DispatchRule(
+        allowed_actions={"yaw_align"},
+        requires_send_actions=True,
+        requires_send_commands=True,
+    ),
     "yolo_lock_target": DispatchRule(
         allowed_actions={"target_lock", "recon_inspect_target", "drop_sequence", "recon_sequence"},
         requires_send_actions=True,

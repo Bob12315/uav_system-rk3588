@@ -363,6 +363,10 @@ class LinkManager:
         )
 
     def land(self, priority: int = 2) -> None:
+        runtime = self._active_runtime()
+        runtime.command_queue.clear_control()
+        runtime.command_queue.clear_gimbal_rate()
+        runtime.command_queue.clear_actions(ActionType.LOCAL_POSITION)
         self.submit_action_command(
             ActionCommand(
                 action_type=ActionType.LAND,

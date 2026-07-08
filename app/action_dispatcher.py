@@ -14,6 +14,7 @@ from app.dispatch.servo_handler import dispatch_set_servo
 from app.dispatch.local_position_handler import dispatch_local_position
 from app.dispatch.flight_mode_handler import (
     dispatch_set_mode, dispatch_arm, dispatch_takeoff, dispatch_land,
+    dispatch_condition_yaw,
 )
 from telemetry_link.frames import BODY_NED, LOCAL_NED
 
@@ -277,6 +278,8 @@ class ActionDispatcher:
             return self._dispatch_takeoff(action, link_manager=link_manager)
         if action_type == "land":
             return self._dispatch_land(action, link_manager=link_manager)
+        if action_type == "condition_yaw":
+            return self._dispatch_condition_yaw(action, link_manager=link_manager)
         if action_type == "local_position":
             return self._dispatch_local_position(action, link_manager=link_manager)
         if action_type in ("flight_command", "body_velocity"):
@@ -350,6 +353,26 @@ class ActionDispatcher:
         link_manager: object | None,
     ) -> dict[str, object]:
         return dispatch_land(action, link_manager=link_manager)
+
+    def _dispatch_condition_yaw(
+        self,
+        action: dict[str, object],
+        *,
+        link_manager: object | None,
+    ) -> dict[str, object]:
+        result = dispatch_condition_yaw(action, link_manager=link_manager)
+        detail = result.get("detail", {})
+        if result.get("status") == "sent" and isinstance(detail, dict):
+            self._logger.info(
+                "action_lab dispatch condition_yaw yaw_deg=%s speed_deg_s=%s direction=%s relative=%s priority=%s key=%s",
+                detail.get("yaw_deg"),
+                detail.get("yaw_speed_deg_s"),
+                detail.get("direction"),
+                detail.get("relative"),
+                detail.get("priority"),
+                detail.get("key"),
+            )
+        return result
 
     def _dispatch_local_position(
         self,

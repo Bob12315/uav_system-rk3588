@@ -40,6 +40,7 @@ def test_action_lab_has_whitelist():
     js = _read_js("web_ui/static/js/action_lab.js")
     assert "ACTION_UI_ALLOWED_NAMES" in js
     assert '"takeoff"' in js
+    assert '"yaw_align"' in js
     assert '"fixed_view_localize"' in js
     assert '"select_drop_targets"' in js
     assert '"recon_sequence"' in js
