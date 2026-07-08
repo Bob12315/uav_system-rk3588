@@ -4,8 +4,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from app.mission_orchestrator import MissionActionStep, MissionBlackboard
 from missions.common.actions.action_lab import create_action_lab_registry
+from scripts.validate_action_missions import validate_templates
 
 
 TEMPLATE_PATHS = [
@@ -484,3 +487,56 @@ def test_drop_two_targets_v2_sitl_profile_matches_base() -> None:
     base_path = Path("config/action_missions/drop_two_targets_v2.json")
     sitl_path = Path("config/profiles/rk3588-sitl/action_missions/drop_two_targets_v2.json")
     assert _template(sitl_path) == _template(base_path)
+
+
+# ── validator 错误场景测试 ─────────────────────────────────────────────
+
+
+def _write_temp_template(tmp_path: Path, data: dict[str, Any]) -> Path:
+    path = tmp_path / "test_template.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
+def test_validator_rejects_retry_current_then_jump_to_missing_target(tmp_path: Path) -> None:
+    """retry_current_then_jump_to 指向不存在的 label 时 validator 必须报错。"""
+    data = {
+        "name": "bad_retry_jump",
+        "steps": [
+            {
+                "name": "fixed_view_localize",
+                "label": "scan",
+                "params": {},
+                "on_failed": {
+                    "action": "retry_current_then_jump_to",
+                    "max_attempts": 2,
+                    "target": "missing_label",
+                },
+            }
+        ],
+    }
+    path = _write_temp_template(tmp_path, data)
+    with pytest.raises(ValueError, match="target not found"):
+        validate_templates([path])
+
+
+def test_validator_rejects_retry_current_then_jump_to_zero_max_attempts(tmp_path: Path) -> None:
+    """retry_current_then_jump_to 的 max_attempts < 1 时 validator 必须报错。"""
+    data = {
+        "name": "bad_retry_attempts",
+        "steps": [
+            {
+                "name": "fixed_view_localize",
+                "label": "scan",
+                "params": {},
+                "on_failed": {
+                    "action": "retry_current_then_jump_to",
+                    "max_attempts": 0,
+                    "target": "scan",
+                },
+            }
+        ],
+    }
+    path = _write_temp_template(tmp_path, data)
+    with pytest.raises(ValueError, match="max_attempts must be >= 1"):
+        validate_templates([path])

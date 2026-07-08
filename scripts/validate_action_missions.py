@@ -114,13 +114,13 @@ def _validate_steps(
     label_set = set(labels)
     for index, step in enumerate(steps):
         policy = step.get("on_failed")
-        if not isinstance(policy, dict) or policy.get("action") != "jump_to":
+        if not isinstance(policy, dict) or policy.get("action") not in {"jump_to", "retry_current_then_jump_to"}:
             continue
         target = policy.get("target")
         if not isinstance(target, str) or not target.strip():
-            raise ValueError(f"ERROR {_display_path(path)}: step {index} jump_to target must be a non-empty string")
+            raise ValueError(f"ERROR {_display_path(path)}: step {index} {policy.get('action')} target must be a non-empty string")
         if target.strip() not in label_set:
-            raise ValueError(f"ERROR {_display_path(path)}: step {index} jump_to target not found: {target}")
+            raise ValueError(f"ERROR {_display_path(path)}: step {index} {policy.get('action')} target not found: {target}")
     return label_set
 
 
@@ -133,7 +133,7 @@ def _validate_on_failed(path: Path, index: int, policy: Any) -> None:
     action = policy.get("action", "fail")
     if not isinstance(action, str) or action not in ALLOWED_FAILURE_ACTIONS:
         raise ValueError(f"{prefix} invalid on_failed action: {action}")
-    if action in {"retry_current", "jump_to"}:
+    if action in {"retry_current", "retry_current_then_jump_to", "jump_to"}:
         attempts = policy.get("max_attempts", 1)
         if not isinstance(attempts, int) or attempts < 1:
             raise ValueError(f"{prefix} {action}.max_attempts must be >= 1")
