@@ -1,6 +1,6 @@
 {
   "name": "drop_two_targets_v2",
-  "description": "Phase1+2 fixed-view drop scan, target selection, and drop sequence.",
+  "description": "投放任务 v2：固定视角扫描、目标选择、投放序列、返航降落。",
   "steps": [
     {
       "name": "takeoff",
@@ -42,8 +42,9 @@
       "label": "drop_fixed_view_scan",
       "save_as": "drop_scan",
       "on_failed": {
-        "action": "retry_current",
-        "max_attempts": 2
+        "action": "retry_current_then_jump_to",
+        "max_attempts": 2,
+        "target": "return_home"
       },
       "params": {
         "detection_source": "scene",

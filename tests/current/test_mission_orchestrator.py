@@ -637,3 +637,119 @@ def test_skip_hold_current_passed_to_stop() -> None:
     # runtime.stop was called; after _start_current_step, state is "running"
     # (next step started), but clear_navigation_queue was called
     assert runtime.clear_nav_calls == 1
+
+
+# ── retry_current_then_jump_to tests ─────────────────────────────────
+
+
+def test_retry_current_then_jump_to_succeeds_on_second_attempt() -> None:
+    """第一次失败重试当前 step，第二次成功则 mission 完成。"""
+    runtime = FakeRuntime(
+        [
+            FakeActionResult(failed=True, reason="first_failed"),
+            FakeActionResult(done=True, reason="done"),
+        ]
+    )
+    orch = MissionOrchestrator(
+        runtime,
+        [
+            MissionActionStep(
+                "unstable",
+                {},
+                on_failed={
+                    "action": "retry_current_then_jump_to",
+                    "max_attempts": 2,
+                    "target": "recovery",
+                },
+            ),
+        ],
+    )
+
+    orch.start()
+    retry_status = orch.tick({})
+    done_status = orch.tick({})
+
+    assert retry_status.running is True
+    assert retry_status.reason == "retry_current"
+    assert done_status.done is True
+    assert done_status.reason == "mission_done"
+    assert runtime.runner.sent_actions == [
+        ("unstable", {}),
+        ("unstable", {}),
+    ]
+
+
+def test_retry_current_then_jump_to_jumps_when_exhausted() -> None:
+    """两次失败后跳转到 target label，mission 不进入 failed 状态。"""
+    runtime = FakeRuntime(
+        [
+            FakeActionResult(failed=True, reason="first_failed"),
+            FakeActionResult(failed=True, reason="second_failed"),
+            FakeActionResult(done=True, reason="done"),
+        ]
+    )
+    orch = MissionOrchestrator(
+        runtime,
+        [
+            MissionActionStep(
+                "unstable",
+                {},
+                on_failed={
+                    "action": "retry_current_then_jump_to",
+                    "max_attempts": 2,
+                    "target": "return_home",
+                },
+            ),
+            MissionActionStep("unused"),
+            MissionActionStep("return_home", label="return_home"),
+        ],
+    )
+
+    orch.start()
+    retry_status = orch.tick({})
+    jump_status = orch.tick({})
+    done_status = orch.tick({})
+
+    assert retry_status.running is True
+    assert retry_status.reason == "retry_current"
+    assert jump_status.failed is False
+    assert jump_status.reason == "retry_current_then_jump_to"
+    assert jump_status.current_index == 2
+    assert jump_status.current_action == "return_home"
+    assert done_status.done is True
+    assert runtime.runner.sent_actions == [
+        ("unstable", {}),
+        ("unstable", {}),
+        ("return_home", {}),
+    ]
+
+
+def test_retry_current_then_jump_to_missing_target_fails_mission() -> None:
+    """target label 不存在时 mission 失败并给出明确原因。"""
+    runtime = FakeRuntime(
+        [
+            FakeActionResult(failed=True, reason="first_failed"),
+            FakeActionResult(failed=True, reason="second_failed"),
+        ]
+    )
+    orch = MissionOrchestrator(
+        runtime,
+        [
+            MissionActionStep(
+                "unstable",
+                {},
+                on_failed={
+                    "action": "retry_current_then_jump_to",
+                    "max_attempts": 2,
+                    "target": "missing",
+                },
+            ),
+        ],
+    )
+
+    orch.start()
+    orch.tick({})
+    status = orch.tick({})
+
+    assert status.failed is True
+    assert status.reason == "retry_jump_target_not_found"

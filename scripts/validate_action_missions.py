@@ -17,10 +17,11 @@ from missions.common.actions.action_lab import create_action_lab_registry
 
 DEFAULT_TEMPLATE_PATHS = [
     ROOT / "config/action_missions/drop_two_targets_v1.json",
+    ROOT / "config/action_missions/drop_two_targets_v2.json",
     ROOT / "config/action_missions/recon_inspect_5_targets_stepwise_v1.json",
     ROOT / "config/action_missions/rescue_2026_full_auto.json",
 ]
-ALLOWED_FAILURE_ACTIONS = {"fail", "retry_current", "jump_to", "continue"}
+ALLOWED_FAILURE_ACTIONS = {"fail", "retry_current", "retry_current_then_jump_to", "jump_to", "continue"}
 
 
 def validate_templates(paths: list[Path]) -> list[str]:

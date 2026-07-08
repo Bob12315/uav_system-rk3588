@@ -389,6 +389,9 @@ class MissionOrchestrator:
         if action == "retry_current":
             self._handle_retry_current(result, policy, link_manager=link_manager)
             return
+        if action == "retry_current_then_jump_to":
+            self._handle_retry_current_then_jump_to(result, policy, link_manager=link_manager)
+            return
         if action == "jump_to":
             self._handle_jump_to(result, policy, link_manager=link_manager)
             return
@@ -418,6 +421,43 @@ class MissionOrchestrator:
             self._start_current_step(link_manager=link_manager)
             return
         self._fail_mission(result, reason="retry_attempts_exhausted")
+
+    def _handle_retry_current_then_jump_to(
+        self,
+        result: dict[str, Any],
+        policy: dict[str, Any],
+        *,
+        link_manager: object | None,
+    ) -> None:
+        max_attempts = int(policy.get("max_attempts", 1))
+        attempts = self.step_attempts.get(self.current_index, 1)
+        if attempts < max_attempts:
+            self.reason = "retry_current"
+            self.detail = {
+                "failed_action_result": result,
+                "retry_step_index": self.current_index,
+                "attempt": attempts + 1,
+                "max_attempts": max_attempts,
+            }
+            self._clear_runtime_before_retry(link_manager)
+            self._start_current_step(link_manager=link_manager)
+            return
+
+        target = str(policy.get("target") or "").strip()
+        if target not in self.labels:
+            self._fail_mission(result, reason="retry_jump_target_not_found")
+            return
+
+        self.current_index = self.labels[target]
+        self.reason = "retry_current_then_jump_to"
+        self.detail = {
+            "failed_action_result": result,
+            "target": target,
+            "target_index": self.current_index,
+            "max_attempts": max_attempts,
+        }
+        self._clear_runtime_before_retry(link_manager)
+        self._start_current_step(link_manager=link_manager)
 
     def _handle_jump_to(
         self,
