@@ -1063,7 +1063,7 @@ async function init() {
     startActionLabAction(true).catch(error => { $("completionHint").textContent = error.message; });
   };
   completions = (await json("/api/commands/completions")).commands;
-  await Promise.all([loadAudit(), loadMissions(), loadConfigFiles(), loadActionLab(), loadActionMissionTemplates()]);
+  await Promise.all([loadAudit(), loadMissions(), loadConfigFiles(), loadActionLab()]);
   startStatusUpdates();
 }
 init().catch(error => { $("completionHint").textContent = error.message; });

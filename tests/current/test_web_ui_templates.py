@@ -23,6 +23,9 @@ def test_index_contains_only_v2_template_buttons():
     assert 'data-action-mission-template="recon_inspect_5_targets_stepwise_v1"' not in html
     assert 'data-action-mission-template="recon_sequence_v1"' not in html
     assert 'data-action-mission-template="rescue_2026_full_auto"' not in html
+    assert 'id="actionMissionTemplateList"' not in html
+    assert 'id="actionMissionLoadCustom"' not in html
+    assert 'id="actionMissionValidate"' not in html
 
 
 def test_index_no_legacy_templates():
@@ -73,3 +76,12 @@ def test_server_template_names_v2_only():
     assert '"recon_sequence_v1"' not in js
     assert '"recon_inspect_5_targets_stepwise_v1"' not in js
     assert '"rescue_2026_full_auto"' not in js
+
+
+def test_app_js_init_no_load_action_mission_templates():
+    """app.js init 不再调用 loadActionMissionTemplates，避免动态生成重复按钮。"""
+    js = _read_js("web_ui/static/app.js")
+    assert "loadActionLab(), loadActionMissionTemplates()" not in js
+    assert "loadActionLab()]);" in js
+    # 函数定义仍可以保留
+    assert "function loadActionMissionTemplates" in js
