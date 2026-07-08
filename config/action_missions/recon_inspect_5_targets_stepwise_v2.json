@@ -1,0 +1,227 @@
+{
+  "name": "recon_inspect_5_targets_stepwise_v2",
+  "description": "侦察任务 v2：起飞、侦察区扫描、逐目标侦察检查、生成报告、返航降落。",
+  "steps": [
+    {
+      "name": "takeoff",
+      "label": "takeoff_5m",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "land_home",
+        "max_attempts": 1
+      },
+      "params": {
+        "mode": "GUIDED",
+        "altitude_m": 5.0,
+        "altitude_tolerance_m": 0.35,
+        "require_armed": true,
+        "max_updates": 150,
+        "priority": 2,
+        "arm_priority": 1,
+        "mode_priority": 2
+      }
+    },
+    {
+      "name": "goto_waypoint",
+      "label": "goto_recon_scan_center",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "return_home",
+        "max_attempts": 1
+      },
+      "params": {
+        "x": 0.0,
+        "y": 57.5,
+        "altitude_m": 5.0,
+        "waypoint_mode": "field",
+        "yaw_mode": "field_heading",
+        "tolerance_xy_m": 0.5,
+        "tolerance_z_m": 0.5,
+        "min_hold_updates": 10,
+        "priority": 5,
+        "key": "goto_recon_scan_center"
+      }
+    },
+    {
+      "name": "fixed_view_localize",
+      "label": "recon_scan",
+      "save_as": "recon_scan",
+      "on_failed": {
+        "action": "retry_current_then_jump_to",
+        "max_attempts": 2,
+        "target": "return_home"
+      },
+      "params": {
+        "altitude_m": 5.0,
+        "capture_updates": 12,
+        "detection_source": "scene",
+        "class_names": ["recon_bucket", "white_bucket", "bucket"],
+        "min_confidence": 0.25,
+        "camera": {
+          "fov_x_deg": 85.0,
+          "fov_y_deg": 69.0,
+          "image_x_sign": 1.0,
+          "image_y_sign": -1.0
+        },
+        "settle_updates": 8,
+        "max_updates": 40,
+        "save_result": true,
+        "fusion": {
+          "cluster_radius_m": 0.7,
+          "outlier_radius_m": 0.8,
+          "min_cluster_size": 2,
+          "max_cluster_radius_m": 0.9,
+          "center_weight_power": 1.0,
+          "max_objects": 8
+        }
+      }
+    },
+    {
+      "name": "select_recon_targets",
+      "label": "select_recon_targets",
+      "save_as": "recon_targets",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "return_home",
+        "max_attempts": 1
+      },
+      "params": {
+        "objects": "$recon_scan.localized_objects",
+        "target_count": 5,
+        "allow_fewer": true,
+        "min_seen_count": 1,
+        "min_raw_count": 0,
+        "min_weight": 0.0,
+        "deduplicate_radius_m": 0.45,
+        "class_names": ["recon_bucket", "white_bucket", "bucket"],
+        "zone_center": {"x": 0.0, "y": 57.5},
+        "zone_center_mode": "field"
+      }
+    },
+    {
+      "name": "recon_sequence",
+      "label": "recon_sequence",
+      "save_as": "recon_sequence",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "return_home",
+        "max_attempts": 1
+      },
+      "params": {
+        "targets": "$recon_targets.target_slots",
+        "max_targets": 5,
+        "approach_altitude_m": 2.5,
+        "finish_altitude_m": 1.5,
+        "climb_after_observe_m": 2.5,
+        "goto_max_updates": 120,
+        "target_lock_max_updates": 40,
+        "observe_max_updates": 200,
+        "climb_max_updates": 100,
+        "continue_after_target_failure": true,
+        "goto": {
+          "waypoint_mode": "absolute",
+          "yaw_mode": "field_heading",
+          "tolerance_xy_m": 0.35,
+          "tolerance_z_m": 0.35,
+          "min_hold_updates": 1,
+          "priority": 5
+        },
+        "target_lock": {
+          "max_match_distance_m": 1.2,
+          "detection_source": "scene",
+          "class_names": ["recon_bucket", "white_bucket", "bucket"],
+          "min_confidence": 0.25,
+          "camera": {
+            "fov_x_deg": 85.0,
+            "fov_y_deg": 69.0,
+            "image_x_sign": 1.0,
+            "image_y_sign": -1.0
+          }
+        },
+        "observe": {
+          "record_start_altitude_m": 2.0,
+          "finish_altitude_m": 1.5,
+          "detection_source": "scene",
+          "sign_class_names": [
+            "baozha", "shenghua", "yiran", "fangshe", "buran",
+            "fushi", "youdu", "yushi", "ziran", "ciji",
+            "danger_1", "danger_2", "danger_3"
+          ],
+          "min_sign_confidence": 0.35,
+          "min_seen_frames": 3,
+          "min_confidence_max": 0.55,
+          "min_confidence_mean": 0.40,
+          "min_score": 1.2,
+          "min_margin_ratio": 1.4,
+          "align_descend": {
+            "expected_dt_s": 0.1,
+            "lost_timeout_updates": 8,
+            "hold_updates_required": 1,
+            "max_retries": 1,
+            "max_updates": 200,
+            "finish_altitude_m": 1.5,
+            "config": {
+              "descent_gate_policy": "allow_unaligned",
+              "unaligned_descend_speed_mps": 0.06,
+              "kp_vx": 0.35,
+              "kp_vy": 0.35,
+              "max_vx_mps": 0.12,
+              "max_vy_mps": 0.12,
+              "descend_speed_mps": 0.16,
+              "slow_descend_speed_mps": 0.10,
+              "max_ex_cam": 0.18,
+              "max_ey_cam": 0.18,
+              "slow_descend_max_ex_cam": 0.45,
+              "slow_descend_max_ey_cam": 0.45,
+              "deadband_ex_cam": 0.04,
+              "deadband_ey_cam": 0.04,
+              "min_altitude_m": 1.5,
+              "require_target_locked": false,
+              "payload_offset_enabled": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "build_recon_report",
+      "label": "build_recon_report",
+      "save_as": "recon_report",
+      "on_failed": {
+        "action": "continue"
+      },
+      "params": {
+        "items": "$recon_sequence.recon_result_items"
+      }
+    },
+    {
+      "name": "goto_waypoint",
+      "label": "return_home",
+      "on_failed": {
+        "action": "continue"
+      },
+      "params": {
+        "x": 0.0,
+        "y": 0.0,
+        "altitude_m": 5.0,
+        "waypoint_mode": "field",
+        "yaw_mode": "field_heading",
+        "tolerance_xy_m": 0.7,
+        "tolerance_z_m": 0.5,
+        "min_hold_updates": 2,
+        "priority": 5,
+        "key": "return_home"
+      }
+    },
+    {
+      "name": "land",
+      "label": "land_home",
+      "params": {
+        "land_altitude_threshold_m": 0.25,
+        "max_updates": 250,
+        "priority": 2,
+        "key": "land_home"
+      }
+    }
+  ]
+}

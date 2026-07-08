@@ -16,12 +16,15 @@ let actionMissionAutoTickTimer = null;
 const fallbackStageModes = ["AUTO", "IDLE", "APPROACH_TRACK", "OVERHEAD_HOLD", "CORRIDOR_FOLLOW"];
 const ACTION_SAFETY_HINTS = {
   goto_waypoint: "默认输入 FIELD 坐标（x=右，y=前），转换为 LOCAL_NED 后下发；需要 SEND=ON 才实发。",
-  survey_area: "默认航点为 FIELD 坐标，转换为 LOCAL_NED 后连续下发；需要 SEND=ON 才实发。",
   target_lock: "YOLO 锁定命令，不需要 SEND=ON，但需要 Dispatch。",
   align_descend: "BODY_NED 速度控制，需要 SEND=ON 才实发。",
   payload_release: "舵机 PWM 输出，需要 SEND=ON 才实发；确认 SERVO 输出通道和 PWM。",
-  single_view_localize: "单帧定位调试 Action：只读取当前 YOLO 检测和飞行状态，计算目标 local 坐标，不发送飞控命令。",
-  multi_view_localize: "四点移动采样并融合定位所有筒；会发送 local_position，需要 SEND=ON 才实发。",
+  fixed_view_localize: "固定视角定位，读取当前画面多帧融合，不主动移动。",
+  select_drop_targets: "从 drop_scan.localized_objects 选择投放目标，不发送飞控命令。",
+  drop_sequence: "复合投放流程，会调用 goto/lock/align/payload_release，Dispatch + SEND=ON 时会实发。",
+  select_recon_targets: "选择侦察目标，不发送飞控命令。",
+  recon_sequence: "复合侦察流程，会调用 goto/lock/observe/climb，Dispatch + SEND=ON 时会实发。",
+  build_recon_report: "纯报告生成，不发送飞控命令。",
 };
 const ACTION_ZH_LABELS = {
   takeoff: "起飞",
@@ -70,94 +73,7 @@ const DEFAULT_ACTION_MISSION_STEPS = [
     },
   },
 ];
-const actionMissionPresets = {
-  dry_goto: [
-    {
-      name: "goto_waypoint",
-      params: {
-        x: 0.0,
-        y: 0.0,
-        altitude_m: 1.5,
-        waypoint_mode: "field",
-        yaw_mode: "field_heading",
-      },
-    },
-  ],
-  payload_release_test: [
-    {
-      name: "payload_release",
-      params: {
-        servo_outputs: [
-          {
-            servo_output: 8,
-            release_pwm: 1200,
-            hold_pwm: 1700,
-          },
-        ],
-        payload_id: "p1",
-        target_id: "t1",
-        release_wait_updates: 1,
-      },
-    },
-  ],
-  goto_payload_release: [
-    {
-      name: "goto_waypoint",
-      params: {
-        x: 0.0,
-        y: 0.0,
-        altitude_m: 1.5,
-        waypoint_mode: "field",
-        yaw_mode: "field_heading",
-      },
-    },
-    {
-      name: "payload_release",
-      params: {
-        servo_outputs: [
-          {
-            servo_output: 8,
-            release_pwm: 1200,
-            hold_pwm: 1700,
-          },
-        ],
-        payload_id: "p1",
-        target_id: "t1",
-        release_wait_updates: 1,
-      },
-    },
-  ],
-  survey_area_dry: [
-    {
-      name: "survey_area",
-      params: {
-        waypoints: [
-          {x: 0.0, y: 0.0, altitude_m: 1.5},
-          {x: 1.0, y: 0.0, altitude_m: 1.5},
-        ],
-        waypoint_mode: "field",
-        yaw_mode: "field_heading",
-        capture_updates_per_waypoint: 1,
-        max_updates_per_waypoint: 20,
-        detection_source: "scene",
-        class_names: ["bucket", "cylinder"],
-      },
-    },
-  ],
-  target_lock_test: [
-    {
-      name: "target_lock",
-      params: {
-        target: {x: 0.0, y: 0.0},
-        max_match_distance_m: 1.0,
-        detection_source: "scene",
-        class_names: ["bucket", "cylinder"],
-        max_updates: 30,
-        key: "target_lock_test",
-      },
-    },
-  ],
-};
+const actionMissionPresets = {};
 
 const json = window.UavApi.request;
 

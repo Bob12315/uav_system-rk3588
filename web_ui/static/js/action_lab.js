@@ -24,6 +24,21 @@
     jsonSelecting: false,
   };
 
+  var ACTION_UI_ALLOWED_NAMES = new Set([
+    "takeoff",
+    "land",
+    "goto_waypoint",
+    "fixed_view_localize",
+    "target_lock",
+    "align_descend",
+    "select_drop_targets",
+    "drop_sequence",
+    "select_recon_targets",
+    "recon_sequence",
+    "recon_descend_observe",
+    "build_recon_report"
+  ]);
+
   // ------------------------------------------------------------------
   // configure — called once by app.js after script loads
   // ------------------------------------------------------------------
@@ -92,14 +107,15 @@
       labState.actionSpecs = result.actions || [];
       var $ = _dom().$;
       var fmt = _fmt();
-      $("actionButtons").innerHTML = labState.actionSpecs.filter(function (spec) { return spec.name !== "payload_release"; }).map(function (spec) {
+      var allowed = ACTION_UI_ALLOWED_NAMES;
+      $("actionButtons").innerHTML = labState.actionSpecs.filter(function (spec) { return allowed.has(spec.name); }).map(function (spec) {
         return "<button data-action-name=\"" + fmt.escapeHtml(spec.name) + "\">" + fmt.escapeHtml(actionDisplayName(spec.name, spec.label || spec.name)) + "</button>";
       }).join("");
       $("actionButtons").querySelectorAll("[data-action-name]").forEach(function (button) {
         button.onclick = function () { selectAction(button.dataset.actionName); };
       });
       if (labState.actionSpecs.length) {
-        var firstRegular = labState.actionSpecs.find(function (spec) { return spec.name !== "payload_release"; }) || labState.actionSpecs[0];
+        var firstRegular = labState.actionSpecs.find(function (spec) { return allowed.has(spec.name); }) || labState.actionSpecs[0];
         selectAction(firstRegular.name);
       }
     });

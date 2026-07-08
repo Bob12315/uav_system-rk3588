@@ -610,3 +610,57 @@ def test_drop_two_targets_v2_select_drop_targets_zone_center_mode_field() -> Non
     data = _template(Path("config/action_missions/drop_two_targets_v2.json"))
     by_label = {step.get("label", ""): step for step in data["steps"]}
     assert by_label["select_drop_targets"]["params"]["zone_center_mode"] == "field"
+
+
+# ── recon_inspect_5_targets_stepwise_v2 tests ────────────────────────────
+
+
+def test_recon_inspect_stepwise_v2_loads() -> None:
+    """recon_inspect_5_targets_stepwise_v2.json 能加载且有 8 个步骤。"""
+    path = Path("config/action_missions/recon_inspect_5_targets_stepwise_v2.json")
+    data = _template(path)
+    assert data["name"] == "recon_inspect_5_targets_stepwise_v2"
+    assert len(data["steps"]) == 8
+    labels = [step.get("label", "") for step in data["steps"] if step.get("label")]
+    assert "recon_scan" in labels
+    assert "select_recon_targets" in labels
+    assert "recon_sequence" in labels
+    assert "build_recon_report" in labels
+    assert "return_home" in labels
+    assert "land_home" in labels
+
+
+def test_recon_inspect_stepwise_v2_target_lock_camera() -> None:
+    """recon_inspect_5_targets_stepwise_v2: recon_sequence target_lock.camera 85/69/1/-1。"""
+    path = Path("config/action_missions/recon_inspect_5_targets_stepwise_v2.json")
+    data = _template(path)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    camera = by_label["recon_sequence"]["params"]["target_lock"]["camera"]
+    assert camera["fov_x_deg"] == 85.0
+    assert camera["fov_y_deg"] == 69.0
+    assert camera["image_x_sign"] == 1.0
+    assert camera["image_y_sign"] == -1.0
+
+
+def test_recon_inspect_stepwise_v2_zone_center_mode_field() -> None:
+    """recon_inspect_5_targets_stepwise_v2: select_recon_targets zone_center_mode=field。"""
+    path = Path("config/action_missions/recon_inspect_5_targets_stepwise_v2.json")
+    data = _template(path)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    assert by_label["select_recon_targets"]["params"]["zone_center_mode"] == "field"
+
+
+def test_recon_inspect_stepwise_v2_sitl_matches_base() -> None:
+    """recon_inspect_5_targets_stepwise_v2: SITL profile 与 base 一致。"""
+    base = _template(Path("config/action_missions/recon_inspect_5_targets_stepwise_v2.json"))
+    sitl = _template(Path("config/profiles/rk3588-sitl/action_missions/recon_inspect_5_targets_stepwise_v2.json"))
+    assert sitl == base
+
+
+def test_recon_inspect_stepwise_v2_validates() -> None:
+    """recon_inspect_5_targets_stepwise_v2 能通过 validator。"""
+    from scripts.validate_action_missions import validate_templates
+    path = Path("config/action_missions/recon_inspect_5_targets_stepwise_v2.json")
+    messages = validate_templates([path])
+    assert len(messages) == 1
+    assert "OK" in messages[0]

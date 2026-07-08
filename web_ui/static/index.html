@@ -173,23 +173,13 @@
         <section class="action-mission-block action-mission-templates">
           <div class="panel-title minor">任务模板</div>
           <div class="action-mission-presets primary">
-            <button data-action-mission-template="drop_two_targets_v1">加载双目标投放 v1</button>
-            <button data-action-mission-template="rescue_2026_full_auto_v2">加载 2026 完整救援 v2</button>
-            <button data-action-mission-template="recon_inspect_5_targets_stepwise_v1">加载侦察逐筒检查 5 目标 v1</button>
+            <button data-action-mission-template="drop_two_targets_v2">加载投放任务 v2</button>
+            <button data-action-mission-template="recon_inspect_5_targets_stepwise_v2">加载侦察任务 v2</button>
+            <button data-action-mission-template="rescue_2026_full_auto_v2">加载完整流程 v2</button>
             <button id="actionMissionLoadCustom">粘贴自定义 JSON</button>
             <button id="actionMissionValidate">校验 JSON</button>
           </div>
           <div id="actionMissionTemplateList" class="mission-template-list"></div>
-          <details class="legacy-templates">
-            <summary>旧版 / 调试模板</summary>
-            <div id="actionMissionPresets" class="action-mission-presets">
-              <button data-action-mission-preset="dry_goto">干跑到点</button>
-              <button data-action-mission-preset="payload_release_test" class="warning">投放测试</button>
-              <button data-action-mission-preset="goto_payload_release" class="warning">到点 + 投放</button>
-              <button data-action-mission-preset="survey_area_dry" class="warning">区域扫描干跑</button>
-              <button data-action-mission-preset="target_lock_test">目标锁定测试</button>
-            </div>
-          </details>
         </section>
 
         <section class="action-mission-block action-mission-controls">
