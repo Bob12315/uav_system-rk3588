@@ -98,7 +98,10 @@ class ResolveGpsTargetsAction(ActionModule):
         errors: list[dict[str, Any]] = []
 
         for i, spec in enumerate(self.target_specs):
-            source = str(spec.get("source", self.default_source or "")).strip().lower()
+            raw_source = spec.get("source", self.default_source or "")
+            if isinstance(raw_source, dict) and self.default_source is not None:
+                raw_source = self.default_source
+            source = str(raw_source).strip().lower()
             try:
                 if source == "field":
                     result = self._resolve_field(spec, ref)
@@ -150,6 +153,13 @@ class ResolveGpsTargetsAction(ActionModule):
             "errors": errors,
             "key": self.key,
         }
+        if not resolved:
+            return ActionResult(
+                failed=True,
+                reason="no_targets_resolved",
+                detail=self._last_detail,
+            )
+
         return ActionResult(
             done=True,
             reason="targets_resolved",
@@ -190,6 +200,7 @@ class ResolveGpsTargetsAction(ActionModule):
         local = gps_to_local_ned(gps.lat, gps.lon, altitude_m, reference=ref)
 
         return self._build_output(
+            spec=spec,
             source="field",
             lat=gps.lat,
             lon=gps.lon,
@@ -224,6 +235,7 @@ class ResolveGpsTargetsAction(ActionModule):
         local = gps_to_local_ned(origin_lat, origin_lon, altitude_m, reference=ref)
 
         return self._build_output(
+            spec=spec,
             source="home",
             lat=origin_lat,
             lon=origin_lon,
@@ -350,6 +362,7 @@ class ResolveGpsTargetsAction(ActionModule):
         local = gps_to_local_ned(target_lat, target_lon, altitude_m, reference=ref)
 
         result = self._build_output(
+            spec=spec,
             source="vision",
             lat=target_lat,
             lon=target_lon,
@@ -404,6 +417,7 @@ class ResolveGpsTargetsAction(ActionModule):
     def _build_output(
         self,
         *,
+        spec: dict[str, Any],
         source: str,
         lat: float,
         lon: float,
@@ -427,6 +441,35 @@ class ResolveGpsTargetsAction(ActionModule):
             "z_down_m": z_down_m,
             "class_name": class_name,
         }
+        for name in ("id", "target_id", "track_id", "class_id"):
+            if spec.get(name) is not None:
+                result[name] = spec.get(name)
+        seen_count = self._optional_int(spec, "seen_count")
+        if seen_count is None:
+            seen_count = self._optional_int(spec, "count")
+        if seen_count is None:
+            seen_count = self._optional_int(spec, "raw_count")
+        if seen_count is None and source == "vision":
+            seen_count = 1
+        if seen_count is not None:
+            result["seen_count"] = seen_count
+            result["count"] = seen_count
+        raw_count = self._optional_int(spec, "raw_count")
+        if raw_count is None:
+            raw_count = seen_count
+        if raw_count is not None:
+            result["raw_count"] = raw_count
+        weight = self._optional_float(spec, "weight")
+        if weight is None and confidence is not None:
+            weight = confidence
+        if weight is None and source == "vision":
+            weight = 1.0
+        if weight is not None:
+            result["weight"] = weight
+        if isinstance(spec.get("track_ids"), list):
+            result["track_ids"] = list(spec.get("track_ids") or [])
+        elif spec.get("track_id") is not None:
+            result["track_ids"] = [spec.get("track_id")]
         if field_x is not None:
             result["field_x"] = field_x
         if field_y is not None:
@@ -434,6 +477,17 @@ class ResolveGpsTargetsAction(ActionModule):
         if confidence is not None:
             result["confidence"] = confidence
         return result
+
+    @staticmethod
+    def _optional_int(spec: dict[str, Any], name: str) -> int | None:
+        value = spec.get(name)
+        if value is None:
+            return None
+        try:
+            result = int(value)
+        except (TypeError, ValueError):
+            return None
+        return result if result >= 0 else None
 
     @staticmethod
     def _required_float(spec: dict[str, Any], *names: str) -> float:

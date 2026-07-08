@@ -381,6 +381,15 @@ def test_drop_two_targets_v2_contains_resolve_gps_targets() -> None:
     )
 
 
+def test_drop_two_targets_v2_selects_resolved_raw_estimates() -> None:
+    data = _template(DROP_V2_TEMPLATE_PATH)
+    by_label = {step.get("label", ""): step for step in data["steps"]}
+    assert by_label["resolve_drop_buckets"]["params"]["targets"] == "$drop_scan.raw_estimates"
+    select_params = by_label["select_drop_targets"]["params"]
+    assert select_params["objects"] == "$drop_buckets.resolved_targets"
+    assert select_params["min_seen_count"] == 1
+
+
 def test_drop_two_targets_v2_no_global_target_frame() -> None:
     """No step in v2 mission uses target_frame: global."""
     data = _template(DROP_V2_TEMPLATE_PATH)
@@ -673,6 +682,8 @@ def test_select_drop_targets_v2_zone_center_mode_field() -> None:
     data = _template(FULL_V2_TEMPLATE_PATH)
     by_label = {step.get("label", ""): step for step in data["steps"]}
     assert by_label["select_drop_targets"]["params"]["zone_center_mode"] == "field"
+    assert by_label["select_drop_targets"]["params"]["objects"] == "$drop_buckets.resolved_targets"
+    assert by_label["select_drop_targets"]["params"]["min_seen_count"] == 1
 
 
 def test_drop_two_targets_v2_select_drop_targets_zone_center_mode_field() -> None:

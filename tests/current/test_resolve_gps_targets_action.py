@@ -6,6 +6,7 @@ import math
 import pytest
 
 from missions.common.actions.resolve_gps_targets import ResolveGpsTargetsAction
+from missions.common.actions.select_drop_targets import SelectDropTargetsAction
 
 
 def _make_context(*, field_origin_lat=30.0, field_origin_lon=120.0,
@@ -190,7 +191,7 @@ def test_resolve_vision_yaw_unstable():
     })
     result = action.update(ctx)
 
-    assert result.done
+    assert result.failed
     # Vision target should fail due to yaw instability
     assert result.detail["resolved_count"] == 0
     assert result.detail["error_count"] == 1
@@ -240,7 +241,7 @@ def test_resolve_vision_yaw_rate_missing_fails():
     })
     result = action.update(ctx)
 
-    assert result.done
+    assert result.failed
     assert result.detail["resolved_count"] == 0
     assert result.detail["error_count"] == 1
     assert "yaw_rate_unavailable" in result.detail["errors"][0]["reason"]
@@ -261,7 +262,7 @@ def test_resolve_unknown_source():
         ],
     })
     result = action.update(ctx)
-    assert result.done
+    assert result.failed
     assert result.detail["resolved_count"] == 0
     assert result.detail["error_count"] == 1
     assert "unsupported_source" in result.detail["errors"][0]["reason"]
@@ -293,3 +294,58 @@ def test_resolve_multiple_targets():
     assert result.detail["error_count"] == 0
     sources = [t["source"] for t in result.detail["resolved_targets"]]
     assert sources == ["field", "home", "vision"]
+
+
+def test_resolve_vision_raw_estimate_preserves_selection_metadata():
+    """Resolved raw estimates remain consumable by SelectDropTargetsAction."""
+    ctx = _make_context()
+    ctx["drone"] = {
+        "lat": 30.0,
+        "lon": 120.0,
+        "relative_altitude": 5.0,
+        "yaw": 0.0,
+        "yaw_rate": 0.01,
+        "global_position_valid": True,
+    }
+    action = ResolveGpsTargetsAction()
+    action.start({
+        "targets": [
+            {
+                "source": {"ex": 0.0, "ey": 0.0},
+                "track_id": 11,
+                "class_id": 1,
+                "class_name": "bucket_1",
+                "confidence": 0.91,
+            },
+            {
+                "source": {"ex": 0.3, "ey": 0.0},
+                "track_id": 12,
+                "class_id": 2,
+                "class_name": "bucket_2",
+                "confidence": 0.87,
+            },
+        ],
+        "default_source": "vision",
+    })
+
+    result = action.update(ctx)
+
+    assert result.done
+    resolved = result.detail["resolved_targets"]
+    assert resolved[0]["seen_count"] == 1
+    assert resolved[0]["raw_count"] == 1
+    assert resolved[0]["weight"] == pytest.approx(0.91)
+    assert resolved[0]["track_ids"] == [11]
+
+    selector = SelectDropTargetsAction()
+    selector.start({
+        "objects": resolved,
+        "target_count": 2,
+        "allow_fewer": False,
+        "min_seen_count": 1,
+        "deduplicate_radius_m": 0.1,
+    })
+    selected = selector.update({})
+
+    assert selected.done
+    assert selected.detail["selected_count"] == 2

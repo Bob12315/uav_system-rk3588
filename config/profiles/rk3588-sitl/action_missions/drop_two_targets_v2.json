@@ -152,7 +152,7 @@
           "bucket_3": 100,
           "bucket": 50
         },
-        "min_seen_count": 2,
+        "min_seen_count": 1,
         "min_raw_count": 0,
         "min_weight": 0.0,
         "deduplicate_radius_m": 0.8,
