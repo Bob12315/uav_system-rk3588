@@ -17,6 +17,25 @@
       }
     },
     {
+      "name": "resolve_gps_targets",
+      "label": "resolve_home_gps",
+      "save_as": "home_waypoint",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "land_home",
+        "max_attempts": 1
+      },
+      "params": {
+        "targets": [
+          {
+            "source": "home",
+            "altitude_m": 3.5
+          }
+        ],
+        "key": "resolve_home_gps"
+      }
+    },
+    {
       "name": "goto_waypoint",
       "label": "goto_first_scan_point_gps",
       "on_failed": {
@@ -404,25 +423,6 @@
         "skip_if_invalid_target": true,
         "priority": 5,
         "key": "climb_after_payload_2_gps"
-      }
-    },
-    {
-      "name": "resolve_gps_targets",
-      "label": "resolve_home_gps",
-      "save_as": "home_waypoint",
-      "on_failed": {
-        "action": "jump_to",
-        "target": "land_home",
-        "max_attempts": 1
-      },
-      "params": {
-        "targets": [
-          {
-            "source": "home",
-            "altitude_m": 3.5
-          }
-        ],
-        "key": "resolve_home_gps"
       }
     },
     {
