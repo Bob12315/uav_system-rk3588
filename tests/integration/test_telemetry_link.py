@@ -367,7 +367,7 @@ log_level: INFO
         load_config()
 
 
-def test_local_position_ned_updates_raw_local_position_and_relative_altitude() -> None:
+def test_local_position_ned_updates_raw_local_position_without_overwriting_relative_altitude() -> None:
     cache = StateCache(heartbeat_timeout_sec=1.0, rx_timeout_sec=1.0)
     now = time.time()
     cache.mark_connected(target_system=1, target_component=1, transport="tcp", now=now)
@@ -377,8 +377,10 @@ def test_local_position_ned_updates_raw_local_position_and_relative_altitude() -
         cfg=_config(data_source="sitl", active_source="sitl", rx_timeout_sec=1.0),
         stop_event=threading.Event(),
     )
+    global_message = SimpleNamespace(lat=34_0000000, lon=108_0000000, alt=420_000, relative_alt=4_200)
     message = SimpleNamespace(x=1.25, y=-2.5, z=-3.75, vx=0.1, vy=0.2, vz=0.3)
 
+    receiver._handle_message("GLOBAL_POSITION_INT", global_message, now)
     receiver._handle_message("LOCAL_POSITION_NED", message, now)
 
     state = cache.get_latest_drone_state_validated(time.time())
@@ -386,7 +388,7 @@ def test_local_position_ned_updates_raw_local_position_and_relative_altitude() -
     assert state.local_x == pytest.approx(1.25)
     assert state.local_y == pytest.approx(-2.5)
     assert state.local_z == pytest.approx(-3.75)
-    assert state.relative_altitude == pytest.approx(3.75)
+    assert state.relative_altitude == pytest.approx(4.2)
 
 
 def test_dispatch_set_servo_queues_action_command() -> None:

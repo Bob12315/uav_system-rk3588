@@ -150,11 +150,8 @@ class TelemetryReceiver(threading.Thread):
                 last_velocity_time=now,
                 velocity_source="ekf",
                 velocity_quality="good" if int(raw_state.gps_fix_type) >= 3 else "poor",
-                relative_altitude=float(-message.z),
                 local_position_valid=True,
-                relative_alt_valid=True,
                 last_local_position_time=now,
-                last_relative_alt_time=now,
             )
             return
 
