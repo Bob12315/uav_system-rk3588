@@ -59,6 +59,12 @@ class ResolveGpsTargetsAction(ActionModule):
         self.fov_y_deg = float(camera.get("fov_y_deg", DEFAULT_FOV_Y_DEG))
         self.image_x_sign = float(camera.get("image_x_sign", DEFAULT_IMAGE_X_SIGN))
         self.image_y_sign = float(camera.get("image_y_sign", DEFAULT_IMAGE_Y_SIGN))
+        self.yaw_offset_deg = float(camera.get("yaw_offset_deg", 0.0))
+
+        # pose fallback policy for vision estimates
+        self.allow_context_pose_fallback = bool(
+            data.get("allow_context_pose_fallback", False)
+        )
 
         # yaw stability
         self.max_yaw_rate_rad_s = float(
@@ -99,8 +105,8 @@ class ResolveGpsTargetsAction(ActionModule):
 
         for i, spec in enumerate(self.target_specs):
             raw_source = spec.get("source", self.default_source or "")
-            if isinstance(raw_source, dict) and self.default_source is not None:
-                raw_source = self.default_source
+            if isinstance(raw_source, dict):
+                raw_source = self.default_source or "vision"
             source = str(raw_source).strip().lower()
             try:
                 if source == "field":
@@ -181,6 +187,8 @@ class ResolveGpsTargetsAction(ActionModule):
         self.image_y_sign = DEFAULT_IMAGE_Y_SIGN
         self.max_yaw_rate_rad_s = DEFAULT_MAX_YAW_RATE_RAD_S
         self.yaw_stability_required = True
+        self.yaw_offset_deg = 0.0
+        self.allow_context_pose_fallback = False
         self._done = False
         self._last_detail = {}
 
@@ -255,71 +263,123 @@ class ResolveGpsTargetsAction(ActionModule):
         ref: FieldReference,
         context: dict[str, Any],
     ) -> dict[str, Any] | None:
-        """Resolve a vision target: drone GPS + yaw + altitude + ex/ey → target GPS → LOCAL_NED.
+        """Resolve a vision target: per-estimate or context pose + ex/ey → target GPS → LOCAL_NED.
 
-        Reads drone GPS / yaw / altitude from context (drone dict or top-level keys).
-        Checks yaw stability before computing.
+        Prefers pose from estimate.source (drone_lat/drone_lon/yaw_rad/altitude_m).
+        Falls back to context only when allow_context_pose_fallback=True.
         """
-        # ── drone state ──
-        drone = context.get("drone")
-        if not isinstance(drone, dict):
-            drone = {}
+        source_nested = spec.get("source") if isinstance(spec.get("source"), dict) else {}
 
-        drone_lat = self._float_context(drone, "lat")
-        drone_lon = self._float_context(drone, "lon")
-        if drone_lat is None or drone_lon is None:
-            drone_lat = self._float_context(context, "lat")
-            drone_lon = self._float_context(context, "lon")
-        if drone_lat is None or drone_lon is None:
-            raise ValueError("vision resolution requires drone GPS (lat/lon) in context")
-
-        if not bool(drone.get("global_position_valid", True)):
-            raise ValueError("drone global_position_valid is false")
-
-        # altitude
-        altitude_m: float | None = None
-        for name in ("relative_altitude", "relative_altitude_m", "altitude", "altitude_m"):
-            alt = drone.get(name)
-            if alt is None:
-                alt = context.get(name)
-            if alt is not None:
-                try:
-                    altitude_m = float(alt)
-                    break
-                except (TypeError, ValueError):
-                    continue
+        # ── per-estimate pose (preferred) ──
+        drone_lat = self._optional_float(source_nested, "drone_lat")
+        drone_lon = self._optional_float(source_nested, "drone_lon")
+        yaw = self._optional_float(source_nested, "yaw_rad")
+        altitude_m: float | None = self._optional_float(source_nested, "altitude_m")
         if altitude_m is None:
-            raise ValueError("vision resolution requires altitude in drone context")
-        if altitude_m <= 0.0:
-            raise ValueError("altitude must be positive for vision resolution")
+            altitude_m = self._optional_float(source_nested, "relative_altitude_m")
 
-        # yaw
-        yaw = self._float_context(drone, "yaw")
+        # fallback: read from estimate top-level if source is missing
+        if drone_lat is None:
+            drone_lat = self._optional_float(spec, "drone_lat")
+        if drone_lon is None:
+            drone_lon = self._optional_float(spec, "drone_lon")
         if yaw is None:
-            yaw = self._float_context(context, "yaw")
-        if yaw is None or not math.isfinite(yaw):
-            raise ValueError("vision resolution requires yaw in drone context")
+            yaw = self._optional_float(spec, "yaw_rad")
+        if altitude_m is None:
+            altitude_m = self._optional_float(spec, "altitude_m")
+        if altitude_m is None:
+            altitude_m = self._optional_float(spec, "relative_altitude_m")
 
-        # ── yaw stability check ──
-        if self.yaw_stability_required:
-            yaw_rate = self._float_context(drone, "yaw_rate")
-            if yaw_rate is None:
-                yaw_rate = self._float_context(context, "yaw_rate")
-            if yaw_rate is None:
-                raise ValueError(
-                    "yaw_rate_unavailable: yaw_stability_required=true but yaw_rate is missing from context"
+        # check if any pose field is missing
+        pose_missing = any(
+            v is None for v in [drone_lat, drone_lon, yaw, altitude_m]
+        )
+
+        if pose_missing:
+            if self.allow_context_pose_fallback:
+                # fall back to current context
+                drone = context.get("drone")
+                if not isinstance(drone, dict):
+                    drone = {}
+                if drone_lat is None:
+                    drone_lat = self._float_context(drone, "lat")
+                    if drone_lat is None:
+                        drone_lat = self._float_context(context, "lat")
+                if drone_lon is None:
+                    drone_lon = self._float_context(drone, "lon")
+                    if drone_lon is None:
+                        drone_lon = self._float_context(context, "lon")
+                if altitude_m is None:
+                    for name in ("relative_altitude", "relative_altitude_m", "altitude", "altitude_m"):
+                        alt = drone.get(name) or context.get(name)
+                        if alt is not None:
+                            try:
+                                altitude_m = float(alt)
+                                break
+                            except (TypeError, ValueError):
+                                continue
+                if yaw is None:
+                    yaw = self._float_context(drone, "yaw")
+                    if yaw is None:
+                        yaw = self._float_context(context, "yaw")
+                # re-check after fallback
+                pose_missing = any(
+                    v is None for v in [drone_lat, drone_lon, yaw, altitude_m]
                 )
-            if not math.isfinite(yaw_rate):
+                if pose_missing:
+                    missing = []
+                    if drone_lat is None:
+                        missing.append("drone_lat")
+                    if drone_lon is None:
+                        missing.append("drone_lon")
+                    if yaw is None:
+                        missing.append("yaw_rad")
+                    if altitude_m is None:
+                        missing.append("altitude_m")
+                    raise ValueError(
+                        f"missing_pose_snapshot: {', '.join(missing)} (even after context fallback)"
+                    )
+                # yaw stability check only for context fallback path
+                if self.yaw_stability_required:
+                    yaw_rate = self._float_context(drone, "yaw_rate")
+                    if yaw_rate is None:
+                        yaw_rate = self._float_context(context, "yaw_rate")
+                    if yaw_rate is None:
+                        raise ValueError(
+                            "yaw_rate_unavailable: yaw_stability_required=true but yaw_rate is missing from context"
+                        )
+                    if not math.isfinite(yaw_rate):
+                        raise ValueError(
+                            "yaw_rate_unavailable: yaw_stability_required=true but yaw_rate is non-finite"
+                        )
+                    if abs(yaw_rate) > self.max_yaw_rate_rad_s:
+                        raise ValueError(
+                            f"yaw_rate unstable: |{yaw_rate:.3f}| > {self.max_yaw_rate_rad_s:.3f} rad/s"
+                        )
+            else:
+                missing = []
+                if drone_lat is None:
+                    missing.append("drone_lat")
+                if drone_lon is None:
+                    missing.append("drone_lon")
+                if yaw is None:
+                    missing.append("yaw_rad")
+                if altitude_m is None:
+                    missing.append("altitude_m")
                 raise ValueError(
-                    "yaw_rate_unavailable: yaw_stability_required=true but yaw_rate is non-finite"
+                    f"missing_pose_snapshot: {', '.join(missing)}"
                 )
-            if abs(yaw_rate) > self.max_yaw_rate_rad_s:
-                raise ValueError(
-                    f"yaw_rate unstable: |{yaw_rate:.3f}| > {self.max_yaw_rate_rad_s:.3f} rad/s"
-                )
-            yaw_rate_unavailable = False
-        else:
-            yaw_rate_unavailable = False
+
+        # post-fallback validation
+        if drone_lat is None or drone_lon is None:
+            raise ValueError("vision resolution requires drone GPS (lat/lon)")
+        if altitude_m is None or altitude_m <= 0.0:
+            raise ValueError("altitude must be positive for vision resolution")
+        if yaw is None or not math.isfinite(yaw):
+            raise ValueError("vision resolution requires yaw")
+
+        # apply yaw offset
+        effective_yaw = yaw + math.radians(self.yaw_offset_deg)
 
         # ── image errors ──
         # try top-level ex/ey first, then nested source.ex/source.ey
@@ -346,8 +406,8 @@ class ResolveGpsTargetsAction(ActionModule):
         body_forward_m = self.image_y_sign * altitude_m * math.tan(angle_y)
 
         # ENU offsets
-        d_north = body_forward_m * math.cos(yaw) - body_right_m * math.sin(yaw)
-        d_east = body_forward_m * math.sin(yaw) + body_right_m * math.cos(yaw)
+        d_north = body_forward_m * math.cos(effective_yaw) - body_right_m * math.sin(effective_yaw)
+        d_east = body_forward_m * math.sin(effective_yaw) + body_right_m * math.cos(effective_yaw)
 
         # target GPS
         drone_lat_rad = math.radians(drone_lat)
@@ -377,14 +437,14 @@ class ResolveGpsTargetsAction(ActionModule):
         )
         # add vision-specific metadata
         result["yaw_rad"] = yaw
+        result["effective_yaw_rad"] = effective_yaw
+        result["yaw_offset_deg"] = self.yaw_offset_deg
         result["ex"] = ex
         result["ey"] = ey
         result["body_forward_m"] = body_forward_m
         result["body_right_m"] = body_right_m
         result["drone_lat"] = drone_lat
         result["drone_lon"] = drone_lon
-        if yaw_rate_unavailable:
-            result["yaw_rate_warning"] = "yaw_rate_unavailable_in_context"
         return result
 
     # ── helpers ─────────────────────────────────────────────────────────

@@ -548,14 +548,14 @@ def test_return_home_failed_continues_to_land() -> None:
 # ── drop_two_targets_v2 安全兜底策略测试 ─────────────────────────────
 
 
-def test_drop_two_targets_v2_fixed_view_localize_retries_then_returns_home() -> None:
-    """drop_two_targets_v2: fixed_view_localize 失败后重试一次，再失败则返航。"""
+def test_drop_two_targets_v2_multi_view_localize_retries_then_returns_home() -> None:
+    """drop_two_targets_v2: multi_view_localize 失败后重试一次，再失败则返航。"""
     path = Path("config/action_missions/drop_two_targets_v2.json")
     data = _template(path)
     by_label = {step.get("label", ""): step for step in data["steps"]}
     labels = {step.get("label", "") for step in data["steps"] if step.get("label")}
 
-    policy = by_label["drop_fixed_view_scan"]["on_failed"]
+    policy = by_label["drop_multi_view_scan"]["on_failed"]
     assert policy["action"] == "retry_current_then_jump_to"
     assert policy["max_attempts"] == 2
     assert policy["target"] == "return_home"

@@ -269,6 +269,29 @@ class MultiViewLocalizeAction(ActionModule):
                     detail=self._detail(extra={"error": str(exc)}),
                 )
             self.raw_estimates.extend(estimates)
+            for est in estimates:
+                est["waypoint_index"] = self.waypoint_index
+                est["capture_index"] = self.capture_count
+                source = est.get("source")
+                if not isinstance(source, dict):
+                    source = {}
+                    est["source"] = source
+                source["waypoint_index"] = self.waypoint_index
+                source["capture_index"] = self.capture_count
+                # pose snapshot: record the drone GPS/yaw/altitude at capture time
+                _ctx_drone = (context or {}).get("drone")
+                if isinstance(_ctx_drone, dict):
+                    source["drone_lat"] = _ctx_drone.get("lat")
+                    source["drone_lon"] = _ctx_drone.get("lon")
+                    source["yaw_rad"] = _ctx_drone.get("yaw")
+                    _alt = _ctx_drone.get("relative_altitude") or _ctx_drone.get("relative_altitude_m")
+                    if _alt is None:
+                        _alt = _ctx_drone.get("altitude") or _ctx_drone.get("altitude_m")
+                    if _alt is not None:
+                        try:
+                            source["altitude_m"] = float(_alt)
+                        except (TypeError, ValueError):
+                            pass
             debug = self.localizer.last_debug
             self._merge_counts(self.observed_classes, debug.get("observed_classes"))
             self._merge_counts(self.rejected_by_reason, debug.get("rejected_by_reason"))

@@ -122,6 +122,7 @@ def test_resolve_vision_center_detection():
         "targets": [
             {"source": "vision", "ex": 0.0, "ey": 0.0, "class_name": "bucket_1"},
         ],
+        "allow_context_pose_fallback": True,
     })
     result = action.update(ctx)
 
@@ -157,6 +158,7 @@ def test_resolve_vision_right_of_center():
         "targets": [
             {"source": "vision", "ex": 0.5, "ey": 0.0},
         ],
+        "allow_context_pose_fallback": True,
     })
     result = action.update(ctx)
 
@@ -188,6 +190,7 @@ def test_resolve_vision_yaw_unstable():
         "targets": [
             {"source": "vision", "ex": 0.0, "ey": 0.0},
         ],
+        "allow_context_pose_fallback": True,
     })
     result = action.update(ctx)
 
@@ -215,6 +218,7 @@ def test_resolve_vision_yaw_stability_bypass():
             {"source": "vision", "ex": 0.0, "ey": 0.0},
         ],
         "yaw_stability_required": False,
+        "allow_context_pose_fallback": True,
     })
     result = action.update(ctx)
 
@@ -238,6 +242,7 @@ def test_resolve_vision_yaw_rate_missing_fails():
         "targets": [
             {"source": "vision", "ex": 0.0, "ey": 0.0},
         ],
+        "allow_context_pose_fallback": True,
     })
     result = action.update(ctx)
 
@@ -286,6 +291,7 @@ def test_resolve_multiple_targets():
             {"source": "home", "altitude_m": 5.0},
             {"source": "vision", "ex": 0.0, "ey": 0.0, "class_name": "bucket"},
         ],
+        "allow_context_pose_fallback": True,
     })
     result = action.update(ctx)
 
@@ -326,6 +332,7 @@ def test_resolve_vision_raw_estimate_preserves_selection_metadata():
             },
         ],
         "default_source": "vision",
+        "allow_context_pose_fallback": True,
     })
 
     result = action.update(ctx)
@@ -349,3 +356,204 @@ def test_resolve_vision_raw_estimate_preserves_selection_metadata():
 
     assert selected.done
     assert selected.detail["selected_count"] == 2
+
+
+# ── per-estimate pose tests ──────────────────────────────────────────
+
+
+def test_resolve_vision_uses_per_estimate_pose() -> None:
+    """Each vision estimate uses its own source.drone_lat/lon/yaw_rad/altitude_m."""
+    ctx = _make_context()
+    # context has different pose — must NOT be used
+    ctx["drone"] = {
+        "lat": 99.0,
+        "lon": 99.0,
+        "relative_altitude": 99.0,
+        "yaw": 9.9,
+        "yaw_rate": 0.01,
+        "global_position_valid": True,
+    }
+    action = ResolveGpsTargetsAction()
+    action.start({
+        "targets": [
+            {
+                "source": {
+                    "ex": 0.0,
+                    "ey": 0.0,
+                    "drone_lat": 30.0,
+                    "drone_lon": 120.0,
+                    "yaw_rad": 0.0,
+                    "altitude_m": 5.0,
+                },
+                "class_name": "bucket",
+            },
+        ],
+    })
+    result = action.update(ctx)
+
+    assert result.done
+    resolved = result.detail["resolved_targets"]
+    assert len(resolved) == 1
+    t = resolved[0]
+    assert t["valid"] is True
+    # should use per-estimate pose (30, 120), NOT context (99, 99)
+    assert t["drone_lat"] == pytest.approx(30.0)
+    assert t["drone_lon"] == pytest.approx(120.0)
+    assert t["lat"] == pytest.approx(30.0, abs=0.0001)
+    assert t["lon"] == pytest.approx(120.0, abs=0.0001)
+
+
+def test_resolve_vision_two_estimates_different_poses() -> None:
+    """Two estimates with different drone poses produce different GPS results."""
+    ctx = _make_context()
+    ctx["drone"] = {
+        "lat": 99.0, "lon": 99.0, "relative_altitude": 5.0,
+        "yaw": 0.0, "yaw_rate": 0.01, "global_position_valid": True,
+    }
+    action = ResolveGpsTargetsAction()
+    action.start({
+        "targets": [
+            {
+                "source": {
+                    "ex": 0.0, "ey": 0.0,
+                    "drone_lat": 30.0, "drone_lon": 120.0,
+                    "yaw_rad": 0.0, "altitude_m": 5.0,
+                },
+                "class_name": "bucket_A",
+            },
+            {
+                "source": {
+                    "ex": 0.0, "ey": 0.0,
+                    "drone_lat": 30.001, "drone_lon": 120.001,
+                    "yaw_rad": 0.0, "altitude_m": 5.0,
+                },
+                "class_name": "bucket_B",
+            },
+        ],
+    })
+    result = action.update(ctx)
+
+    assert result.done
+    resolved = result.detail["resolved_targets"]
+    assert len(resolved) == 2
+    # The two targets should have different GPS because of different drone poses
+    assert resolved[0]["lat"] != pytest.approx(resolved[1]["lat"])
+    assert resolved[0]["lon"] != pytest.approx(resolved[1]["lon"])
+
+
+def test_resolve_vision_missing_pose_fails_by_default() -> None:
+    """Vision estimate without pose snapshot fails (allow_context_pose_fallback=False)."""
+    ctx = _make_context()
+    ctx["drone"] = {
+        "lat": 30.0, "lon": 120.0, "relative_altitude": 5.0,
+        "yaw": 0.0, "global_position_valid": True,
+    }
+    action = ResolveGpsTargetsAction()
+    action.start({
+        "targets": [
+            {"source": {"ex": 0.0, "ey": 0.0}, "class_name": "bucket"},
+        ],
+        # default allow_context_pose_fallback=False
+    })
+    result = action.update(ctx)
+
+    assert result.failed
+    assert result.detail["resolved_count"] == 0
+    assert result.detail["error_count"] == 1
+    assert "missing_pose_snapshot" in result.detail["errors"][0]["reason"]
+
+
+def test_resolve_vision_yaw_offset_changes_position() -> None:
+    """yaw_offset_deg changes the resolved local coordinates."""
+    ctx = _make_context()
+    action_no_offset = ResolveGpsTargetsAction()
+    action_no_offset.start({
+        "targets": [
+            {
+                "source": {
+                    "ex": 0.5, "ey": 0.0,
+                    "drone_lat": 30.0, "drone_lon": 120.0,
+                    "yaw_rad": 0.0, "altitude_m": 5.0,
+                },
+            },
+        ],
+        "camera": {"yaw_offset_deg": 0.0},
+    })
+    r1 = action_no_offset.update(ctx)
+    t1 = r1.detail["resolved_targets"][0]
+
+    action_with_offset = ResolveGpsTargetsAction()
+    action_with_offset.start({
+        "targets": [
+            {
+                "source": {
+                    "ex": 0.5, "ey": 0.0,
+                    "drone_lat": 30.0, "drone_lon": 120.0,
+                    "yaw_rad": 0.0, "altitude_m": 5.0,
+                },
+            },
+        ],
+        "camera": {"yaw_offset_deg": 10.0},
+    })
+    r2 = action_with_offset.update(ctx)
+    t2 = r2.detail["resolved_targets"][0]
+
+    # positions must differ
+    assert (abs(t1["local_x"] - t2["local_x"]) > 1e-9) or (
+        abs(t1["local_y"] - t2["local_y"]) > 1e-9
+    )
+
+
+def test_resolve_vision_yaw_offset_in_result() -> None:
+    """Resolved result includes yaw_offset_deg and effective_yaw_rad."""
+    ctx = _make_context()
+    action = ResolveGpsTargetsAction()
+    action.start({
+        "targets": [
+            {
+                "source": {
+                    "ex": 0.0, "ey": 0.0,
+                    "drone_lat": 30.0, "drone_lon": 120.0,
+                    "yaw_rad": 1.0, "altitude_m": 5.0,
+                },
+            },
+        ],
+        "camera": {"yaw_offset_deg": 3.5},
+    })
+    result = action.update(ctx)
+    t = result.detail["resolved_targets"][0]
+    assert t["yaw_offset_deg"] == 3.5
+    assert "effective_yaw_rad" in t
+    assert t["effective_yaw_rad"] == pytest.approx(1.0 + math.radians(3.5))
+
+
+def test_resolve_vision_top_level_pose_fallback() -> None:
+    """Estimate top-level drone_lat/lon/yaw_rad/altitude_m used when source lacks them."""
+    ctx = _make_context()
+    ctx["drone"] = {
+        "lat": 99.0, "lon": 99.0, "relative_altitude": 99.0,
+        "yaw": 9.9, "global_position_valid": True,
+    }
+    action = ResolveGpsTargetsAction()
+    action.start({
+        "targets": [
+            {
+                "source": {"ex": 0.0, "ey": 0.0},
+                "drone_lat": 30.0,
+                "drone_lon": 120.0,
+                "yaw_rad": 0.0,
+                "altitude_m": 5.0,
+                "class_name": "bucket",
+            },
+        ],
+    })
+    result = action.update(ctx)
+
+    assert result.done
+    resolved = result.detail["resolved_targets"]
+    assert len(resolved) == 1
+    t = resolved[0]
+    assert t["valid"] is True
+    # should use top-level pose (30, 120), NOT context (99, 99)
+    assert t["drone_lat"] == pytest.approx(30.0)
+    assert t["drone_lon"] == pytest.approx(120.0)

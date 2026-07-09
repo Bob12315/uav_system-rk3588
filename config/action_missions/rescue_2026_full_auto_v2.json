@@ -1,6 +1,6 @@
 {
   "name": "rescue_2026_full_auto_v2",
-  "description": "2026 完整救援 v2：GPS→local 统一坐标、投放区定位与双载荷投放、侦察区逐目标检查、生成报告、返航降落。",
+  "description": "2026 完整救援 v2：GPS→local 统一坐标、投放区 2×2 多视角定位与双载荷投放、侦察区逐目标检查、生成报告、返航降落。",
   "steps": [
     {
       "name": "takeoff",
@@ -83,8 +83,8 @@
       }
     },
     {
-      "name": "fixed_view_localize",
-      "label": "drop_scan",
+      "name": "multi_view_localize",
+      "label": "drop_multi_view_scan",
       "save_as": "drop_scan",
       "on_failed": {
         "action": "jump_to",
@@ -92,17 +92,43 @@
         "max_attempts": 1
       },
       "params": {
+        "waypoint_mode": "field",
         "altitude_m": 5.0,
-        "capture_updates": 12,
+        "yaw_mode": "field_heading",
+        "waypoints": [
+          {"x": -2.0, "y": 31.25, "altitude_m": 5.0},
+          {"x":  2.0, "y": 31.25, "altitude_m": 5.0},
+          {"x":  2.0, "y": 33.75, "altitude_m": 5.0},
+          {"x": -2.0, "y": 33.75, "altitude_m": 5.0}
+        ],
+        "capture_updates_per_waypoint": 8,
+        "settle_updates_per_waypoint": 2,
+        "max_updates_per_waypoint": 120,
+        "tolerance_xy_m": 0.6,
+        "tolerance_z_m": 0.5,
+        "goto_min_hold_updates": 1,
         "detection_source": "scene",
         "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
-        "min_confidence": 0.25,
+        "min_confidence": 0.30,
         "camera": {
-          "fov_x_deg": 85.0,
-          "fov_y_deg": 69.0,
+          "fov_x_deg": 51.3,
+          "fov_y_deg": 39.6,
           "image_x_sign": 1.0,
-          "image_y_sign": -1.0
-        }
+          "image_y_sign": -1.0,
+          "yaw_offset_deg": 0.0
+        },
+        "fusion": {
+          "cluster_radius_m": 1.0,
+          "outlier_radius_m": 0.9,
+          "min_cluster_size": 2,
+          "max_cluster_radius_m": 1.0,
+          "center_weight_power": 2.0,
+          "max_abs_ex": 0.75,
+          "max_abs_ey": 0.75,
+          "max_objects": 3
+        },
+        "save_result": true,
+        "priority": 5
       }
     },
     {
@@ -118,11 +144,13 @@
         "targets": "$drop_scan.raw_estimates",
         "default_source": "vision",
         "camera": {
-          "fov_x_deg": 85.0,
-          "fov_y_deg": 69.0,
+          "fov_x_deg": 51.3,
+          "fov_y_deg": 39.6,
           "image_x_sign": 1.0,
-          "image_y_sign": -1.0
+          "image_y_sign": -1.0,
+          "yaw_offset_deg": 0.0
         },
+        "allow_context_pose_fallback": false,
         "key": "resolve_drop_buckets"
       }
     },
@@ -204,8 +232,8 @@
           "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
           "min_confidence": 0.25,
           "camera": {
-            "fov_x_deg": 85.0,
-            "fov_y_deg": 69.0,
+            "fov_x_deg": 51.3,
+            "fov_y_deg": 39.6,
             "image_x_sign": 1.0,
             "image_y_sign": -1.0
           }
@@ -245,8 +273,8 @@
             "payload_offset_enabled": true,
             "payload_forward_m": -0.06,
             "payload_right_m": 0.0,
-            "fov_x_deg": 85.0,
-            "fov_y_deg": 69.0,
+            "fov_x_deg": 51.3,
+            "fov_y_deg": 39.6,
             "image_x_sign": 1.0,
             "image_y_sign": -1.0,
             "max_payload_offset_ex_cam": 0.8,

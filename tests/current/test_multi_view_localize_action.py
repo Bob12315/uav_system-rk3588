@@ -520,3 +520,67 @@ def test_four_points_complete_with_done() -> None:
     assert result2.reason == "multi_view_localized"
     assert len(result2.detail.get("localized_objects", [])) >= 1
     assert "best_target" not in result2.detail
+
+
+# ── waypoint_index / capture_index in raw_estimates ─────────────────
+
+
+def test_raw_estimates_contain_waypoint_and_capture_index() -> None:
+    action = MultiViewLocalizeAction()
+    action.start(_params(
+        waypoints=[
+            {"x": 1.0, "y": 2.0, "altitude_m": 3.0},
+            {"x": 4.0, "y": 5.0, "altitude_m": 3.0},
+        ],
+        capture_updates_per_waypoint=1,
+        settle_updates_per_waypoint=1,
+        class_names={"bucket"},
+    ))
+
+    # point 0
+    ctx = _at_waypoint(1.0, 2.0, 3.0)
+    action.update(ctx)
+    action.update(ctx)
+    ctx["scene"] = _scene_with_detection(track_id=1, ex=0.0, ey=0.0)
+    action.update(ctx)
+
+    # point 1
+    ctx2 = _at_waypoint(4.0, 5.0, 3.0)
+    action.update(ctx2)
+    action.update(ctx2)
+    ctx2["scene"] = _scene_with_detection(track_id=2, ex=0.1, ey=0.1)
+    action.update(ctx2)
+
+    assert len(action.raw_estimates) >= 2
+    for est in action.raw_estimates:
+        assert "waypoint_index" in est
+        assert "capture_index" in est
+        assert isinstance(est["waypoint_index"], int)
+        assert isinstance(est["capture_index"], int)
+        # also check nested source if present
+        source = est.get("source")
+        if isinstance(source, dict):
+            assert "waypoint_index" in source
+            assert "capture_index" in source
+
+
+def test_raw_estimates_do_not_lose_existing_fields() -> None:
+    """Adding waypoint_index must not remove x, y, track_id, etc."""
+    action = MultiViewLocalizeAction()
+    action.start(_params(
+        waypoints=[{"x": 1.0, "y": 2.0, "altitude_m": 3.0}],
+        capture_updates_per_waypoint=1,
+        settle_updates_per_waypoint=1,
+        class_names={"bucket"},
+    ))
+
+    ctx = _at_waypoint(1.0, 2.0, 3.0)
+    action.update(ctx)
+    action.update(ctx)
+    ctx["scene"] = _scene_with_detection(track_id=1, ex=0.1, ey=0.2)
+    action.update(ctx)
+
+    assert len(action.raw_estimates) >= 1
+    est = action.raw_estimates[0]
+    for key in ("x", "y", "z", "track_id", "class_name", "confidence", "source"):
+        assert key in est, f"raw_estimate missing key: {key}"
