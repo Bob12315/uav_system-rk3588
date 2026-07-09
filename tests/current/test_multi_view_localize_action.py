@@ -294,6 +294,29 @@ def test_no_detection_results_in_no_target_fused() -> None:
     assert result.reason == "no_target_fused"
 
 
+def test_no_detection_can_complete_with_empty_result_when_allowed() -> None:
+    action = MultiViewLocalizeAction()
+    action.start(_params(
+        waypoints=[{"x": 1.0, "y": 2.0, "altitude_m": 3.0}],
+        capture_updates_per_waypoint=1,
+        settle_updates_per_waypoint=1,
+        class_names={"bucket"},
+        allow_empty_result=True,
+    ))
+
+    ctx = _at_waypoint(1.0, 2.0, 3.0)
+    action.update(ctx)
+    action.update(ctx)
+    result = action.update(ctx)
+
+    assert result.done is True
+    assert result.failed is False
+    assert result.reason == "multi_view_empty_result"
+    assert result.detail["object_count"] == 0
+    assert result.detail["localized_objects"] == []
+    assert result.detail["raw_estimates"] == []
+
+
 # ── yaw_mode arm_heading ────────────────────────────────────────────
 
 

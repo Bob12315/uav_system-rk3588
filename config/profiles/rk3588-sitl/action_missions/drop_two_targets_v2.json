@@ -120,6 +120,7 @@
           "max_objects": 3
         },
         "save_result": true,
+        "allow_empty_result": true,
         "priority": 5
       }
     },
@@ -141,6 +142,7 @@
           "yaw_offset_deg": 0.0
         },
         "allow_context_pose_fallback": false,
+        "allow_empty_result": true,
         "key": "resolve_drop_buckets"
       }
     },

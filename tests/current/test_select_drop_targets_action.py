@@ -136,6 +136,17 @@ def test_select_drop_targets_fails_when_objects_empty() -> None:
     assert result.reason == "no_drop_objects"
 
 
+def test_select_drop_targets_allow_fewer_accepts_zero_targets() -> None:
+    result = _select([], target_count=2, allow_fewer=True)
+
+    assert result.done is True
+    assert result.failed is False
+    assert result.reason == "drop_targets_selected_empty"
+    assert result.detail["selected_count"] == 0
+    assert len(result.detail["target_slots"]) == 2
+    assert all(slot["valid"] is False for slot in result.detail["target_slots"])
+
+
 def test_select_drop_targets_deduplicates_nearby_candidates() -> None:
     result = _select(
         [

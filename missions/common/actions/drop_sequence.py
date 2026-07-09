@@ -10,7 +10,9 @@ Key safety rules:
 - Single valid target + release_all_payloads_if_only_one_target → release all
   payloads at the same spot without re-goto/re-lock.
 - climb timeout does NOT fail the sequence.
-- No valid targets → done with released_count=0 (not failed).
+- No valid targets:
+  - default behavior: done with released_count=0 (not failed).
+  - if release_all_payloads_if_no_valid_targets=true: release all payloads in place.
 """
 
 from __future__ import annotations

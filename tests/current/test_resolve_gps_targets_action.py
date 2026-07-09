@@ -226,6 +226,22 @@ def test_resolve_vision_yaw_stability_bypass():
     assert result.detail["resolved_count"] == 1
 
 
+def test_resolve_gps_targets_allows_empty_result_when_enabled() -> None:
+    action = ResolveGpsTargetsAction()
+    action.start({
+        "targets": [],
+        "allow_empty_result": True,
+    })
+
+    result = action.update(_make_context())
+
+    assert result.done is True
+    assert result.failed is False
+    assert result.reason == "targets_resolved_empty"
+    assert result.detail["resolved_targets"] == []
+    assert result.detail["resolved_count"] == 0
+
+
 def test_resolve_vision_yaw_rate_missing_fails():
     """Vision target with yaw_stability_required=true and no yaw_rate → valid=false."""
     ctx = _make_context()

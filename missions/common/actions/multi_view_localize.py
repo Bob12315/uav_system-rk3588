@@ -82,6 +82,7 @@ class MultiViewLocalizeAction(ActionModule):
         self.fusion = MultiPhotoFusion(fusion_config, class_names=self.class_names)
 
         self.save_result = bool(data.get("save_result", True))
+        self.allow_empty_result = bool(data.get("allow_empty_result", False))
         self.run_id = str(uuid.uuid4())[:8]
 
         self.phase = "init" if self.waypoints is None else "goto"
@@ -174,6 +175,7 @@ class MultiViewLocalizeAction(ActionModule):
         self.detection_source = "scene"
         self.class_names = None
         self.save_result = True
+        self.allow_empty_result = False
         self.run_id = ""
         self.yaw_defaulted = False
         self.start_yaw_rad = None
@@ -325,6 +327,16 @@ class MultiViewLocalizeAction(ActionModule):
             self.fusion.fuse(self.raw_estimates) if self.fusion is not None else []
         )
         if not self.fused_objects:
+            if self.allow_empty_result:
+                self.phase = "done"
+                return ActionResult(
+                    done=True,
+                    reason="multi_view_empty_result",
+                    detail=self._detail(done=True, extra={
+                        "captures": self.captures,
+                        "diagnostic": "no target fused; empty result allowed",
+                    }),
+                )
             self.phase = "failed"
             self.failure_reason = "no_target_fused"
             return ActionResult(
@@ -524,6 +536,7 @@ class MultiViewLocalizeAction(ActionModule):
                 })
             detail["localized_objects"] = localized_objects
             detail["object_count"] = len(localized_objects)
+            detail["raw_estimates"] = list(self.raw_estimates)
             detail["captures"] = self.captures
             if self.fusion is not None:
                 detail["fusion_debug"] = self.fusion.last_debug
