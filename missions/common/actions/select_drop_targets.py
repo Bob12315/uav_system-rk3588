@@ -189,6 +189,8 @@ class SelectDropTargetsAction(ActionModule):
     def _select(self) -> ActionResult:
         if not self.objects:
             detail = self._base_detail([], [])
+            if self.allow_fewer:
+                return ActionResult(done=True, reason="drop_targets_selected_empty", detail=detail)
             return ActionResult(failed=True, reason="no_drop_objects", detail=detail)
 
         candidates: list[_Candidate] = []
@@ -205,6 +207,8 @@ class SelectDropTargetsAction(ActionModule):
 
         if not candidates:
             detail = self._base_detail([], rejected)
+            if self.allow_fewer:
+                return ActionResult(done=True, reason="drop_targets_selected_empty", detail=detail)
             return ActionResult(failed=True, reason="no_valid_drop_targets", detail=detail)
 
         ordered = sorted(candidates, key=self._sort_key)

@@ -1,6 +1,6 @@
 {
   "name": "rescue_2026_full_auto_v2",
-  "description": "2026 完整救援 v2：GPS→local 统一坐标、投放区 2×2 多视角定位与双载荷投放、侦察区逐目标检查、生成报告、返航降落。",
+  "description": "2026 完整救援 v2 aggressive scoring：起飞直飞第一扫描点、yaw 对齐、2×2 多视角定位与激进双载荷投放、侦察区逐目标检查、生成报告、返航降落。",
   "steps": [
     {
       "name": "takeoff",
@@ -22,27 +22,9 @@
       }
     },
     {
-      "name": "yaw_align",
-      "label": "yaw_align_after_takeoff",
-      "on_failed": {
-        "action": "jump_to",
-        "target": "land_home",
-        "max_attempts": 1
-      },
-      "params": {
-        "yaw_mode": "field_heading",
-        "tolerance_deg": 3.0,
-        "yaw_speed_deg_s": 25.0,
-        "min_hold_updates": 5,
-        "max_updates": 120,
-        "priority": 4,
-        "key": "yaw_align_after_takeoff"
-      }
-    },
-    {
       "name": "resolve_gps_targets",
-      "label": "resolve_drop_center",
-      "save_as": "drop_center",
+      "label": "resolve_first_scan_point",
+      "save_as": "first_scan_point",
       "on_failed": {
         "action": "jump_to",
         "target": "land_home",
@@ -52,34 +34,48 @@
         "targets": [
           {
             "source": "field",
-            "field_x_m": 0.0,
-            "field_y_m": 32.5,
+            "field_x_m": -2.0,
+            "field_y_m": 31.25,
             "altitude_m": 5.0
           }
         ],
-        "key": "resolve_drop_center"
+        "key": "resolve_first_scan_point"
       }
     },
     {
       "name": "goto_waypoint",
-      "label": "goto_drop_scan_center",
+      "label": "goto_first_scan_point",
       "on_failed": {
-        "action": "jump_to",
-        "target": "return_home",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
-        "x": "$drop_center.resolved_targets.0.local_x",
-        "y": "$drop_center.resolved_targets.0.local_y",
+        "x": "$first_scan_point.resolved_targets.0.local_x",
+        "y": "$first_scan_point.resolved_targets.0.local_y",
         "altitude_m": 5.0,
         "waypoint_mode": "absolute",
         "target_frame": "local",
         "yaw_mode": "field_heading",
-        "tolerance_xy_m": 0.5,
-        "tolerance_z_m": 0.5,
-        "min_hold_updates": 10,
+        "tolerance_xy_m": 0.8,
+        "tolerance_z_m": 0.6,
+        "min_hold_updates": 1,
         "priority": 5,
-        "key": "goto_drop_scan_center"
+        "key": "goto_first_scan_point"
+      }
+    },
+    {
+      "name": "yaw_align",
+      "label": "yaw_align_before_scan",
+      "on_failed": {
+        "action": "continue"
+      },
+      "params": {
+        "yaw_mode": "field_heading",
+        "tolerance_deg": 3.0,
+        "yaw_speed_deg_s": 25.0,
+        "min_hold_updates": 5,
+        "max_updates": 120,
+        "priority": 4,
+        "key": "yaw_align_before_scan"
       }
     },
     {
@@ -101,11 +97,11 @@
           {"x":  2.0, "y": 33.75, "altitude_m": 5.0},
           {"x": -2.0, "y": 33.75, "altitude_m": 5.0}
         ],
-        "capture_updates_per_waypoint": 8,
-        "settle_updates_per_waypoint": 2,
-        "max_updates_per_waypoint": 120,
-        "tolerance_xy_m": 0.6,
-        "tolerance_z_m": 0.5,
+        "capture_updates_per_waypoint": 6,
+        "settle_updates_per_waypoint": 1,
+        "max_updates_per_waypoint": 100,
+        "tolerance_xy_m": 0.8,
+        "tolerance_z_m": 0.6,
         "goto_min_hold_updates": 1,
         "detection_source": "scene",
         "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
@@ -119,15 +115,16 @@
         },
         "fusion": {
           "cluster_radius_m": 1.0,
-          "outlier_radius_m": 0.9,
+          "outlier_radius_m": 1.0,
           "min_cluster_size": 2,
-          "max_cluster_radius_m": 1.0,
+          "max_cluster_radius_m": 1.2,
           "center_weight_power": 2.0,
           "max_abs_ex": 0.75,
           "max_abs_ey": 0.75,
           "max_objects": 3
         },
         "save_result": true,
+        "allow_empty_result": true,
         "priority": 5
       }
     },
@@ -136,9 +133,7 @@
       "label": "resolve_drop_buckets",
       "save_as": "drop_buckets",
       "on_failed": {
-        "action": "jump_to",
-        "target": "goto_recon_scan_center",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
         "targets": "$drop_scan.raw_estimates",
@@ -151,6 +146,7 @@
           "yaw_offset_deg": 0.0
         },
         "allow_context_pose_fallback": false,
+        "allow_empty_result": true,
         "key": "resolve_drop_buckets"
       }
     },
@@ -159,15 +155,13 @@
       "label": "select_drop_targets",
       "save_as": "drop_targets",
       "on_failed": {
-        "action": "jump_to",
-        "target": "goto_recon_scan_center",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
         "objects": "$drop_buckets.resolved_targets",
         "input_key": "resolved_targets",
-        "target_count": 3,
-        "allow_fewer": false,
+        "target_count": 2,
+        "allow_fewer": true,
         "score_table": {
           "bucket_1": 500,
           "bucket_2": 300,
@@ -177,7 +171,7 @@
         "min_seen_count": 1,
         "min_raw_count": 0,
         "min_weight": 0.0,
-        "deduplicate_radius_m": 0.6,
+        "deduplicate_radius_m": 0.8,
         "prefer_class_order": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
         "zone_center": {"x": 0.0, "y": 32.5},
         "zone_center_mode": "field"
@@ -208,16 +202,17 @@
         ],
         "max_target_candidates": 3,
         "max_payloads": 2,
-        "approach_altitude_m": 2.5,
+        "approach_altitude_m": 3.0,
         "finish_altitude_m": 1.5,
         "climb_after_drop_m": 3.5,
-        "goto_max_updates": 120,
-        "target_lock_max_updates": 50,
-        "align_descend_max_updates": 250,
-        "climb_max_updates": 100,
-        "fallback_release_when_last_target_failed": false,
-        "release_all_payloads_if_only_one_target": false,
-        "continue_after_any_failure": false,
+        "goto_max_updates": 100,
+        "target_lock_max_updates": 40,
+        "align_descend_max_updates": 300,
+        "climb_max_updates": 80,
+        "fallback_release_when_last_target_failed": true,
+        "release_all_payloads_if_only_one_target": true,
+        "release_all_payloads_if_no_valid_targets": true,
+        "continue_after_any_failure": true,
         "goto": {
           "waypoint_mode": "absolute",
           "yaw_mode": "field_heading",
@@ -230,7 +225,7 @@
           "max_match_distance_m": 1.2,
           "detection_source": "scene",
           "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
-          "min_confidence": 0.25,
+          "min_confidence": 0.35,
           "camera": {
             "fov_x_deg": 51.3,
             "fov_y_deg": 39.6,
@@ -243,7 +238,6 @@
           "lost_timeout_updates": 10,
           "hold_updates_required": 1,
           "max_retries": 1,
-          "max_updates": 160,
           "finish_altitude_m": 1.5,
           "config": {
             "kp_vx": 0.55,
@@ -257,7 +251,7 @@
               {"altitude_m": 1.5, "scale": 0.25},
               {"altitude_m": 2.4, "scale": 0.55},
               {"altitude_m": 3.5, "scale": 0.55},
-              {"altitude_m": 4.5, "scale": 0.55}
+              {"altitude_m": 5.0, "scale": 0.55}
             ],
             "scale_max_velocity_with_height": true,
             "descend_speed_mps": 0.3,
@@ -271,8 +265,6 @@
             "min_altitude_m": 1.5,
             "require_target_locked": false,
             "payload_offset_enabled": true,
-            "payload_forward_m": -0.06,
-            "payload_right_m": 0.0,
             "fov_x_deg": 51.3,
             "fov_y_deg": 39.6,
             "image_x_sign": 1.0,

@@ -10,7 +10,9 @@ Key safety rules:
 - Single valid target + release_all_payloads_if_only_one_target → release all
   payloads at the same spot without re-goto/re-lock.
 - climb timeout does NOT fail the sequence.
-- No valid targets → done with released_count=0 (not failed).
+- No valid targets:
+  - default behavior: done with released_count=0 (not failed).
+  - if release_all_payloads_if_no_valid_targets=true: release all payloads in place.
 """
 
 from __future__ import annotations
@@ -94,6 +96,9 @@ class DropSequenceAction(ActionModule):
         self.continue_after_any_failure = bool(
             data.get("continue_after_any_failure", True)
         )
+        self.release_all_payloads_if_no_valid_targets = bool(
+            data.get("release_all_payloads_if_no_valid_targets", False)
+        )
 
         # ── sub-action param templates ──
         self.goto_params = dict(data.get("goto") or {})
@@ -142,6 +147,9 @@ class DropSequenceAction(ActionModule):
         # ── first call: check for no valid targets ──
         if self.phase == "init":
             if not self.valid_targets:
+                if self.release_all_payloads_if_no_valid_targets:
+                    self._start_release_no_target()
+                    return self._phase_transition_result()
                 self._done = True
                 self._last_reason = "no_valid_targets"
                 self._last_detail = self._make_detail(status="done")
@@ -159,6 +167,8 @@ class DropSequenceAction(ActionModule):
             return self._handle_align_descend(data)
         if self.phase == "release_payload":
             return self._handle_release_payload(data)
+        if self.phase == "release_no_target":
+            return self._handle_release_no_target(data)
         if self.phase == "climb_after_release":
             return self._handle_climb(data)
 
@@ -188,6 +198,7 @@ class DropSequenceAction(ActionModule):
         self.fallback_release_when_last_target_failed = True
         self.release_all_payloads_if_only_one_target = True
         self.continue_after_any_failure = True
+        self.release_all_payloads_if_no_valid_targets = False
         self.goto_params = {}
         self._target_lock_params = {}
         self._align_descend_params = {}
@@ -207,6 +218,69 @@ class DropSequenceAction(ActionModule):
         self._last_detail = {}
         self._done = False
         self._only_one_target = False
+
+    # ── release_no_target ──────────────────────────────────────────────
+
+    def _start_release_no_target(self) -> None:
+        """Start in-place payload release when no valid targets exist."""
+        self._start_release_payload("no_target_release_all_in_place")
+        self.phase = "release_no_target"
+
+    def _handle_release_no_target(self, context: dict[str, Any]) -> ActionResult:
+        """Handle release tick for no-target in-place release.
+
+        Unlike normal release_payload, this does NOT go through
+        _handle_release_payload → _advance_after_payload → climb.
+        Instead it releases payloads sequentially in-place and finishes.
+        """
+        self.phase_update_count += 1
+        result = self._current_action.update(context)  # type: ignore[union-attr]
+
+        if result.failed:
+            actions = self._actions_with_zero(result.detail, result.actions)
+            actions.append(self._clear_continuous_action("release_no_target_failed", send_stop_first=True))
+            self._done = True
+            self._last_reason = "no_target_release_failed"
+            self._last_detail = self._make_detail(status="failed")
+            return ActionResult(
+                actions=actions, failed=True,
+                reason="no_target_release_failed", detail=self._last_detail,
+            )
+
+        actions = self._actions_with_zero(result.detail, result.actions)
+
+        if result.done:
+            self.payload_results.append({
+                "payload_index": self.payload_index,
+                "payload_id": self.payloads[self.payload_index].get("payload_id"),
+                "released": True,
+                "target_id": None,
+                "target_index": -1,
+                "fallback_release": False,
+                "release_reason": "no_target_release_all_in_place",
+            })
+            self.released_count += 1
+            self.payload_index += 1
+
+            if self.payload_index >= len(self.payloads):
+                actions.append(self._clear_continuous_action("no_target_done", send_stop_first=True))
+                self._done = True
+                self._last_reason = "drop_sequence_done"
+                self._last_detail = self._make_detail(status="done")
+                return ActionResult(
+                    actions=actions, done=True,
+                    reason="drop_sequence_done", detail=self._last_detail,
+                )
+
+            # more payloads to release in-place
+            self._start_release_payload("no_target_release_all_in_place")
+            return self._phase_transition_result()
+
+        return ActionResult(
+            actions=actions,
+            reason="release_no_target_active",
+            detail=self._make_detail(),
+        )
 
     # ── goto_target ────────────────────────────────────────────────────
 

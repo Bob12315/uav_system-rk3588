@@ -65,6 +65,7 @@ class ResolveGpsTargetsAction(ActionModule):
         self.allow_context_pose_fallback = bool(
             data.get("allow_context_pose_fallback", False)
         )
+        self.allow_empty_result = bool(data.get("allow_empty_result", False))
 
         # yaw stability
         self.max_yaw_rate_rad_s = float(
@@ -160,6 +161,12 @@ class ResolveGpsTargetsAction(ActionModule):
             "key": self.key,
         }
         if not resolved:
+            if self.allow_empty_result:
+                return ActionResult(
+                    done=True,
+                    reason="targets_resolved_empty",
+                    detail=self._last_detail,
+                )
             return ActionResult(
                 failed=True,
                 reason="no_targets_resolved",
@@ -189,6 +196,7 @@ class ResolveGpsTargetsAction(ActionModule):
         self.yaw_stability_required = True
         self.yaw_offset_deg = 0.0
         self.allow_context_pose_fallback = False
+        self.allow_empty_result = False
         self._done = False
         self._last_detail = {}
 

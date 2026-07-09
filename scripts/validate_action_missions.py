@@ -195,6 +195,14 @@ def _smoke_blackboard() -> MissionBlackboard:
         },
     )
     blackboard.set(
+        "first_scan_point",
+        {
+            "resolved_targets": [
+                {"valid": True, "source": "field", "local_x": 98.0, "local_y": 231.25, "z_down_m": -5.0, "lat": 30.0, "lon": 120.0, "altitude_m": 5.0},
+            ],
+        },
+    )
+    blackboard.set(
         "drop_buckets",
         {
             "resolved_targets": [
