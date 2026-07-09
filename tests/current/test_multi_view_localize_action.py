@@ -6,6 +6,7 @@ import pytest
 
 from missions.common.actions.multi_view_localize import MultiViewLocalizeAction
 from missions.common.actions.result import ActionResult
+from telemetry_link.frames import GLOBAL_RELATIVE_ALT_INT
 
 
 def _params(**overrides: object) -> dict[str, object]:
@@ -182,6 +183,28 @@ def test_goto_phase_returns_local_position_action() -> None:
     assert result.done is False
     assert len(result.actions) >= 1
     assert result.actions[0]["action_type"] == "local_position"
+
+
+def test_global_target_frame_defaults_to_global_relative_alt_frame() -> None:
+    action = MultiViewLocalizeAction()
+    action.start(_params(
+        target_frame="global",
+        waypoints=[{"x": 34.103633, "y": 108.6428172, "altitude_m": 5.0}],
+    ))
+
+    result = action.update({
+        "drone": {
+            "yaw": 0.75,
+            "global_position_valid": False,
+            "lat": 34.1036423,
+            "lon": 108.6426735,
+            "relative_altitude": 5.0,
+        },
+    })
+
+    assert result.reason == "multi_view_goto"
+    assert result.actions[0]["action_type"] == "global_goto"
+    assert result.actions[0]["params"]["frame"] == GLOBAL_RELATIVE_ALT_INT
 
 
 def test_field_waypoint_preserves_frame_and_reports_local_target() -> None:

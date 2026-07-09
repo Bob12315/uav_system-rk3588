@@ -4,6 +4,8 @@ import time
 import uuid
 from typing import Any
 
+from telemetry_link.frames import GLOBAL_RELATIVE_ALT_INT, LOCAL_NED
+
 from .base import ActionModule
 from .goto_waypoint import GotoWaypointAction
 from .multi_photo_fusion import MultiPhotoFusion, MultiPhotoFusionConfig
@@ -53,7 +55,8 @@ class MultiViewLocalizeAction(ActionModule):
         self.yaw_rad = None
         if self.yaw_mode == "fixed":
             self.yaw_rad = self._required_float(data, "yaw_rad")
-        self.frame = int(data.get("frame", 1))
+        default_frame = GLOBAL_RELATIVE_ALT_INT if self.target_frame == "global" else LOCAL_NED
+        self.frame = int(data.get("frame", default_frame))
 
         self.capture_updates_per_waypoint = int(data.get("capture_updates_per_waypoint", 3))
         if self.capture_updates_per_waypoint < 1:
