@@ -389,13 +389,15 @@ def test_drop_two_targets_v2_contains_resolve_gps_targets() -> None:
     )
 
 
-def test_drop_two_targets_v2_selects_resolved_raw_estimates() -> None:
+def test_drop_two_targets_v2_selects_fused_localized_objects() -> None:
     data = _template(DROP_V2_TEMPLATE_PATH)
     by_label = {step.get("label", ""): step for step in data["steps"]}
     assert by_label["resolve_drop_buckets"]["params"]["targets"] == "$drop_scan.raw_estimates"
     select_params = by_label["select_drop_targets"]["params"]
-    assert select_params["objects"] == "$drop_buckets.resolved_targets"
-    assert select_params["min_seen_count"] == 1
+    assert select_params["objects"] == "$drop_scan.localized_objects"
+    assert select_params["input_key"] == "localized_objects"
+    assert select_params["min_seen_count"] == 2
+    assert select_params["objects"] != "$drop_buckets.resolved_targets"
 
 
 def test_drop_two_targets_v2_no_global_target_frame() -> None:
@@ -699,8 +701,9 @@ def test_select_drop_targets_v2_zone_center_mode_field() -> None:
     data = _template(FULL_V2_TEMPLATE_PATH)
     by_label = {step.get("label", ""): step for step in data["steps"]}
     assert by_label["select_drop_targets"]["params"]["zone_center_mode"] == "field"
-    assert by_label["select_drop_targets"]["params"]["objects"] == "$drop_buckets.resolved_targets"
-    assert by_label["select_drop_targets"]["params"]["min_seen_count"] == 1
+    assert by_label["select_drop_targets"]["params"]["objects"] == "$drop_scan.localized_objects"
+    assert by_label["select_drop_targets"]["params"]["input_key"] == "localized_objects"
+    assert by_label["select_drop_targets"]["params"]["min_seen_count"] == 2
 
 
 def test_drop_two_targets_v2_select_drop_targets_zone_center_mode_field() -> None:

@@ -154,8 +154,8 @@
         "action": "continue"
       },
       "params": {
-        "objects": "$drop_buckets.resolved_targets",
-        "input_key": "resolved_targets",
+        "objects": "$drop_scan.localized_objects",
+        "input_key": "localized_objects",
         "target_count": 2,
         "allow_fewer": true,
         "score_table": {
@@ -164,7 +164,7 @@
           "bucket_3": 100,
           "bucket": 50
         },
-        "min_seen_count": 1,
+        "min_seen_count": 2,
         "min_raw_count": 0,
         "min_weight": 0.0,
         "deduplicate_radius_m": 0.8,

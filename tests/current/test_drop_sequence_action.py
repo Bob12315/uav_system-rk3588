@@ -411,6 +411,45 @@ def test_invalid_targets_filtered() -> None:
     assert a.valid_targets[0]["id"] == "good"
 
 
+def test_goto_and_climb_prefer_local_xy_over_xy() -> None:
+    targets = [{
+        "valid": True,
+        "id": "mixed",
+        "target_id": "mixed",
+        "class_name": "bucket",
+        "local_x": 1.25,
+        "local_y": 32.75,
+        "x": 99.0,
+        "y": -99.0,
+        "score": 500,
+        "seen_count": 3,
+        "count": 3,
+        "raw_count": 3,
+        "weight": 1.0,
+    }]
+    params = _base_params(targets=targets, payloads=_make_payloads(1))
+    action = DropSequenceAction()
+    action.start(params)
+
+    action._start_goto_target()
+    assert action._current_action.target_x == 1.25
+    assert action._current_action.target_y == 32.75
+    goto_result = action._current_action.update(GOTO_CTX)
+    assert goto_result.actions[0]["params"]["x"] == 1.25
+    assert goto_result.actions[0]["params"]["y"] == 32.75
+    assert goto_result.actions[0]["local_target"]["x"] == 1.25
+    assert goto_result.actions[0]["local_target"]["y"] == 32.75
+
+    action._start_climb()
+    assert action._current_action.target_x == 1.25
+    assert action._current_action.target_y == 32.75
+    climb_result = action._current_action.update(GOTO_CTX)
+    assert climb_result.actions[0]["params"]["x"] == 1.25
+    assert climb_result.actions[0]["params"]["y"] == 32.75
+    assert climb_result.actions[0]["local_target"]["x"] == 1.25
+    assert climb_result.actions[0]["local_target"]["y"] == 32.75
+
+
 def test_max_target_candidates_respected() -> None:
     targets = _make_targets((1.0, 5.0), (2.0, 5.0), (3.0, 5.0), (4.0, 5.0))
     params = _base_params(targets=targets, max_target_candidates=2, payloads=_make_payloads(1))

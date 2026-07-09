@@ -288,8 +288,8 @@ class DropSequenceAction(ActionModule):
         target = self.valid_targets[self.target_index]
         params: dict[str, Any] = {
             **self.goto_params,
-            "x": target.get("x", target.get("local_x")),
-            "y": target.get("y", target.get("local_y")),
+            "x": target.get("local_x", target.get("x")),
+            "y": target.get("local_y", target.get("y")),
             "altitude_m": self.approach_altitude_m,
             "skip_if_invalid_target": True,
             "priority": self.goto_params.get("priority", 5),
@@ -492,8 +492,8 @@ class DropSequenceAction(ActionModule):
     def _start_climb(self) -> None:
         target = self.valid_targets[self.target_index] if self.target_index < len(self.valid_targets) else {}
         params: dict[str, Any] = {
-            "x": target.get("x", target.get("local_x", 0.0)),
-            "y": target.get("y", target.get("local_y", 0.0)),
+            "x": target.get("local_x", target.get("x", 0.0)),
+            "y": target.get("local_y", target.get("y", 0.0)),
             "altitude_m": self.climb_after_drop_m,
             "waypoint_mode": self.goto_params.get("waypoint_mode", "field"),
             "yaw_mode": self.goto_params.get("yaw_mode", "field_heading"),

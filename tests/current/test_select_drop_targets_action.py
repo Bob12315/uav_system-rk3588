@@ -99,6 +99,59 @@ def test_select_drop_targets_filters_low_seen_count() -> None:
     assert result.detail["rejected_objects"][0]["reason"] == "low_seen_count"
 
 
+def test_select_drop_targets_prefers_fused_objects_over_raw_like_seen_once() -> None:
+    result = _select(
+        [
+            {
+                "id": "raw_high_score",
+                "class_name": "bucket_1",
+                "local_x": -1.098,
+                "local_y": 31.763,
+                "seen_count": 1,
+                "raw_count": 1,
+                "weight": 1.0,
+            },
+            {
+                "id": "fused_left",
+                "class_name": "bucket_2",
+                "local_x": -2.227,
+                "local_y": 35.089,
+                "seen_count": 6,
+                "raw_count": 6,
+                "weight": 6.0,
+            },
+            {
+                "id": "fused_center",
+                "class_name": "bucket_3",
+                "local_x": -0.093,
+                "local_y": 33.786,
+                "seen_count": 11,
+                "raw_count": 11,
+                "weight": 11.0,
+            },
+            {
+                "id": "raw_high_score_2",
+                "class_name": "bucket_1",
+                "local_x": 1.049,
+                "local_y": 30.739,
+                "seen_count": 1,
+                "raw_count": 1,
+                "weight": 1.0,
+            },
+        ],
+        target_count=2,
+        allow_fewer=True,
+        min_seen_count=2,
+    )
+
+    assert result.done is True
+    selected_ids = [item["id"] for item in result.detail["selected_targets"]]
+    assert selected_ids == ["fused_left", "fused_center"]
+    rejected_ids = {item["id"]: item["reason"] for item in result.detail["rejected_objects"]}
+    assert rejected_ids["raw_high_score"] == "low_seen_count"
+    assert rejected_ids["raw_high_score_2"] == "low_seen_count"
+
+
 def test_select_drop_targets_filters_unknown_class() -> None:
     result = _select(
         [{"id": "u1", "class_name": "unknown", "local_x": 0, "local_y": 30, "seen_count": 3}],
