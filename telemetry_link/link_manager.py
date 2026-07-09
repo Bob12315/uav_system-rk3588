@@ -446,11 +446,15 @@ class LinkManager:
         alt: float,
         frame: int,
         priority: int = 4,
+        yaw_rad: float | None = None,
     ) -> None:
+        params: dict[str, Any] = {"lat": float(lat), "lon": float(lon), "alt": float(alt), "frame": int(frame)}
+        if yaw_rad is not None:
+            params["yaw"] = float(yaw_rad)
         self.submit_latest_action_command(
             ActionCommand(
                 action_type=ActionType.GLOBAL_GOTO,
-                params={"lat": float(lat), "lon": float(lon), "alt": float(alt), "frame": int(frame)},
+                params=params,
                 priority=priority,
                 retries_left=self.cfg.action_cmd_retries,
                 retry_interval_sec=self.cfg.action_retry_interval_sec,

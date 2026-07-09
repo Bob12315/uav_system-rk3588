@@ -31,6 +31,10 @@ class MultiViewLocalizeAction(ActionModule):
         if self.waypoint_mode not in {"relative_to_start", "absolute", "field"}:
             raise ValueError("waypoint_mode must be relative_to_start, absolute, or field")
 
+        self.target_frame = str(data.get("target_frame", "local")).strip().lower()
+        if self.target_frame not in {"local", "global"}:
+            raise ValueError("target_frame must be local or global")
+
         waypoints_raw = data.get("waypoints")
         self.waypoints: list[dict[str, float]] | None = None
         if self.waypoint_mode in {"absolute", "field"}:
@@ -160,6 +164,7 @@ class MultiViewLocalizeAction(ActionModule):
         self.capture_count = 0
         self.update_count_at_waypoint = 0
         self.waypoint_mode = "relative_to_start"
+        self.target_frame = "local"
         self.radius_m = 0.8
         self.altitude_m_obs = 3.0
         self.yaw_mode = "arm_heading"
@@ -365,6 +370,7 @@ class MultiViewLocalizeAction(ActionModule):
             "y": wp["y"],
             "altitude_m": wp["altitude_m"],
             "waypoint_mode": "field" if self.waypoint_mode == "field" else "absolute",
+            "target_frame": self.target_frame,
             "yaw_mode": yaw_mode,
             "frame": self.frame,
             "tolerance_xy_m": self.goto_tolerance_xy_m,
@@ -501,7 +507,8 @@ class MultiViewLocalizeAction(ActionModule):
             "captures_count": len(self.captures),
             "raw_estimates_count": len(self.raw_estimates),
             "update_count_at_waypoint": self.update_count_at_waypoint,
-            "coordinate_frame": "LOCAL_NED",
+            "coordinate_frame": "GLOBAL" if self.target_frame == "global" else "LOCAL_NED",
+            "target_frame": self.target_frame,
             "yaw_mode": self.yaw_mode,
             "observed_classes": dict(self.observed_classes),
             "rejected_by_reason": dict(self.rejected_by_reason),

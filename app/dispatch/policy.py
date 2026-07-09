@@ -53,7 +53,7 @@ ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
         requires_send_commands=True,
     ),
     "global_goto": DispatchRule(
-        allowed_actions={"goto_waypoint"},
+        allowed_actions={"goto_waypoint", "multi_view_localize"},
         requires_send_actions=True,
         requires_send_commands=True,
     ),

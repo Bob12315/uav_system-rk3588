@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.dispatch.normalizer import get_action_params
+from app.dispatch.normalizer import get_action_params, optional_float
 
 
 def dispatch_global_goto(
@@ -14,6 +14,7 @@ def dispatch_global_goto(
     lon = float(params["lon"])
     alt = float(params["alt"])
     frame = int(params["frame"])
+    yaw_rad = optional_float(params.get("yaw"))
     priority = int(action.get("priority", 4))
 
     sender = getattr(link_manager, "global_goto", None)
@@ -23,15 +24,17 @@ def dispatch_global_goto(
     log_msg = (
         "action_lab dispatch global_goto input_frame=%s input_target=%s"
         " global_target=%s field_origin=(%s,%s) field_heading_yaw_rad=%s"
-        " frame=%s priority=%s key=%s"
+        " frame=%s yaw_rad=%s priority=%s key=%s"
         % (
             action.get("input_frame"), action.get("input_target"),
             action.get("global_target"),
             action.get("field_origin_lat"), action.get("field_origin_lon"),
-            action.get("field_heading_yaw_rad"), frame, priority, action.get("key"),
+            action.get("field_heading_yaw_rad"), frame,
+            "None" if yaw_rad is None else f"{yaw_rad:.3f}",
+            priority, action.get("key"),
         )
     )
-    sender(lat=lat, lon=lon, alt=alt, frame=frame, priority=priority)
+    sender(lat=lat, lon=lon, alt=alt, frame=frame, priority=priority, yaw_rad=yaw_rad)
     detail: dict[str, object] = {
         "action_type": "global_goto",
         "lat": lat,
@@ -40,6 +43,8 @@ def dispatch_global_goto(
         "frame": frame,
         "key": str(action.get("key") or ""),
     }
+    if yaw_rad is not None:
+        detail["yaw_rad"] = yaw_rad
     for name in (
         "input_frame", "input_target", "global_target",
         "field_origin_lat", "field_origin_lon", "field_heading_yaw_rad",

@@ -192,14 +192,25 @@ class GotoWaypointAction(ActionModule):
         target_data = target or self._raw_target()
         context_data = context or {}
         if self.target_frame == "global":
+            params: dict[str, Any] = {
+                "lat": target_data["lat"],
+                "lon": target_data["lon"],
+                "alt": target_data["alt"],
+                "frame": self.frame,
+            }
+            if self.yaw_mode == "fixed":
+                params["yaw"] = self.yaw_rad
+            elif self.yaw_mode == "arm_heading":
+                params["yaw"] = arm_heading_yaw_rad
+            elif self.yaw_mode == "field_heading":
+                params["yaw"] = field_heading_yaw_rad
+            elif self.yaw_mode == "hold":
+                current_yaw = self._current_yaw_from_context(context_data)
+                if current_yaw is not None:
+                    params["yaw"] = current_yaw
             action = {
                 "action_type": "global_goto",
-                "params": {
-                    "lat": target_data["lat"],
-                    "lon": target_data["lon"],
-                    "alt": target_data["alt"],
-                    "frame": self.frame,
-                },
+                "params": params,
                 "input_frame": "field" if self.waypoint_mode == "field" else "global",
                 "input_target": {"x": self.target_x, "y": self.target_y, "z": self.target_z},
                 "global_target": dict(target_data),
@@ -387,6 +398,28 @@ class GotoWaypointAction(ActionModule):
         except (TypeError, ValueError):
             return None
         return result if math.isfinite(result) else None
+
+    @staticmethod
+    def _current_yaw_from_context(context: dict[str, Any]) -> float | None:
+        """Extract the best available current yaw from context for yaw_mode=hold."""
+        for name in ("arm_heading_yaw_rad", "field_heading_yaw_rad", "yaw"):
+            value = context.get(name)
+            if value is not None:
+                try:
+                    result = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(result):
+                    return result
+        drone = context.get("drone")
+        if isinstance(drone, dict):
+            try:
+                yaw = float(drone.get("yaw", float("nan")))
+                if math.isfinite(yaw):
+                    return yaw
+            except (TypeError, ValueError):
+                pass
+        return None
 
     def _current_position(self, context: dict[str, Any]) -> dict[str, float] | None:
         if self.target_frame == "global":
