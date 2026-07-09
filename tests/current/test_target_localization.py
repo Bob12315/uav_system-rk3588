@@ -259,3 +259,58 @@ def test_output_is_plain_json_serializable_dict() -> None:
     assert estimate["class_name"] == "cylinder"
     assert estimate["confidence"] == pytest.approx(0.8)
     json.dumps(estimate)
+
+
+# ── yaw_offset_deg tests ────────────────────────────────────────────
+
+
+def test_yaw_offset_default_zero_matches_old_behavior() -> None:
+    localizer = TargetLocalization(CameraProjectionConfig(fov_x_deg=90.0, fov_y_deg=90.0))
+    localizer_with_offset = TargetLocalization(
+        CameraProjectionConfig(fov_x_deg=90.0, fov_y_deg=90.0, yaw_offset_deg=0.0)
+    )
+    drone = {"local_x": 0.0, "local_y": 0.0, "local_z": -10.0, "yaw": 0.0}
+    est1 = localizer.localize_detection({"ex": 0.5, "ey": 0.0}, drone)
+    est2 = localizer_with_offset.localize_detection({"ex": 0.5, "ey": 0.0}, drone)
+    assert est1["x"] == pytest.approx(est2["x"])
+    assert est1["y"] == pytest.approx(est2["y"])
+
+
+def test_yaw_offset_nonzero_changes_position() -> None:
+    localizer = TargetLocalization(
+        CameraProjectionConfig(fov_x_deg=90.0, fov_y_deg=90.0, yaw_offset_deg=5.0)
+    )
+    localizer_zero = TargetLocalization(
+        CameraProjectionConfig(fov_x_deg=90.0, fov_y_deg=90.0, yaw_offset_deg=0.0)
+    )
+    drone = {"local_x": 0.0, "local_y": 0.0, "local_z": -10.0, "yaw": 0.0}
+    est = localizer.localize_detection({"ex": 0.5, "ey": 0.0}, drone)
+    est_zero = localizer_zero.localize_detection({"ex": 0.5, "ey": 0.0}, drone)
+    # position must differ
+    assert (abs(est["x"] - est_zero["x"]) > 1e-9) or (abs(est["y"] - est_zero["y"]) > 1e-9)
+
+
+def test_yaw_offset_positive_and_negative_are_opposite() -> None:
+    localizer_pos = TargetLocalization(
+        CameraProjectionConfig(fov_x_deg=90.0, fov_y_deg=90.0, yaw_offset_deg=10.0)
+    )
+    localizer_neg = TargetLocalization(
+        CameraProjectionConfig(fov_x_deg=90.0, fov_y_deg=90.0, yaw_offset_deg=-10.0)
+    )
+    drone = {"local_x": 0.0, "local_y": 0.0, "local_z": -10.0, "yaw": 0.0}
+    est_pos = localizer_pos.localize_detection({"ex": 0.5, "ey": 0.0}, drone)
+    est_neg = localizer_neg.localize_detection({"ex": 0.5, "ey": 0.0}, drone)
+    # yaw +10 and -10 should land on opposite sides of the zero-offset position
+    assert est_pos["x"] != pytest.approx(est_neg["x"])
+
+
+def test_yaw_offset_appears_in_projection_debug() -> None:
+    localizer = TargetLocalization(
+        CameraProjectionConfig(fov_x_deg=90.0, fov_y_deg=90.0, yaw_offset_deg=3.5)
+    )
+    drone = {"local_x": 0.0, "local_y": 0.0, "local_z": -10.0, "yaw": 0.5}
+    est = localizer.localize_detection({"ex": 0.0, "ey": 0.0}, drone)
+    proj = est["projection"]
+    assert proj["yaw_offset_deg"] == 3.5
+    assert "effective_yaw_rad" in proj
+    assert proj["yaw_rad"] == 0.5

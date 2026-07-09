@@ -347,7 +347,7 @@ class FieldReference:
 # module-level GPS utilities (small-range ENU approximation)
 # ---------------------------------------------------------------------------
 
-def _gps_enu_deltas(
+def gps_enu_deltas(
     lat_a: float,
     lon_a: float,
     lat_b: float,
@@ -364,6 +364,10 @@ def _gps_enu_deltas(
         * math.cos(lat_a_rad)
     )
     return d_north, d_east
+
+
+# backward-compatible alias for internal callers
+_gps_enu_deltas = gps_enu_deltas
 
 
 def _gps_distance_m(

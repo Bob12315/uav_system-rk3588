@@ -9,7 +9,9 @@ from app.coordinate_transform import (
     FieldPoint,
     LocalNedPoint,
     FieldReferenceError,
+    field_to_gps,
     field_to_local_ned,
+    gps_to_local_ned,
     local_ned_to_field,
 )
 from app.field_reference import FieldReference
@@ -29,6 +31,18 @@ def _make_ref(yaw_rad=0.0, origin_n=10.0, origin_e=20.0, origin_z=-1.0):
 def _make_unready_ref():
     """Build a FieldReference that is NOT ready (unconfirmed)."""
     return FieldReference()
+
+
+def _make_gps_ref(origin_lat=30.0, origin_lon=120.0, origin_n=100.0, origin_e=200.0):
+    """Build a FieldReference with GPS origin fields set for gps_to_local_ned."""
+    ref = FieldReference()
+    ref.is_confirmed = True
+    ref.origin_lat = origin_lat
+    ref.origin_lon = origin_lon
+    ref.origin_local_n_m = origin_n
+    ref.origin_local_e_m = origin_e
+    ref.field_heading_yaw_rad = 0.0  # not used by gps_to_local_ned
+    return ref
 
 
 # ---------------------------------------------------------------------------
@@ -164,3 +178,78 @@ def test_field_point_fields():
     assert p.field_x_m == 1.0
     assert p.field_y_m == 2.0
     assert p.altitude_m == 3.0
+
+
+# ---------------------------------------------------------------------------
+# gps_to_local_ned
+# ---------------------------------------------------------------------------
+
+
+def test_gps_to_local_ned_origin_to_origin():
+    """Origin GPS → local should equal origin_local."""
+    ref = _make_gps_ref(origin_lat=30.0, origin_lon=120.0, origin_n=100.0, origin_e=200.0)
+    result = gps_to_local_ned(lat=30.0, lon=120.0, altitude_m=5.0, reference=ref)
+    assert result.north_m == pytest.approx(100.0)
+    assert result.east_m == pytest.approx(200.0)
+    assert result.z_down_m == pytest.approx(-5.0)
+
+
+def test_gps_to_local_ned_north_offset():
+    """GPS north of origin → positive local north offset."""
+    ref = _make_gps_ref(origin_lat=30.0, origin_lon=120.0, origin_n=100.0, origin_e=200.0)
+    # 1 degree north ≈ 111 km, use a tiny offset
+    dlat = 0.0001  # ~11.1 m north
+    result = gps_to_local_ned(lat=30.0 + dlat, lon=120.0, altitude_m=0.0, reference=ref)
+    assert result.north_m > 100.0
+    assert result.north_m == pytest.approx(100.0 + dlat * 60 * 1852, rel=1e-3)
+    assert result.east_m == pytest.approx(200.0, abs=0.02)
+
+
+def test_gps_to_local_ned_east_offset():
+    """GPS east of origin → positive local east offset."""
+    ref = _make_gps_ref(origin_lat=30.0, origin_lon=120.0, origin_n=100.0, origin_e=200.0)
+    dlon = 0.0001  # ~9.6 m east at lat=30
+    result = gps_to_local_ned(lat=30.0, lon=120.0 + dlon, altitude_m=0.0, reference=ref)
+    assert result.east_m > 200.0
+    assert result.north_m == pytest.approx(100.0, abs=0.02)
+
+
+def test_field_to_gps_to_local_ned_roundtrip():
+    """field→GPS→local_ned should match field→local_ned directly."""
+    # Build a ref with both GPS and local origin, plus heading
+    ref = FieldReference()
+    ref.is_confirmed = True
+    ref.origin_lat = 30.0
+    ref.origin_lon = 120.0
+    ref.origin_local_n_m = 100.0
+    ref.origin_local_e_m = 200.0
+    ref.field_heading_yaw_rad = math.radians(45.0)
+
+    field_x, field_y, alt = 5.0, 10.0, 3.0
+    # Direct field → local
+    direct = field_to_local_ned(field_x, field_y, alt, reference=ref)
+    # field → GPS → local
+    gps = field_to_gps(field_x, field_y, alt, reference=ref)
+    via_gps = gps_to_local_ned(gps.lat, gps.lon, alt, reference=ref)
+
+    assert via_gps.north_m == pytest.approx(direct.north_m, abs=0.02)
+    assert via_gps.east_m == pytest.approx(direct.east_m, abs=0.02)
+    assert via_gps.z_down_m == pytest.approx(direct.z_down_m)
+
+
+def test_gps_to_local_ned_missing_gps_origin_raises():
+    """Calling gps_to_local_ned without GPS origin raises FieldReferenceError."""
+    ref = _make_ref()  # no origin_lat/origin_lon
+    with pytest.raises(FieldReferenceError, match="missing GPS or LOCAL origin"):
+        gps_to_local_ned(lat=30.0, lon=120.0, altitude_m=5.0, reference=ref)
+
+
+def test_gps_to_local_ned_missing_local_origin_raises():
+    """Calling gps_to_local_ned without LOCAL origin raises FieldReferenceError."""
+    ref = FieldReference()
+    ref.is_confirmed = True
+    ref.origin_lat = 30.0
+    ref.origin_lon = 120.0
+    # origin_local_n_m / origin_local_e_m not set
+    with pytest.raises(FieldReferenceError, match="missing GPS or LOCAL origin"):
+        gps_to_local_ned(lat=30.0, lon=120.0, altitude_m=5.0, reference=ref)

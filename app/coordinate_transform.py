@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from .field_reference import EARTH_RADIUS_M, FieldReference, FieldReferenceError
+from .field_reference import EARTH_RADIUS_M, FieldReference, FieldReferenceError, gps_enu_deltas
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +151,63 @@ def field_to_gps(
     lat = origin_lat + math.degrees(d_north / EARTH_RADIUS_M)
     lon = origin_lon + math.degrees(d_east / (EARTH_RADIUS_M * cos_lat))
     return GpsPoint(lat=lat, lon=lon, alt_m=altitude_m)
+
+
+def gps_to_local_ned(
+    lat: float,
+    lon: float,
+    altitude_m: float,
+    reference: FieldReference,
+) -> LocalNedPoint:
+    """Convert GPS coordinates to LOCAL_NED using a fixed origin.
+
+    Uses *reference.origin_lat* / *reference.origin_lon* as the fixed GPS
+    origin and *reference.origin_local_n_m* / *reference.origin_local_e_m*
+    as the LOCAL_NED origin.  The current drone GPS position must NOT be
+    used as the origin — this function is for mapping absolute global
+    coordinates into a consistent LOCAL_NED frame.
+
+    Height convention: ``z_down_m = -altitude_m`` (positive-up altitude
+    becomes negative-down LOCAL_NED).
+
+    Raises :exc:`FieldReferenceError` if the reference is missing its GPS
+    origin or LOCAL origin fields.
+    """
+    if (
+        reference.origin_lat is None
+        or reference.origin_lon is None
+        or reference.origin_local_n_m is None
+        or reference.origin_local_e_m is None
+    ):
+        raise FieldReferenceError(
+            "FieldReference is missing GPS or LOCAL origin for GPS -> LOCAL_NED conversion"
+        )
+
+    origin_lat = float(reference.origin_lat)
+    origin_lon = float(reference.origin_lon)
+    origin_n = float(reference.origin_local_n_m)
+    origin_e = float(reference.origin_local_e_m)
+
+    if not (
+        math.isfinite(origin_lat)
+        and math.isfinite(origin_lon)
+        and math.isfinite(origin_n)
+        and math.isfinite(origin_e)
+        and math.isfinite(lat)
+        and math.isfinite(lon)
+        and math.isfinite(altitude_m)
+    ):
+        raise FieldReferenceError(
+            "Non-finite values in GPS -> LOCAL_NED conversion"
+        )
+
+    d_north, d_east = gps_enu_deltas(origin_lat, origin_lon, lat, lon)
+
+    return LocalNedPoint(
+        north_m=origin_n + d_north,
+        east_m=origin_e + d_east,
+        z_down_m=-altitude_m,
+    )
 
 
 def local_ned_to_field(

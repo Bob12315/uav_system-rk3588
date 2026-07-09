@@ -139,6 +139,8 @@ def test_center_weight_power_zero_disables_center_weighting() -> None:
             outlier_radius_m=20.0,
             max_cluster_radius_m=20.0,
             center_weight_power=0.0,
+            max_abs_ex=None,
+            max_abs_ey=None,
             min_cluster_size=1,
         )
     )
@@ -503,3 +505,140 @@ def test_output_contains_stability_score_and_debug_fields() -> None:
     assert fusion.last_debug["accepted_objects"][0]["stable"] is True
     assert fusion.last_debug["rejected_clusters"][0]["reason"] == "too_few_points"
     json.dumps(fusion.last_debug)
+
+
+# ── edge filtering tests ────────────────────────────────────────────
+
+
+def test_edge_filter_rejects_ex_above_max() -> None:
+    fusion = MultiPhotoFusion(
+        MultiPhotoFusionConfig(
+            max_abs_ex=0.75,
+            max_abs_ey=0.75,
+            min_cluster_size=1,
+        )
+    )
+    fused = fusion.fuse(
+        [
+            {"x": 0.0, "y": 0.0, "confidence": 1.0, "source": {"ex": 0.8, "ey": 0.0}},
+            {"x": 0.5, "y": 0.0, "confidence": 1.0, "source": {"ex": 0.2, "ey": 0.0}},
+        ]
+    )
+    assert len(fused) == 1
+    assert fused[0]["x"] == pytest.approx(0.5)
+    assert fusion.last_debug["edge_rejected_count"] == 1
+
+
+def test_edge_filter_rejects_ey_above_max() -> None:
+    fusion = MultiPhotoFusion(
+        MultiPhotoFusionConfig(
+            max_abs_ex=0.75,
+            max_abs_ey=0.75,
+            min_cluster_size=1,
+        )
+    )
+    fused = fusion.fuse(
+        [
+            {"x": 0.0, "y": 0.0, "confidence": 1.0, "source": {"ex": 0.0, "ey": 0.8}},
+            {"x": 0.5, "y": 0.0, "confidence": 1.0, "source": {"ex": 0.0, "ey": 0.2}},
+        ]
+    )
+    assert len(fused) == 1
+    assert fusion.last_debug["edge_rejected_count"] == 1
+
+
+def test_edge_filter_keeps_ex_below_max() -> None:
+    fusion = MultiPhotoFusion(
+        MultiPhotoFusionConfig(
+            max_abs_ex=0.75,
+            max_abs_ey=0.75,
+            min_cluster_size=1,
+        )
+    )
+    fused = fusion.fuse(
+        [
+            {"x": 0.0, "y": 0.0, "confidence": 1.0, "source": {"ex": 0.5, "ey": 0.0}},
+        ]
+    )
+    assert len(fused) == 1
+    assert fusion.last_debug["edge_rejected_count"] == 0
+
+
+def test_edge_filter_passes_when_ex_ey_missing() -> None:
+    """Estimates without ex/ey must pass edge filter (backward compat)."""
+    fusion = MultiPhotoFusion(
+        MultiPhotoFusionConfig(
+            max_abs_ex=0.75,
+            max_abs_ey=0.75,
+            min_cluster_size=1,
+        )
+    )
+    fused = fusion.fuse(
+        [
+            {"x": 0.0, "y": 0.0, "confidence": 1.0},
+            {"x": 1.0, "y": 1.0, "confidence": 1.0},
+        ]
+    )
+    assert len(fused) == 2
+    assert fusion.last_debug["edge_rejected_count"] == 0
+
+
+def test_edge_filter_with_none_disabled() -> None:
+    """max_abs_ex=None / max_abs_ey=None disables edge filtering."""
+    fusion = MultiPhotoFusion(
+        MultiPhotoFusionConfig(
+            max_abs_ex=None,
+            max_abs_ey=None,
+            center_weight_power=0.0,
+            min_cluster_size=1,
+        )
+    )
+    fused = fusion.fuse(
+        [
+            {"x": 0.0, "y": 0.0, "confidence": 1.0, "source": {"ex": 2.0, "ey": 2.0}},
+        ]
+    )
+    assert len(fused) == 1
+    assert fusion.last_debug["edge_rejected_count"] == 0
+
+
+def test_edge_filter_ex_ey_from_estimate_direct() -> None:
+    """Edge filter reads ex/ey from estimate top-level fields."""
+    fusion = MultiPhotoFusion(
+        MultiPhotoFusionConfig(
+            max_abs_ex=0.75,
+            max_abs_ey=0.75,
+            min_cluster_size=1,
+        )
+    )
+    fused = fusion.fuse(
+        [
+            {"x": 0.0, "y": 0.0, "confidence": 1.0, "ex": 0.9, "ey": 0.0},
+        ]
+    )
+    assert len(fused) == 0
+    assert fusion.last_debug["edge_rejected_count"] == 1
+
+
+def test_center_weight_power_2_does_not_break_fusion() -> None:
+    """center_weight_power=2.0 should still produce valid fusion."""
+    fusion = MultiPhotoFusion(
+        MultiPhotoFusionConfig(
+            cluster_radius_m=1.0,
+            outlier_radius_m=1.0,
+            max_cluster_radius_m=2.0,
+            center_weight_power=2.0,
+            max_abs_ex=None,
+            max_abs_ey=None,
+            min_cluster_size=1,
+        )
+    )
+    fused = fusion.fuse(
+        [
+            {"x": 0.0, "y": 0.0, "confidence": 1.0, "source": {"ex": 0.0, "ey": 0.0}},
+            {"x": 0.3, "y": 0.0, "confidence": 1.0, "source": {"ex": 0.5, "ey": 0.0}},
+        ]
+    )
+    assert len(fused) == 1
+    assert fused[0]["x"] < 0.3
+    assert fused[0]["count"] >= 1

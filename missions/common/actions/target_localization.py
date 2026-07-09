@@ -12,6 +12,7 @@ class CameraProjectionConfig:
     image_x_sign: float = 1.0
     image_y_sign: float = -1.0
     min_altitude_m: float = 0.1
+    yaw_offset_deg: float = 0.0
 
     def __post_init__(self) -> None:
         if not 0.0 < self.fov_x_deg < 180.0:
@@ -57,6 +58,8 @@ class TargetLocalization:
         local_y = self._required_float(drone, "local_y")
         yaw = self._required_float(drone, "yaw")
 
+        effective_yaw = yaw + math.radians(self.camera.yaw_offset_deg)
+
         half_fov_x = math.radians(self.camera.fov_x_deg) / 2.0
         half_fov_y = math.radians(self.camera.fov_y_deg) / 2.0
         angle_x = ex * half_fov_x
@@ -65,8 +68,8 @@ class TargetLocalization:
         body_right_m = self.camera.image_x_sign * altitude_m * math.tan(angle_x)
         body_forward_m = self.camera.image_y_sign * altitude_m * math.tan(angle_y)
 
-        local_dx = body_forward_m * math.cos(yaw) - body_right_m * math.sin(yaw)
-        local_dy = body_forward_m * math.sin(yaw) + body_right_m * math.cos(yaw)
+        local_dx = body_forward_m * math.cos(effective_yaw) - body_right_m * math.sin(effective_yaw)
+        local_dy = body_forward_m * math.sin(effective_yaw) + body_right_m * math.cos(effective_yaw)
         target_local_x = local_x + local_dx
         target_local_y = local_y + local_dy
 
@@ -94,6 +97,8 @@ class TargetLocalization:
                 "model": "flat_ground_fov_downward_camera",
                 "altitude_m": altitude_m,
                 "yaw_rad": yaw,
+                "yaw_offset_deg": self.camera.yaw_offset_deg,
+                "effective_yaw_rad": effective_yaw,
                 "body_forward_m": body_forward_m,
                 "body_right_m": body_right_m,
                 "local_dx": local_dx,

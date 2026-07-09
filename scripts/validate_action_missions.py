@@ -179,7 +179,36 @@ def _smoke_blackboard() -> MissionBlackboard:
             "localized_objects": [
                 {"id": "b1", "local_x": 1.0, "local_y": 30.0},
                 {"id": "b2", "local_x": -1.0, "local_y": 31.0},
-            ]
+            ],
+            "raw_estimates": [
+                {"track_id": 1, "class_name": "bucket_1", "local_x": 1.0, "local_y": 30.0, "source": {"ex": 0.1, "ey": 0.05}, "confidence": 0.85},
+                {"track_id": 2, "class_name": "bucket_2", "local_x": -1.0, "local_y": 31.0, "source": {"ex": -0.1, "ey": 0.08}, "confidence": 0.78},
+            ],
+        },
+    )
+    blackboard.set(
+        "drop_center",
+        {
+            "resolved_targets": [
+                {"valid": True, "source": "field", "local_x": 100.0, "local_y": 232.5, "z_down_m": -5.0, "lat": 30.0, "lon": 120.0, "altitude_m": 5.0},
+            ],
+        },
+    )
+    blackboard.set(
+        "drop_buckets",
+        {
+            "resolved_targets": [
+                {"valid": True, "source": "vision", "class_name": "bucket_1", "local_x": 101.0, "local_y": 230.0, "z_down_m": -5.0, "lat": 30.0, "lon": 120.0, "altitude_m": 5.0, "confidence": 0.85},
+                {"valid": True, "source": "vision", "class_name": "bucket_2", "local_x": 99.0, "local_y": 231.0, "z_down_m": -5.0, "lat": 30.0, "lon": 120.0, "altitude_m": 5.0, "confidence": 0.78},
+            ],
+        },
+    )
+    blackboard.set(
+        "home_waypoint",
+        {
+            "resolved_targets": [
+                {"valid": True, "source": "home", "local_x": 100.0, "local_y": 200.0, "z_down_m": -5.0, "lat": 30.0, "lon": 120.0, "altitude_m": 5.0},
+            ],
         },
     )
     blackboard.set(

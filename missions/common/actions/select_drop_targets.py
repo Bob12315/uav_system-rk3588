@@ -43,8 +43,12 @@ class SelectDropTargetsAction(ActionModule):
     def start(self, params: dict[str, Any] | None = None) -> None:
         data = params or {}
         objects = data.get("objects", [])
+        self.input_key = str(data.get("input_key", "")).strip() or None
         if not isinstance(objects, list):
-            raise ValueError("objects must be a list")
+            if self.input_key is not None:
+                objects = []
+            else:
+                raise ValueError("objects must be a list")
         target_count = int(data.get("target_count", 2))
         min_seen_count = int(data.get("min_seen_count", 2))
         min_raw_count = int(data.get("min_raw_count", 0))
@@ -142,6 +146,13 @@ class SelectDropTargetsAction(ActionModule):
             )
             self._effective_zone_center = (local.north_m, local.east_m)
 
+        # input_key fallback: read objects from context at runtime
+        if self.input_key is not None and not self.objects:
+            ctx = context or {}
+            objs = ctx.get(self.input_key)
+            if isinstance(objs, list):
+                self.objects = list(objs)
+
         result = self._select()
         self.done = result.done
         self.failed = result.failed
@@ -153,6 +164,7 @@ class SelectDropTargetsAction(ActionModule):
 
     def reset(self) -> None:
         self.objects: list[Any] = []
+        self.input_key: str | None = None
         self.target_count = 2
         self.allow_fewer = False
         self.score_table = dict(DEFAULT_SCORE_TABLE)

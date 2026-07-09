@@ -16,6 +16,8 @@ class MultiPhotoFusionConfig:
     min_confidence: float = 0.35
     max_cluster_radius_m: float = 0.8
     max_objects: int | None = None
+    max_abs_ex: float | None = 0.75
+    max_abs_ey: float | None = 0.75
     debug: bool = True
 
     def __post_init__(self) -> None:
@@ -37,6 +39,10 @@ class MultiPhotoFusionConfig:
             raise ValueError("max_cluster_radius_m must be positive")
         if self.max_objects is not None and self.max_objects < 1:
             raise ValueError("max_objects must be positive when set")
+        if self.max_abs_ex is not None and self.max_abs_ex <= 0.0:
+            raise ValueError("max_abs_ex must be positive when set")
+        if self.max_abs_ey is not None and self.max_abs_ey <= 0.0:
+            raise ValueError("max_abs_ey must be positive when set")
 
 
 class MultiPhotoFusion:
@@ -48,9 +54,15 @@ class MultiPhotoFusion:
     ) -> None:
         self.config = config or MultiPhotoFusionConfig()
         self.class_names = set(class_names) if class_names is not None else None
+        self._edge_rejected_count: int = 0
+        self._rejected_edge_ex: list[dict[str, Any]] = []
+        self._rejected_edge_ey: list[dict[str, Any]] = []
         self.last_debug: dict[str, Any] = self._empty_debug(0)
 
     def fuse(self, estimates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        self._edge_rejected_count = 0
+        self._rejected_edge_ex = []
+        self._rejected_edge_ey = []
         points = [point for estimate in estimates if (point := self._point(estimate)) is not None]
         candidate_clusters = self._connected_clusters(points)
 
@@ -121,6 +133,8 @@ class MultiPhotoFusion:
             and self._json_safe_value(estimate.get("class_name")) not in self.class_names
         ):
             return None
+        if not self._passes_edge_filter(estimate):
+            return None
         try:
             x = self._float_value(estimate["x"], "x")
             y = self._float_value(estimate["y"], "y")
@@ -154,6 +168,54 @@ class MultiPhotoFusion:
             "estimate": estimate,
             "cluster_key": self._cluster_key(estimate),
         }
+
+    def _passes_edge_filter(self, estimate: dict[str, Any]) -> bool:
+        """Reject estimates whose ex/ey exceed configured thresholds.
+
+        Compatible with both estimate['ex']/estimate['ey'] and
+        estimate['source']['ex']/estimate['source']['ey'] patterns.
+        Returns True when ex/ey are unavailable (backward-compatible).
+        """
+        ex, ey = self._extract_ex_ey(estimate)
+        if ex is None and ey is None:
+            return True
+        rejected = False
+        if ex is not None and self.config.max_abs_ex is not None:
+            if abs(ex) > self.config.max_abs_ex:
+                rejected = True
+                self._rejected_edge_ex.append({
+                    "ex": ex,
+                    "track_id": estimate.get("track_id"),
+                    "class_name": estimate.get("class_name"),
+                })
+        if ey is not None and self.config.max_abs_ey is not None:
+            if abs(ey) > self.config.max_abs_ey:
+                rejected = True
+                self._rejected_edge_ey.append({
+                    "ey": ey,
+                    "track_id": estimate.get("track_id"),
+                    "class_name": estimate.get("class_name"),
+                })
+        if rejected:
+            self._edge_rejected_count += 1
+            return False
+        return True
+
+    def _extract_ex_ey(self, estimate: dict[str, Any]) -> tuple[float | None, float | None]:
+        """Extract (ex, ey) from an estimate, trying multiple compatible paths."""
+        # direct fields on the estimate
+        ex = self._optional_float(estimate.get("ex"))
+        ey = self._optional_float(estimate.get("ey"))
+        if ex is not None and ey is not None:
+            return ex, ey
+        # nested under 'source'
+        source = estimate.get("source")
+        if isinstance(source, dict):
+            if ex is None:
+                ex = self._optional_float(source.get("ex"))
+            if ey is None:
+                ey = self._optional_float(source.get("ey"))
+        return ex, ey
 
     def _connected_clusters(self, points: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
         clusters: list[list[dict[str, Any]]] = []
@@ -330,6 +392,8 @@ class MultiPhotoFusion:
             "min_confidence": self.config.min_confidence,
             "max_cluster_radius_m": self.config.max_cluster_radius_m,
             "max_objects": self.config.max_objects,
+            "max_abs_ex": self.config.max_abs_ex,
+            "max_abs_ey": self.config.max_abs_ey,
             "debug": self.config.debug,
         }
 
@@ -365,6 +429,9 @@ class MultiPhotoFusion:
                 for obj in accepted_objects
             ],
             "rejected_clusters": rejected_clusters,
+            "edge_rejected_count": self._edge_rejected_count,
+            "rejected_edge_ex": self._rejected_edge_ex,
+            "rejected_edge_ey": self._rejected_edge_ey,
             "config": self._config_debug(),
         }
 
