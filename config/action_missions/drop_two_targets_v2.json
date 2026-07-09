@@ -44,8 +44,8 @@
         "max_attempts": 1
       },
       "params": {
-        "x": 34.1036423,
-        "y": 108.6426735,
+        "x": 34.10364806,
+        "y": 108.64301159,
         "altitude_m": 5.0,
         "waypoint_mode": "absolute",
         "target_frame": "global",
@@ -88,11 +88,10 @@
         "altitude_m": 5.0,
         "yaw_mode": "hold",
         "waypoints": [
-          {"x": 34.1036423, "y": 108.6426735, "altitude_m": 5.0},
-          {"x": 34.1036330, "y": 108.6428172, "altitude_m": 5.0},
-          {"x": 34.1036300, "y": 108.6429911, "altitude_m": 5.0},
-          {"x": 34.1036307, "y": 108.6431836, "altitude_m": 5.0},
-          {"x": 34.1036332, "y": 108.6433703, "altitude_m": 5.0}
+          {"x": 34.10364806, "y": 108.64301159, "altitude_m": 5.0},
+          {"x": 34.10361200, "y": 108.64301179, "altitude_m": 5.0},
+          {"x": 34.10361210, "y": 108.64303888, "altitude_m": 5.0},
+          {"x": 34.10364816, "y": 108.64303869, "altitude_m": 5.0}
         ],
         "capture_updates_per_waypoint": 6,
         "settle_updates_per_waypoint": 1,
