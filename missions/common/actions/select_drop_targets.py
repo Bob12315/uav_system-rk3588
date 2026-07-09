@@ -324,7 +324,8 @@ class SelectDropTargetsAction(ActionModule):
         for rank_index in range(self.target_count):
             if rank_index < len(selected):
                 candidate = selected[rank_index]
-                slots.append({
+                gps_lat, gps_lon = self._gps_from_original(candidate.original)
+                slot: dict[str, Any] = {
                     "valid": True,
                     "id": candidate.id,
                     "target_id": candidate.target_id,
@@ -340,7 +341,12 @@ class SelectDropTargetsAction(ActionModule):
                     "weight": candidate.weight,
                     "track_ids": list(candidate.original.get("track_ids") or []),
                     "rank": rank_index + 1,
-                })
+                }
+                if gps_lat is not None:
+                    slot["lat"] = gps_lat
+                if gps_lon is not None:
+                    slot["lon"] = gps_lon
+                slots.append(slot)
             else:
                 slots.append({
                     "valid": False,
@@ -351,6 +357,8 @@ class SelectDropTargetsAction(ActionModule):
                     "local_y": None,
                     "x": None,
                     "y": None,
+                    "lat": None,
+                    "lon": None,
                     "score": 0.0,
                     "seen_count": 0,
                     "count": 0,
@@ -378,6 +386,29 @@ class SelectDropTargetsAction(ActionModule):
             raise ValueError(f"{name} entries must be dicts")
         return [dict(item) for item in value]
 
+    @staticmethod
+    def _gps_from_original(obj: dict[str, Any]) -> tuple[float | None, float | None]:
+        """Extract lat/lon from an input object, with gps_lat/gps_lon fallback."""
+        lat = obj.get("lat")
+        lon = obj.get("lon")
+        if lat is None:
+            lat = obj.get("gps_lat")
+        if lon is None:
+            lon = obj.get("gps_lon")
+        try:
+            lat_f = None if lat is None else float(lat)
+        except (TypeError, ValueError):
+            lat_f = None
+        try:
+            lon_f = None if lon is None else float(lon)
+        except (TypeError, ValueError):
+            lon_f = None
+        if lat_f is not None and not math.isfinite(lat_f):
+            lat_f = None
+        if lon_f is not None and not math.isfinite(lon_f):
+            lon_f = None
+        return lat_f, lon_f
+
     def _selected_dict(self, candidate: _Candidate, rank: int) -> dict[str, Any]:
         data = {
             "id": candidate.id,
@@ -395,6 +426,11 @@ class SelectDropTargetsAction(ActionModule):
             "track_ids": list(candidate.original.get("track_ids") or []),
             "rank": rank,
         }
+        gps_lat, gps_lon = self._gps_from_original(candidate.original)
+        if gps_lat is not None:
+            data["lat"] = gps_lat
+        if gps_lon is not None:
+            data["lon"] = gps_lon
         if "local_z" in candidate.original:
             data["local_z"] = candidate.original["local_z"]
         elif "z" in candidate.original:
