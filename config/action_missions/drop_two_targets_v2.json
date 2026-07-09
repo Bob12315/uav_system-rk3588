@@ -161,10 +161,24 @@
       }
     },
     {
+      "name": "validate_target",
+      "label": "validate_drop_target_0",
+      "params": {
+        "target": "$drop_targets.target_slots.0",
+        "require_valid": true,
+        "require_lat_lon": true
+      },
+      "on_failed": {
+        "action": "jump_to",
+        "target": "return_home_gps"
+      }
+    },
+    {
       "name": "goto_waypoint",
       "label": "goto_drop_target_0_gps",
       "on_failed": {
-        "action": "continue"
+        "action": "jump_to",
+        "target": "return_home_gps"
       },
       "params": {
         "x": "$drop_targets.target_slots.0.lat",
@@ -270,10 +284,24 @@
       }
     },
     {
+      "name": "validate_target",
+      "label": "validate_drop_target_1",
+      "params": {
+        "target": "$drop_targets.target_slots.1",
+        "require_valid": true,
+        "require_lat_lon": true
+      },
+      "on_failed": {
+        "action": "jump_to",
+        "target": "return_home_gps"
+      }
+    },
+    {
       "name": "goto_waypoint",
       "label": "goto_drop_target_1_gps",
       "on_failed": {
-        "action": "continue"
+        "action": "jump_to",
+        "target": "return_home_gps"
       },
       "params": {
         "x": "$drop_targets.target_slots.1.lat",

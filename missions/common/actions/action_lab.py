@@ -22,6 +22,7 @@ from .single_view_localize import SingleViewLocalizeAction
 from .survey_area import SurveyAreaAction
 from .takeoff import TakeoffAction
 from .target_lock import TargetLockAction
+from .validate_target import ValidateTargetAction
 from .yaw_align import YawAlignAction
 
 
@@ -45,6 +46,7 @@ def create_action_lab_registry() -> ActionRegistry:
     registry.register("build_recon_report", BuildReconReportAction)
     registry.register("fixed_view_localize", FixedViewLocalizeAction)
     registry.register("resolve_gps_targets", ResolveGpsTargetsAction)
+    registry.register("validate_target", ValidateTargetAction)
     registry.register("drop_sequence", DropSequenceAction)
     registry.register("recon_sequence", ReconSequenceAction)
     return registry
