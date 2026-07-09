@@ -176,6 +176,14 @@ def test_action_mission_templates_blackboard_references_resolve() -> None:
         },
     )
     blackboard.set(
+        "first_scan_point",
+        {
+            "resolved_targets": [
+                {"valid": True, "source": "field", "local_x": 98.0, "local_y": 231.25, "z_down_m": -5.0},
+            ],
+        },
+    )
+    blackboard.set(
         "drop_buckets",
         {
             "resolved_targets": [
@@ -366,8 +374,8 @@ def test_return_home_waypoint_mode_field() -> None:
 def test_drop_two_targets_v2_outer_gotos_use_local_targets() -> None:
     data = _template(DROP_V2_TEMPLATE_PATH)
     by_label = {step.get("label", ""): step for step in data["steps"]}
-    assert by_label["goto_drop_scan_center"]["params"]["target_frame"] == "local"
-    assert by_label["goto_drop_scan_center"]["params"]["waypoint_mode"] == "absolute"
+    assert by_label["goto_first_scan_point"]["params"]["target_frame"] == "local"
+    assert by_label["goto_first_scan_point"]["params"]["waypoint_mode"] == "absolute"
     assert by_label["return_home"]["params"]["target_frame"] == "local"
     assert by_label["return_home"]["params"]["waypoint_mode"] == "absolute"
 
@@ -398,18 +406,27 @@ def test_drop_two_targets_v2_no_global_target_frame() -> None:
         assert tf != "global", f"step {step['label']} has target_frame=global"
 
 
-def test_drop_two_targets_v2_no_dangerous_true_flags() -> None:
-    """v2 mission must not have release_all/falseback/continue_after as true."""
+def test_drop_two_targets_v2_aggressive_scoring_flags() -> None:
+    """v2 aggressive scoring: drop_sequence must have all aggressive flags true."""
     data = _template(DROP_V2_TEMPLATE_PATH)
     for step in data["steps"]:
         p = step.get("params", {})
-        for flag in ("release_all_payloads_if_only_one_target",
-                     "fallback_release_when_last_target_failed",
-                     "continue_after_any_failure"):
-            if flag in p:
-                assert p[flag] is not True, (
-                    f"step {step['label']} has {flag}=true"
-                )
+        if step.get("name") == "drop_sequence":
+            assert p.get("release_all_payloads_if_only_one_target") is True, (
+                "aggressive scoring: release_all_payloads_if_only_one_target must be true"
+            )
+            assert p.get("fallback_release_when_last_target_failed") is True, (
+                "aggressive scoring: fallback_release_when_last_target_failed must be true"
+            )
+            assert p.get("continue_after_any_failure") is True, (
+                "aggressive scoring: continue_after_any_failure must be true"
+            )
+            assert p.get("release_all_payloads_if_no_valid_targets") is True, (
+                "aggressive scoring: release_all_payloads_if_no_valid_targets must be true"
+            )
+            assert p.get("target_count" if False else "_") is None  # target_count is on select_drop_targets, not drop_sequence
+            return
+    pytest.fail("drop_sequence step not found")
 
 
 def test_drop_sequence_goto_waypoint_mode_absolute() -> None:

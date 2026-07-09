@@ -930,3 +930,95 @@ def test_single_target_release_all_disabled_no_fallback() -> None:
     assert "payload_2" not in payload_ids, (
         f"payload_2 should not be released when release_all is disabled; released: {payload_ids}"
     )
+
+
+# ── aggressive scoring: no-target in-place release ────────────────────
+
+
+def test_no_valid_targets_release_all_in_place() -> None:
+    """release_all_payloads_if_no_valid_targets=true + empty targets
+    → both payloads released in-place, released_count=2, done.
+    """
+    params = _base_params(
+        targets=[], payloads=_make_payloads(2),
+        release_wait_updates=2,
+        release_all_payloads_if_no_valid_targets=True,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    assert a.release_all_payloads_if_no_valid_targets is True
+    assert len(a.valid_targets) == 0
+    assert len(a.payloads) == 2
+
+    # init → release_no_target
+    r0 = a.update({})
+    assert a.phase == "release_no_target"
+    assert r0.done is False
+
+    # Run both payloads to completion
+    _run_to_done(a, {})
+
+    assert a._done is True
+    assert a.released_count == 2
+    assert a.fallback_release_count == 0
+    assert a._last_reason == "drop_sequence_done"
+
+    assert len(a.payload_results) == 2
+    assert a.payload_results[0]["payload_id"] == "payload_1"
+    assert a.payload_results[0]["released"] is True
+    assert a.payload_results[0]["release_reason"] == "no_target_release_all_in_place"
+    assert a.payload_results[0]["target_id"] is None
+    assert a.payload_results[0]["target_index"] == -1
+    assert a.payload_results[1]["payload_id"] == "payload_2"
+    assert a.payload_results[1]["release_reason"] == "no_target_release_all_in_place"
+
+
+def test_no_valid_targets_no_release_when_flag_false() -> None:
+    """flag=false + empty targets → done with released_count=0 (backward compat)."""
+    params = _base_params(
+        targets=[], payloads=_make_payloads(2),
+        release_all_payloads_if_no_valid_targets=False,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    assert a.release_all_payloads_if_no_valid_targets is False
+
+    r = a.update({})
+    assert r.done is True
+    assert r.failed is False
+    assert r.reason == "no_valid_targets"
+    assert r.detail["released_count"] == 0
+    assert a.released_count == 0
+
+
+def test_no_valid_targets_release_all_default_off() -> None:
+    """Default (no param) → flag=false → no release."""
+    params = _base_params(targets=[], payloads=_make_payloads(2))
+    a = DropSequenceAction()
+    a.start(params)
+
+    assert a.release_all_payloads_if_no_valid_targets is False
+
+    r = a.update({})
+    assert r.done is True
+    assert r.reason == "no_valid_targets"
+    assert a.released_count == 0
+
+
+def test_no_valid_targets_release_one_payload() -> None:
+    """1 payload, no targets, flag=true → release 1 payload in-place."""
+    params = _base_params(
+        targets=[], payloads=_make_payloads(1),
+        release_wait_updates=2,
+        release_all_payloads_if_no_valid_targets=True,
+    )
+    a = DropSequenceAction()
+    a.start(params)
+
+    _run_to_done(a, {})
+
+    assert a._done is True
+    assert a.released_count == 1
+    assert a.payload_results[0]["release_reason"] == "no_target_release_all_in_place"
