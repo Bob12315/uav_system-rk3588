@@ -162,18 +162,18 @@ const fieldMapView = {
   interacting: false,
 };
 function worldToCanvas(x, y, rect, view = fieldMapView) {
-  const originX = rect.width / 2 + view.centerX * view.scale;
+  const originX = rect.width / 2 - view.centerX * view.scale;
   const originY = rect.height / 2 + view.centerY * view.scale;
   return [
-    originX - Number(x) * view.scale,
+    originX + Number(x) * view.scale,
     originY - Number(y) * view.scale,
   ];
 }
 function canvasToWorld(screenX, screenY, rect, view = fieldMapView) {
-  const originX = rect.width / 2 + view.centerX * view.scale;
+  const originX = rect.width / 2 - view.centerX * view.scale;
   const originY = rect.height / 2 + view.centerY * view.scale;
   return {
-    x: (originX - screenX) / view.scale,
+    x: (screenX - originX) / view.scale,
     y: (originY - screenY) / view.scale,
   };
 }
@@ -257,8 +257,11 @@ function fieldMapModel(next) {
   const fieldX = finiteNumber(rawFieldPosition?.x);
   const fieldY = finiteNumber(rawFieldPosition?.y);
   const fieldPosition = fieldX !== null && fieldY !== null ? {
-    x: fieldX,
+    x: -fieldX,
     y: fieldY,
+    display_x_mirrored: true,
+    raw_field_x: fieldX,
+    raw_field_y: fieldY,
     z: finiteNumber(rawFieldPosition.z ?? rawFieldPosition.local_z),
     local_x: finiteNumber(rawFieldPosition.local_x),
     local_y: finiteNumber(rawFieldPosition.local_y),
@@ -622,7 +625,10 @@ function drawDrone(ctx, model) {
   ctx.fill();
   ctx.stroke();
   const label = model.drone.field ? "UAV field" : model.drone.fallback ? "UAV LOCAL fallback" : "UAV";
-  drawFieldLabel(ctx, `${label} ${num(model.drone.x, 1)}, ${num(model.drone.y, 1)}`, x + 46, y - 14, {align: "left"});
+  const mirrorNote = model.drone.display_x_mirrored && model.drone.raw_field_x != null
+    ? ` raw_x=${num(model.drone.raw_field_x, 1)}`
+    : "";
+  drawFieldLabel(ctx, `${label} ${num(model.drone.x, 1)}, ${num(model.drone.y, 1)}${mirrorNote}`, x + 46, y - 14, {align: "left"});
   drawFieldLabel(ctx, `z=${num(model.drone.z, 1)}`, x + 46, y + 2, {align: "left", color: "#93a8bf"});
 }
 function drawTargets(ctx, model) {
