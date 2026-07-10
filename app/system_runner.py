@@ -1223,7 +1223,12 @@ class SystemRunner:
         with self.action_runtime_lock:
             self.latest_recon_inspection_result = {}
             self.latest_drop_workflow_result = {}
-            if self._action_mission_uses_field_coordinates():
+            requirements = self._action_mission_field_requirements()
+            if requirements["needs_gps"]:
+                reason = self._field_gps_mission_preflight_reason()
+                if reason is not None:
+                    return self._reject_action_mission_start(reason)
+            if requirements["needs_local"]:
                 reason = self._field_mission_preflight_reason()
                 if reason is not None:
                     return self._reject_action_mission_start(reason)
@@ -1233,13 +1238,59 @@ class SystemRunner:
             return self.action_mission_status_payload()
 
     def _action_mission_uses_field_coordinates(self) -> bool:
+        requirements = self._action_mission_field_requirements()
+        return requirements["needs_gps"] or requirements["needs_local"]
+
+    def _action_mission_field_requirements(self) -> dict[str, bool]:
+        requirements = {"needs_gps": False, "needs_local": False}
         orchestrator = self.action_mission_orchestrator
         if orchestrator is None:
-            return False
-        return any(
-            str(step.params.get("waypoint_mode", "")).strip().lower() == "field"
-            for step in orchestrator.steps
+            return requirements
+        for step in orchestrator.steps:
+            if step.name == "gps_multi_view_localize":
+                requirements["needs_gps"] = True
+            waypoint_mode = str(step.params.get("waypoint_mode", "")).strip().lower()
+            if waypoint_mode != "field":
+                continue
+            target_frame = str(step.params.get("target_frame", "local")).strip().lower()
+            requirements["needs_gps" if target_frame == "global" else "needs_local"] = True
+        return requirements
+
+    def _field_gps_mission_preflight_reason(self) -> str | None:
+        reference = self.field_reference_service.reference
+        if not reference.is_confirmed:
+            return "field_gps_reference_not_confirmed"
+        if not reference.is_frozen:
+            return "field_gps_reference_not_frozen"
+        if not reference.is_ready_for_field_to_gps():
+            return "field_gps_reference_not_ready"
+
+        builder = self.runtime_context_builder
+        if not (
+            builder.field_gps_transform_ready()
+            and builder.field_heading_confirmed
+            and builder.field_origin_gps_confirmed
+        ):
+            return "field_gps_reference_not_synced"
+
+        pairs = (
+            (builder.field_heading_yaw_rad, reference.field_heading_yaw_rad, None),
+            (builder.field_origin_lat, reference.origin_lat, (-90.0, 90.0)),
+            (builder.field_origin_lon, reference.origin_lon, (-180.0, 180.0)),
         )
+        for runtime_value, reference_value, bounds in pairs:
+            runtime_float = RuntimeContextBuilder._float_or_none(runtime_value)
+            reference_float = RuntimeContextBuilder._float_or_none(reference_value)
+            if runtime_float is None or reference_float is None:
+                return "field_gps_reference_not_synced"
+            if bounds is not None and not (
+                bounds[0] <= runtime_float <= bounds[1]
+                and bounds[0] <= reference_float <= bounds[1]
+            ):
+                return "field_gps_reference_not_synced"
+            if not math.isclose(runtime_float, reference_float, rel_tol=1e-9, abs_tol=1e-9):
+                return "field_gps_reference_not_synced"
+        return None
 
     def _field_mission_preflight_reason(self) -> str | None:
         reference = self.field_reference_service.reference

@@ -547,8 +547,8 @@ def test_align_to_release_transition_emits_zero_velocity() -> None:
     assert "flight_command" in types, "align→release transition missing zero velocity"
 
 
-def test_drop_sequence_goto_uses_absolute_waypoint_mode() -> None:
-    """Both v2 templates must use absolute waypoint_mode for drop_sequence.goto."""
+def test_gps_drop_sequence_v2_uses_composite_absolute_navigation() -> None:
+    """Both V2 templates use the GPS composite, which owns absolute GLOBAL goto."""
     import json
     import pathlib
 
@@ -557,16 +557,12 @@ def test_drop_sequence_goto_uses_absolute_waypoint_mode() -> None:
         repo_root / "config" / "action_missions" / "drop_two_targets_v2.json",
         repo_root / "config" / "profiles" / "rk3588-sitl" / "action_missions" / "drop_two_targets_v2.json",
     ]
-    checked_paths = []
     for path in paths:
         data = json.loads(path.read_text())
-        drop_step = next((s for s in data["steps"] if s.get("name") == "drop_sequence"), None)
-        if drop_step is None:
-            continue
-        checked_paths.append(path)
-        goto_mode = drop_step["params"]["goto"]["waypoint_mode"]
-        assert goto_mode == "absolute", f"{path.name}: goto.waypoint_mode={goto_mode!r}, expected 'absolute'"
-    assert checked_paths, "expected at least one v2 template to contain drop_sequence"
+        drop_steps = [step for step in data["steps"] if step.get("name") == "gps_drop_sequence"]
+        assert len(drop_steps) == 1
+        assert not any(step.get("name") == "drop_sequence" for step in data["steps"])
+        assert drop_steps[0]["params"]["targets"] == "$drop_targets.target_slots"
 
 
 def test_payload_release_failed_returns_failed() -> None:

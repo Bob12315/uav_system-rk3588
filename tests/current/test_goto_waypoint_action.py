@@ -240,6 +240,27 @@ def test_field_waypoint_global_target_frame_converts_to_gps() -> None:
     assert result.detail["note"] == "field -> GPS converted"
 
 
+def test_field_global_waypoint_uses_gps_origin_without_local_origin() -> None:
+    action = GotoWaypointAction()
+    action.start({
+        "x": 0.0, "y": 0.0, "altitude_m": 5.0,
+        "waypoint_mode": "field", "target_frame": "global", "yaw_mode": "hold",
+    })
+    result = action.update({
+        "field_heading_yaw_rad": 0.25,
+        "field_heading_confirmed": True,
+        "field_origin_gps_confirmed": True,
+        "field_origin_confirmed": False,
+        "field_origin_lat": 34.0,
+        "field_origin_lon": 108.0,
+    })
+
+    assert result.failed is False
+    assert result.actions[0]["action_type"] == "global_goto"
+    assert result.actions[0]["params"]["lat"] == pytest.approx(34.0)
+    assert result.actions[0]["params"]["lon"] == pytest.approx(108.0)
+
+
 def test_global_target_uses_gps_position_for_completion() -> None:
     action = GotoWaypointAction()
     action.start({
@@ -262,6 +283,100 @@ def test_global_target_uses_gps_position_for_completion() -> None:
     assert result.done is True
     assert result.reason == "waypoint_reached"
     assert result.actions == []
+
+
+def _global_velocity_context(*, vx=0.0, vy=0.0, vz=0.0, velocity_valid=True):
+    return {
+        "drone": {
+            "global_position_valid": True,
+            "lat": 34.0,
+            "lon": 108.0,
+            "relative_altitude": 5.0,
+            "velocity_valid": velocity_valid,
+            "vx": vx,
+            "vy": vy,
+            "vz": vz,
+        }
+    }
+
+
+def test_global_velocity_gate_accepts_consecutive_low_speed_updates() -> None:
+    action = GotoWaypointAction()
+    action.start({
+        "lat": 34.0, "lon": 108.0, "altitude_m": 5.0,
+        "target_frame": "global", "yaw_mode": "hold",
+        "require_velocity_valid": True,
+        "max_horizontal_speed_mps": 0.15,
+        "max_vertical_speed_mps": 0.10,
+        "min_hold_updates": 2,
+    })
+
+    first = action.update(_global_velocity_context(vx=0.1, vy=0.05, vz=0.05))
+    second = action.update(_global_velocity_context(vx=0.1, vy=0.05, vz=0.05))
+
+    assert first.done is False
+    assert second.done is True
+    assert second.detail["velocity_required"] is True
+    assert second.detail["velocity_valid"] is True
+    assert second.detail["velocity_gate_passed"] is True
+    assert second.detail["horizontal_speed_mps"] == pytest.approx(math.hypot(0.1, 0.05))
+    assert second.detail["vertical_speed_mps"] == pytest.approx(0.05)
+
+
+@pytest.mark.parametrize(
+    "drone_update",
+    [
+        {"vx": 0.2, "vy": 0.0, "vz": 0.0},
+        {"vx": 0.0, "vy": 0.0, "vz": 0.2},
+        {"velocity_valid": False},
+        {"vx": float("nan")},
+    ],
+)
+def test_global_velocity_gate_rejects_high_or_invalid_velocity(drone_update) -> None:
+    action = GotoWaypointAction()
+    action.start({
+        "lat": 34.0, "lon": 108.0, "altitude_m": 5.0,
+        "target_frame": "global", "yaw_mode": "hold",
+        "require_velocity_valid": True,
+        "max_horizontal_speed_mps": 0.15,
+        "max_vertical_speed_mps": 0.10,
+    })
+    context = _global_velocity_context()
+    context["drone"].update(drone_update)
+
+    result = action.update(context)
+
+    assert result.done is False
+    assert result.reason == "goto_active"
+    assert result.detail["reached_updates"] == 0
+    assert result.detail["velocity_gate_passed"] is False
+    assert result.actions[0]["action_type"] == "global_goto"
+
+
+def test_global_velocity_gate_resets_consecutive_hold_after_speed_spike() -> None:
+    action = GotoWaypointAction()
+    action.start({
+        "lat": 34.0, "lon": 108.0, "altitude_m": 5.0,
+        "target_frame": "global", "yaw_mode": "hold",
+        "require_velocity_valid": True, "min_hold_updates": 2,
+    })
+    first = action.update(_global_velocity_context())
+    spike = action.update(_global_velocity_context(vx=0.3))
+    after_spike = action.update(_global_velocity_context())
+    done = action.update(_global_velocity_context())
+    assert first.detail["reached_updates"] == 1
+    assert spike.detail["reached_updates"] == 0
+    assert after_spike.done is False and after_spike.detail["reached_updates"] == 1
+    assert done.done is True
+
+
+@pytest.mark.parametrize("name,value", [("max_horizontal_speed_mps", -0.1), ("max_vertical_speed_mps", float("nan"))])
+def test_global_velocity_gate_rejects_invalid_thresholds(name, value) -> None:
+    with pytest.raises(ValueError):
+        GotoWaypointAction().start({
+            "lat": 34.0, "lon": 108.0, "altitude_m": 5.0,
+            "target_frame": "global", "yaw_mode": "hold", name: value,
+        })
 
 
 def test_field_waypoint_without_confirmation_never_emits_action() -> None:

@@ -217,6 +217,7 @@ class SelectDropTargetsAction(ActionModule):
 
         ordered = sorted(candidates, key=self._sort_key)
         selected: list[_Candidate] = []
+        selected_target_ids: set[str] = set()
         for candidate in ordered:
             duplicate_distance = self._duplicate_distance(candidate, selected)
             if duplicate_distance is not None:
@@ -229,6 +230,17 @@ class SelectDropTargetsAction(ActionModule):
                     }
                 )
                 continue
+            if self.coordinate_mode == "gps_enu":
+                base_target_id = candidate.target_id or f"gps_target_{candidate.index}"
+                unique_target_id = base_target_id
+                if unique_target_id in selected_target_ids:
+                    unique_target_id = f"{base_target_id}_{candidate.index}"
+                suffix = 2
+                while unique_target_id in selected_target_ids:
+                    unique_target_id = f"{base_target_id}_{candidate.index}_{suffix}"
+                    suffix += 1
+                candidate.target_id = unique_target_id
+                selected_target_ids.add(unique_target_id)
             selected.append(candidate)
             if len(selected) >= self.target_count:
                 break
@@ -245,8 +257,18 @@ class SelectDropTargetsAction(ActionModule):
         obj: dict[str, Any],
         index: int,
     ) -> tuple[_Candidate | None, dict[str, Any] | None]:
-        target_id = None if obj.get("target_id") is None else str(obj.get("target_id"))
-        object_id = str(obj.get("id") or target_id or f"target_{index}")
+        raw_target_id = obj.get("target_id")
+        target_id = str(raw_target_id).strip() if raw_target_id is not None else ""
+        if target_id.lower() in {"", "none", "null"}:
+            target_id = ""
+        fallback_id = f"gps_target_{index}" if self.coordinate_mode == "gps_enu" else f"target_{index}"
+        raw_object_id = obj.get("id") or target_id or fallback_id
+        object_id = str(raw_object_id).strip()
+        if object_id.lower() in {"", "none", "null"}:
+            object_id = fallback_id
+        if self.coordinate_mode == "gps_enu" and not target_id:
+            target_id = object_id
+        candidate_target_id: str | None = target_id or None
         class_name = str(obj.get("class_name") or obj.get("label") or "bucket")
         base_rejection = {"id": object_id, "class_name": class_name}
 
@@ -292,7 +314,7 @@ class SelectDropTargetsAction(ActionModule):
                 original=obj,
                 index=index,
                 id=object_id,
-                target_id=target_id,
+                target_id=candidate_target_id,
                 class_name=class_name,
                 local_x=local_x,
                 local_y=local_y,
@@ -367,10 +389,15 @@ class SelectDropTargetsAction(ActionModule):
                     slot["lon"] = gps_lon
                 slots.append(slot)
             else:
+                missing_target_id = (
+                    f"gps_target_missing_{rank_index}"
+                    if self.coordinate_mode == "gps_enu"
+                    else None
+                )
                 slots.append({
                     "valid": False,
                     "id": f"missing_drop_target_{rank_index}",
-                    "target_id": None,
+                    "target_id": missing_target_id,
                     "class_name": "",
                     "local_x": None,
                     "local_y": None,
@@ -445,6 +472,9 @@ class SelectDropTargetsAction(ActionModule):
             "track_ids": list(candidate.original.get("track_ids") or []),
             "rank": rank,
         }
+        if self.coordinate_mode == "gps_enu":
+            data["east_m"] = candidate.local_x
+            data["north_m"] = candidate.local_y
         gps_lat, gps_lon = self._gps_from_original(candidate.original)
         if gps_lat is not None:
             data["lat"] = gps_lat

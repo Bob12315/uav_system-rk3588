@@ -371,64 +371,26 @@ def test_return_home_waypoint_mode_field() -> None:
     assert step["params"]["y"] == 0.0
 
 
-def _x_test_drop_two_targets_v2_outer_gotos_use_local_targets() -> None:
+def test_drop_two_targets_v2_uses_gps_first_composite_runtime() -> None:
     data = _template(DROP_V2_TEMPLATE_PATH)
-    by_label = {step.get("label", ""): step for step in data["steps"]}
-    assert by_label["goto_first_scan_point"]["params"]["target_frame"] == "local"
-    assert by_label["goto_first_scan_point"]["params"]["waypoint_mode"] == "absolute"
-    assert by_label["return_home"]["params"]["target_frame"] == "local"
-    assert by_label["return_home"]["params"]["waypoint_mode"] == "absolute"
-
-
-def _x_test_drop_two_targets_v2_contains_resolve_gps_targets() -> None:
-    """v2 mission must include resolve_gps_targets steps."""
-    data = _template(DROP_V2_TEMPLATE_PATH)
-    names = [s["name"] for s in data["steps"]]
-    assert names.count("resolve_gps_targets") >= 3, (
-        f"expected >=3 resolve_gps_targets steps, got {names.count('resolve_gps_targets')}"
-    )
-
-
-def _x_test_drop_two_targets_v2_selects_fused_localized_objects() -> None:
-    data = _template(DROP_V2_TEMPLATE_PATH)
-    by_label = {step.get("label", ""): step for step in data["steps"]}
-    assert by_label["resolve_drop_buckets"]["params"]["targets"] == "$drop_scan.raw_estimates"
-    select_params = by_label["select_drop_targets"]["params"]
+    names = [step["name"] for step in data["steps"]]
+    assert names == [
+        "takeoff", "yaw_align", "gps_multi_view_localize",
+        "select_drop_targets", "gps_drop_sequence", "goto_waypoint", "land",
+    ]
+    by_name = {step["name"]: step for step in data["steps"]}
+    select_params = by_name["select_drop_targets"]["params"]
     assert select_params["objects"] == "$drop_scan.localized_objects"
-    assert select_params["input_key"] == "localized_objects"
+    assert select_params["coordinate_mode"] == "gps_enu"
     assert select_params["min_seen_count"] == 2
-    assert select_params["objects"] != "$drop_buckets.resolved_targets"
-
-
-def _x_test_drop_two_targets_v2_no_global_target_frame() -> None:
-    """No step in v2 mission uses target_frame: global."""
-    data = _template(DROP_V2_TEMPLATE_PATH)
-    for step in data["steps"]:
-        tf = step.get("params", {}).get("target_frame")
-        assert tf != "global", f"step {step['label']} has target_frame=global"
-
-
-def _x_test_drop_two_targets_v2_aggressive_scoring_flags() -> None:
-    """v2 aggressive scoring: drop_sequence must have all aggressive flags true."""
-    data = _template(DROP_V2_TEMPLATE_PATH)
-    for step in data["steps"]:
-        p = step.get("params", {})
-        if step.get("name") == "drop_sequence":
-            assert p.get("release_all_payloads_if_only_one_target") is True, (
-                "aggressive scoring: release_all_payloads_if_only_one_target must be true"
-            )
-            assert p.get("fallback_release_when_last_target_failed") is True, (
-                "aggressive scoring: fallback_release_when_last_target_failed must be true"
-            )
-            assert p.get("continue_after_any_failure") is True, (
-                "aggressive scoring: continue_after_any_failure must be true"
-            )
-            assert p.get("release_all_payloads_if_no_valid_targets") is True, (
-                "aggressive scoring: release_all_payloads_if_no_valid_targets must be true"
-            )
-            assert p.get("target_count" if False else "_") is None  # target_count is on select_drop_targets, not drop_sequence
-            return
-    pytest.fail("drop_sequence step not found")
+    forbidden = {
+        "resolve_gps_targets", "resolve_drop_buckets", "multi_view_localize",
+        "drop_sequence", "target_lock", "align_descend", "payload_release",
+    }
+    assert not forbidden.intersection(names)
+    return_home = by_name["goto_waypoint"]
+    assert return_home["label"] == "return_home_gps"
+    assert return_home["params"]["target_frame"] == "global"
 
 
 def test_drop_sequence_goto_waypoint_mode_absolute() -> None:
@@ -567,18 +529,18 @@ def test_return_home_failed_continues_to_land() -> None:
 # ── drop_two_targets_v2 安全兜底策略测试 ─────────────────────────────
 
 
-def _x_test_drop_two_targets_v2_multi_view_localize_retries_then_returns_home() -> None:
+def test_drop_two_targets_v2_multi_view_localize_retries_then_returns_home() -> None:
     """drop_two_targets_v2: multi_view_localize 失败后重试一次，再失败则返航。"""
     path = Path("config/action_missions/drop_two_targets_v2.json")
     data = _template(path)
     by_label = {step.get("label", ""): step for step in data["steps"]}
     labels = {step.get("label", "") for step in data["steps"] if step.get("label")}
 
-    policy = by_label["drop_multi_view_scan"]["on_failed"]
+    policy = by_label["drop_gps_multi_view_scan"]["on_failed"]
     assert policy["action"] == "retry_current_then_jump_to"
     assert policy["max_attempts"] == 2
-    assert policy["target"] == "return_home"
-    assert "return_home" in labels
+    assert policy["target"] == "return_home_gps"
+    assert "return_home_gps" in labels
     assert "land_home" in labels
 
 
@@ -706,11 +668,12 @@ def test_select_drop_targets_v2_zone_center_mode_field() -> None:
     assert by_label["select_drop_targets"]["params"]["min_seen_count"] == 2
 
 
-def _x_test_drop_two_targets_v2_select_drop_targets_zone_center_mode_field() -> None:
-    """drop_two_targets_v2: select_drop_targets zone_center_mode is field."""
+def test_drop_two_targets_v2_select_drop_targets_uses_gps_enu() -> None:
     data = _template(Path("config/action_missions/drop_two_targets_v2.json"))
     by_label = {step.get("label", ""): step for step in data["steps"]}
-    assert by_label["select_drop_targets"]["params"]["zone_center_mode"] == "field"
+    params = by_label["select_gps_drop_targets"]["params"]
+    assert params["coordinate_mode"] == "gps_enu"
+    assert "zone_center_mode" not in params
 
 
 # ── recon_inspect_5_targets_stepwise_v2 tests ────────────────────────────

@@ -14,8 +14,10 @@ TARGETS = [
     {"valid": True, "lat": 34.00021, "lon": 108.00031, "class_name": "bucket", "target_id": "t1"},
 ]
 PAYLOADS = [
-    {"payload_id": "p0", "servo_outputs": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}]},
-    {"payload_id": "p1", "servo_outputs": [{"channel": 9, "release_pwm": 1250, "hold_pwm": 1750}]},
+    {"payload_id": "p0", "payload_forward_m": -0.06, "payload_right_m": 0.0,
+     "servo_outputs": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}]},
+    {"payload_id": "p1", "payload_forward_m": 0.06, "payload_right_m": 0.0,
+     "servo_outputs": [{"channel": 9, "release_pwm": 1250, "hold_pwm": 1750}]},
 ]
 
 
@@ -28,6 +30,11 @@ def _params(**overrides: Any) -> dict[str, Any]:
         "align_descend_max_updates": 3,
         "climb_max_updates": 3,
         "release_wait_updates": 2,
+        "goto": {
+            "require_velocity_valid": True,
+            "max_horizontal_speed_mps": 0.15,
+            "max_vertical_speed_mps": 0.10,
+        },
     }
     params.update(overrides)
     return params
@@ -215,11 +222,18 @@ def test_dual_target_happy_path_from_start(scripted_children: None) -> None:
     assert all(item["target_frame"] == "global" for item in goto_starts)
     assert all(item["waypoint_mode"] == "absolute" for item in goto_starts)
     assert all(item["yaw_mode"] == "hold" for item in goto_starts)
+    assert all(item["require_velocity_valid"] is True for item in goto_starts)
+    assert all(item["max_horizontal_speed_mps"] == 0.15 for item in goto_starts)
+    assert all(item["max_vertical_speed_mps"] == 0.10 for item in goto_starts)
     assert [item["target"]["id"] for item in ScriptedLock.starts] == ["t0", "t1"]
     for align_start in ScriptedAlign.starts:
         assert align_start["finish_policy"] == "require_alignment_or_timeout"
         assert align_start["config"]["yaw_control_mode"] == "ignore"
         assert align_start["config"]["require_target_locked"] is True
+    assert [item["config"]["payload_forward_m"] for item in ScriptedAlign.starts] == [-0.06, 0.06]
+    assert [item["config"]["payload_right_m"] for item in ScriptedAlign.starts] == [0.0, 0.0]
+    assert "payload_forward_m" not in action.align_cfg["config"]
+    assert "payload_right_m" not in action.align_cfg["config"]
     assert not any(kind == "local_position" for kinds in action_types for kind in kinds)
     assert sum(pwm in {1200, 1250} for result in results for pwm in _servo_pwms(result)) == 2
     assert sum(pwm in {1700, 1750} for result in results for pwm in _servo_pwms(result)) == 2
@@ -328,6 +342,14 @@ def test_gps_sequence_rejects_legacy_finish_policy() -> None:
         GpsDropSequenceAction().start(
             _params(align_descend={"finish_policy": "legacy"})
         )
+
+
+@pytest.mark.parametrize("field", ["payload_forward_m", "payload_right_m"])
+def test_gps_sequence_rejects_nonfinite_payload_offsets(field: str) -> None:
+    payloads = [dict(PAYLOADS[0]), dict(PAYLOADS[1])]
+    payloads[0][field] = float("nan")
+    with pytest.raises(ValueError, match=field):
+        GpsDropSequenceAction().start(_params(payloads=payloads))
 
 
 def test_target_unlocked_never_descends_or_releases(

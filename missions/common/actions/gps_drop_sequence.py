@@ -6,6 +6,7 @@ Requires exactly 2 targets and 2 payloads.
 
 from __future__ import annotations
 
+import copy
 import math
 from typing import Any
 
@@ -44,7 +45,14 @@ class GpsDropSequenceAction(ActionModule):
                 if not math.isfinite(lat) or not math.isfinite(lon): continue
                 if lat < -90 or lat > 90 or lon < -180 or lon > 180: continue
             except (KeyError, TypeError, ValueError): continue
-            raw_tid = t.get("target_id"); tid = str(raw_tid).strip() if raw_tid is not None and str(raw_tid).strip() and str(raw_tid).strip().lower() != "none" else str(t.get("id", "")).strip()
+            raw_target_id = t.get("target_id")
+            target_id = str(raw_target_id).strip() if raw_target_id is not None else ""
+            if target_id.lower() in {"", "none", "null"}:
+                target_id = ""
+            fallback_id = str(t.get("id") or "").strip()
+            if fallback_id.lower() in {"none", "null"}:
+                fallback_id = ""
+            tid = target_id or fallback_id
             if not tid:
                 continue
             if tid in seen_ids: continue  # dedup
@@ -183,6 +191,9 @@ class GpsDropSequenceAction(ActionModule):
                 "tolerance_xy_m": self.goto_cfg.get("tolerance_xy_m", 0.35),
                 "tolerance_z_m": self.goto_cfg.get("tolerance_z_m", 0.35),
                 "min_hold_updates": self.goto_cfg.get("min_hold_updates", 1),
+                "require_velocity_valid": self.goto_cfg.get("require_velocity_valid", False),
+                "max_horizontal_speed_mps": self.goto_cfg.get("max_horizontal_speed_mps", 0.15),
+                "max_vertical_speed_mps": self.goto_cfg.get("max_vertical_speed_mps", 0.10),
                 "key": f"gps_drop_goto_{self.target_index}",
             })
             self.sub_action = ga
@@ -239,11 +250,15 @@ class GpsDropSequenceAction(ActionModule):
 
     def _update_align(self, context: dict[str, Any]) -> ActionResult:
         if self.sub_action is None:
+            payload = self.payloads[self.payload_index]
+            align_params = copy.deepcopy(self.align_cfg)
+            align_config = dict(align_params.get("config") or {})
+            align_config["payload_forward_m"] = payload["payload_forward_m"]
+            align_config["payload_right_m"] = payload["payload_right_m"]
+            align_params["config"] = align_config
+            align_params["finish_altitude_m"] = self.finish_altitude_m
             aa = AlignDescendAction()
-            aa.start({
-                **self.align_cfg,
-                "finish_altitude_m": self.finish_altitude_m,
-            })
+            aa.start(align_params)
             self.sub_action = aa
             self.update_count_at_phase = 0
 
@@ -372,6 +387,9 @@ class GpsDropSequenceAction(ActionModule):
                 "yaw_mode": "hold", "frame": GLOBAL_RELATIVE_ALT_INT,
                 "tolerance_xy_m": 0.5, "tolerance_z_m": 0.5,
                 "min_hold_updates": 1, "key": f"gps_drop_climb_{self.target_index}",
+                "require_velocity_valid": self.goto_cfg.get("require_velocity_valid", False),
+                "max_horizontal_speed_mps": self.goto_cfg.get("max_horizontal_speed_mps", 0.15),
+                "max_vertical_speed_mps": self.goto_cfg.get("max_vertical_speed_mps", 0.10),
             })
             self.sub_action = ga
             self.update_count_at_phase = 0
@@ -477,6 +495,14 @@ def _validated_payload(raw: Any) -> dict[str, Any]:
         )
 
     payload = dict(raw)
+    for name in ("payload_forward_m", "payload_right_m"):
+        try:
+            value = float(raw.get(name, 0.0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be a finite float") from exc
+        if not math.isfinite(value):
+            raise ValueError(f"{name} must be a finite float")
+        payload[name] = value
     payload["payload_id"] = payload_id
     payload["servo_outputs"] = validated_outputs
     return payload

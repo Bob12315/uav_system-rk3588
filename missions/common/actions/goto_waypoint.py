@@ -80,6 +80,15 @@ class GotoWaypointAction(ActionModule):
         min_hold_updates = int(data.get("min_hold_updates", 1))
         if min_hold_updates < 1:
             min_hold_updates = 1
+        require_velocity_valid = bool(data.get("require_velocity_valid", False))
+        max_horizontal_speed_mps = float(data.get("max_horizontal_speed_mps", 0.15))
+        max_vertical_speed_mps = float(data.get("max_vertical_speed_mps", 0.10))
+        for name, value in (
+            ("max_horizontal_speed_mps", max_horizontal_speed_mps),
+            ("max_vertical_speed_mps", max_vertical_speed_mps),
+        ):
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be finite and non-negative")
 
         self.target_x = x
         self.target_y = y
@@ -94,6 +103,9 @@ class GotoWaypointAction(ActionModule):
         self.tolerance_xy_m = tolerance_xy_m
         self.tolerance_z_m = tolerance_z_m
         self.min_hold_updates = min_hold_updates
+        self.require_velocity_valid = require_velocity_valid
+        self.max_horizontal_speed_mps = max_horizontal_speed_mps
+        self.max_vertical_speed_mps = max_vertical_speed_mps
         self.priority = int(data.get("priority", 4))
         self.key = str(data.get("key") or f"goto_waypoint_{x:.2f}_{y:.2f}_{altitude_m:.2f}")
         self.started = True
@@ -150,9 +162,11 @@ class GotoWaypointAction(ActionModule):
             )
 
         distance_xy_m, z_error_m = self._target_error(target, current)
+        velocity_gate_passed = self._velocity_status(context_data)["velocity_gate_passed"]
         reached = (
             distance_xy_m <= self.tolerance_xy_m
             and z_error_m <= self.tolerance_z_m
+            and velocity_gate_passed
         )
         if reached:
             self.reached_updates += 1
@@ -188,6 +202,9 @@ class GotoWaypointAction(ActionModule):
         self.tolerance_xy_m = 0.3
         self.tolerance_z_m = 0.3
         self.min_hold_updates = 1
+        self.require_velocity_valid = False
+        self.max_horizontal_speed_mps = 0.15
+        self.max_vertical_speed_mps = 0.10
         self.priority = 4
         self.key = ""
         self.reached_updates = 0
@@ -291,6 +308,7 @@ class GotoWaypointAction(ActionModule):
             "field_origin_local_y": self._float_context(context_data, "field_origin_local_y"),
             "field_origin_lat": self._float_context(context_data, "field_origin_lat"),
             "field_origin_lon": self._float_context(context_data, "field_origin_lon"),
+            **self._velocity_status(context_data),
         }
         target = self._target(context_data)
         if target is not None:
@@ -317,6 +335,39 @@ class GotoWaypointAction(ActionModule):
         if "field_heading_source" in context_data:
             detail["field_heading_source"] = context_data.get("field_heading_source")
         return detail
+
+    def _velocity_status(self, context: dict[str, Any]) -> dict[str, Any]:
+        required = self.target_frame == "global" and self.require_velocity_valid
+        drone = context.get("drone")
+        velocity_valid = False
+        horizontal_speed_mps: float | None = None
+        vertical_speed_mps: float | None = None
+        if isinstance(drone, dict) and drone.get("velocity_valid") is True:
+            try:
+                vx = float(drone["vx"])
+                vy = float(drone["vy"])
+                vz = float(drone["vz"])
+            except (KeyError, TypeError, ValueError):
+                pass
+            else:
+                if all(math.isfinite(value) for value in (vx, vy, vz)):
+                    velocity_valid = True
+                    horizontal_speed_mps = math.hypot(vx, vy)
+                    vertical_speed_mps = abs(vz)
+        gate_passed = not required or (
+            velocity_valid
+            and horizontal_speed_mps is not None
+            and vertical_speed_mps is not None
+            and horizontal_speed_mps <= self.max_horizontal_speed_mps
+            and vertical_speed_mps <= self.max_vertical_speed_mps
+        )
+        return {
+            "velocity_required": required,
+            "velocity_valid": velocity_valid,
+            "horizontal_speed_mps": horizontal_speed_mps,
+            "vertical_speed_mps": vertical_speed_mps,
+            "velocity_gate_passed": gate_passed,
+        }
 
     def _raw_target(self) -> dict[str, float]:
         if self.target_frame == "global":
@@ -377,9 +428,11 @@ class GotoWaypointAction(ActionModule):
         if self.waypoint_mode == "absolute":
             return {"lat": self.target_x, "lon": self.target_y, "alt": self.altitude_m}
 
-        if not bool(context.get("field_heading_confirmed", False)) or not bool(
-            context.get("field_origin_confirmed", False)
-        ):
+        gps_origin_confirmed = context.get("field_origin_gps_confirmed")
+        if gps_origin_confirmed is None:
+            # Compatibility for contexts produced before the GPS-specific flag.
+            gps_origin_confirmed = context.get("field_origin_confirmed", False)
+        if not bool(context.get("field_heading_confirmed", False)) or not bool(gps_origin_confirmed):
             return None
         field_heading_yaw_rad = self._field_heading_yaw(context)
         origin_lat = self._float_context(context, "field_origin_lat")

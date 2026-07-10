@@ -332,3 +332,40 @@ def test_select_drop_targets_zone_center_mode_field_missing_context():
     result = action.update({})
     assert result.failed
     assert result.reason == "missing_field_reference_for_zone_center"
+
+
+def test_gps_enu_targets_receive_stable_nonempty_target_ids() -> None:
+    objects = [
+        {"id": None, "target_id": None, "class_name": "bucket_1", "lat": 34.0, "lon": 108.0,
+         "east_m": 1.0, "north_m": 2.0, "seen_count": 3, "raw_count": 3},
+        {"id": "null", "target_id": "None", "class_name": "bucket_2", "lat": 34.001, "lon": 108.001,
+         "east_m": 3.0, "north_m": 4.0, "seen_count": 3, "raw_count": 3},
+    ]
+    action = SelectDropTargetsAction()
+    action.start({"objects": objects, "coordinate_mode": "gps_enu", "target_count": 2})
+
+    first = action.update({})
+    second = action.update({})
+    target_ids = [slot["target_id"] for slot in first.detail["target_slots"]]
+
+    assert target_ids == ["gps_target_0", "gps_target_1"]
+    assert len(set(target_ids)) == 2
+    assert all(value.lower() not in {"", "none", "null"} for value in target_ids)
+    assert [slot["target_id"] for slot in second.detail["target_slots"]] == target_ids
+    assert [(slot["east_m"], slot["north_m"]) for slot in first.detail["target_slots"]] == [(1.0, 2.0), (3.0, 4.0)]
+
+
+def test_gps_enu_duplicate_source_ids_are_made_distinct() -> None:
+    result = _select(
+        [
+            {"id": "same", "target_id": "same", "class_name": "bucket_1", "lat": 34.0, "lon": 108.0,
+             "east_m": 0.0, "north_m": 0.0, "seen_count": 3},
+            {"id": "same", "target_id": "same", "class_name": "bucket_2", "lat": 34.001, "lon": 108.001,
+             "east_m": 2.0, "north_m": 2.0, "seen_count": 3},
+        ],
+        coordinate_mode="gps_enu",
+        target_count=2,
+    )
+    target_ids = [slot["target_id"] for slot in result.detail["target_slots"]]
+    assert target_ids == ["same", "same_1"]
+    assert len(set(target_ids)) == 2
