@@ -933,12 +933,59 @@ test("confirm=false prevents Cancel POST", async function () {
     assertEqual(reqs.length, 0, "no POST when confirm is false");
 });
 
-// ── 12. requestBusy ──────────────────────────────────────────────────────────
-test("requestBusy flag exists in source", function () {
+// ── 12. requestBusy — real behavior with deferred Promise ─────────────────
+test("requestBusy prevents duplicate POST with deferred resolve", async function () {
+    var v3d = v3ProfileData();
+    v3d.profile_id = "v3-busy2";
+    apiResponses["/api/field-profiles"] = {
+        ok: true,
+        profiles: [createProfileEntry("v3-busy2", 3, "V3 Busy2")]
+    };
+    apiResponses["/api/field-profiles/v3-busy2"] = v3d;
+
+    // Deferred: track calls
+    var callCount = 0;
+    var deferredResolve;
+    apiResponses["/api/field-profiles/v3-busy2/runtime-sampling/start"] = function () {
+        callCount++;
+        return new Promise(function (resolve) { deferredResolve = resolve; });
+    };
+
+    var s = loadBoth();
+    await initAndSettle(s);
+    var sel = domElements["fpProfileSelect"];
+    sel.value = "v3-busy2"; sel.selectedIndex = 1;
+    dispatchEvent("fpProfileSelect", "change");
+    await runTimersAndFlush();
+
+    // Directly call startRuntimeSampling twice, confirm both times
+    confirmResponses.push(true);
+    s.window.UavFieldProfiles.startRuntimeSampling();
+    await runTimersAndFlush();
+    assertEqual(callCount, 1, "first call: api called once");
+
+    confirmResponses.push(true);
+    s.window.UavFieldProfiles.startRuntimeSampling();
+    await runTimersAndFlush();
+    assertEqual(callCount, 1, "second call while pending: api NOT called again, got " + callCount);
+
+    // Resolve the pending request
+    deferredResolve({ ok: true, state: "sampling" });
+    await runTimersAndFlush();
+
+    // Now requestBusy should be false, can call again
+    confirmResponses.push(true);
+    s.window.UavFieldProfiles.startRuntimeSampling();
+    await runTimersAndFlush();
+    assertEqual(callCount, 2, "third call after resolve: api called again, got " + callCount);
+});
+
+test("requestBusy source check (still present)", function () {
     var src = fs.readFileSync("web_ui/static/js/field_profile.js", "utf8");
     assertIncludes(src, "requestBusy");
     assertIncludes(src, "if (requestBusy) return");
 });
+
 
 // ── 13. Reset ────────────────────────────────────────────────────────────────
 test("Reset button has confirm and calls reset endpoint", async function () {
@@ -968,23 +1015,66 @@ test("Reset confirm=false does not POST", async function () {
     assertEqual(reqs.length, 0);
 });
 
-// ── 14. Polling single chain ─────────────────────────────────────────────────
-test("startPolling twice results in only one timer chain", function () {
+// ── 14. Polling single chain — real behavior ──────────────────────────────
+test("startPolling first call creates exactly 1 timer", async function () {
+    var s = loadBoth();
+    s.window.UavFieldRef.startPolling();
+    await runTimersAndFlush();
+    assertEqual(countPendingTimers(), 1, "first startPolling should create 1 timer");
+});
+
+test("startPolling second call does not add timer", async function () {
+    var s = loadBoth();
+    s.window.UavFieldRef.startPolling();
+    await runTimersAndFlush();
+    s.window.UavFieldRef.startPolling();
+    assertEqual(countPendingTimers(), 1, "second startPolling should not add timer");
+});
+
+test("manual fetch with scheduleNext:false does not add timer", async function () {
     var s = loadBoth();
     s.window.UavFieldRef.startPolling();
     var t1 = countPendingTimers();
-    s.window.UavFieldRef.startPolling();
+    await s.window.UavFieldRef.fetchFieldReferenceStatus({ scheduleNext: false });
+    await runTimersAndFlush();
+    // After the fetch, the original poll timer should still be the only one
+    // (scheduleNext=false so no new timer from the manual fetch)
     var t2 = countPendingTimers();
-    assertEqual(t1, t2, "second startPolling should not create more timers");
-    assertOk(t1 <= 1, "at most one timer chain");
+    assertOk(t2 <= 1, "manual fetch should not add extra timer");
 });
 
-// ── 15. Polling delays ───────────────────────────────────────────────────────
-test("field_reference.js uses 500ms and 2000ms delays", function () {
-    var src = fs.readFileSync("web_ui/static/js/field_reference.js", "utf8");
-    assertIncludes(src, "500");
-    assertIncludes(src, "2000");
+// ── 15. Polling delay — real behavior, not just source search ───────────────
+test("polling delay is 500ms when runtime state=sampling", async function () {
+    var s = loadBoth();
+    apiResponses["/api/field-reference/status"] = {
+        field_reference: {
+            runtime_binding: { state: "sampling", sampling: {} }
+        }
+    };
+    s.window.UavFieldRef.startPolling();
+    await runTimersAndFlush();
+    // After fetch completes, next poll should be scheduled with 500ms delay
+    var timers = _timerQueue.slice();
+    assertOk(timers.length >= 1, "should have scheduled next poll, got " + timers.length);
+    var found500 = timers.some(function (t) { return t.at === 500; });
+    assertOk(found500, "next poll delay should be 500ms for sampling state, delays: " + JSON.stringify(timers.map(function(t){return t.at;})));
 });
+
+test("polling delay is 2000ms when runtime state=idle", async function () {
+    var s = loadBoth();
+    apiResponses["/api/field-reference/status"] = {
+        field_reference: {
+            runtime_binding: { state: "idle", sampling: {} }
+        }
+    };
+    s.window.UavFieldRef.startPolling();
+    await runTimersAndFlush();
+    var timers = _timerQueue.slice();
+    assertOk(timers.length >= 1, "should have scheduled next poll, got " + timers.length);
+    var found2000 = timers.some(function (t) { return t.at === 2000; });
+    assertOk(found2000, "next poll delay should be 2000ms for idle state, delays: " + JSON.stringify(timers.map(function(t){return t.at;})));
+});
+
 
 // ── 16. app.js no Field Reference interval ───────────────────────────────────
 test("app.js has no Field Reference setInterval", function () {
@@ -1063,6 +1153,78 @@ test("field_reference.js has Freeze endpoint", function () {
     var src = fs.readFileSync("web_ui/static/js/field_reference.js", "utf8");
     assertIncludes(src, "frFreeze");
     assertIncludes(src, "/api/field-reference/freeze");
+});
+
+// ── 24. Freeze boundary tests ─────────────────────────────────────────────
+test("v2 confirmed: Freeze enabled", async function () {
+    apiResponses["/api/field-profiles"] = {
+        ok: true,
+        profiles: [createProfileEntry("v2-freeze-on", 2, "V2 FreezeOn")]
+    };
+    apiResponses["/api/field-profiles/v2-freeze-on"] = v2ProfileData();
+    var s = loadBoth();
+    await initAndSettle(s);
+    var sel = domElements["fpProfileSelect"];
+    sel.value = "v2-freeze-on"; sel.selectedIndex = 1;
+    dispatchEvent("fpProfileSelect", "change");
+    await runTimersAndFlush();
+    s.window.UavFieldProfiles.onFieldReferenceStatus({
+        field_reference: { is_confirmed: true, is_frozen: false, runtime_binding: { state: "idle" } }
+    });
+    await flushPromises();
+    assertOk(!domElements["frFreeze"].disabled, "v2 confirmed: Freeze should be enabled");
+});
+
+test("v3 confirmed: Freeze disabled", async function () {
+    apiResponses["/api/field-profiles"] = {
+        ok: true,
+        profiles: [createProfileEntry("v3-freeze-off", 3, "V3 FreezeOff")]
+    };
+    apiResponses["/api/field-profiles/v3-freeze-off"] = v3ProfileData();
+    var s = loadBoth();
+    await initAndSettle(s);
+    var sel = domElements["fpProfileSelect"];
+    sel.value = "v3-freeze-off"; sel.selectedIndex = 1;
+    dispatchEvent("fpProfileSelect", "change");
+    await runTimersAndFlush();
+    s.window.UavFieldProfiles.onFieldReferenceStatus({
+        field_reference: { is_confirmed: true, is_frozen: false, runtime_binding: { state: "idle" } }
+    });
+    await flushPromises();
+    assertOk(domElements["frFreeze"].disabled, "v3 confirmed: Freeze must be disabled");
+});
+
+test("no profile + confirmed: Freeze disabled", async function () {
+    var s = loadBoth();
+    s.window.UavFieldProfiles.init();
+    await runTimersAndFlush();
+    s.window.UavFieldProfiles.onFieldReferenceStatus({
+        field_reference: { is_confirmed: true, is_frozen: false, runtime_binding: { state: "idle" } }
+    });
+    await flushPromises();
+    assertOk(domElements["frFreeze"].disabled, "no profile + confirmed: Freeze must be disabled");
+});
+
+test("unknown schema + confirmed: Freeze disabled", async function () {
+    apiResponses["/api/field-profiles"] = {
+        ok: true,
+        profiles: [createProfileEntry("unk-schema", 99, "Unknown Schema")]
+    };
+    apiResponses["/api/field-profiles/unk-schema"] = {
+        ok: true, profile_id: "unk-schema", name: "Unknown", schema_version: 99,
+        source: "config", gps_quality: {}
+    };
+    var s = loadBoth();
+    await initAndSettle(s);
+    var sel = domElements["fpProfileSelect"];
+    sel.value = "unk-schema"; sel.selectedIndex = 1;
+    dispatchEvent("fpProfileSelect", "change");
+    await runTimersAndFlush();
+    s.window.UavFieldProfiles.onFieldReferenceStatus({
+        field_reference: { is_confirmed: true, is_frozen: false, runtime_binding: { state: "idle" } }
+    });
+    await flushPromises();
+    assertOk(domElements["frFreeze"].disabled, "unknown schema + confirmed: Freeze must be disabled");
 });
 
 // ── 24. HTML has v3 detail IDs ───────────────────────────────────────────────

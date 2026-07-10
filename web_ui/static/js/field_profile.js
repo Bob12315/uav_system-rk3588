@@ -204,11 +204,20 @@ window.UavFieldProfiles = (function () {
         if (busy) { allOff(); return; }
         if (state === "applied") { allOff(); if (freezeBtn) freezeBtn.disabled = true; return; }
 
-        var isV3 = schema === 3;
         if (state === "idle") {
             allOff();
-            if (isV3) { if (startBtn) startBtn.disabled = false; if (bindBtn) bindBtn.disabled = true; if (freezeBtn) freezeBtn.disabled = true; }
-            else { if (bindBtn) bindBtn.disabled = false; if (startBtn) startBtn.disabled = true; if (freezeBtn) freezeBtn.disabled = !(fr.is_confirmed && !frozen); }
+            // Start / Bind based on schema
+            if (schema === 3) {
+                if (startBtn) startBtn.disabled = false;
+                if (bindBtn) bindBtn.disabled = true;
+            } else if (schema === 2) {
+                if (bindBtn) bindBtn.disabled = false;
+                if (startBtn) startBtn.disabled = true;
+            }
+            // Freeze: strictly schema === 2, confirmed, not frozen, not busy
+            if (freezeBtn) {
+                freezeBtn.disabled = !(schema === 2 && fr.is_confirmed === true && frozen === false && busy === false);
+            }
             return;
         }
         if (state === "sampling") {
