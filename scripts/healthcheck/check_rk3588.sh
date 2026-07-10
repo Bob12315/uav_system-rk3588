@@ -3,8 +3,28 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-APP_PYTHON="${APP_PYTHON:-${HOME}/anaconda3/envs/app/bin/python}"
-YOLO_PYTHON="${YOLO_PYTHON:-${HOME}/anaconda3/envs/yolo/bin/python}"
+discover_python() {
+  local override="$1"
+  local environment_name="$2"
+  local candidate
+
+  if [[ -n "${override}" ]]; then
+    printf '%s\n' "${override}"
+    return
+  fi
+  for candidate in \
+    "${HOME}/miniconda3/envs/${environment_name}/bin/python" \
+    "${HOME}/anaconda3/envs/${environment_name}/bin/python"; do
+    if [[ -x "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return
+    fi
+  done
+  command -v python3 || command -v python || true
+}
+
+APP_PYTHON="$(discover_python "${APP_PYTHON:-}" app)"
+YOLO_PYTHON="$(discover_python "${YOLO_PYTHON:-}" yolo)"
 CONFIG_PYTHON="${APP_PYTHON}"
 FAILURES=0
 WARNINGS=0
@@ -49,7 +69,6 @@ esac
 check_file "${REPO_ROOT}/config/app.yaml"
 check_file "${REPO_ROOT}/config/telemetry.yaml"
 check_file "${REPO_ROOT}/config/yolo.yaml"
-check_file "${REPO_ROOT}/data/models/cuadc-fp16.rknn"
 
 echo
 if [[ -x "${APP_PYTHON}" ]]; then
@@ -102,6 +121,7 @@ print(f"send_commands={str(send_commands).lower()}")
 print(f"data_source={data_source}")
 print(f"active_source={active_source}")
 print(f"video_source={yolo.get('source', '')}")
+print(f"model_path={yolo.get('model_path', '')}")
 PY
 )"; then
   fail "configuration validation failed: ${config_summary}"
@@ -109,6 +129,18 @@ PY
 else
   ok "configuration safety validation"
   printf '%s\n' "${config_summary}" | sed 's/^/     /'
+fi
+
+model_path="$(printf '%s\n' "${config_summary}" | sed -n 's/^model_path=//p')"
+if [[ -n "${model_path}" ]]; then
+  if [[ "${model_path}" == /* ]]; then
+    resolved_model_path="${model_path}"
+  else
+    resolved_model_path="$(realpath -m "${REPO_ROOT}/config/${model_path}")"
+  fi
+  check_file "${resolved_model_path}"
+else
+  fail "YOLO model_path is empty"
 fi
 
 video_source="$(printf '%s\n' "${config_summary}" | sed -n 's/^video_source=//p')"
