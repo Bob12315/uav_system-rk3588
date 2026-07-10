@@ -1,9 +1,12 @@
 """Integration tests for Web UI routes — centerline-only field reference."""
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
+import threading
 
 from fastapi import HTTPException
+from starlette.websockets import WebSocketDisconnect
 
 from app.app_config import build_arg_parser, load_app_config
 from app.system_runner import SystemRunner
@@ -129,6 +132,81 @@ def test_web_action_mission_status():
     fn = _endpoint(app, "GET", "/api/action-mission/status")
     result = fn()
     assert result["ok"] is True
+
+
+def test_get_action_status_is_read_only():
+    runner = _make_runner()
+    runner.action_lab_tick = lambda: (_ for _ in ()).throw(
+        AssertionError("GET status must not advance an Action")
+    )
+    runner.action_lab_status_payload = lambda: {
+        "status": {"state": "running"},
+        "send_actions_effective": False,
+    }
+    app = _make_app(runner)
+
+    result = _endpoint(app, "GET", "/api/actions/status")()
+
+    assert result["ok"] is True
+    assert result["action_lab"]["status"]["state"] == "running"
+
+
+def test_status_websocket_snapshot_does_not_block_event_loop_or_overlap():
+    runner = _make_runner()
+    entered = threading.Event()
+    release = threading.Event()
+    calls = 0
+    active = 0
+    max_active = 0
+    worker_thread_ids = []
+
+    def blocking_snapshot():
+        nonlocal calls, active, max_active
+        calls += 1
+        active += 1
+        max_active = max(max_active, active)
+        worker_thread_ids.append(threading.get_ident())
+        entered.set()
+        assert release.wait(timeout=2.0)
+        active -= 1
+        return {"sequence": calls}
+
+    runner.web_status_snapshot = blocking_snapshot
+    app = _make_app(runner)
+    endpoint = next(
+        route.endpoint for route in app.routes
+        if getattr(route, "path", "") == "/ws/status"
+    )
+
+    class DisconnectAfterOneMessage:
+        async def accept(self):
+            return None
+
+        async def send_json(self, _snapshot):
+            raise WebSocketDisconnect()
+
+    async def scenario():
+        main_thread_id = threading.get_ident()
+        websocket_task = asyncio.create_task(endpoint(DisconnectAfterOneMessage()))
+        assert await asyncio.to_thread(entered.wait, 1.0)
+        heartbeat_completed = False
+
+        async def heartbeat():
+            nonlocal heartbeat_completed
+            await asyncio.sleep(0.01)
+            heartbeat_completed = True
+
+        await heartbeat()
+        assert heartbeat_completed is True
+        release.set()
+        await asyncio.wait_for(websocket_task, timeout=1.0)
+        return main_thread_id
+
+    main_thread_id = asyncio.run(scenario())
+
+    assert calls == 1
+    assert max_active == 1
+    assert worker_thread_ids[0] != main_thread_id
 
 
 # ---------------------------------------------------------------------------

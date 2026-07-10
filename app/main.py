@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from logging.handlers import RotatingFileHandler
 import signal
 import threading
 from pathlib import Path
@@ -10,12 +11,21 @@ from app.system_runner import SystemRunner
 
 
 def setup_logging(level: str, log_file: str | None = None) -> None:
+    handlers: list[logging.Handler] | None = None
     if log_file:
         Path(log_file).parent.mkdir(parents=True, exist_ok=True)
+        handlers = [
+            RotatingFileHandler(
+                log_file,
+                maxBytes=10 * 1024 * 1024,
+                backupCount=5,
+                encoding="utf-8",
+            )
+        ]
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        filename=log_file,
+        handlers=handlers,
     )
 
 

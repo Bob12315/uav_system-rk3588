@@ -133,6 +133,10 @@ class CommandPipeline:
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
             except (ProcessLookupError, OSError):
                 pass
+            try:
+                proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                pass
 
     def stop_external_process(self, service: str) -> None:
         """Public wrapper to stop a single service."""

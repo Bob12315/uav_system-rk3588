@@ -78,52 +78,60 @@ class WebStatusService:
     # ------------------------------------------------------------------
 
     def snapshot(self) -> dict[str, object]:
+        # Keep the shared-state critical section deliberately small.  The
+        # callbacks below may acquire their own locks (Action runtime,
+        # Mission orchestrator, LinkManager, and runtime switches), so calling
+        # them while holding this plain Lock creates lock-order coupling with
+        # the main loop and command handlers.
         with self._lock:
             snapshot = dict(self._get_snapshot())
-            snapshot.update({
-                "mission": self._latest_mission_name,
-                "stage": self._latest_mission_stage,
-                "stage_controller": self._latest_stage_controller,
-                "stage_override": (
-                    self._debug_runtime.config.force_mode
-                    if self._debug_runtime else "NO_MISSION"
-                ),
-                "mission_stage_selection": self._active_mission_stage_selection(),
-                "stage_modes": self._web_stage_modes(),
-                "hold_reason": self._latest_hold_reason,
-                "controllers": (
-                    asdict(self._switches.snapshot()) if self._switches else {}
-                ),
-                "control_commands": list(self._control_command_log)[:40],
-                "events": list(self._system_events)[:40],
-                "actions": self._mission_action_log_lines()[:20],
-                "action_lab": self._action_lab_snapshot(),
-                "action_mission": (
-                    self._get_action_mission_status_payload()
-                    if self._get_action_mission_status_payload
-                    else {}
-                ),
-                "localization": (
-                    self._get_latest_localization_result()
-                    if self._get_latest_localization_result
-                    else self._latest_localization
-                ) or {},
-                "drop_targets": (
-                    self._get_latest_drop_targets_result()
-                    if self._get_latest_drop_targets_result
-                    else self._latest_drop_targets
-                ) or {},
-                "recon_inspection": (
-                    self._get_latest_recon_inspection_result()
-                    if self._get_latest_recon_inspection_result
-                    else self._latest_recon
-                ) or {},
-                "drop_workflow": (
-                    self._get_latest_drop_workflow_result()
-                    if self._get_latest_drop_workflow_result
-                    else {}
-                ) or {},
-            })
+            control_commands = list(self._control_command_log)[:40]
+            events = list(self._system_events)[:40]
+
+        snapshot.update({
+            "mission": self._latest_mission_name,
+            "stage": self._latest_mission_stage,
+            "stage_controller": self._latest_stage_controller,
+            "stage_override": (
+                self._debug_runtime.config.force_mode
+                if self._debug_runtime else "NO_MISSION"
+            ),
+            "mission_stage_selection": self._active_mission_stage_selection(),
+            "stage_modes": self._web_stage_modes(),
+            "hold_reason": self._latest_hold_reason,
+            "controllers": (
+                asdict(self._switches.snapshot()) if self._switches else {}
+            ),
+            "control_commands": control_commands,
+            "events": events,
+            "actions": self._mission_action_log_lines()[:20],
+            "action_lab": self._action_lab_snapshot(),
+            "action_mission": (
+                self._get_action_mission_status_payload()
+                if self._get_action_mission_status_payload
+                else {}
+            ),
+            "localization": (
+                self._get_latest_localization_result()
+                if self._get_latest_localization_result
+                else self._latest_localization
+            ) or {},
+            "drop_targets": (
+                self._get_latest_drop_targets_result()
+                if self._get_latest_drop_targets_result
+                else self._latest_drop_targets
+            ) or {},
+            "recon_inspection": (
+                self._get_latest_recon_inspection_result()
+                if self._get_latest_recon_inspection_result
+                else self._latest_recon
+            ) or {},
+            "drop_workflow": (
+                self._get_latest_drop_workflow_result()
+                if self._get_latest_drop_workflow_result
+                else {}
+            ) or {},
+        })
         manager = self._get_link_manager() if self._get_link_manager else None
         snapshot["active_source"] = (
             manager.get_active_source() if manager is not None else "none"

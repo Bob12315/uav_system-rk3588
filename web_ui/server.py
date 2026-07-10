@@ -173,10 +173,8 @@ def create_app(runner, config: UiConfig) -> FastAPI:
     @app.get("/api/actions/status")
     def action_status():
         try:
-            status = runner.action_lab_tick()
             action_lab = runner.action_lab_status_payload()
             action_lab["enabled"] = bool(getattr(runner, "action_lab_enabled", False))
-            action_lab["status"] = status
             return {"ok": True, "action_lab": action_lab}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -549,6 +547,8 @@ def create_app(runner, config: UiConfig) -> FastAPI:
                 snapshot = await asyncio.to_thread(runner.web_status_snapshot)
                 await websocket.send_json(snapshot)
                 await asyncio.sleep(0.25)
+        except asyncio.CancelledError:
+            raise
         except (WebSocketDisconnect, RuntimeError):
             return
 

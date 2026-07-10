@@ -185,7 +185,10 @@ class ServiceManager:
 
     def stop(self) -> None:
         if self.yolo_receiver is not None:
-            self.yolo_receiver.close()
+            receiver = self.yolo_receiver
+            receiver.close()
+            if receiver.is_alive():
+                receiver.join(timeout=1.0)
             self.yolo_receiver = None
         if self.link_manager is not None:
             self.link_manager.stop()

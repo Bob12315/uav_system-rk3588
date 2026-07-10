@@ -89,6 +89,10 @@ class VideoSource:
                 self.udp_process.wait(timeout=1.0)
             except subprocess.TimeoutExpired:
                 self.udp_process.kill()
+                try:
+                    self.udp_process.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    pass
 
     def _open_capture(self, capture_source: str) -> cv2.VideoCapture:
         if self._looks_like_gstreamer_pipeline(capture_source):
@@ -143,7 +147,10 @@ class VideoSource:
         self.udp_process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            # The helper's stdout is a binary frame stream.  Its stderr must
+            # not be left as an unread pipe, which could fill and stall a
+            # long-running GStreamer process.
+            stderr=subprocess.DEVNULL,
             env=env,
         )
 
@@ -152,10 +159,7 @@ class VideoSource:
 
         header_line = self.udp_process.stdout.readline()
         if not header_line:
-            error_text = ""
-            if self.udp_process.stderr is not None:
-                error_text = self.udp_process.stderr.read(1024).decode("utf-8", errors="ignore")
-            raise RuntimeError(f"failed to start UDP bridge on port {udp_port}: {error_text.strip()}")
+            raise RuntimeError(f"failed to start UDP bridge on port {udp_port}")
 
         header = json.loads(header_line.decode("utf-8"))
         if "error" in header:

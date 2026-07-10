@@ -53,17 +53,6 @@ def test_action_lab_only_loop_does_not_deadlock():
         "control_command_log_lock must be threading.Lock, not RLock"
     )
 
-    # Make the field reference controller's drone snapshot fast and safe.
-    runner.field_reference_controller._get_drone_snapshot = lambda: {
-        "global_position_valid": False,
-        "local_position_valid": False,
-        "attitude_valid": False,
-        "gps_fix_type": 0,
-        "satellites_visible": 0,
-        "gps_eph": -1.0,
-        "gps_epv": -1.0,
-    }
-
     loop_thread = threading.Thread(
         target=runner._action_lab_only_loop,
         name="test-deadlock-loop",
@@ -116,16 +105,6 @@ def test_status_not_called_inside_lock():
     control_command_log_lock is held."""
     runner = _make_runner()
 
-    runner.field_reference_controller._get_drone_snapshot = lambda: {
-        "global_position_valid": False,
-        "local_position_valid": False,
-        "attitude_valid": False,
-        "gps_fix_type": 0,
-        "satellites_visible": 0,
-        "gps_eph": -1.0,
-        "gps_epv": -1.0,
-    }
-
     # Wrap the controller so that status() asserts the lock is NOT held.
     runner.field_reference_controller = _LockDetectingController(
         runner.field_reference_controller, runner.control_command_log_lock
@@ -154,16 +133,6 @@ def test_web_status_snapshot_returns_without_deadlock():
     """web_status_snapshot() must return promptly even when the main loop
     is (or was) running."""
     runner = _make_runner()
-
-    runner.field_reference_controller._get_drone_snapshot = lambda: {
-        "global_position_valid": False,
-        "local_position_valid": False,
-        "attitude_valid": False,
-        "gps_fix_type": 0,
-        "satellites_visible": 0,
-        "gps_eph": -1.0,
-        "gps_epv": -1.0,
-    }
 
     # Run the loop briefly in background
     loop_thread = threading.Thread(

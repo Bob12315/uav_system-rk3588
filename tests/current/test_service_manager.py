@@ -175,3 +175,33 @@ def test_service_manager_reconnect_stops_old_link_and_starts_new_link(monkeypatc
     assert manager.link_manager is created[-1]
     assert manager.link_manager.config is new_config
     assert manager.link_manager.started is True
+
+
+def test_service_manager_stop_joins_yolo_receiver() -> None:
+    class FakeReceiver:
+        def __init__(self) -> None:
+            self.closed = False
+            self.join_timeout = None
+
+        def close(self) -> None:
+            self.closed = True
+
+        def is_alive(self) -> bool:
+            return True
+
+        def join(self, timeout=None) -> None:
+            self.join_timeout = timeout
+
+    app_config = SimpleNamespace(
+        runtime=SimpleNamespace(require_gimbal_feedback=False),
+        telemetry=object(),
+    )
+    manager = ServiceManager(app_config, threading.Event())
+    receiver = FakeReceiver()
+    manager.yolo_receiver = receiver
+
+    manager.stop()
+
+    assert receiver.closed is True
+    assert receiver.join_timeout == 1.0
+    assert manager.yolo_receiver is None
