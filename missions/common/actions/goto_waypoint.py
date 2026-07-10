@@ -21,6 +21,13 @@ class GotoWaypointAction(ActionModule):
         x_raw = data.get("x")
         y_raw = data.get("y")
         altitude_raw = data.get("altitude_m")
+        # GLOBAL lat/lon input support (new path)
+        lat_raw = data.get("lat")
+        lon_raw = data.get("lon")
+        target_frame = str(data.get("target_frame", "local")).strip().lower()
+        if target_frame not in {"local", "global"}:
+            raise ValueError("target_frame must be local or global")
+        use_global_latlon = target_frame == "global" and lat_raw is not None and lon_raw is not None
         # when skip enabled, check target validity before float conversion
         if self.skip_if_invalid_target:
             target = data.get("target")
@@ -35,23 +42,26 @@ class GotoWaypointAction(ActionModule):
                 self.started = True
                 self.stopped = False
                 return
-            if self._is_invalid_coord(x_raw) or self._is_invalid_coord(y_raw) or self._is_invalid_coord(altitude_raw):
+            raw_x_check = lat_raw if use_global_latlon else x_raw
+            raw_y_check = lon_raw if use_global_latlon else y_raw
+            if self._is_invalid_coord(raw_x_check) or self._is_invalid_coord(raw_y_check) or self._is_invalid_coord(altitude_raw):
                 self._skipped = True
                 self.started = True
                 self.stopped = False
                 return
 
-        x = self._required_float(data, "x")
-        y = self._required_float(data, "y")
+        if use_global_latlon:
+            x = self._required_float({"v": lat_raw}, "v")
+            y = self._required_float({"v": lon_raw}, "v")
+        else:
+            x = self._required_float(data, "x")
+            y = self._required_float(data, "y")
         altitude_m = self._required_float(data, "altitude_m")
         if altitude_m <= 0.0:
             raise ValueError("altitude_m must be positive")
         waypoint_mode = str(data.get("waypoint_mode", "absolute")).strip().lower()
         if waypoint_mode not in {"absolute", "field"}:
             raise ValueError("waypoint_mode must be absolute or field")
-        target_frame = str(data.get("target_frame", "local")).strip().lower()
-        if target_frame not in {"local", "global"}:
-            raise ValueError("target_frame must be local or global")
 
         yaw_mode = str(data.get("yaw_mode", "arm_heading")).strip().lower()
         if yaw_mode not in {"hold", "fixed", "arm_heading", "field_heading"}:

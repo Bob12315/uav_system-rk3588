@@ -223,6 +223,7 @@ class SystemRunner:
                             "name": "action_lab_only",
                             "reason": "mission_modules_unavailable",
                         },
+                        "field_reference": self.field_reference_controller.status().get("field_reference", {}),
                     }
 
                 self._record_blackbox_cycle(

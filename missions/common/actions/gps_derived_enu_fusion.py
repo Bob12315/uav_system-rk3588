@@ -132,6 +132,7 @@ class GpsDerivedEnuFusion:
                 "ex": est.ex,
                 "ey": est.ey,
                 "source_waypoint": est.source_waypoint,
+                "timestamp": est.timestamp,
                 "_raw_est": est,
             })
 
@@ -146,21 +147,21 @@ class GpsDerivedEnuFusion:
             lat, lon = self._enu_to_gps(east_m, north_m)
 
             # Collect source metadata
-            source_estimates = obj.get("source_estimates", [])
-            if not source_estimates:
+            members = obj.get("members", [])
+            if not members:
                 # fallback: use top-level fields
                 source_waypoints: list[str] = []
                 source_frames: list[int] = []
             else:
                 source_waypoints = [
-                    str(s.get("source_waypoint", ""))
-                    for s in source_estimates
-                    if isinstance(s, dict)
+                    str(m.get("source_waypoint", ""))
+                    for m in members
+                    if isinstance(m, dict)
                 ]
                 source_frames = [
-                    int(s.get("frame_id", 0))
-                    for s in source_estimates
-                    if isinstance(s, dict) and s.get("frame_id") is not None
+                    int(m.get("frame_id", 0))
+                    for m in members
+                    if isinstance(m, dict) and m.get("frame_id") is not None
                 ]
 
             result.append(GpsLocalizedObject(
@@ -185,13 +186,13 @@ class GpsDerivedEnuFusion:
     # ------------------------------------------------------------------
 
     def _gps_to_enu(self, lat: float, lon: float) -> Tuple[float, float]:
-        """Convert GPS lat/lon to east/north metres relative to origin."""
-        d_lat_rad = math.radians(lat - self.origin_lat)
-        d_lon_rad = math.radians(lon - self.origin_lon)
-        cos_lat = math.cos(math.radians(self.origin_lat))
-        north_m = d_lat_rad * self._EARTH_RADIUS_M
-        east_m = d_lon_rad * self._EARTH_RADIUS_M * cos_lat
-        return east_m, north_m
+        """Convert GPS lat/lon to east/north metres relative to origin.
+        Uses gps_enu_deltas for cross-dateline correctness."""
+        from app.field_reference import gps_enu_deltas  # noqa: PLC0415
+        d_north, d_east = gps_enu_deltas(
+            self.origin_lat, self.origin_lon, lat, lon
+        )
+        return d_east, d_north
 
     def _enu_to_gps(self, east_m: float, north_m: float) -> Tuple[float, float]:
         """Convert east/north metres relative to origin back to GPS."""

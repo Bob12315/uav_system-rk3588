@@ -1,26 +1,26 @@
 """Runtime field target resolver.
 
-Resolves Schema v3 runtime field geometry into GLOBAL GPS waypoint targets
-(HOME, DROP_SCAN_1..4) suitable for ``GotoWaypointAction`` with
-``target_frame=global``.
+Resolves HOME and DROP_SCAN_1..4 from a frozen runtime field reference
+status dict (JSON-safe, as produced by ``FieldReferenceController.status()``).
 
-Reads the *frozen* ``FieldReference`` from ``FieldReferenceService`` and
-rejects if readiness conditions are not met.
+Consumes:
+    context["field_reference"] = FieldReferenceController.status()["field_reference"]
+
+Readiness requires ALL of:
+    is_confirmed == True
+    is_frozen == True
+    is_ready_for_field_to_gps == True
+    active_source == "runtime_origin_forward_marker"
+    synced_to_runtime == True
+    runtime_binding.state == "applied"
+    runtime_binding.profile_id is non-empty
+    runtime_binding.geometry is a valid dict with home + drop_scan_waypoints
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
-
-from .field_profile import FieldProfile
-from .field_reference import FieldReference
-from .runtime_field_geometry import (
-    RuntimeFieldGeometry,
-    RuntimeFieldGeometryError,
-    RuntimeFieldPoint,
-    build_runtime_field_geometry,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -45,64 +45,76 @@ class GpsScanTarget:
 
 
 class RuntimeFieldTargetResolver:
-    """Resolve HOME + DROP_SCAN_1..4 from a frozen runtime field reference.
+    """Resolve HOME + DROP_SCAN_1..4 from a JSON-safe field_reference status dict.
 
     Usage::
 
-        resolver = RuntimeFieldTargetResolver(profile, reference)
-        home = resolver.home()
-        scan_waypoints = resolver.scan_waypoints()   # tuple of 4
-
-    All methods raise :exc:`RuntimeFieldTargetError` when the runtime
-    state is not ready.
+        resolver = RuntimeFieldTargetResolver(field_reference_dict)
+        if resolver.is_ready:
+            home = resolver.home(altitude_m=5.0)
+            scans = resolver.scan_waypoints()
     """
 
-    def __init__(
-        self,
-        profile: FieldProfile,
-        reference: FieldReference,
-    ) -> None:
-        self._profile = profile
-        self._reference = reference
-        self._geometry: RuntimeFieldGeometry | None = None
+    def __init__(self, field_reference: Dict[str, Any]) -> None:
+        self._fr = field_reference or {}
         self._error: str | None = None
+        self._home: Dict[str, Any] | None = None
+        self._scan_waypoints: List[Dict[str, Any]] | None = None
+        self._profile_id: str = ""
 
-        if profile.schema_version != 3:
-            self._error = "only schema v3 profiles are supported"
+        # ── readiness checks ──────────────────────────────────────────
+        if self._fr.get("is_confirmed") is not True:
+            self._error = "field reference not confirmed"
             return
-
-        if not reference.is_confirmed:
-            self._error = "field reference is not confirmed"
+        if self._fr.get("is_frozen") is not True:
+            self._error = "field reference not frozen"
             return
-
-        if not reference.is_frozen:
-            self._error = "field reference is not frozen"
+        if self._fr.get("is_ready_for_field_to_gps") is not True:
+            self._error = "field reference not ready for field→GPS"
             return
-
-        if not reference.is_ready_for_field_to_gps():
-            self._error = "field reference is not ready for field→GPS conversion"
-            return
-
-        if reference.origin_source not in ("gps_marker", "manual_gps_input"):
+        if self._fr.get("active_source") != "runtime_origin_forward_marker":
             self._error = (
-                f"origin_source must be gps_marker or manual_gps_input, "
-                f"got {reference.origin_source!r}"
+                f"active_source must be runtime_origin_forward_marker, "
+                f"got {self._fr.get('active_source')!r}"
             )
             return
-
-        if reference.origin_lat is None or reference.origin_lon is None:
-            self._error = "origin GPS not set"
+        if self._fr.get("synced_to_runtime") is not True:
+            self._error = "field reference not synced to runtime"
             return
 
-        try:
-            self._geometry = build_runtime_field_geometry(
-                profile,
-                origin_lat=reference.origin_lat,
-                origin_lon=reference.origin_lon,
-            )
-        except RuntimeFieldGeometryError as exc:
-            self._error = f"failed to build runtime geometry: {exc}"
+        rb = self._fr.get("runtime_binding")
+        if not isinstance(rb, dict):
+            self._error = "runtime_binding missing"
             return
+        if rb.get("state") != "applied":
+            self._error = f"runtime_binding.state must be applied, got {rb.get('state')!r}"
+            return
+
+        self._profile_id = str(rb.get("profile_id") or "")
+        if not self._profile_id:
+            self._error = "runtime_binding.profile_id is empty"
+            return
+
+        geometry = rb.get("geometry")
+        if not isinstance(geometry, dict):
+            self._error = "runtime_binding.geometry missing or not a dict"
+            return
+
+        home = geometry.get("home")
+        if not isinstance(home, dict) or "lat" not in home or "lon" not in home:
+            self._error = "geometry.home missing or invalid"
+            return
+        self._home = dict(home)
+
+        scans = geometry.get("drop_scan_waypoints")
+        if not isinstance(scans, list) or len(scans) != 4:
+            self._error = f"geometry.drop_scan_waypoints must be a list of 4, got {type(scans).__name__}"
+            return
+        for i, wp in enumerate(scans):
+            if not isinstance(wp, dict) or "lat" not in wp or "lon" not in wp:
+                self._error = f"geometry.drop_scan_waypoints[{i}] invalid"
+                return
+        self._scan_waypoints = [dict(wp) for wp in scans]
 
     # ------------------------------------------------------------------
     # public API
@@ -110,79 +122,95 @@ class RuntimeFieldTargetResolver:
 
     @property
     def is_ready(self) -> bool:
-        return self._geometry is not None
+        return self._error is None
 
     @property
     def error(self) -> str | None:
         return self._error
 
     @property
-    def geometry(self) -> RuntimeFieldGeometry:
-        self._require_ready()
-        return self._geometry  # type: ignore[return-value]
+    def profile_id(self) -> str:
+        return self._profile_id
 
-    def home(self) -> GpsScanTarget:
-        """Return HOME as a GLOBAL GPS target (runtime origin A)."""
+    def home(self, altitude_m: float | None = None) -> GpsScanTarget:
+        """Return HOME as a GLOBAL GPS target.
+
+        ``altitude_m`` MUST be provided (> 0) — HOME GPS point has
+        altitude 0 and cannot be used directly for flight.
+        """
         self._require_ready()
-        h = self._geometry.home  # type: ignore[union-attr]
+        h = self._home
+        alt = altitude_m
+        if alt is None or alt <= 0.0:
+            raise RuntimeFieldTargetError(
+                "HOME altitude_m must be provided and > 0"
+            )
         return GpsScanTarget(
             name="HOME",
-            lat=h.lat,
-            lon=h.lon,
-            altitude_m=h.altitude_m,
+            lat=float(h["lat"]),
+            lon=float(h["lon"]),
+            altitude_m=float(alt),
             yaw_mode="hold",
         )
 
-    def scan_waypoints(self) -> Tuple[GpsScanTarget, ...]:
-        """Return DROP_SCAN_1..4 as GLOBAL GPS targets."""
-        self._require_ready()
-        return tuple(
-            GpsScanTarget(
-                name=p.name,
-                lat=p.lat,
-                lon=p.lon,
-                altitude_m=p.altitude_m,
-                yaw_mode="hold",
-            )
-            for p in self._geometry.drop_scan_waypoints  # type: ignore[union-attr]
-        )
+    def scan_waypoints(
+        self, altitude_overrides: Dict[str, float] | None = None
+    ) -> Tuple[GpsScanTarget, ...]:
+        """Return DROP_SCAN_1..4 as GLOBAL GPS targets.
 
-    def target_by_name(self, name: str) -> GpsScanTarget:
-        """Resolve a named target (HOME, DROP_SCAN_1..4)."""
+        Optionally override altitude_m per waypoint name.
+        """
         self._require_ready()
-        g = self._geometry  # type: ignore[union-attr]
+        overrides = altitude_overrides or {}
+        result: list[GpsScanTarget] = []
+        for wp in self._scan_waypoints:
+            name = str(wp.get("name", ""))
+            alt = overrides.get(name, float(wp.get("altitude_m", 0.0)))
+            result.append(GpsScanTarget(
+                name=name,
+                lat=float(wp["lat"]),
+                lon=float(wp["lon"]),
+                altitude_m=float(alt),
+                yaw_mode="hold",
+            ))
+        return tuple(result)
+
+    def target_by_name(self, name: str, altitude_m: float | None = None) -> GpsScanTarget:
+        """Resolve a named target."""
+        self._require_ready()
         if name == "HOME":
-            return self.home()
-        for p in g.drop_scan_waypoints:
-            if p.name == name:
+            return self.home(altitude_m=altitude_m)
+        for wp in self._scan_waypoints:
+            if wp.get("name") == name:
+                alt = altitude_m if altitude_m is not None else float(wp.get("altitude_m", 0.0))
                 return GpsScanTarget(
-                    name=p.name,
-                    lat=p.lat,
-                    lon=p.lon,
-                    altitude_m=p.altitude_m,
+                    name=name,
+                    lat=float(wp["lat"]),
+                    lon=float(wp["lon"]),
+                    altitude_m=float(alt),
                     yaw_mode="hold",
                 )
         raise RuntimeFieldTargetError(f"unknown target: {name!r}")
 
-    def as_action_dict(self, name: str) -> Dict[str, Any]:
-        """Return a dict suitable for ``GotoWaypointAction.start()``.
+    def as_action_dict(
+        self, name: str, altitude_m: float | None = None
+    ) -> Dict[str, Any]:
+        """Return a dict suitable for ``GotoWaypointAction.start()``
+        using lat/lon GLOBAL input.
 
         Produces::
 
-            {
-                "x": <lat>, "y": <lon>, "altitude_m": <alt>,
-                "waypoint_mode": "absolute",
-                "target_frame": "global",
-                "yaw_mode": "hold",
-            }
+            {"lat": <lat>, "lon": <lon>, "altitude_m": <alt>,
+             "target_frame": "global", "waypoint_mode": "absolute",
+             "yaw_mode": "hold"}
         """
-        t = self.target_by_name(name)
+        t = self.target_by_name(name, altitude_m=altitude_m)
         return {
-            "x": t.lat,
-            "y": t.lon,
+            "lat": t.lat,
+            "lon": t.lon,
             "altitude_m": t.altitude_m,
-            "waypoint_mode": "absolute",
             "target_frame": "global",
+            "waypoint_mode": "absolute",
             "yaw_mode": t.yaw_mode,
             "key": f"global_scan_{name}",
         }

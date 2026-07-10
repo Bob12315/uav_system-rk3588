@@ -77,6 +77,7 @@ class RuntimeContextBuilder:
             "health": snapshot.get("health", {}),
             "command": snapshot.get("command", {}),
             "mission_detail": snapshot.get("mission_detail", {}),
+            "field_reference": snapshot.get("field_reference", {}),
         }
         if self.field_heading_yaw_rad is not None:
             context["field_heading_yaw_rad"] = self.field_heading_yaw_rad

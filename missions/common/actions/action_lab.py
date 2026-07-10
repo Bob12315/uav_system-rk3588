@@ -4,6 +4,7 @@ from typing import Any
 
 from .align_descend import AlignDescendAction
 from .build_recon_report import BuildReconReportAction
+from .gps_multi_view_localize import GpsMultiViewLocalizeAction
 from .goto_waypoint import GotoWaypointAction
 from .land import LandAction
 from .multi_view_localize import MultiViewLocalizeAction
@@ -49,6 +50,7 @@ def create_action_lab_registry() -> ActionRegistry:
     registry.register("validate_target", ValidateTargetAction)
     registry.register("drop_sequence", DropSequenceAction)
     registry.register("recon_sequence", ReconSequenceAction)
+    registry.register("gps_multi_view_localize", GpsMultiViewLocalizeAction)
     return registry
 
 
@@ -521,6 +523,24 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "observe_max_updates": 200,
                 "climb_max_updates": 100,
                 "continue_after_target_failure": True,
+            },
+        },
+        {
+            "name": "gps_multi_view_localize",
+            "label": "GPS Multi-View Localize",
+            "description": "Fly to 4 GLOBAL GPS scan points from frozen runtime reference, capture detections, GPS-project and fuse into localized objects.",
+            "default_params": {
+                "capture_updates_per_waypoint": 3,
+                "settle_updates_per_waypoint": 2,
+                "max_updates_per_waypoint": 100,
+                "tolerance_xy_m": 0.35,
+                "tolerance_z_m": 0.35,
+                "goto_min_hold_updates": 1,
+                "detection_source": "scene",
+                "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
+                "min_confidence": 0.35,
+                "camera": {"fov_x_deg": 51.3, "fov_y_deg": 39.6, "image_x_sign": 1.0, "image_y_sign": -1.0},
+                "fusion": {"cluster_radius_m": 0.8, "outlier_radius_m": 0.8, "min_cluster_size": 2, "center_weight_power": 1.0}
             },
         },
     ]

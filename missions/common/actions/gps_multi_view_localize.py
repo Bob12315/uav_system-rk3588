@@ -1,13 +1,9 @@
-"""GPS-first multi-view localize action.
+"""GPS-first multi-view localize action (runtime context integration).
 
-Feature 2.4 — GPS-first scan localization.
+Feature 2.4 — GPS-first scan localization via Action Lab + runtime context.
 
-Flown sequence:
-    1. Resolve DROP_SCAN_1..4 as GLOBAL GPS targets from frozen runtime reference.
-    2. Fly to each with ``GotoWaypointAction`` (target_frame=global).
-    3. At each scan point, capture detections with capture-time telemetry snapshot.
-    4. Project each detection to raw GPS estimate via ``GpsTargetProjector``.
-    5. Fuse all raw estimates into ``localized_objects`` with lat/lon.
+Reads ``context["field_reference"]`` in first ``update()`` to initialise
+the resolver.  All params are JSON-safe dicts (no Python objects).
 """
 
 from __future__ import annotations
@@ -42,10 +38,9 @@ from .result import ActionResult
 class GpsMultiViewLocalizeAction(ActionModule):
     """GPS-first multi-view scan localization.
 
-    Requires a *frozen* runtime field reference.  Flies to 4 GLOBAL
-    scan points derived from the v3 profile's drop_scan waypoints,
-    captures YOLO detections at each, projects them to GPS, and
-    fuses into GPS-localized objects.
+    On first ``update(context)``, reads ``context["field_reference"]`` to
+    initialise the resolver.  Flies to 4 GLOBAL scan points, captures
+    detections, GPS-projects, and fuses.
     """
 
     def __init__(self) -> None:
@@ -56,63 +51,44 @@ class GpsMultiViewLocalizeAction(ActionModule):
     def start(self, params: dict[str, Any] | None = None) -> None:
         data = params or {}
 
-        # Resolver inputs
-        profile = data.get("profile")
-        reference = data.get("field_reference")
-        if profile is None:
-            raise ValueError("profile is required for GPS multi-view localize")
-        if reference is None:
-            raise ValueError("field_reference is required")
-
-        self.resolver = RuntimeFieldTargetResolver(profile, reference)
-        if not self.resolver.is_ready:
-            raise RuntimeFieldTargetError(self.resolver.error or "resolver not ready")
-
-        # Scan targets
-        self.scan_targets = list(self.resolver.scan_waypoints())
-        self.home_target = self.resolver.home()
-
-        # Camera
-        cam_raw = dict(data.get("camera") or {})
-        if "fov_x_deg" not in cam_raw:
-            cam_raw["fov_x_deg"] = 51.3
-        if "fov_y_deg" not in cam_raw:
-            cam_raw["fov_y_deg"] = 39.6
-        self.camera = GpsProjectionCamera(**cam_raw)
-        self.projector = GpsTargetProjector(self.camera)
-
-        # Fusion
-        fusion_cfg = dict(data.get("fusion") or {})
-        origin_lat = reference.origin_lat
-        origin_lon = reference.origin_lon
-        self.fuser = GpsDerivedEnuFusion(
-            origin_lat=origin_lat,
-            origin_lon=origin_lon,
-            config=GpsFusionConfig(**{k: v for k, v in fusion_cfg.items()
-                                       if k in GpsFusionConfig.__dataclass_fields__}),
-            class_names=(set(data["class_names"]) if data.get("class_names") else None),
+        # Store params for deferred init
+        self._params_profile_id: str = str(data.get("profile_id") or "")
+        self._params_capture_updates: int = int(data.get("capture_updates_per_waypoint", 3))
+        self._params_settle_updates: int = int(data.get("settle_updates_per_waypoint", 2))
+        self._params_max_updates: int = int(data.get("max_updates_per_waypoint", 100))
+        self._params_tolerance_xy: float = float(data.get("tolerance_xy_m", 0.35))
+        self._params_tolerance_z: float = float(data.get("tolerance_z_m", 0.35))
+        self._params_goto_min_hold: int = int(data.get("goto_min_hold_updates", 1))
+        self._params_priority: int = int(data.get("priority", 5))
+        self._params_detection_source: str = str(data.get("detection_source", "scene"))
+        self._params_class_names: list[str] | None = (
+            [str(n) for n in data["class_names"]] if data.get("class_names") else None
         )
+        self._params_min_confidence: float = float(data.get("min_confidence", 0.35))
 
-        # Goto params
+        cam_raw = dict(data.get("camera") or {})
+        cam_raw.setdefault("fov_x_deg", 51.3)
+        cam_raw.setdefault("fov_y_deg", 39.6)
+        self.camera = GpsProjectionCamera(**cam_raw)
+
+        fusion_raw = dict(data.get("fusion") or {})
+        self._fusion_config = GpsFusionConfig(**{
+            k: v for k, v in fusion_raw.items()
+            if k in GpsFusionConfig.__dataclass_fields__
+        })
+
         self.yaw_mode = str(data.get("yaw_mode", "hold")).strip().lower()
-        self.goto_tolerance_xy_m = float(data.get("tolerance_xy_m", 0.3))
-        self.goto_tolerance_z_m = float(data.get("tolerance_z_m", 0.3))
-        self.goto_min_hold_updates = int(data.get("goto_min_hold_updates", 1))
-        self.priority = int(data.get("priority", 5))
 
-        # Capture params
-        self.capture_updates_per_waypoint = int(data.get("capture_updates_per_waypoint", 3))
-        self.settle_updates_per_waypoint = int(data.get("settle_updates_per_waypoint", 3))
-        self.max_updates_per_waypoint = int(data.get("max_updates_per_waypoint", 100))
-
-        self.min_confidence = float(data.get("min_confidence", 0.25))
-        class_names = data.get("class_names")
-        self.class_names = {str(n) for n in class_names} if class_names else None
-
-        self.detection_source = str(data.get("detection_source", "scene")).strip().lower()
+        # Deferred init
+        self._initialized = False
+        self.resolver: RuntimeFieldTargetResolver | None = None
+        self.projector: GpsTargetProjector | None = None
+        self.fuser: GpsDerivedEnuFusion | None = None
+        self.scan_targets: list[Any] = []
+        self.home_target: Any = None
 
         # State
-        self.phase = "goto"
+        self.phase = "init"
         self.waypoint_index = 0
         self.raw_estimates: list[GpsRawEstimate] = []
         self.fused_objects: list[GpsLocalizedObject] = []
@@ -123,6 +99,7 @@ class GpsMultiViewLocalizeAction(ActionModule):
         self.failure_reason = ""
         self.goto_action: GotoWaypointAction | None = None
         self.run_id = str(uuid.uuid4())[:8]
+        self.rejected_by_reason: dict[str, int] = {}
 
         self.started = True
         self.stopped = False
@@ -139,14 +116,10 @@ class GpsMultiViewLocalizeAction(ActionModule):
             return ActionResult(failed=True, reason=self.failure_reason or "gps_multi_view_failed",
                                 detail=self._detail())
 
-        self.update_count_at_waypoint += 1
-        if self.update_count_at_waypoint > self.max_updates_per_waypoint:
-            self.phase = "failed"
-            self.failure_reason = "waypoint_timeout"
-            return ActionResult(failed=True, reason="waypoint_timeout", detail=self._detail())
-
         data = context or {}
 
+        if self.phase == "init":
+            return self._update_init(data)
         if self.phase == "goto":
             return self._update_goto(data)
         if self.phase == "settle":
@@ -161,25 +134,84 @@ class GpsMultiViewLocalizeAction(ActionModule):
             self.goto_action.stop()
 
     def reset(self) -> None:
+        self._initialized = False
         self.resolver = None
-        self.scan_targets = []
-        self.home_target = None
-        self.camera = GpsProjectionCamera()
-        self.projector = GpsTargetProjector()
+        self.projector = None
         self.fuser = None
+        self.scan_targets = []
         self.waypoint_index = 0
         self.phase = "idle"
         self.goto_action = None
         self.raw_estimates = []
         self.fused_objects = []
-        self.settle_count = 0
-        self.capture_count = 0
-        self.update_count_at_waypoint = 0
         self.captures = []
+        self.rejected_by_reason = {}
         self.failure_reason = ""
         self.run_id = ""
         self.started = False
         self.stopped = False
+
+    # ── deferred init ─────────────────────────────────────────────────
+
+    def _update_init(self, context: dict[str, Any]) -> ActionResult:
+        """First update: initialise resolver from context["field_reference"]."""
+        fr = context.get("field_reference")
+        if not isinstance(fr, dict):
+            self.phase = "failed"
+            self.failure_reason = "missing_field_reference_context"
+            return ActionResult(failed=True, reason="missing_field_reference_context")
+
+        try:
+            self.resolver = RuntimeFieldTargetResolver(fr)
+        except Exception as exc:
+            self.phase = "failed"
+            self.failure_reason = f"resolver_init_failed: {exc}"
+            return ActionResult(failed=True, reason="resolver_init_failed")
+
+        if not self.resolver.is_ready:
+            self.phase = "failed"
+            self.failure_reason = self.resolver.error or "resolver not ready"
+            return ActionResult(failed=True, reason="resolver_not_ready")
+
+        # Profile ID check
+        if self._params_profile_id:
+            if self._params_profile_id != self.resolver.profile_id:
+                self.phase = "failed"
+                self.failure_reason = f"profile_id mismatch: params={self._params_profile_id} runtime={self.resolver.profile_id}"
+                return ActionResult(failed=True, reason="profile_id_mismatch")
+
+        # Scan targets
+        self.scan_targets = list(self.resolver.scan_waypoints())
+
+        # Projector
+        self.projector = GpsTargetProjector(self.camera)
+
+        # Fuser
+        rb = fr.get("runtime_binding", {})
+        origin_lat = None
+        origin_lon = None
+        geom = rb.get("geometry", {}) if isinstance(rb, dict) else {}
+        home = geom.get("home", {}) if isinstance(geom, dict) else {}
+        if isinstance(home, dict):
+            origin_lat = home.get("lat")
+            origin_lon = home.get("lon")
+        if origin_lat is None or origin_lon is None:
+            self.phase = "failed"
+            self.failure_reason = "missing_origin_in_geometry"
+            return ActionResult(failed=True, reason="missing_origin_in_geometry")
+
+        self.fuser = GpsDerivedEnuFusion(
+            origin_lat=float(origin_lat),
+            origin_lon=float(origin_lon),
+            config=self._fusion_config,
+            class_names=set(self._params_class_names) if self._params_class_names else None,
+        )
+
+        self._initialized = True
+        self.phase = "goto"
+        self.waypoint_index = 0
+        self.goto_action = self._new_goto_action()
+        return self._update_goto(context)
 
     # ── phase handlers ──────────────────────────────────────────────
 
@@ -196,54 +228,83 @@ class GpsMultiViewLocalizeAction(ActionModule):
 
         self.phase = "settle"
         self.settle_count = 0
+        self.update_count_at_waypoint = 0
         return ActionResult(reason="gps_multi_view_settle", detail=self._detail())
 
     def _update_settle(self) -> ActionResult:
         self.settle_count += 1
-        if self.settle_count >= self.settle_updates_per_waypoint:
+        self.update_count_at_waypoint += 1
+        if self.update_count_at_waypoint > self._params_max_updates:
+            self.phase = "failed"
+            self.failure_reason = "waypoint_timeout"
+            return ActionResult(failed=True, reason="waypoint_timeout", detail=self._detail())
+        if self.settle_count >= self._params_settle_updates:
             self.phase = "capture"
             self.capture_count = 0
             return ActionResult(reason="gps_multi_view_capture", detail=self._detail())
         return ActionResult(reason="gps_multi_view_settle", detail=self._detail())
 
     def _update_capture(self, context: dict[str, Any]) -> ActionResult:
-        # Snapshot capture-time telemetry — record BEFORE any fusion step
+        self.update_count_at_waypoint += 1
+        if self.update_count_at_waypoint > self._params_max_updates:
+            self.phase = "failed"
+            self.failure_reason = "waypoint_timeout"
+            return ActionResult(failed=True, reason="waypoint_timeout", detail=self._detail())
+
+        # ── capture-time telemetry snapshot (priority: capture_telemetry > drone) ──
         capture_snapshot = self._capture_snapshot(context)
+        if capture_snapshot is None:
+            self.phase = "failed"
+            self.failure_reason = "invalid_capture_telemetry"
+            return ActionResult(failed=True, reason="invalid_capture_telemetry",
+                                detail=self._detail())
 
         detections, image_width, image_height = self._detections(context)
         new_estimates: list[GpsRawEstimate] = []
 
         for det in detections:
-            # Class filter
-            class_name = str(det.get("class_name") or "")
-            if self.class_names and class_name not in self.class_names:
-                continue
-            # Confidence filter
-            conf = det.get("confidence")
-            if conf is not None and float(conf) < self.min_confidence:
-                continue
-
             try:
-                est = self.projector.project_detection(
-                    det, capture_snapshot,
-                    image_width=image_width, image_height=image_height,
-                )
-                # Tag with waypoint
-                est = GpsRawEstimate(
-                    lat=est.lat, lon=est.lon,
-                    east_offset_m=est.east_offset_m, north_offset_m=est.north_offset_m,
-                    capture_drone_lat=est.capture_drone_lat,
-                    capture_drone_lon=est.capture_drone_lon,
-                    capture_yaw_rad=est.capture_yaw_rad,
-                    capture_relative_altitude_m=est.capture_relative_altitude_m,
-                    ex=est.ex, ey=est.ey,
-                    class_name=est.class_name, confidence=est.confidence,
-                    track_id=est.track_id, frame_id=est.frame_id,
-                    timestamp=est.timestamp,
+                # Class filter
+                class_name = str(det.get("class_name") or "")
+                if self._params_class_names and class_name not in self._params_class_names:
+                    self._inc_reject("class_not_allowed")
+                    continue
+
+                # Confidence filter
+                conf = det.get("confidence")
+                if conf is not None:
+                    try:
+                        cf = float(conf)
+                    except (TypeError, ValueError):
+                        self._inc_reject("invalid_confidence")
+                        continue
+                    if cf < self._params_min_confidence:
+                        self._inc_reject("low_confidence")
+                        continue
+
+                # Extract ex/ey
+                ex, ey = self._detection_ex_ey(det, image_width, image_height)
+                if ex is None:
+                    self._inc_reject("missing_ex_ey")
+                    continue
+
+                # GPS project
+                est = self.projector.project(
+                    drone_lat=capture_snapshot["drone_lat"],
+                    drone_lon=capture_snapshot["drone_lon"],
+                    drone_yaw_rad=capture_snapshot["drone_yaw_rad"],
+                    relative_altitude_m=capture_snapshot["relative_altitude_m"],
+                    ex=ex, ey=ey,
+                    class_name=class_name,
+                    confidence=conf,
+                    track_id=_opt_int(det.get("track_id")),
+                    frame_id=_opt_int(det.get("frame_id")),
+                    timestamp=_opt_float(det.get("timestamp")),
                     source_waypoint=f"DROP_SCAN_{self.waypoint_index + 1}",
                 )
                 new_estimates.append(est)
-            except GpsProjectionError:
+            except (GpsProjectionError, ValueError, TypeError):
+                self._inc_reject("projection_failed")
                 continue
 
         self.raw_estimates.extend(new_estimates)
@@ -251,7 +312,7 @@ class GpsMultiViewLocalizeAction(ActionModule):
             "waypoint_index": self.waypoint_index,
             "detections_count": len(detections),
             "new_estimates_count": len(new_estimates),
-            "drone_snapshot": capture_snapshot,
+            "drone_snapshot": {k: v for k, v in capture_snapshot.items() if k != "source_waypoint"},
         })
 
         self.capture_count += 1
@@ -260,7 +321,7 @@ class GpsMultiViewLocalizeAction(ActionModule):
             "new_estimates_count": len(new_estimates),
         })
 
-        if self.capture_count < self.capture_updates_per_waypoint:
+        if self.capture_count < self._params_capture_updates:
             return ActionResult(reason="gps_multi_view_capture", detail=detail)
 
         # Next waypoint or finish
@@ -278,7 +339,7 @@ class GpsMultiViewLocalizeAction(ActionModule):
             self.failure_reason = "no_targets"
             return ActionResult(failed=True, reason="no_targets", detail=self._detail())
 
-        self.fused_objects = self.fuser.fuse(self.raw_estimates) if self.fuser else []
+        self.fused_objects = self.fuser.fuse(self.raw_estimates)
         if not self.fused_objects:
             self.phase = "failed"
             self.failure_reason = "no_target_fused"
@@ -292,32 +353,43 @@ class GpsMultiViewLocalizeAction(ActionModule):
     def _new_goto_action(self) -> GotoWaypointAction:
         t = self.scan_targets[self.waypoint_index]
         gp: dict[str, Any] = {
-            "x": t.lat,
-            "y": t.lon,
+            "lat": t.lat,
+            "lon": t.lon,
             "altitude_m": t.altitude_m,
-            "waypoint_mode": "absolute",
             "target_frame": "global",
+            "waypoint_mode": "absolute",
             "yaw_mode": self.yaw_mode,
             "frame": GLOBAL_RELATIVE_ALT_INT,
-            "tolerance_xy_m": self.goto_tolerance_xy_m,
-            "tolerance_z_m": self.goto_tolerance_z_m,
-            "min_hold_updates": self.goto_min_hold_updates,
-            "priority": self.priority,
+            "tolerance_xy_m": self._params_tolerance_xy,
+            "tolerance_z_m": self._params_tolerance_z,
+            "min_hold_updates": self._params_goto_min_hold,
+            "priority": self._params_priority,
             "key": f"gps_scan_{self.waypoint_index}",
         }
         action = GotoWaypointAction()
         action.start(gp)
         return action
 
-    def _capture_snapshot(self, context: dict[str, Any]) -> dict[str, Any]:
-        """Extract capture-time telemetry from context.
+    def _capture_snapshot(self, context: dict[str, Any]) -> dict[str, Any] | None:
+        """Extract capture-time telemetry, preferring bound capture telemetry."""
+        # Priority 1: detection already has capture telemetry
+        # (not yet in current architecture; falls through to 2)
 
-        Records the drone's GPS, yaw, and altitude at capture time.
-        Subsequent drone movement must not affect this snapshot.
-        """
-        drone = (context or {}).get("drone")
+        # Priority 2: scene/detection source capture telemetry
+        scene = (context or {}).get("scene", {})
+        if isinstance(scene, dict) and all(k in scene for k in ("drone_lat", "drone_lon", "drone_yaw_rad", "relative_altitude_m")):
+            return {
+                "drone_lat": float(scene["drone_lat"]),
+                "drone_lon": float(scene["drone_lon"]),
+                "drone_yaw_rad": float(scene["drone_yaw_rad"]),
+                "relative_altitude_m": float(scene["relative_altitude_m"]),
+                "source_waypoint": f"DROP_SCAN_{self.waypoint_index + 1}",
+            }
+
+        # Priority 3: current drone snapshot
+        drone = (context or {}).get("drone", {})
         if not isinstance(drone, dict):
-            raise ValueError("drone context required for GPS capture")
+            return None
 
         lat = drone.get("lat")
         lon = drone.get("lon")
@@ -326,28 +398,55 @@ class GpsMultiViewLocalizeAction(ActionModule):
         if alt is None:
             alt = drone.get("altitude") or drone.get("altitude_m")
 
-        return {
-            "drone_lat": float(lat) if lat is not None else None,
-            "drone_lon": float(lon) if lon is not None else None,
-            "drone_yaw_rad": float(yaw) if yaw is not None else None,
-            "relative_altitude_m": float(alt) if alt is not None else None,
-            "source_waypoint": f"DROP_SCAN_{self.waypoint_index + 1}",
-        }
+        if lat is None or lon is None or yaw is None or alt is None:
+            return None
+
+        try:
+            return {
+                "drone_lat": float(lat),
+                "drone_lon": float(lon),
+                "drone_yaw_rad": float(yaw),
+                "relative_altitude_m": float(alt),
+                "source_waypoint": f"DROP_SCAN_{self.waypoint_index + 1}",
+            }
+        except (TypeError, ValueError):
+            return None
 
     def _detections(self, context: dict[str, Any]) -> tuple[list[dict[str, Any]], int | float | None, int | float | None]:
-        if self.detection_source == "scene":
-            scene = (context or {}).get("scene")
+        if self._params_detection_source == "scene":
+            scene = (context or {}).get("scene", {})
             if not isinstance(scene, dict):
                 return [], None, None
-            dets = scene.get("detections")
+            dets = scene.get("detections", [])
             if not isinstance(dets, list):
                 dets = []
             return ([d for d in dets if isinstance(d, dict)],
                     scene.get("image_width"), scene.get("image_height"))
-        perception = (context or {}).get("perception")
+        perception = (context or {}).get("perception", {})
         if not isinstance(perception, dict):
             return [], None, None
         return [perception], perception.get("image_width"), perception.get("image_height")
+
+    @staticmethod
+    def _detection_ex_ey(det: dict[str, Any], img_w: Any, img_h: Any) -> tuple[float, float] | tuple[None, None]:
+        if "ex" in det and "ey" in det:
+            try:
+                return float(det["ex"]), float(det["ey"])
+            except (TypeError, ValueError):
+                return None, None
+        if "cx" in det and "cy" in det and img_w is not None and img_h is not None:
+            try:
+                w = float(img_w)
+                h = float(img_h)
+                cx = float(det["cx"])
+                cy = float(det["cy"])
+                return (cx - w / 2.0) / (w / 2.0), (cy - h / 2.0) / (h / 2.0)
+            except (TypeError, ValueError, ZeroDivisionError):
+                return None, None
+        return None, None
+
+    def _inc_reject(self, reason: str) -> None:
+        self.rejected_by_reason[reason] = self.rejected_by_reason.get(reason, 0) + 1
 
     def _detail(self, *, done: bool = False, extra: dict[str, Any] | None = None) -> dict[str, Any]:
         detail: dict[str, Any] = {
@@ -360,8 +459,9 @@ class GpsMultiViewLocalizeAction(ActionModule):
             "raw_estimates_count": len(self.raw_estimates),
             "coordinate_frame": "GLOBAL",
             "target_frame": "global",
+            "rejected_by_reason": dict(self.rejected_by_reason),
         }
-        if done:
+        if done and self.fused_objects:
             localized_objects: list[dict[str, Any]] = []
             for obj in self.fused_objects:
                 localized_objects.append({
@@ -380,7 +480,6 @@ class GpsMultiViewLocalizeAction(ActionModule):
                 })
             detail["localized_objects"] = localized_objects
             detail["object_count"] = len(localized_objects)
-            # Raw estimates as plain dicts for serialization
             detail["raw_estimates"] = [
                 {
                     "lat": e.lat, "lon": e.lon,
@@ -399,3 +498,17 @@ class GpsMultiViewLocalizeAction(ActionModule):
         if extra:
             detail.update(extra)
         return detail
+
+
+def _opt_int(v: Any) -> int | None:
+    if v is None: return None
+    try: return int(v)
+    except (TypeError, ValueError): return None
+
+def _opt_float(v: Any) -> float | None:
+    if v is None: return None
+    try:
+        f = float(v)
+        import math
+        return f if math.isfinite(f) else None
+    except (TypeError, ValueError): return None
