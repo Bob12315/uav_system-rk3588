@@ -3,7 +3,14 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from .field_reference import EARTH_RADIUS_M, FieldReference, FieldReferenceError, gps_enu_deltas
+from .field_reference import (
+    EARTH_RADIUS_M,
+    FieldReference,
+    FieldReferenceError,
+    gps_enu_deltas,
+    normalize_longitude_deg,
+    validate_wgs84_lat_lon,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -182,14 +189,21 @@ def field_to_gps_from_origin(
             raise FieldReferenceError(f"{name} must be a finite number, got {val!r}")
 
     if origin_lat < -90.0 or origin_lat > 90.0:
-        raise FieldReferenceError(f"origin_lat {origin_lat} out of range [-90, 90]")
+        raise FieldReferenceError(
+            f"origin_lat {origin_lat} out of range [-90, 90]"
+        )
     if origin_lon < -180.0 or origin_lon > 180.0:
-        raise FieldReferenceError(f"origin_lon {origin_lon} out of range [-180, 180]")
-
+        raise FieldReferenceError(
+            f"origin_lon {origin_lon} out of range [-180, 180]"
+        )
+    try:
+        origin_lat, origin_lon = validate_wgs84_lat_lon(
+            origin_lat, origin_lon, reject_pole=True
+        )
+    except FieldReferenceError as exc:
+        raise FieldReferenceError(f"invalid origin_lat/origin_lon: {exc}") from exc
     origin_lat_rad = math.radians(origin_lat)
     cos_lat = math.cos(origin_lat_rad)
-    if abs(cos_lat) < 1e-9:
-        raise FieldReferenceError("origin latitude is too close to pole")
 
     cos_h = math.cos(field_heading_yaw_rad)
     sin_h = math.sin(field_heading_yaw_rad)
@@ -197,7 +211,11 @@ def field_to_gps_from_origin(
     d_east = field_y_m * sin_h + field_x_m * cos_h
 
     lat = origin_lat + math.degrees(d_north / EARTH_RADIUS_M)
-    lon = origin_lon + math.degrees(d_east / (EARTH_RADIUS_M * cos_lat))
+    raw_lon = origin_lon + math.degrees(
+        d_east / (EARTH_RADIUS_M * cos_lat)
+    )
+    lon = normalize_longitude_deg(raw_lon)
+    lat, lon = validate_wgs84_lat_lon(lat, lon, reject_pole=True)
     return GpsPoint(lat=lat, lon=lon, alt_m=altitude_m)
 
 

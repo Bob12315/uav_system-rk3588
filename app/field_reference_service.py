@@ -144,6 +144,14 @@ class FieldReferenceService:
         ts = timestamp if timestamp is not None else candidate.completed_at_s
         if not (isinstance(ts, (int, float)) and not isinstance(ts, bool) and math.isfinite(float(ts))):
             return {"ok": False, "error": f"timestamp must be finite, got {ts!r}"}
+        if float(ts) < float(candidate.completed_at_s):
+            return {
+                "ok": False,
+                "error": (
+                    f"timestamp {ts!r} must be >= candidate.completed_at_s "
+                    f"{candidate.completed_at_s!r}"
+                ),
+            }
 
         # ── write ──────────────────────────────────────────────────
         self._ref.origin_source = candidate.origin_source
@@ -157,7 +165,7 @@ class FieldReferenceService:
         self._ref.origin_local_e_m = None
         self._ref.origin_local_z_m = None
         self._ref.is_confirmed = True
-        self._ref.confirmed_at_s = ts
+        self._ref.confirmed_at_s = float(ts)
 
         self._profile_id = candidate.profile_id
         self._profile_name = profile_name.strip()

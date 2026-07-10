@@ -14,6 +14,7 @@ from typing import Optional, Tuple
 EARTH_RADIUS_M = 6371000.0
 MIN_GPS_BASELINE_M = 5.0
 RECOMMENDED_GPS_BASELINE_M = 10.0
+WGS84_POLE_COS_EPS = 1e-9
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +176,7 @@ class FieldReference:
         if not -180.0 <= lon <= 180.0:
             return False
 
-        if abs(math.cos(math.radians(lat))) < 1e-9:
+        if abs(math.cos(math.radians(lat))) <= WGS84_POLE_COS_EPS:
             return False
 
         return True
@@ -393,6 +394,71 @@ class FieldReference:
 # module-level GPS utilities (small-range ENU approximation)
 # ---------------------------------------------------------------------------
 
+
+def normalize_longitude_deg(longitude_deg: float) -> float:
+    """Normalize a finite longitude to the canonical range [-180, 180)."""
+    if not (
+        isinstance(longitude_deg, (int, float))
+        and not isinstance(longitude_deg, bool)
+        and math.isfinite(float(longitude_deg))
+    ):
+        raise FieldReferenceError(
+            f"longitude must be a finite number, got {longitude_deg!r}"
+        )
+    normalized = (float(longitude_deg) + 180.0) % 360.0 - 180.0
+    return -180.0 if normalized == 180.0 else normalized
+
+
+def shortest_longitude_delta_deg(
+    from_lon_deg: float,
+    to_lon_deg: float,
+) -> float:
+    """Return the shortest signed longitude delta from *from* to *to*."""
+    if not (
+        isinstance(from_lon_deg, (int, float))
+        and not isinstance(from_lon_deg, bool)
+        and math.isfinite(float(from_lon_deg))
+    ):
+        raise FieldReferenceError(
+            f"from longitude must be a finite number, got {from_lon_deg!r}"
+        )
+    if not (
+        isinstance(to_lon_deg, (int, float))
+        and not isinstance(to_lon_deg, bool)
+        and math.isfinite(float(to_lon_deg))
+    ):
+        raise FieldReferenceError(
+            f"to longitude must be a finite number, got {to_lon_deg!r}"
+        )
+    return normalize_longitude_deg(float(to_lon_deg) - float(from_lon_deg))
+
+
+def validate_wgs84_lat_lon(
+    lat: object,
+    lon: object,
+    *,
+    reject_pole: bool,
+) -> tuple[float, float]:
+    """Validate and return numeric WGS84 latitude/longitude values."""
+    for name, value in (("latitude", lat), ("longitude", lon)):
+        if not (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+        ):
+            raise FieldReferenceError(
+                f"{name} must be a finite number, got {value!r}"
+            )
+    lat_f = float(lat)
+    lon_f = float(lon)
+    if not -90.0 <= lat_f <= 90.0:
+        raise FieldReferenceError(f"latitude {lat_f} out of range [-90, 90]")
+    if not -180.0 <= lon_f <= 180.0:
+        raise FieldReferenceError(f"longitude {lon_f} out of range [-180, 180]")
+    if reject_pole and abs(math.cos(math.radians(lat_f))) <= WGS84_POLE_COS_EPS:
+        raise FieldReferenceError("latitude is too close to a WGS84 pole")
+    return lat_f, lon_f
+
 def gps_enu_deltas(
     lat_a: float,
     lon_a: float,
@@ -401,11 +467,17 @@ def gps_enu_deltas(
 ) -> Tuple[float, float]:
     """Return (d_north_m, d_east_m) from *a* to *b* using a small-range
     ENU approximation.  Inputs are decimal degrees."""
-    lat_a_rad = math.radians(lat_a)
-    lat_b_rad = math.radians(lat_b)
+    lat_a_f, lon_a_f = validate_wgs84_lat_lon(
+        lat_a, lon_a, reject_pole=True
+    )
+    lat_b_f, lon_b_f = validate_wgs84_lat_lon(
+        lat_b, lon_b, reject_pole=True
+    )
+    lat_a_rad = math.radians(lat_a_f)
+    lat_b_rad = math.radians(lat_b_f)
     d_north = (lat_b_rad - lat_a_rad) * EARTH_RADIUS_M
     d_east = (
-        (math.radians(lon_b) - math.radians(lon_a))
+        math.radians(shortest_longitude_delta_deg(lon_a_f, lon_b_f))
         * EARTH_RADIUS_M
         * math.cos(lat_a_rad)
     )

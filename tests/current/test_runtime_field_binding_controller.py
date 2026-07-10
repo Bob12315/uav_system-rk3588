@@ -2,7 +2,7 @@
 
 import copy
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dc_replace
 from unittest.mock import Mock
 
 import pytest
@@ -81,13 +81,6 @@ class TestOrchestratorLifecycle:
         assert o.state == "idle"
 
 
-def test_no_local_in_orchestrator():
-    src = __import__("pathlib").Path("app/runtime_binding_orchestrator.py").read_text()
-    for token in ("origin_local_n_m", "origin_local_e_m", "local_x", "local_y", "local_z",
-                  "field_to_local_ned", "gps_to_local_ned", ):
-        assert token not in src, f"forbidden: {token}"
-
-
 # =============================================================================
 # Transaction failure tests (5B.2.2)
 # =============================================================================
@@ -140,14 +133,29 @@ class TestTransactionFailure:
         r2 = o.finalize(completed_at_s=1006.0)
         assert r1 == r2
 
-    def test_sync_failure_before_freeze(self):
+    def test_sync_failure_before_freeze(self, monkeypatch):
         o = self._setup()
-        # Freeze the service first — service apply will fail, rollback will trigger
-        o._svc.reference.is_confirmed = True
-        o._svc.reference.freeze()
+        service_before = o._svc.snapshot()
+        builder_before = o._builder.snapshot_field_reference_state()
+        real_confirm = o._builder.confirm_runtime_gps_reference
+
+        def confirm_then_corrupt(*args, **kwargs):
+            ok = real_confirm(*args, **kwargs)
+            o._builder.field_baseline_m += 1.0
+            return ok
+
+        freeze = Mock(wraps=o._svc.freeze)
+        monkeypatch.setattr(
+            o._builder, "confirm_runtime_gps_reference", confirm_then_corrupt
+        )
+        monkeypatch.setattr(o._svc, "freeze", freeze)
         r = o.finalize(completed_at_s=1005.0)
         assert r["ok"] is False
-        assert "frozen" in r.get("error", "").lower()
+        assert r["rollback_ok"] is True
+        assert "sync verification before freeze" in r["error"]
+        freeze.assert_not_called()
+        assert o._svc.snapshot() == service_before
+        assert o._builder.snapshot_field_reference_state() == builder_before
 
 
 # =============================================================================
@@ -216,18 +224,8 @@ class TestOrchestratorStateMachine:
 def test_no_local_in_orchestrator():
     src = __import__("pathlib").Path("app/runtime_binding_orchestrator.py").read_text()
     for token in ("origin_local_n_m", "origin_local_e_m", "local_x", "local_y", "local_z",
-                  "field_to_local_ned", "gps_to_local_ned"):
+                  "field_to_local_ned", "gps_to_local_ned", "local_ned_to_field"):
         assert token not in src, f"forbidden: {token}"
-
-
-class TestControllerIntegration:
-    def test_controller_has_runtime_binding(self):
-        from app.field_reference_controller import FieldReferenceController
-        svc = FieldReferenceService()
-        from app.runtime_context import RuntimeContextBuilder
-        bld = RuntimeContextBuilder()
-        ctrl = FieldReferenceController(svc, bld, None)
-        assert hasattr(ctrl, '_runtime_binding')
 
 
 # =============================================================================
@@ -525,6 +523,35 @@ def test_rollback_reports_both_restore_failures(monkeypatch):
     )
     result = orchestrator.finalize(completed_at_s=1005.0)
     assert result["rollback_ok"] is False
+
+
+def test_damaged_candidate_blocks_freeze_and_rolls_back(monkeypatch):
+    source = _ready_orchestrator()
+    candidate = source._sampler.finalize(completed_at_s=1005.0)
+    points = list(candidate.geometry.drop_scan_waypoints)
+    points[0] = dc_replace(points[0], lat=float("nan"))
+    damaged = dc_replace(
+        candidate,
+        geometry=dc_replace(
+            candidate.geometry, drop_scan_waypoints=tuple(points)
+        ),
+    )
+
+    orchestrator = _ready_orchestrator()
+    service_before = orchestrator._svc.snapshot()
+    builder_before = orchestrator._builder.snapshot_field_reference_state()
+    freeze = Mock(wraps=orchestrator._svc.freeze)
+    monkeypatch.setattr(orchestrator._sampler, "finalize", lambda **kwargs: damaged)
+    monkeypatch.setattr(orchestrator._svc, "freeze", freeze)
+
+    result = orchestrator.finalize(completed_at_s=1005.0)
+
+    assert result["ok"] is False
+    assert result["state"] == "apply_failed"
+    assert result["rollback_ok"] is True
+    freeze.assert_not_called()
+    assert orchestrator._svc.snapshot() == service_before
+    assert orchestrator._builder.snapshot_field_reference_state() == builder_before
 
 
 def test_apply_failure_retries_same_candidate_without_refinalize(monkeypatch):

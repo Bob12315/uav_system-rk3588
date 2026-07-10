@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from app.field_reference import WGS84_POLE_COS_EPS
+
 from app.field_profile import (
     AnchorPoint,
     CenterlinePoint,
@@ -82,6 +84,26 @@ def make_valid_v3_profile_dict() -> dict:
             "warn_baseline_below_m": 50.0,
         },
     }
+
+
+@pytest.mark.parametrize(
+    "latitude",
+    [
+        90.0,
+        -90.0,
+        math.degrees(math.acos(WGS84_POLE_COS_EPS / 2.0)),
+    ],
+)
+def test_schema_v3_rejects_forward_marker_at_pole(latitude):
+    data = make_valid_v3_profile_dict()
+    data["forward_marker"]["lat"] = latitude
+    profile = parse_field_profile(data)
+    diagnostics = validate_field_profile(profile)
+    assert diagnostics.ok is False
+    assert any(
+        "forward_marker" in error and "pole" in error
+        for error in diagnostics.errors
+    )
 
 
 # =========================================================================

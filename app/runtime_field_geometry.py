@@ -21,7 +21,12 @@ from .field_profile import (
     ForwardMarker,
     validate_field_profile,
 )
-from .field_reference import gps_enu_deltas
+from .field_reference import (
+    FieldReferenceError,
+    gps_enu_deltas,
+    normalize_longitude_deg,
+    validate_wgs84_lat_lon,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -98,9 +103,20 @@ def build_runtime_field_geometry(
     fg: FieldGeometry = profile.field_geometry
     bp: BindingPolicy = profile.binding_policy
 
-    d_north, d_east = gps_enu_deltas(
-        origin_lat, origin_lon, marker.lat, marker.lon
+    origin_lat, origin_lon = validate_wgs84_lat_lon(
+        origin_lat, origin_lon, reject_pole=True
     )
+    marker_lat, marker_lon = validate_wgs84_lat_lon(
+        marker.lat, marker.lon, reject_pole=True
+    )
+    origin_lon = normalize_longitude_deg(origin_lon)
+    marker_lon = normalize_longitude_deg(marker_lon)
+    try:
+        d_north, d_east = gps_enu_deltas(
+            origin_lat, origin_lon, marker_lat, marker_lon
+        )
+    except FieldReferenceError as exc:
+        raise RuntimeFieldGeometryError(f"invalid A→B WGS84 geometry: {exc}") from exc
     baseline_m = math.hypot(d_north, d_east)
     heading_rad = _normalize_yaw(math.atan2(d_east, d_north))
     heading_deg = math.degrees(heading_rad)
@@ -137,30 +153,35 @@ def build_runtime_field_geometry(
         field_x_m=0.0,
         field_y_m=baseline_m,
         altitude_m=0.0,
-        lat=marker.lat,
-        lon=marker.lon,
+        lat=marker_lat,
+        lon=marker_lon,
     )
 
-    scan_points = _build_scan_points(
-        profile.drop_scan, origin_lat, origin_lon, heading_rad
-    )
-    drop_corners = _build_area_corners(
-        "D", fg.lane_half_width_m,
-        fg.drop_area_y_min, fg.drop_area_y_max,
-        origin_lat, origin_lon, heading_rad,
-    )
-    recce_corners = _build_area_corners(
-        "R", fg.lane_half_width_m,
-        fg.recce_area_y_min, fg.recce_area_y_max,
-        origin_lat, origin_lon, heading_rad,
-    )
+    try:
+        scan_points = _build_scan_points(
+            profile.drop_scan, origin_lat, origin_lon, heading_rad
+        )
+        drop_corners = _build_area_corners(
+            "D", fg.lane_half_width_m,
+            fg.drop_area_y_min, fg.drop_area_y_max,
+            origin_lat, origin_lon, heading_rad,
+        )
+        recce_corners = _build_area_corners(
+            "R", fg.lane_half_width_m,
+            fg.recce_area_y_min, fg.recce_area_y_max,
+            origin_lat, origin_lon, heading_rad,
+        )
+    except FieldReferenceError as exc:
+        raise RuntimeFieldGeometryError(
+            f"runtime FIELD→GPS projection failed: {exc}"
+        ) from exc
 
-    return RuntimeFieldGeometry(
+    geometry = RuntimeFieldGeometry(
         profile_id=profile.profile_id,
         origin_lat=origin_lat,
         origin_lon=origin_lon,
-        forward_marker_lat=marker.lat,
-        forward_marker_lon=marker.lon,
+        forward_marker_lat=marker_lat,
+        forward_marker_lon=marker_lon,
         field_heading_yaw_rad=heading_rad,
         field_heading_deg=heading_deg,
         baseline_m=baseline_m,
@@ -171,6 +192,15 @@ def build_runtime_field_geometry(
         recce_area_corners=tuple(recce_corners),
         warnings=tuple(warnings),
     )
+    for point in (
+        geometry.home,
+        geometry.forward_marker,
+        *geometry.drop_scan_waypoints,
+        *geometry.drop_area_corners,
+        *geometry.recce_area_corners,
+    ):
+        _validate_generated_point(point)
+    return geometry
 
 
 # ---------------------------------------------------------------------------
@@ -211,20 +241,40 @@ def _validate_inputs(
     ):
         raise RuntimeFieldGeometryError("profile.field_geometry area boundaries must not be None")
 
-    # validate dynamic origin
-    for name, val in (("origin_lat", origin_lat), ("origin_lon", origin_lon)):
+    try:
+        validate_wgs84_lat_lon(origin_lat, origin_lon, reject_pole=True)
+        marker = profile.forward_marker
+        if marker is not None:
+            validate_wgs84_lat_lon(marker.lat, marker.lon, reject_pole=True)
+    except FieldReferenceError as exc:
+        raise RuntimeFieldGeometryError(
+            f"invalid origin_lat/origin_lon or forward marker: {exc}"
+        ) from exc
+
+
+def _validate_generated_point(point: RuntimeFieldPoint) -> None:
+    for name in ("field_x_m", "field_y_m", "altitude_m"):
+        value = getattr(point, name)
         if not (
-            isinstance(val, (int, float))
-            and not isinstance(val, bool)
-            and math.isfinite(float(val))
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
         ):
-            raise RuntimeFieldGeometryError(f"{name} must be a finite number, got {val!r}")
-    if origin_lat < -90.0 or origin_lat > 90.0:
-        raise RuntimeFieldGeometryError(f"origin_lat {origin_lat} out of range [-90, 90]")
-    if origin_lon < -180.0 or origin_lon > 180.0:
-        raise RuntimeFieldGeometryError(f"origin_lon {origin_lon} out of range [-180, 180]")
-    if abs(math.cos(math.radians(origin_lat))) < 1e-9:
-        raise RuntimeFieldGeometryError("origin latitude too close to pole")
+            raise RuntimeFieldGeometryError(
+                f"generated point {point.name}.{name} is not finite"
+            )
+    try:
+        _, lon = validate_wgs84_lat_lon(
+            point.lat, point.lon, reject_pole=True
+        )
+    except FieldReferenceError as exc:
+        raise RuntimeFieldGeometryError(
+            f"generated point {point.name} has invalid WGS84: {exc}"
+        ) from exc
+    if lon != normalize_longitude_deg(lon):
+        raise RuntimeFieldGeometryError(
+            f"generated point {point.name} longitude is not canonical"
+        )
 
 
 def _normalize_yaw(yaw_rad: float) -> float:

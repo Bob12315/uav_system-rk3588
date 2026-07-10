@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .field_reference import (
     EARTH_RADIUS_M,
+    WGS84_POLE_COS_EPS,
     _gps_bearing_rad,
     _gps_distance_m,
     _gps_enu_deltas,
@@ -956,6 +957,8 @@ def _validate_field_profile_v3(
             diag.errors.append(
                 f"forward_marker.lat {fm.lat} out of range [-90, 90]"
             )
+        elif abs(math.cos(math.radians(float(fm.lat)))) <= WGS84_POLE_COS_EPS:
+            diag.errors.append("forward_marker latitude is too close to a pole")
         if not _is_finite_number(fm.lon):
             diag.errors.append(
                 f"forward_marker.lon must be a finite number, got {fm.lon!r}"

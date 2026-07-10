@@ -6,7 +6,7 @@ import time
 from typing import Any, Mapping
 
 from .coordinate_transform import field_to_local_ned, local_ned_to_field
-from .field_reference import FieldReference
+from .field_reference import FieldReference, WGS84_POLE_COS_EPS
 from .runtime_field_binding import (
     validate_runtime_field_binding_candidate,
 )
@@ -206,7 +206,7 @@ class RuntimeContextBuilder:
             and _is_finite_number(self.field_origin_lon)
             and -90.0 <= float(self.field_origin_lat) <= 90.0
             and -180.0 <= float(self.field_origin_lon) <= 180.0
-            and abs(math.cos(math.radians(float(self.field_origin_lat)))) >= 1e-9
+            and abs(math.cos(math.radians(float(self.field_origin_lat)))) > WGS84_POLE_COS_EPS
         )
 
     def field_gps_transform(self) -> dict[str, object]:
@@ -318,7 +318,7 @@ class RuntimeContextBuilder:
                 and _is_finite_number(self.field_origin_lon)
                 and -90.0 <= float(self.field_origin_lat) <= 90.0
                 and -180.0 <= float(self.field_origin_lon) <= 180.0
-                and abs(math.cos(math.radians(float(self.field_origin_lat)))) >= 1e-9
+                and abs(math.cos(math.radians(float(self.field_origin_lat)))) > WGS84_POLE_COS_EPS
             ):
                 self.field_origin_gps_confirmed = True
         self.field_reference_mode = ""
@@ -357,8 +357,9 @@ class RuntimeContextBuilder:
             return False
         c = candidate  # type: ignore[assignment]
         ts = timestamp if timestamp is not None else float(c.completed_at_s)
-        if not _is_finite_number(ts) or ts < float(c.started_at_s):
+        if not _is_finite_number(ts) or float(ts) < float(c.completed_at_s):
             return False
+        ts = float(ts)
         normalized = self._normalize_yaw(float(c.field_heading_yaw_rad))
         self.field_heading_yaw_rad = normalized
         self.field_heading_time = ts
@@ -472,7 +473,7 @@ class RuntimeContextBuilder:
             f_lat = float(olat); f_lon = float(olon)
             if f_lat < -90.0 or f_lat > 90.0: return False
             if f_lon < -180.0 or f_lon > 180.0: return False
-            if abs(math.cos(math.radians(f_lat))) < 1e-9: return False
+            if abs(math.cos(math.radians(f_lat))) <= WGS84_POLE_COS_EPS: return False
             if not snapshot.get("field_heading_confirmed"): return False
         for key in ("field_gps_sample_duration_s", "field_gps_horizontal_spread_m", "field_gps_eph", "field_gps_epv"):
             v = snapshot.get(key)

@@ -10,11 +10,12 @@ from app.coordinate_transform import (
     LocalNedPoint,
     FieldReferenceError,
     field_to_gps,
+    field_to_gps_from_origin,
     field_to_local_ned,
     gps_to_local_ned,
     local_ned_to_field,
 )
-from app.field_reference import FieldReference
+from app.field_reference import FieldReference, gps_enu_deltas
 
 
 def _make_ref(yaw_rad=0.0, origin_n=10.0, origin_e=20.0, origin_z=-1.0):
@@ -43,6 +44,55 @@ def _make_gps_ref(origin_lat=30.0, origin_lon=120.0, origin_n=100.0, origin_e=20
     ref.origin_local_e_m = origin_e
     ref.field_heading_yaw_rad = 0.0  # not used by gps_to_local_ned
     return ref
+
+
+@pytest.mark.parametrize(
+    ("origin_lon", "east_m", "expected_sign"),
+    [(179.9999, 30.0, -1), (-179.9999, -30.0, 1)],
+)
+def test_field_to_gps_crosses_dateline_canonically(
+    origin_lon, east_m, expected_sign
+):
+    point = field_to_gps_from_origin(
+        0.0,
+        east_m,
+        3.0,
+        origin_lat=0.0,
+        origin_lon=origin_lon,
+        field_heading_yaw_rad=math.pi / 2.0,
+    )
+    assert -180.0 <= point.lon < 180.0
+    assert point.lon * expected_sign > 0.0
+    north, east = gps_enu_deltas(0.0, origin_lon, point.lat, point.lon)
+    assert north == pytest.approx(0.0, abs=1e-6)
+    assert east == pytest.approx(east_m, abs=1e-6)
+    assert point.alt_m == 3.0
+
+
+@pytest.mark.parametrize("north_m", [20_000_000.0, -20_000_000.0])
+def test_field_to_gps_rejects_projection_across_pole(north_m):
+    with pytest.raises(FieldReferenceError, match="range|pole"):
+        field_to_gps_from_origin(
+            0.0,
+            north_m,
+            0.0,
+            origin_lat=0.0,
+            origin_lon=0.0,
+            field_heading_yaw_rad=0.0,
+        )
+
+
+@pytest.mark.parametrize("origin_lat", [90.0, -90.0])
+def test_field_to_gps_rejects_pole_origin(origin_lat):
+    with pytest.raises(FieldReferenceError, match="pole"):
+        field_to_gps_from_origin(
+            0.0,
+            1.0,
+            0.0,
+            origin_lat=origin_lat,
+            origin_lon=0.0,
+            field_heading_yaw_rad=0.0,
+        )
 
 
 # ---------------------------------------------------------------------------

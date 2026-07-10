@@ -86,6 +86,29 @@ def make_valid_v3_dict() -> dict:
     }
 
 
+def test_runtime_geometry_crosses_dateline_with_short_baseline_math():
+    data = make_valid_v3_dict()
+    data["forward_marker"]["lat"] = 0.0
+    data["forward_marker"]["lon"] = -179.9998
+    profile = parse_field_profile(data)
+    geometry = build_runtime_field_geometry(
+        profile, origin_lat=0.0, origin_lon=179.9998
+    )
+    assert geometry.baseline_m == pytest.approx(44.48, abs=0.2)
+    assert geometry.field_heading_yaw_rad == pytest.approx(math.pi / 2.0)
+    for point in (
+        geometry.home,
+        geometry.forward_marker,
+        *geometry.drop_scan_waypoints,
+        *geometry.drop_area_corners,
+        *geometry.recce_area_corners,
+    ):
+        assert math.isfinite(point.lat)
+        assert math.isfinite(point.lon)
+        assert -90.0 < point.lat < 90.0
+        assert -180.0 <= point.lon < 180.0
+
+
 def _profile() -> FieldProfile:
     return parse_field_profile(make_valid_v3_dict())
 

@@ -17,6 +17,7 @@ from app.runtime_context import RuntimeContextBuilder
 from app.runtime_field_binding import (
     RuntimeFieldBindingCandidate,
     RuntimeFieldBindingSampler,
+    validate_runtime_field_binding_candidate,
 )
 
 
@@ -49,6 +50,49 @@ def _make_candidate() -> RuntimeFieldBindingCandidate:
             "gps_fix_type": 3, "satellites_visible": 12, "gps_eph": 1.0, "gps_epv": 1.5,
         }, observed_at_s=1000.0 + i * 0.26)
     return s.finalize(completed_at_s=1005.0)
+
+
+def _damage_geometry(candidate, case):
+    geometry = candidate.geometry
+    if case == "scan_nan_lat":
+        points = list(geometry.drop_scan_waypoints)
+        points[0] = dc_replace(points[0], lat=float("nan"))
+        geometry = dc_replace(geometry, drop_scan_waypoints=tuple(points))
+    elif case == "scan_bad_lon":
+        points = list(geometry.drop_scan_waypoints)
+        points[1] = dc_replace(points[1], lon=181.0)
+        geometry = dc_replace(geometry, drop_scan_waypoints=tuple(points))
+    elif case == "scan_bad_name":
+        points = list(geometry.drop_scan_waypoints)
+        points[2] = dc_replace(points[2], name="bad")
+        geometry = dc_replace(geometry, drop_scan_waypoints=tuple(points))
+    elif case == "drop_count":
+        geometry = dc_replace(
+            geometry, drop_area_corners=geometry.drop_area_corners[:3]
+        )
+    elif case == "drop_asymmetry":
+        points = list(geometry.drop_area_corners)
+        points[0] = dc_replace(points[0], field_x_m=points[0].field_x_m + 0.5)
+        geometry = dc_replace(geometry, drop_area_corners=tuple(points))
+    elif case == "recce_altitude":
+        points = list(geometry.recce_area_corners)
+        points[0] = dc_replace(points[0], altitude_m=1.0)
+        geometry = dc_replace(geometry, recce_area_corners=tuple(points))
+    elif case == "home_name":
+        geometry = dc_replace(
+            geometry, home=dc_replace(geometry.home, name="NOT_HOME")
+        )
+    elif case == "marker_field_y":
+        geometry = dc_replace(
+            geometry,
+            forward_marker=dc_replace(
+                geometry.forward_marker,
+                field_y_m=geometry.forward_marker.field_y_m + 1.0,
+            ),
+        )
+    else:
+        raise AssertionError(case)
+    return dc_replace(candidate, geometry=geometry)
 
 
 # =========================================================================
@@ -191,6 +235,85 @@ class TestServiceMaliciousCandidate:
         c = dc_replace(_make_candidate(), origin_lat=float("nan"))
         svc.apply_runtime_binding(c, profile_name="T")
         assert ref.origin_lat == 99.0  # unchanged
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "scan_nan_lat",
+        "scan_bad_lon",
+        "scan_bad_name",
+        "drop_count",
+        "drop_asymmetry",
+        "recce_altitude",
+        "home_name",
+        "marker_field_y",
+    ],
+)
+def test_nested_geometry_damage_blocks_validator_service_and_builder(case):
+    damaged = _damage_geometry(_make_candidate(), case)
+    service = FieldReferenceService()
+    builder = RuntimeContextBuilder()
+    service_before = service.snapshot()
+    builder_before = builder.snapshot_field_reference_state()
+
+    errors = validate_runtime_field_binding_candidate(damaged)
+    service_result = service.apply_runtime_binding(damaged, profile_name="Test")
+    builder_result = builder.confirm_runtime_gps_reference(damaged)
+
+    assert errors
+    assert service_result["ok"] is False
+    assert builder_result is False
+    assert service.snapshot() == service_before
+    assert builder.snapshot_field_reference_state() == builder_before
+
+
+def test_coupled_heading_baseline_tamper_fails_independent_recomputation():
+    candidate = _make_candidate()
+    heading = candidate.field_heading_yaw_rad + 0.1
+    baseline = candidate.baseline_m + 10.0
+    geometry = dc_replace(
+        candidate.geometry,
+        field_heading_yaw_rad=heading,
+        field_heading_deg=math.degrees(heading),
+        baseline_m=baseline,
+        forward_marker=dc_replace(
+            candidate.geometry.forward_marker, field_y_m=baseline
+        ),
+    )
+    damaged = dc_replace(
+        candidate,
+        field_heading_yaw_rad=heading,
+        field_heading_deg=math.degrees(heading),
+        baseline_m=baseline,
+        geometry=geometry,
+    )
+    errors = validate_runtime_field_binding_candidate(damaged)
+    assert errors
+    assert any("recomputation" in error or "mismatch" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "timestamp", [999.0, 1002.0, float("nan"), float("inf"), True, "1005"]
+)
+def test_service_and_builder_reject_identical_invalid_timestamp_semantics(timestamp):
+    candidate = _make_candidate()
+    service = FieldReferenceService()
+    builder = RuntimeContextBuilder()
+    service_before = service.snapshot()
+    builder_before = builder.snapshot_field_reference_state()
+
+    service_result = service.apply_runtime_binding(
+        candidate, profile_name="Test", timestamp=timestamp
+    )
+    builder_result = builder.confirm_runtime_gps_reference(
+        candidate, timestamp=timestamp
+    )
+
+    assert service_result["ok"] is False
+    assert builder_result is False
+    assert service.snapshot() == service_before
+    assert builder.snapshot_field_reference_state() == builder_before
 
 
 # =========================================================================
