@@ -225,6 +225,8 @@ class FieldReferenceController:
         """
         # -- resolve profile ------------------------------------------------
         profile, errors = self._load_profile(profile_id)
+        if profile is not None and profile.schema_version != 2:
+            return {"ok": False, "error": "bind-current is only supported for schema v2; schema v3 must use runtime GPS sampling"}
 
         if profile is None:
             message = f"profile not found: {profile_id}"

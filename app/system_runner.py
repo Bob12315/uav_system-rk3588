@@ -430,24 +430,13 @@ class SystemRunner:
         for d in self._PROFILE_DIRS:
             try:
                 p = FieldProfileService.load_profile(profile_id, profile_dir=d)
-                cl_points = [
-                    {"name": pt.name, "lat": pt.lat, "lon": pt.lon,
-                     "expected_field_y_m": pt.expected_field_y_m}
-                    for pt in p.centerline_points
-                ]
-                return {
+                sv = p.schema_version
+                resp: dict[str, object] = {
                     "ok": True,
                     "profile_id": p.profile_id,
                     "name": p.name,
-                    "schema_version": p.schema_version,
-                    "anchor": {
-                        "name": p.anchor.name,
-                        "lat": p.anchor.lat,
-                        "lon": p.anchor.lon,
-                        "field_x_m": p.anchor.field_x_m,
-                        "field_y_m": p.anchor.field_y_m,
-                    },
-                    "centerline_points": cl_points,
+                    "schema_version": sv,
+                    "coordinate_convention": p.coordinate_convention,
                     "gps_quality": {
                         "min_fix_type": p.gps_quality.min_fix_type,
                         "min_satellites": p.gps_quality.min_satellites,
@@ -458,21 +447,52 @@ class SystemRunner:
                         "lane_half_width_m": p.field_geometry.lane_half_width_m,
                         "drop_center_y_m": p.field_geometry.drop_center_y_m,
                         "recce_center_y_m": p.field_geometry.recce_center_y_m,
+                        "drop_area_y_min": p.field_geometry.drop_area_y_min,
+                        "drop_area_y_max": p.field_geometry.drop_area_y_max,
+                        "recce_area_y_min": p.field_geometry.recce_area_y_min,
+                        "recce_area_y_max": p.field_geometry.recce_area_y_max,
                     },
                     "binding_policy": {
                         "max_start_error_m": p.binding_policy.max_start_error_m,
                         "warn_start_error_m": p.binding_policy.warn_start_error_m,
                         "max_centerline_residual_m": p.binding_policy.max_centerline_residual_m,
                         "warn_centerline_residual_m": p.binding_policy.warn_centerline_residual_m,
+                        "min_baseline_m": p.binding_policy.min_baseline_m,
+                        "warn_baseline_below_m": p.binding_policy.warn_baseline_below_m,
                     },
                 }
+                if sv == 2:
+                    resp["anchor"] = {"name": p.anchor.name, "lat": p.anchor.lat, "lon": p.anchor.lon,
+                                       "field_x_m": p.anchor.field_x_m, "field_y_m": p.anchor.field_y_m}
+                    resp["centerline_points"] = [
+                        {"name": pt.name, "lat": pt.lat, "lon": pt.lon, "expected_field_y_m": pt.expected_field_y_m}
+                        for pt in p.centerline_points
+                    ]
+                    resp["forward_marker"] = None
+                    resp["drop_scan"] = None
+                    resp["runtime_origin_sampling"] = None
+                elif sv == 3:
+                    resp["anchor"] = None
+                    resp["centerline_points"] = []
+                    fm = p.forward_marker
+                    resp["forward_marker"] = {"name": fm.name, "lat": fm.lat, "lon": fm.lon, "coordinate_system": fm.coordinate_system} if fm else None
+                    ds = p.drop_scan
+                    if ds:
+                        resp["drop_scan"] = {"waypoints": [
+                            {"name": f"DROP_SCAN_{i+1}", "x_m": wp.x_m, "y_m": wp.y_m, "altitude_m": wp.altitude_m}
+                            for i, wp in enumerate(ds.waypoints)
+                        ]}
+                    else:
+                        resp["drop_scan"] = None
+                    ros = p.runtime_origin_sampling
+                    resp["runtime_origin_sampling"] = {"min_samples": ros.min_samples, "sample_window_s": ros.sample_window_s,
+                                                         "max_horizontal_spread_m": ros.max_horizontal_spread_m, "estimator": ros.estimator} if ros else None
+                return resp
             except FileNotFoundError:
                 continue
             except Exception as exc:
                 return self._field_profile_error(profile_id, str(exc))
-        return self._field_profile_error(
-            profile_id, f"profile not found: {profile_id}"
-        )
+        return self._field_profile_error(profile_id, f"profile not found: {profile_id}")
 
     def field_profile_validate(self, profile_id: str) -> dict[str, object]:
         for d in self._PROFILE_DIRS:

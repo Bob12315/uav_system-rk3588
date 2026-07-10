@@ -321,3 +321,18 @@ The v1 mission file must not be modified by any step in this transformation.
 | image_center lock | TargetLock uses local_x/local_y distance matching | TargetLock uses image_centre proximity matching with stable_track_updates=3 | Step 13 |
 | BODY_NED align | BODY_NED with yaw_hold → dispatcher converts to LOCAL_NED | Pure BODY_NED, yaw_control_mode=ignore | Step 14 |
 | Align complete/timeout drop | Minimum altitude can return done without aligned hold; frame differs between normal/invalid/retry paths; zero-stop transition lacks end-to-end integration proof | Min altitude stops descent but continues horizontal alignment; done only after aligned hold; timeout zeroes then continues to release; all paths use consistent BODY_NED semantics | Step 15 |
+
+
+## Step 6 Web confirmation
+
+Schema v3 runtime GPS binding is controlled explicitly from the Web UI:
+
+1. select a valid Schema v3 profile;
+2. start sampling;
+3. observe live accepted/rejected/duplicate counts and GPS quality;
+4. explicitly finalize and freeze;
+5. reset to clear an applied reference.
+
+Polling never automatically finalizes or starts a mission.
+No flight command is emitted by these controls.
+Schema v2 bind-current remains available as a separate legacy path.

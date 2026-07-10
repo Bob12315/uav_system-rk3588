@@ -373,6 +373,36 @@ def create_app(runner, config: UiConfig) -> FastAPI:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    @app.post("/api/field-profiles/{profile_id}/runtime-sampling/start")
+    def runtime_sampling_start(profile_id: str):
+        try:
+            result = runner.field_profile_runtime_sampling_start(profile_id)
+            _audit("FIELD_REFERENCE", "runtime_sampling_start", profile_id,
+                   ok=result.get("ok") is True, detail={"state": result.get("state"), "error": result.get("error"), "profile_id": profile_id})
+            return result
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/field-reference/runtime-sampling/finalize")
+    def runtime_sampling_finalize():
+        try:
+            result = runner.field_profile_runtime_sampling_finalize()
+            _audit("FIELD_REFERENCE", "runtime_sampling_finalize", "",
+                   ok=result.get("ok") is True, detail={"state": result.get("state"), "error": result.get("error")})
+            return result
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.post("/api/field-reference/runtime-sampling/cancel")
+    def runtime_sampling_cancel():
+        try:
+            result = runner.field_profile_runtime_sampling_cancel()
+            _audit("FIELD_REFERENCE", "runtime_sampling_cancel", "",
+                   ok=result.get("ok") is True, detail={"state": result.get("state")})
+            return result
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     @app.get("/api/field-profiles")
     def field_profiles_list():
         try:
