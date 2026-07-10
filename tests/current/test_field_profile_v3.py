@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from app.field_profile import (
+    AnchorPoint,
+    CenterlinePoint,
     BindingPolicy,
     DropScanConfig,
     FieldGeometry,
@@ -629,3 +631,240 @@ class TestNoCenterlineRequired:
         assert p.centerline_points == []
         diag = validate_field_profile(p)
         assert diag.ok is True
+
+
+# =========================================================================
+# K. Schema v2 regression tests (v2.1 fixes)
+# =========================================================================
+
+
+class TestV2Regression:
+    def test_schema_v2_direction_deviation_remains_warning_not_error(self):
+        data = {
+            "schema_version": 2,
+            "profile_id": "test",
+            "name": "Test",
+            "coordinate_convention": {
+                "field_x_positive": "right",
+                "field_y_positive": "forward",
+                "altitude_positive": "up",
+            },
+            "anchor": {"name": "a", "lat": 34.0, "lon": 108.0,
+                       "field_x_m": 0.0, "field_y_m": 0.0},
+            "centerline_points": [
+                {"name": "c1", "lat": 34.002, "lon": 108.001},
+                {"name": "c2", "lat": 34.003, "lon": 108.002},
+                {"name": "c3", "lat": 34.004, "lon": 108.003},
+                {"name": "c4", "lat": 34.0005, "lon": 108.004},
+            ],
+        }
+        profile = parse_field_profile(data)
+        diag = validate_field_profile(profile)
+        assert diag.ok is True
+        assert any(
+            "direction deviates from main axis" in w
+            for w in diag.warnings
+        )
+        assert not any(
+            "direction deviates from main axis" in e
+            for e in diag.errors
+        )
+
+    def test_schema_v2_nonpositive_recce_center_is_rejected(self):
+        data = {
+            "schema_version": 2,
+            "profile_id": "test",
+            "name": "Test",
+            "coordinate_convention": {
+                "field_x_positive": "right",
+                "field_y_positive": "forward",
+                "altitude_positive": "up",
+            },
+            "anchor": {"name": "a", "lat": 34.0, "lon": 108.0,
+                       "field_x_m": 0.0, "field_y_m": 0.0},
+            "centerline_points": [
+                {"name": "c1", "lat": 34.001, "lon": 108.001},
+                {"name": "c2", "lat": 34.002, "lon": 108.002},
+                {"name": "c3", "lat": 34.003, "lon": 108.003},
+                {"name": "c4", "lat": 34.004, "lon": 108.004},
+            ],
+            "field_geometry": {"recce_center_y_m": 0.0},
+        }
+        profile = parse_field_profile(data)
+        diag = validate_field_profile(profile)
+        assert not diag.ok
+        assert any("recce_center_y_m must be > 0" in e for e in diag.errors)
+
+
+# =========================================================================
+# L. V3 parser — strict name type
+# =========================================================================
+
+
+@pytest.mark.parametrize("bad_name", [None, 123, True, [], {}, "", "   "])
+class TestV3StrictForwardMarkerName:
+    def test_schema_v3_rejects_non_string_or_blank_name(self, bad_name):
+        data = make_valid_v3_profile_dict()
+        data["forward_marker"]["name"] = bad_name
+        with pytest.raises(FieldProfileValidationError) as exc:
+            parse_field_profile(data)
+        assert any(
+            "forward_marker.name" in e
+            for e in exc.value.diagnostics.errors
+        )
+
+
+# =========================================================================
+# M. Direct-object validator tests
+# =========================================================================
+
+
+class TestValidateDirectV3:
+    def _valid(self) -> FieldProfile:
+        return parse_field_profile(make_valid_v3_profile_dict())
+
+    def test_rejects_anchor(self):
+        p = self._valid()
+        p.anchor = AnchorPoint(name="bad", lat=0, lon=0)
+        diag = validate_field_profile(p)
+        assert not diag.ok
+        assert any("anchor" in e for e in diag.errors)
+
+    def test_rejects_centerline_points(self):
+        p = self._valid()
+        p.centerline_points = [CenterlinePoint(name="bad", lat=0, lon=0)]
+        diag = validate_field_profile(p)
+        assert not diag.ok
+        assert any("centerline_points" in e for e in diag.errors)
+
+    def test_fm_lat_nan(self):
+        p = self._valid()
+        p.forward_marker.lat = float("nan")
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_fm_lon_inf(self):
+        p = self._valid()
+        p.forward_marker.lon = float("inf")
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_geom_lane_nan(self):
+        p = self._valid()
+        p.field_geometry.lane_half_width_m = float("nan")
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_wp_x_nan(self):
+        p = self._valid()
+        p.drop_scan.waypoints[0].x_m = float("nan")
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_wp_alt_nan(self):
+        p = self._valid()
+        p.drop_scan.waypoints[0].altitude_m = float("nan")
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_gps_eph_inf(self):
+        p = self._valid()
+        p.gps_quality.max_eph = float("inf")
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_gps_epv_nan(self):
+        p = self._valid()
+        p.gps_quality.max_epv = float("nan")
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_samp_window_inf(self):
+        p = self._valid()
+        p.runtime_origin_sampling.sample_window_s = float("inf")
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_samp_spread_nan(self):
+        p = self._valid()
+        p.runtime_origin_sampling.max_horizontal_spread_m = float("nan")
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_bp_min_inf(self):
+        p = self._valid()
+        p.binding_policy.min_baseline_m = float("inf")
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_bp_warn_nan(self):
+        p = self._valid()
+        p.binding_policy.warn_baseline_below_m = float("nan")
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_gps_fix_float(self):
+        p = self._valid()
+        p.gps_quality.min_fix_type = 3.5
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_gps_fix_bool(self):
+        p = self._valid()
+        p.gps_quality.min_fix_type = True
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_gps_sat_float(self):
+        p = self._valid()
+        p.gps_quality.min_satellites = 10.5
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_gps_sat_bool(self):
+        p = self._valid()
+        p.gps_quality.min_satellites = True
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_samp_min_float(self):
+        p = self._valid()
+        p.runtime_origin_sampling.min_samples = 3.5
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_samp_min_bool(self):
+        p = self._valid()
+        p.runtime_origin_sampling.min_samples = True
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_geom_lane_str(self):
+        p = self._valid()
+        p.field_geometry.lane_half_width_m = "bad"
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_wp_x_none(self):
+        p = self._valid()
+        p.drop_scan.waypoints[0].x_m = None
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_gps_eph_str(self):
+        p = self._valid()
+        p.gps_quality.max_eph = "bad"
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_samp_win_list(self):
+        p = self._valid()
+        p.runtime_origin_sampling.sample_window_s = []
+        diag = validate_field_profile(p)
+        assert not diag.ok
+
+    def test_bp_min_dict(self):
+        p = self._valid()
+        p.binding_policy.min_baseline_m = {}
+        diag = validate_field_profile(p)
+        assert not diag.ok

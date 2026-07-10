@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import math
 import os
-from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -449,7 +448,7 @@ def _parse_forward_marker(data: Dict[str, Any]) -> ForwardMarker:
             )
         )
     name = str(raw.get("name", "")).strip()
-    if not name:
+    if not isinstance(raw.get("name"), str) or not name:
         raise FieldProfileValidationError(
             FieldProfileDiagnostics(errors=["forward_marker.name must be a non-empty string"])
         )
@@ -853,22 +852,31 @@ def _validate_field_profile_v2(
                 f"Minimum centerline point distance from anchor is {min_dist:.2f} m (< 0.5 m)"
             )
 
-        # check direction consistency
+        # check direction consistency (original semantics: reference =
+        # direction to farthest point, cosine < 0.7 → warning)
         if len(enu_points) >= 2:
-            for i in range(len(enu_points)):
-                dn_i, de_i = enu_points[i]
-                for j in range(i + 1, len(enu_points)):
-                    dn_j, de_j = enu_points[j]
-                    dot = dn_i * dn_j + de_i * de_j
-                    ni = math.hypot(dn_i, de_i)
-                    nj = math.hypot(dn_j, de_j)
-                    if ni > 1e-9 and nj > 1e-9:
-                        cos_angle = dot / (ni * nj)
-                        if cos_angle < 0.707:
-                            diag.errors.append(
-                                f"centerline_points[{i}] direction deviates from main axis (cos={cos_angle:.2f})"
-                            )
-                            break
+            farthest_idx = max(
+                range(len(enu_points)),
+                key=lambda i: math.hypot(*enu_points[i]),
+            )
+            farthest_n, farthest_e = enu_points[farthest_idx]
+            farthest_dist = math.hypot(farthest_n, farthest_e)
+
+            if farthest_dist > 0.0:
+                ref_n = farthest_n / farthest_dist
+                ref_e = farthest_e / farthest_dist
+
+                for i, (dn, de) in enumerate(enu_points):
+                    distance = math.hypot(dn, de)
+                    if distance < 0.01:
+                        continue
+
+                    dot = (dn * ref_n + de * ref_e) / distance
+                    if dot < 0.7:
+                        diag.warnings.append(
+                            f"centerline_points[{i}] direction deviates "
+                            f"from main axis (cos={dot:.2f})"
+                        )
 
     # -- field_geometry ---------------------------------------------------
     fg = profile.field_geometry
@@ -876,6 +884,10 @@ def _validate_field_profile_v2(
         diag.errors.append(f"field_geometry.lane_half_width_m must be > 0, got {fg.lane_half_width_m}")
     if fg.drop_center_y_m <= 0.0:
         diag.errors.append(f"field_geometry.drop_center_y_m must be > 0, got {fg.drop_center_y_m}")
+    if fg.recce_center_y_m <= 0.0:
+        diag.errors.append(
+            f"field_geometry.recce_center_y_m must be > 0, got {fg.recce_center_y_m}"
+        )
 
     # -- binding_policy ---------------------------------------------------
     bp = profile.binding_policy
@@ -914,6 +926,14 @@ def _validate_field_profile_v2(
 def _validate_field_profile_v3(
     profile: FieldProfile, diag: FieldProfileDiagnostics
 ) -> None:
+    # -- reject pre-surveyed static origin data ---------------------------
+    if profile.anchor is not None:
+        diag.errors.append("schema v3 must not contain pre-surveyed 'anchor'")
+    if profile.centerline_points:
+        diag.errors.append(
+            "schema v3 must not contain pre-surveyed 'centerline_points'"
+        )
+
     # -- profile_id -------------------------------------------------------
     if not profile.profile_id.strip():
         diag.errors.append("profile_id must be non-empty")
@@ -926,60 +946,117 @@ def _validate_field_profile_v3(
     if fm is None:
         diag.errors.append("forward_marker is required for schema v3")
     else:
-        if fm.lat < -90.0 or fm.lat > 90.0:
-            diag.errors.append(f"forward_marker.lat {fm.lat} out of range [-90, 90]")
-        if fm.lon < -180.0 or fm.lon > 180.0:
-            diag.errors.append(f"forward_marker.lon {fm.lon} out of range [-180, 180]")
-        if fm.coordinate_system != "WGS84":
+        if not isinstance(fm.name, str) or not fm.name.strip():
+            diag.errors.append("forward_marker.name must be a non-empty string")
+        if not _is_finite_number(fm.lat):
             diag.errors.append(
-                f"forward_marker.coordinate_system must be 'WGS84', got {fm.coordinate_system!r}"
+                f"forward_marker.lat must be a finite number, got {fm.lat!r}"
+            )
+        elif not -90.0 <= float(fm.lat) <= 90.0:
+            diag.errors.append(
+                f"forward_marker.lat {fm.lat} out of range [-90, 90]"
+            )
+        if not _is_finite_number(fm.lon):
+            diag.errors.append(
+                f"forward_marker.lon must be a finite number, got {fm.lon!r}"
+            )
+        elif not -180.0 <= float(fm.lon) <= 180.0:
+            diag.errors.append(
+                f"forward_marker.lon {fm.lon} out of range [-180, 180]"
+            )
+        if not isinstance(fm.coordinate_system, str) or fm.coordinate_system != "WGS84":
+            diag.errors.append(
+                f"forward_marker.coordinate_system must be 'WGS84', "
+                f"got {fm.coordinate_system!r}"
             )
 
     # -- field_geometry ---------------------------------------------------
     fg = profile.field_geometry
-    if fg.lane_half_width_m <= 0.0:
+
+    if not _is_finite_number(fg.lane_half_width_m):
+        diag.errors.append(
+            f"field_geometry.lane_half_width_m must be a finite number, "
+            f"got {fg.lane_half_width_m!r}"
+        )
+    elif fg.lane_half_width_m <= 0.0:
         diag.errors.append(
             f"field_geometry.lane_half_width_m must be > 0, got {fg.lane_half_width_m}"
         )
 
-    # geometry range checks
-    dmin = fg.drop_area_y_min
-    dmax = fg.drop_area_y_max
-    dc = fg.drop_center_y_m
-    rmin = fg.recce_area_y_min
-    rmax = fg.recce_area_y_max
-    rc = fg.recce_center_y_m
+    if not _is_finite_number(fg.drop_center_y_m):
+        diag.errors.append(
+            f"field_geometry.drop_center_y_m must be a finite number, "
+            f"got {fg.drop_center_y_m!r}"
+        )
+    if not _is_finite_number(fg.recce_center_y_m):
+        diag.errors.append(
+            f"field_geometry.recce_center_y_m must be a finite number, "
+            f"got {fg.recce_center_y_m!r}"
+        )
 
-    if dmin is not None and dmax is not None:
+    area_fields = [
+        ("drop_area_y_min", fg.drop_area_y_min),
+        ("drop_area_y_max", fg.drop_area_y_max),
+        ("recce_area_y_min", fg.recce_area_y_min),
+        ("recce_area_y_max", fg.recce_area_y_max),
+    ]
+    area_ok = True
+    area_vals: dict[str, float] = {}
+    for name, val in area_fields:
+        if val is None:
+            diag.errors.append(
+                f"field_geometry.{name} is required for schema v3"
+            )
+            area_ok = False
+        elif not _is_finite_number(val):
+            diag.errors.append(
+                f"field_geometry.{name} must be a finite number, got {val!r}"
+            )
+            area_ok = False
+        else:
+            area_vals[name] = float(val)
+
+    if area_ok:
+        dmin = area_vals["drop_area_y_min"]
+        dmax = area_vals["drop_area_y_max"]
+        rmin = area_vals["recce_area_y_min"]
+        rmax = area_vals["recce_area_y_max"]
+        dc = float(fg.drop_center_y_m)
+        rc = float(fg.recce_center_y_m)
+
         if dmin >= dmax:
             diag.errors.append(
-                f"field_geometry.drop_area_y_min_m ({dmin}) must be < drop_area_y_max_m ({dmax})"
+                f"field_geometry.drop_area_y_min_m ({dmin}) must be"
+                f" < drop_area_y_max_m ({dmax})"
             )
         if dc < dmin or dc > dmax:
             diag.errors.append(
-                f"field_geometry.drop_center_y_m ({dc}) must be in "
-                f"[drop_area_y_min_m ({dmin}), drop_area_y_max_m ({dmax})]"
+                f"field_geometry.drop_center_y_m ({dc}) must be in"
+                f" [drop_area_y_min_m ({dmin}), drop_area_y_max_m ({dmax})]"
             )
         if dmin < 0:
-            diag.errors.append(f"field_geometry.drop_area_y_min_m must be >= 0, got {dmin}")
-
-    if rmin is not None and rmax is not None:
+            diag.errors.append(
+                f"field_geometry.drop_area_y_min_m must be >= 0, got {dmin}"
+            )
         if rmin >= rmax:
             diag.errors.append(
-                f"field_geometry.recce_area_y_min_m ({rmin}) must be < recce_area_y_max_m ({rmax})"
+                f"field_geometry.recce_area_y_min_m ({rmin}) must be"
+                f" < recce_area_y_max_m ({rmax})"
             )
         if rc < rmin or rc > rmax:
             diag.errors.append(
-                f"field_geometry.recce_center_y_m ({rc}) must be in "
-                f"[recce_area_y_min_m ({rmin}), recce_area_y_max_m ({rmax})]"
+                f"field_geometry.recce_center_y_m ({rc}) must be in"
+                f" [recce_area_y_min_m ({rmin}), recce_area_y_max_m ({rmax})]"
             )
         if rmin < 0:
-            diag.errors.append(f"field_geometry.recce_area_y_min_m must be >= 0, got {rmin}")
-
-    if dmax is not None and rmin is not None and dmax >= rmin:
-        diag.errors.append(
-            f"field_geometry.drop_area_y_max_m ({dmax}) must be < recce_area_y_min_m ({rmin})"
-        )
+            diag.errors.append(
+                f"field_geometry.recce_area_y_min_m must be >= 0, got {rmin}"
+            )
+        if dmax >= rmin:
+            diag.errors.append(
+                f"field_geometry.drop_area_y_max_m ({dmax}) must be"
+                f" < recce_area_y_min_m ({rmin})"
+            )
 
     # -- drop_scan --------------------------------------------------------
     ds = profile.drop_scan
@@ -990,71 +1067,153 @@ def _validate_field_profile_v3(
             diag.errors.append(
                 f"drop_scan must have exactly 4 waypoints, got {len(ds.waypoints)}"
             )
+        lane = float(fg.lane_half_width_m) if _is_finite_number(fg.lane_half_width_m) else 100.0
         coords = set()
         for i, wp in enumerate(ds.waypoints):
-            if wp.altitude_m <= 0.0:
+            if not _is_finite_number(wp.x_m):
                 diag.errors.append(
-                    f"drop_scan.waypoints[{i}].altitude_m must be > 0, got {wp.altitude_m}"
+                    f"drop_scan.waypoints[{i}].x_m must be a finite number, "
+                    f"got {wp.x_m!r}"
                 )
-            lane = fg.lane_half_width_m
-            if wp.x_m < -lane or wp.x_m > lane:
+            elif wp.x_m < -lane or wp.x_m > lane:
                 diag.errors.append(
-                    f"drop_scan.waypoints[{i}].x_m ({wp.x_m}) out of lane [-{lane}, {lane}]"
+                    f"drop_scan.waypoints[{i}].x_m ({wp.x_m}) out of"
+                    f" lane [-{lane}, {lane}]"
                 )
-            if dmin is not None and dmax is not None:
-                if wp.y_m < dmin or wp.y_m > dmax:
-                    diag.errors.append(
-                        f"drop_scan.waypoints[{i}].y_m ({wp.y_m}) out of "
-                        f"drop area [{dmin}, {dmax}]"
-                    )
-            coords.add((wp.x_m, wp.y_m, wp.altitude_m))
+            if not _is_finite_number(wp.y_m):
+                diag.errors.append(
+                    f"drop_scan.waypoints[{i}].y_m must be a finite number, "
+                    f"got {wp.y_m!r}"
+                )
+            elif area_ok and (wp.y_m < dmin or wp.y_m > dmax):
+                diag.errors.append(
+                    f"drop_scan.waypoints[{i}].y_m ({wp.y_m}) out of"
+                    f" drop area [{dmin}, {dmax}]"
+                )
+            if not _is_finite_number(wp.altitude_m):
+                diag.errors.append(
+                    f"drop_scan.waypoints[{i}].altitude_m must be a finite"
+                    f" number, got {wp.altitude_m!r}"
+                )
+            elif wp.altitude_m <= 0.0:
+                diag.errors.append(
+                    f"drop_scan.waypoints[{i}].altitude_m must be > 0,"
+                    f" got {wp.altitude_m}"
+                )
+            if (
+                _is_finite_number(wp.x_m)
+                and _is_finite_number(wp.y_m)
+                and _is_finite_number(wp.altitude_m)
+            ):
+                coords.add((
+                    float(wp.x_m), float(wp.y_m), float(wp.altitude_m)
+                ))
         if len(coords) < 2:
             diag.errors.append("drop_scan.waypoints must not be all identical")
 
     # -- gps_quality ------------------------------------------------------
     gq = profile.gps_quality
-    if gq.min_fix_type < 3:
-        diag.errors.append(f"gps_quality.min_fix_type must be >= 3, got {gq.min_fix_type}")
-    if gq.min_satellites <= 0:
-        diag.errors.append(f"gps_quality.min_satellites must be > 0, got {gq.min_satellites}")
-    if gq.max_eph <= 0.0:
-        diag.errors.append(f"gps_quality.max_eph must be > 0, got {gq.max_eph}")
-    if gq.max_epv <= 0.0:
-        diag.errors.append(f"gps_quality.max_epv must be > 0, got {gq.max_epv}")
+    if not _is_strict_int(gq.min_fix_type):
+        diag.errors.append(
+            f"gps_quality.min_fix_type must be a strict integer, "
+            f"got {gq.min_fix_type!r}"
+        )
+    elif gq.min_fix_type < 3:
+        diag.errors.append(
+            f"gps_quality.min_fix_type must be >= 3, got {gq.min_fix_type}"
+        )
+    if not _is_strict_int(gq.min_satellites):
+        diag.errors.append(
+            f"gps_quality.min_satellites must be a strict integer, "
+            f"got {gq.min_satellites!r}"
+        )
+    elif gq.min_satellites <= 0:
+        diag.errors.append(
+            f"gps_quality.min_satellites must be > 0, got {gq.min_satellites}"
+        )
+    if not _is_finite_number(gq.max_eph):
+        diag.errors.append(
+            f"gps_quality.max_eph must be a finite number, got {gq.max_eph!r}"
+        )
+    elif gq.max_eph <= 0.0:
+        diag.errors.append(
+            f"gps_quality.max_eph must be > 0, got {gq.max_eph}"
+        )
+    if not _is_finite_number(gq.max_epv):
+        diag.errors.append(
+            f"gps_quality.max_epv must be a finite number, got {gq.max_epv!r}"
+        )
+    elif gq.max_epv <= 0.0:
+        diag.errors.append(
+            f"gps_quality.max_epv must be > 0, got {gq.max_epv}"
+        )
 
     # -- runtime_origin_sampling ------------------------------------------
     ros = profile.runtime_origin_sampling
     if ros is None:
         diag.errors.append("runtime_origin_sampling is required for schema v3")
     else:
-        if ros.min_samples < 3:
+        if not _is_strict_int(ros.min_samples):
             diag.errors.append(
-                f"runtime_origin_sampling.min_samples must be >= 3, got {ros.min_samples}"
+                f"runtime_origin_sampling.min_samples must be a strict"
+                f" integer, got {ros.min_samples!r}"
             )
-        if ros.sample_window_s <= 0.0:
+        elif ros.min_samples < 3:
             diag.errors.append(
-                f"runtime_origin_sampling.sample_window_s must be > 0, got {ros.sample_window_s}"
+                f"runtime_origin_sampling.min_samples must be >= 3,"
+                f" got {ros.min_samples}"
             )
-        if ros.max_horizontal_spread_m <= 0.0:
+        if not _is_finite_number(ros.sample_window_s):
             diag.errors.append(
-                f"runtime_origin_sampling.max_horizontal_spread_m must be > 0, "
-                f"got {ros.max_horizontal_spread_m}"
+                f"runtime_origin_sampling.sample_window_s must be a finite"
+                f" number, got {ros.sample_window_s!r}"
             )
-        if ros.estimator != "median":
+        elif ros.sample_window_s <= 0.0:
             diag.errors.append(
-                f"runtime_origin_sampling.estimator must be 'median', got {ros.estimator!r}"
+                f"runtime_origin_sampling.sample_window_s must be > 0,"
+                f" got {ros.sample_window_s}"
+            )
+        if not _is_finite_number(ros.max_horizontal_spread_m):
+            diag.errors.append(
+                f"runtime_origin_sampling.max_horizontal_spread_m must be"
+                f" a finite number, got {ros.max_horizontal_spread_m!r}"
+            )
+        elif ros.max_horizontal_spread_m <= 0.0:
+            diag.errors.append(
+                f"runtime_origin_sampling.max_horizontal_spread_m must be"
+                f" > 0, got {ros.max_horizontal_spread_m}"
+            )
+        if not isinstance(ros.estimator, str) or ros.estimator != "median":
+            diag.errors.append(
+                f"runtime_origin_sampling.estimator must be 'median',"
+                f" got {ros.estimator!r}"
             )
 
     # -- binding_policy ---------------------------------------------------
     bp = profile.binding_policy
-    if bp.min_baseline_m <= 0.0:
+    bp_ok = True
+    if not _is_finite_number(bp.min_baseline_m):
+        diag.errors.append(
+            f"binding_policy.min_baseline_m must be a finite number,"
+            f" got {bp.min_baseline_m!r}"
+        )
+        bp_ok = False
+    elif bp.min_baseline_m <= 0.0:
         diag.errors.append(
             f"binding_policy.min_baseline_m must be > 0, got {bp.min_baseline_m}"
         )
-    if bp.warn_baseline_below_m <= bp.min_baseline_m:
+        bp_ok = False
+    if not _is_finite_number(bp.warn_baseline_below_m):
         diag.errors.append(
-            f"binding_policy.warn_baseline_below_m ({bp.warn_baseline_below_m}) "
-            f"must be > min_baseline_m ({bp.min_baseline_m})"
+            f"binding_policy.warn_baseline_below_m must be a finite number,"
+            f" got {bp.warn_baseline_below_m!r}"
+        )
+        bp_ok = False
+    if bp_ok and bp.warn_baseline_below_m <= bp.min_baseline_m:
+        diag.errors.append(
+            f"binding_policy.warn_baseline_below_m"
+            f" ({bp.warn_baseline_below_m}) must be"
+            f" > min_baseline_m ({bp.min_baseline_m})"
         )
 
     # -- unknown top-level keys → warning ----------------------------------
@@ -1460,6 +1619,25 @@ def _parse_binding_policy(data: Dict[str, Any]) -> BindingPolicy:
         min_baseline_m=float(raw.get("min_baseline_m", 30.0)),
         warn_baseline_below_m=float(raw.get("warn_baseline_below_m", 50.0)),
     )
+
+
+# ===================================================================
+# internal helpers — safe type checks for direct-object validation
+# ===================================================================
+
+
+def _is_finite_number(value: Any) -> bool:
+    """True if *value* is int or float (not bool) and finite."""
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+    )
+
+
+def _is_strict_int(value: Any) -> bool:
+    """True if *value* is int and not bool."""
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 # ===================================================================

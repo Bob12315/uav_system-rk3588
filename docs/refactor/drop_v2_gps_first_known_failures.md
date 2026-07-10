@@ -66,3 +66,17 @@ These three files are temporarily excluded from test runs via `--ignore=<file>`.
    removed from this whitelist.
 6. Old tests must not be deleted, skipped, or weakened to reduce the failure
    count.
+
+## Existing invalid field-profile fixture
+
+`config/field_profiles/example_centerline_lane.json` has been unable to pass
+`load_field_profile_json()` since before this GPS-first branch (confirmed at
+baseline `fc1667c`).  The failure is:
+
+- `CL_0` uses the same GPS coordinates as the anchor.
+- Minimum centreline-point distance from anchor is 0.0 m.
+- This is below the 0.5 m hard limit in Schema v2 validation.
+
+This is a pre-existing configuration data issue, not a regression introduced
+by Schema v3.  This GPS-first branch does **not** modify that example config.
+Subsequent bulk-load checks allow — and only allow — this known failure.
