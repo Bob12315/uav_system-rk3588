@@ -45,6 +45,15 @@ class RuntimeBindingOrchestrator:
         *,
         started_at_s: float,
     ) -> dict[str, object]:
+        if self._state == "applied":
+            return {
+                "ok": False,
+                "state": "applied",
+                "error": (
+                    "runtime binding is already applied; "
+                    "use field reference reset"
+                ),
+            }
         if not isinstance(profile, FieldProfile):
             return self._failure("profile must be a FieldProfile", state=self._state)
         if self._state == "sampling":
@@ -86,13 +95,13 @@ class RuntimeBindingOrchestrator:
         *,
         observed_at_s: float,
     ) -> dict[str, object]:
+        if self._sampler is None or self._state != "sampling":
+            return {"ok": True, "observed": False, "state": self._state}
         if not _finite_number(observed_at_s):
             return self._failure(
                 "observed_at_s must be finite", state=self._state
             )
         self._last_observed_at_s = float(observed_at_s)
-        if self._sampler is None or self._state != "sampling":
-            return {"ok": True, "observed": False, "state": self._state}
         try:
             sampling = self._sampler.observe_snapshot(
                 snapshot, observed_at_s=float(observed_at_s)  # type: ignore[arg-type]
@@ -115,10 +124,10 @@ class RuntimeBindingOrchestrator:
         }
 
     def finalize(self, *, completed_at_s: float) -> dict[str, object]:
-        if not _finite_number(completed_at_s):
-            return self._failure("completed_at_s must be finite", state=self._state)
         if self._state == "applied" and self._last_result is not None:
             return dict(self._last_result)
+        if not _finite_number(completed_at_s):
+            return self._failure("completed_at_s must be finite", state=self._state)
         if self._sampler is None:
             return self._failure("no runtime sampling session", state=self._state)
         if self._state == "apply_failed" and self._candidate is not None:
@@ -160,6 +169,19 @@ class RuntimeBindingOrchestrator:
         return self._apply(candidate, completed_at_s=float(completed_at_s))
 
     def cancel(self) -> dict[str, object]:
+        if self._state == "applied":
+            return {
+                "ok": False,
+                "state": "applied",
+                "error": (
+                    "runtime binding is already applied; "
+                    "use field reference reset"
+                ),
+            }
+        return self.reset()
+
+    def reset(self) -> dict[str, object]:
+        """Unconditionally discard the complete orchestrator lifecycle."""
         if self._sampler is not None:
             try:
                 self._sampler.reset()

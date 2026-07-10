@@ -1,6 +1,7 @@
 """Tests for runtime binding orchestrator (step 5B.2)."""
 
 import copy
+import threading
 from dataclasses import dataclass
 from unittest.mock import Mock
 
@@ -430,6 +431,13 @@ def _ready_orchestrator():
     return orchestrator
 
 
+def _applied_orchestrator():
+    orchestrator = _ready_orchestrator()
+    result = orchestrator.finalize(completed_at_s=1005.0)
+    assert result["state"] == "applied"
+    return orchestrator, result
+
+
 @pytest.mark.parametrize("failure_stage", ["service", "builder", "freeze"])
 def test_returned_transaction_failure_restores_both_owners(
     monkeypatch, failure_stage
@@ -567,6 +575,93 @@ def test_applied_finalize_has_no_transaction_side_effects(monkeypatch):
     assert orchestrator.finalize(completed_at_s=1006.0) == first
 
 
+def test_applied_cancel_preserves_complete_successful_state():
+    orchestrator, successful = _applied_orchestrator()
+    candidate = orchestrator._candidate
+    service_snapshot = orchestrator._svc.snapshot()
+    builder_snapshot = orchestrator._builder.snapshot_field_reference_state()
+
+    cancelled = orchestrator.cancel()
+
+    assert cancelled == {
+        "ok": False,
+        "state": "applied",
+        "error": (
+            "runtime binding is already applied; use field reference reset"
+        ),
+    }
+    assert orchestrator._candidate is candidate
+    assert orchestrator._svc.snapshot() == service_snapshot
+    assert orchestrator._builder.snapshot_field_reference_state() == builder_snapshot
+    assert orchestrator.synced_to_runtime(require_frozen=True) is True
+    assert orchestrator.finalize(completed_at_s=1006.0) == successful
+
+
+def test_applied_start_does_not_overwrite_successful_result():
+    orchestrator, successful = _applied_orchestrator()
+    candidate = orchestrator._candidate
+    last_error = orchestrator._last_error
+
+    restarted = orchestrator.start(_make_profile(), started_at_s=2000.0)
+
+    assert restarted["ok"] is False
+    assert restarted["state"] == "applied"
+    assert orchestrator._candidate is candidate
+    assert orchestrator._last_error is last_error
+    assert orchestrator.finalize(completed_at_s=2001.0) == successful
+
+
+def test_applied_invalid_repeated_finalize_returns_first_success():
+    orchestrator, successful = _applied_orchestrator()
+    stored = orchestrator._last_result
+    assert orchestrator.finalize(completed_at_s=float("nan")) == successful
+    assert orchestrator._last_result is stored
+
+
+def test_applied_observe_is_noop_even_with_invalid_time():
+    orchestrator, successful = _applied_orchestrator()
+    candidate = orchestrator._candidate
+    stored = orchestrator._last_result
+    observed = orchestrator.observe({}, observed_at_s=float("nan"))
+    assert observed == {"ok": True, "observed": False, "state": "applied"}
+    assert orchestrator._candidate is candidate
+    assert orchestrator._last_result is stored
+    assert orchestrator.finalize(completed_at_s=1006.0) == successful
+
+
+def test_cancel_then_late_observe_cannot_restore_sampling_state():
+    orchestrator = _ready_orchestrator()
+    assert orchestrator.cancel() == {"ok": True, "state": "idle"}
+    observed = orchestrator.observe({}, observed_at_s=float("nan"))
+    assert observed == {"ok": True, "observed": False, "state": "idle"}
+    assert orchestrator.state == "idle"
+    assert orchestrator._sampler is None
+
+
+def test_controller_reset_clears_applied_runtime_binding(monkeypatch):
+    controller, service, builder = _controller_with_profile(monkeypatch)
+    controller.start_runtime_profile_sampling("test_orch", started_at_s=1000.0)
+    for i in range(20):
+        controller.observe_runtime_profile_sampling(
+            _valid_snap(2000.0 + i * 0.1),
+            observed_at_s=1000.0 + i * 0.25,
+        )
+    applied = controller.finalize_runtime_profile_binding(completed_at_s=1005.0)
+    assert applied["state"] == "applied"
+
+    reset = controller.reset()
+    status = controller.status()["field_reference"]
+
+    assert reset["ok"] is True
+    assert controller._runtime_binding.state == "idle"
+    assert controller._runtime_binding._candidate is None
+    assert service.reference.is_confirmed is False
+    assert service.reference.is_frozen is False
+    assert builder.field_gps_transform_ready() is False
+    assert builder.field_transform_ready() is False
+    assert status["active_source"] == "none"
+
+
 # =============================================================================
 # Full synchronization tamper checks
 # =============================================================================
@@ -622,8 +717,25 @@ class _DroneDataclass:
 def _runner_sampling_spy():
     runner = SystemRunner.__new__(SystemRunner)
     runner.logger = Mock()
+    runner.action_runtime_lock = threading.RLock()
     runner.field_reference_controller = Mock()
     return runner
+
+
+class _LockSpy:
+    def __init__(self):
+        self.held = False
+        self.enter_count = 0
+
+    def __enter__(self):
+        assert self.held is False
+        self.held = True
+        self.enter_count += 1
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        self.held = False
+        return False
 
 
 def test_system_runner_preserves_mapping_snapshot():
@@ -652,6 +764,50 @@ def test_system_runner_isolates_controller_observe_exception():
     runner.logger.warning.assert_called_once()
 
 
+def test_system_runner_observe_holds_action_runtime_lock():
+    runner = _runner_sampling_spy()
+    lock = _LockSpy()
+    runner.action_runtime_lock = lock
+
+    def assert_locked(*args, **kwargs):
+        assert lock.held is True
+        return {"ok": True}
+
+    runner.field_reference_controller.observe_runtime_profile_sampling.side_effect = (
+        assert_locked
+    )
+    runner._observe_runtime_field_sampling({}, now_s=10.0)
+    assert lock.enter_count == 1
+    assert lock.held is False
+
+
+@pytest.mark.parametrize(
+    ("runner_method", "controller_method"),
+    [
+        ("field_reference_status", "status"),
+        ("field_reference_reset", "reset"),
+        ("field_reference_freeze", "freeze"),
+    ],
+)
+def test_system_runner_field_reference_handlers_hold_action_runtime_lock(
+    runner_method, controller_method
+):
+    runner = _runner_sampling_spy()
+    lock = _LockSpy()
+    runner.action_runtime_lock = lock
+
+    def assert_locked():
+        assert lock.held is True
+        return {"ok": True}
+
+    getattr(runner.field_reference_controller, controller_method).side_effect = (
+        assert_locked
+    )
+    assert getattr(runner, runner_method)() == {"ok": True}
+    assert lock.enter_count == 1
+    assert lock.held is False
+
+
 def test_system_runner_loop_source_observes_immediately_after_drone_read():
     import inspect
 
@@ -673,8 +829,6 @@ def test_system_runner_loop_source_observes_immediately_after_drone_read():
 def test_system_runner_runtime_wrappers_use_controller_and_lock(
     monkeypatch, wrapper, controller_method
 ):
-    import threading
-
     runner = SystemRunner.__new__(SystemRunner)
     runner.action_runtime_lock = threading.RLock()
     runner.field_reference_controller = Mock()

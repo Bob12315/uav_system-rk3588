@@ -374,13 +374,16 @@ class SystemRunner:
         return snapshot.get("drone", {}) or {}
 
     def field_reference_status(self) -> dict[str, object]:
-        return self.field_reference_controller.status()
+        with self.action_runtime_lock:
+            return self.field_reference_controller.status()
 
     def field_reference_reset(self) -> dict[str, object]:
-        return self.field_reference_controller.reset()
+        with self.action_runtime_lock:
+            return self.field_reference_controller.reset()
 
     def field_reference_freeze(self) -> dict[str, object]:
-        return self.field_reference_controller.freeze()
+        with self.action_runtime_lock:
+            return self.field_reference_controller.freeze()
 
     # ------------------------------------------------------------------
 
@@ -504,10 +507,11 @@ class SystemRunner:
                 snapshot = dict(drone)
             else:
                 snapshot = {}
-            self.field_reference_controller.observe_runtime_profile_sampling(
-                snapshot,
-                observed_at_s=now_s,
-            )
+            with self.action_runtime_lock:
+                self.field_reference_controller.observe_runtime_profile_sampling(
+                    snapshot,
+                    observed_at_s=now_s,
+                )
         except Exception:
             self.logger.warning("runtime field sampling observe failed", exc_info=True)
 

@@ -141,7 +141,7 @@ class FieldReferenceController:
     # ------------------------------------------------------------------
 
     def reset(self) -> dict[str, object]:
-        self._runtime_binding.cancel()
+        self._runtime_binding.reset()
         result = self._svc.reset()
         self._builder.clear_field_heading()
         self._last_bind_result = None
