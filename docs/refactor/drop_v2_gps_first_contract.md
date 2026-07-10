@@ -296,6 +296,7 @@ The v1 mission file must not be modified by any step in this transformation.
 |---|---|---|---|
 | FieldReference readiness | single local-only is_ready before step 4 | separate GPS/local readiness implemented in step 4; runtime GPS sampling and binding still not connected | steps 4–5 |
 | Runtime GPS sampling | not implemented before step 5A | pure deterministic sampler and binding candidate implemented; controller/runtime application not connected | steps 5A–5B |
+| Runtime binding application | not connected before 5B.1 | service and RuntimeContext application primitives implemented; controller transaction and freeze not connected | steps 5B.1–5B.2 |
 | Dynamic origin A | Not implemented | GPS sampling while stationary during pre-mission confirmation | Steps 3–5 |
 | Schema v3 | Schema v2 (anchor + 4 centreline GPS points) | Schema v3 pure data/parse/validation implemented in step 2; runtime binding not yet implemented | Step 2 |
 | FIELD → GLOBAL | `field_to_gps` utility exists, but current v2 scan uses hardcoded absolute GPS waypoints | Pure runtime A/B heading and FIELD→GLOBAL geometry implemented in step 3; FieldReference lifecycle and runtime binding are not yet connected. | Steps 3–7 |
