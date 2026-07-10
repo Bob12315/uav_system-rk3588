@@ -41,6 +41,7 @@ function makeHarness(options = {}) {
   const timers = [];
   const windowListeners = Object.create(null);
   const handlers = new Map();
+  const _runtimeGeometryCalls = [];
   let confirmResult = true;
   let timerId = 0;
 
@@ -88,7 +89,17 @@ function makeHarness(options = {}) {
         }
       },
     },
-    UavFieldMap: options.map || null,
+    UavFieldMap: (function() {
+      const wrapped = options.map || null;
+      if (wrapped && wrapped.setRuntimeGeometry) {
+        const orig = wrapped.setRuntimeGeometry;
+        wrapped.setRuntimeGeometry = function(geom, confirmed) {
+          _runtimeGeometryCalls.push([geom, confirmed]);
+          return orig.call(this, geom, confirmed);
+        };
+      }
+      return wrapped;
+    })(),
     UavFieldRef: null,
     confirm(message) { confirms.push(message); return confirmResult; },
     addEventListener(type, handler) {
@@ -155,6 +166,11 @@ function makeHarness(options = {}) {
     async settle() {
       for (let index = 0; index < 8; index += 1) await Promise.resolve();
     },
+    get lastRuntimeGeometryArgs() {
+      return _runtimeGeometryCalls.length > 0
+        ? _runtimeGeometryCalls[_runtimeGeometryCalls.length - 1]
+        : null;
+    },
     loadMap() {
       load("web_ui/static/js/field_map.js");
       return window.UavFieldMap;
@@ -171,6 +187,8 @@ function status(state, options = {}) {
         state,
         sampling: {can_finalize: Boolean(options.canFinalize)},
         candidate_summary: options.candidateSummary || null,
+        geometry: options.geometry || null,
+        last_result: options.lastResult || null,
       },
     },
     telemetry: {},
@@ -386,6 +404,83 @@ test("HOME/B/SCAN1-4/D1-4/R1-4 enter the real drawing and info paths", () => {
   confirmedModel.rect = model.rect;
   map.renderFieldMapInfoBox(confirmedModel);
   assert.ok(h.element("fieldMapInfoBox").innerHTML.includes("CONFIRMED / FROZEN"));
+});
+
+function makeMockMap() {
+  var calls = [];
+  return {
+    setRuntimeGeometry: function(geom, confirmed) {
+      calls.push([geom, confirmed]);
+    },
+    _calls: calls,
+  };
+}
+
+test("idle with no geometry clears runtime map", () => {
+  const map = makeMockMap();
+  const h = makeHarness({map: map});
+  h.window.UavFieldProfiles.init();
+  // Applied with geometry
+  h.window.UavFieldProfiles.onFieldReferenceStatus(status("applied", {geometry: {home: {lat: 34, lon: 108, field_x_m: 0, field_y_m: 0, name: "HOME"}, heading: {degrees: 1}}}));
+  assert.strictEqual(map._calls.length, 1, "applied should call setRuntimeGeometry");
+  assert.ok(map._calls[0][0], "should set geometry");
+  // Go idle with no geometry
+  h.window.UavFieldProfiles.onFieldReferenceStatus(status("idle"));
+  assert.strictEqual(map._calls.length, 2, "idle should call setRuntimeGeometry again");
+  assert.strictEqual(map._calls[1][0], null);
+  assert.strictEqual(map._calls[1][1], false);
+});
+
+test("cancel returns idle and clears geometry", () => {
+  const map = makeMockMap();
+  const h = makeHarness({map: map});
+  h.window.UavFieldProfiles.init();
+  // Sampling with geometry (preview)
+  h.window.UavFieldProfiles.onFieldReferenceStatus(status("sampling", {geometry: {home: {lat: 34, lon: 108, field_x_m: 0, field_y_m: 0, name: "HOME"}, heading: {degrees: 1}}}));
+  assert.ok(map._calls.length >= 1, "sampling with preview should call setRuntimeGeometry");
+  // Cancel returns idle
+  h.window.UavFieldProfiles.onFieldReferenceStatus(status("idle"));
+  const last = map._calls[map._calls.length - 1];
+  assert.strictEqual(last[0], null);
+  assert.strictEqual(last[1], false);
+});
+
+test("reset returns idle and clears geometry", () => {
+  const map = makeMockMap();
+  const h = makeHarness({map: map});
+  h.window.UavFieldProfiles.init();
+  h.window.UavFieldProfiles.onFieldReferenceStatus(status("applied", {geometry: {home: {lat: 34, lon: 108, field_x_m: 0, field_y_m: 0, name: "HOME"}, heading: {degrees: 1}}}));
+  assert.ok(map._calls.length >= 1, "applied should call setRuntimeGeometry");
+  // Reset returns idle
+  h.window.UavFieldProfiles.onFieldReferenceStatus(status("idle"));
+  const last = map._calls[map._calls.length - 1];
+  assert.strictEqual(last[0], null);
+  assert.strictEqual(last[1], false);
+});
+
+test("new sampling before preview does not show old geometry", () => {
+  const map = makeMockMap();
+  const h = makeHarness({map: map});
+  h.window.UavFieldProfiles.init();
+  h.window.UavFieldProfiles.onFieldReferenceStatus(status("applied", {geometry: {home: {lat: 34, lon: 108, field_x_m: 0, field_y_m: 0, name: "HOME"}, heading: {degrees: 1}}}));
+  assert.ok(map._calls.length >= 1, "applied should show geometry");
+  // Reset to idle
+  h.window.UavFieldProfiles.onFieldReferenceStatus(status("idle"));
+  const afterReset = map._calls[map._calls.length - 1];
+  assert.strictEqual(afterReset[0], null, "idle should clear");
+  // New sampling starts but no preview yet
+  h.window.UavFieldProfiles.onFieldReferenceStatus({
+    field_reference: {
+      runtime_binding: {
+        state: "sampling",
+        sampling: { elapsed_s: 1.0, sample_window_s: 5.0, window_complete: false, can_finalize: false },
+        geometry: null,
+        candidate_summary: null,
+      }
+    }
+  });
+  const afterSampling = map._calls[map._calls.length - 1];
+  assert.strictEqual(afterSampling[0], null, "sampling without preview should not show old geometry");
 });
 
 (async () => {

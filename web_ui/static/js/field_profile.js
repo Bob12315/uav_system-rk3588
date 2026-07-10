@@ -250,18 +250,15 @@ window.UavFieldProfiles = (function () {
 
         // ---- Field Map (runtime geometry) ---------------------------------
         var geom = runtime.geometry || (runtime.last_result || {}).geometry;
-        if (geom && window.UavFieldMap) {
-            if (window.UavFieldMap.setRuntimeGeometry) {
-                window.UavFieldMap.setRuntimeGeometry(geom, runtime.state === "applied");
-            } else if (window.UavFieldMap.setProfilePreview) {
-                // adapter: pass geometry as a profile-preview-like object
-                window.UavFieldMap.setProfilePreview({
-                    ok: true,
-                    type: "runtime_geometry",
-                    geometry: geom,
-                    is_confirmed: runtime.state === "applied",
-                    is_frozen: runtime.state === "applied"
-                });
+        if (window.UavFieldMap && window.UavFieldMap.setRuntimeGeometry) {
+            if (geom) {
+                window.UavFieldMap.setRuntimeGeometry(
+                    geom,
+                    runtime.state === "applied"
+                );
+            } else {
+                // Clear stale competition geometry on idle/cancel/reset/sampling-before-preview
+                window.UavFieldMap.setRuntimeGeometry(null, false);
             }
         }
 
