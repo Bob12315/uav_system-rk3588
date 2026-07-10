@@ -137,8 +137,8 @@ def test_field_map_x_mirrored_inverse_removed():
 
 
 def test_field_map_drone_x_mirrored():
-    """field_map.js fieldMapModel 中 fieldPosition 使用 x: -fieldX 镜像显示。"""
+    """field_map.js fieldMapModel does not mirror drone x (removed display_x_mirrored)."""
     js = _read_js("web_ui/static/js/field_map.js")
-    assert "x: -fieldX" in js
-    assert "display_x_mirrored: true" in js
-    assert "raw_field_x: fieldX" in js
+    assert "x: -fieldX" not in js
+    assert "display_x_mirrored" not in js
+    assert "x: fieldX" in js

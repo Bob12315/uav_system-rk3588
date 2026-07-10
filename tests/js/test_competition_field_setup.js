@@ -520,6 +520,77 @@ test("double init is guarded in field_reference.js", () => {
   assert.ok(src.includes("_initCalled"), "must have _initCalled guard");
 });
 
+// ── UAV x mirror fix tests ───────────────────────────────────────────────
+
+test("drone fieldPosition x is not mirrored", () => {
+  const src = fs.readFileSync("web_ui/static/js/field_map.js", "utf8");
+  assert.ok(!src.includes("x: -fieldX"), "must not have x: -fieldX");
+  assert.ok(!src.includes("display_x_mirrored"), "must not have display_x_mirrored");
+  assert.ok(src.includes("x: fieldX"), "must have x: fieldX");
+});
+
+test("drone x=+2 stays +2 in model", () => {
+  const mapSrc = fs.readFileSync("web_ui/static/js/field_map.js", "utf8");
+  const vm = require("vm");
+  const sandbox = {
+    window: { UavFieldMap: null },
+    document: { getElementById: () => null, createElement: () => ({}), querySelectorAll: () => [] },
+    console,
+    Math, Number, JSON, Object, Array, String,
+    isFinite,
+    requestAnimationFrame: (fn) => setTimeout(fn, 0),
+    setTimeout: (fn) => 0,
+    clearTimeout: () => {},
+    encodeURIComponent,
+    escapeHtml: (v) => String(v),
+    num: (v) => String(v),
+    $: () => null,
+    globalThis: null,
+  };
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(mapSrc, sandbox, { filename: "field_map.js" });
+  const map = sandbox.window.UavFieldMap;
+  const model = map.fieldMapModel({
+    field_position: { x: 2, y: 30, z: -5, local_x: 101, local_y: 202 },
+    drone: {},
+    mission_detail: {},
+  });
+  assert.strictEqual(model.drone.x, 2, "drone x should be +2, not mirrored");
+  assert.strictEqual(model.drone.y, 30, "drone y should be unchanged");
+});
+
+test("drone x=-2 stays -2 in model", () => {
+  const mapSrc = fs.readFileSync("web_ui/static/js/field_map.js", "utf8");
+  const vm = require("vm");
+  const sandbox = {
+    window: { UavFieldMap: null },
+    document: { getElementById: () => null, createElement: () => ({}), querySelectorAll: () => [] },
+    console,
+    Math, Number, JSON, Object, Array, String,
+    isFinite,
+    requestAnimationFrame: (fn) => setTimeout(fn, 0),
+    setTimeout: (fn) => 0,
+    clearTimeout: () => {},
+    encodeURIComponent,
+    escapeHtml: (v) => String(v),
+    num: (v) => String(v),
+    $: () => null,
+    globalThis: null,
+  };
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(mapSrc, sandbox, { filename: "field_map.js" });
+  const map = sandbox.window.UavFieldMap;
+  const model = map.fieldMapModel({
+    field_position: { x: -2, y: 30, z: -5, local_x: 99, local_y: 200 },
+    drone: {},
+    mission_detail: {},
+  });
+  assert.strictEqual(model.drone.x, -2, "drone x should be -2, not mirrored to +2");
+  assert.strictEqual(model.drone.y, 30, "drone y should be unchanged");
+});
+
 (async () => {
   let failed = 0;
   for (const entry of tests) {
