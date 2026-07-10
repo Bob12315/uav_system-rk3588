@@ -94,9 +94,10 @@ def _valid_snapshot(source_time: float, lat=34.103649, lon=108.642674) -> dict:
 
 
 def _finalize_valid(extra_spread=0.0):
-    s = RuntimeFieldBindingSampler(_profile())
+    profile = _profile()
     if extra_spread > 0:
-        s._profile.runtime_origin_sampling.max_horizontal_spread_m = max(1.0, extra_spread * 1.5)
+        profile.runtime_origin_sampling.max_horizontal_spread_m = max(1.0, extra_spread * 1.5)
+    s = RuntimeFieldBindingSampler(profile)
     s.start(started_at_s=1000.0)
     for i in range(20):
         s.observe_snapshot(
@@ -400,8 +401,9 @@ class TestSampleCount:
 
 class TestMedian:
     def test_median_origin(self):
-        s = RuntimeFieldBindingSampler(_profile())
-        s._profile.runtime_origin_sampling.max_horizontal_spread_m = 10.0
+        profile = _profile()
+        profile.runtime_origin_sampling.max_horizontal_spread_m = 10.0
+        s = RuntimeFieldBindingSampler(profile)
         s.start(started_at_s=1000.0)
         step = 5.0 / 19.0
         lats = [34.103649 + (i - 10) * 0.000001 for i in range(20)]
@@ -416,8 +418,9 @@ class TestMedian:
         assert c.origin_lon == pytest.approx(statistics.median(lons), abs=1e-12)
 
     def test_median_even_count(self):
-        s = RuntimeFieldBindingSampler(_profile())
-        s._profile.runtime_origin_sampling.max_horizontal_spread_m = 10.0
+        profile = _profile()
+        profile.runtime_origin_sampling.max_horizontal_spread_m = 10.0
+        s = RuntimeFieldBindingSampler(profile)
         s.start(started_at_s=1000.0)
         step = 5.0 / 19.0
         base = 34.103649
@@ -443,8 +446,9 @@ class TestSpread:
         assert s.finalize(completed_at_s=1005.0).horizontal_spread_m == 0.0
 
     def test_max_radius_definition(self):
-        s = RuntimeFieldBindingSampler(_profile())
-        s._profile.runtime_origin_sampling.max_horizontal_spread_m = 10.0
+        profile = _profile()
+        profile.runtime_origin_sampling.max_horizontal_spread_m = 10.0
+        s = RuntimeFieldBindingSampler(profile)
         s.start(started_at_s=1000.0)
         step = 5.0 / 19.0
         for i in range(19):
@@ -457,7 +461,8 @@ class TestSpread:
         assert c.horizontal_spread_m == pytest.approx(expected, abs=0.01)
 
     def test_at_threshold_ok(self):
-        s = RuntimeFieldBindingSampler(_profile())
+        profile = _profile()
+        s = RuntimeFieldBindingSampler(profile)
         s.start(started_at_s=1000.0)
         step = 5.0 / 19.0
         for i in range(19):
@@ -465,7 +470,7 @@ class TestSpread:
         s.observe_snapshot(_valid_snapshot(2100.0, lat=34.103650, lon=108.642675), observed_at_s=1004.9)
         from app.field_reference import gps_enu_deltas
         dn, de = gps_enu_deltas(34.103649, 108.642674, 34.103650, 108.642675)
-        s._profile.runtime_origin_sampling.max_horizontal_spread_m = math.hypot(dn, de)
+        profile.runtime_origin_sampling.max_horizontal_spread_m = math.hypot(dn, de)
         c = s.finalize(completed_at_s=1005.0)
         assert c.horizontal_spread_m > 0
 
@@ -565,7 +570,188 @@ class TestFailed:
 
 
 # =========================================================================
-# O. Static checks
+# =========================================================================
+# O. Max seen source time (5A.1 fix)
+# =========================================================================
+
+
+class TestMaxSeenSourceTime:
+    def test_newer_rejected_advances_max_seen(self):
+        s = RuntimeFieldBindingSampler(_profile())
+        s.start(started_at_s=1000.0)
+        # Accept source_time=8
+        s.observe_snapshot(_valid_snapshot(8.0), observed_at_s=1000.1)
+        # Reject source_time=10 (bad eph) — must advance max_seen
+        snap10 = _valid_snapshot(10.0)
+        snap10["gps_eph"] = 99.0
+        st = s.observe_snapshot(snap10, observed_at_s=1000.2)
+        assert st.last_source_time_s == 10.0
+        # source_time=9 with valid content — must be rejected as non-monotonic
+        st2 = s.observe_snapshot(_valid_snapshot(9.0), observed_at_s=1000.3)
+        assert st2.rejected_samples == 2
+        assert "monotonic" in (st2.last_rejection_reason or "").lower()
+        assert st2.accepted_samples == 1
+
+    def test_repeated_bad_becomes_duplicate(self):
+        s = RuntimeFieldBindingSampler(_profile())
+        s.start(started_at_s=1000.0)
+        snap = _valid_snapshot(10.0)
+        snap["gps_eph"] = 99.0
+        st1 = s.observe_snapshot(snap, observed_at_s=1000.1)
+        assert st1.rejected_samples == 1
+        assert st1.duplicate_samples == 0
+        st2 = s.observe_snapshot(snap, observed_at_s=1000.2)
+        assert st2.rejected_samples == 1
+        assert st2.duplicate_samples == 1
+
+    def test_duplicate_does_not_change_rejection_reason(self):
+        s = RuntimeFieldBindingSampler(_profile())
+        s.start(started_at_s=1000.0)
+        s.observe_snapshot(_valid_snapshot(8.0), observed_at_s=1000.1)
+        snap = _valid_snapshot(10.0)
+        snap["global_position_valid"] = False
+        s.observe_snapshot(snap, observed_at_s=1000.2)
+        reason = s.status(now_s=1000.3).last_rejection_reason
+        s.observe_snapshot(snap, observed_at_s=1000.3)  # duplicate
+        assert s.status(now_s=1000.4).last_rejection_reason == reason
+
+
+# =========================================================================
+# P. Non-Mapping snapshot
+# =========================================================================
+
+
+@pytest.mark.parametrize("bad_snapshot", [None, [], "bad", 123, True])
+class TestNonMapping:
+    def test_rejected_without_exception(self, bad_snapshot):
+        s = RuntimeFieldBindingSampler(_profile())
+        s.start(started_at_s=1000.0)
+        st = s.observe_snapshot(bad_snapshot, observed_at_s=1000.1)
+        assert st.rejected_samples == 1
+        assert st.accepted_samples == 0
+        assert st.duplicate_samples == 0
+        assert st.last_source_time_s is None
+        assert "mapping" in (st.last_rejection_reason or "").lower()
+
+
+# =========================================================================
+# Q. Ready/failed status
+# =========================================================================
+
+
+class TestReadyFailedStatus:
+    def _make_ready(self):
+        s = RuntimeFieldBindingSampler(_profile())
+        s.start(started_at_s=1000.0)
+        for i in range(20):
+            s.observe_snapshot(_valid_snapshot(2000.0 + i * 0.1), observed_at_s=1000.0 + i * 0.26)
+        s.finalize(completed_at_s=1005.0)
+        return s
+
+    def _make_failed_insufficient(self):
+        s = RuntimeFieldBindingSampler(_profile())
+        s.start(started_at_s=1000.0)
+        for i in range(19):
+            s.observe_snapshot(_valid_snapshot(2000.0 + i * 0.1), observed_at_s=1000.0 + i * 0.27)
+        try:
+            s.finalize(completed_at_s=1005.0)
+        except RuntimeFieldBindingError:
+            pass
+        return s
+
+    def test_ready_window_complete(self):
+        s = self._make_ready()
+        st = s.status()
+        assert st.state == "ready"
+        assert st.window_complete is True
+        assert st.can_finalize is False
+        assert st.elapsed_s == 5.0
+
+    def test_ready_elapsed_not_backwards(self):
+        s = self._make_ready()
+        assert s.status(now_s=1002.0).elapsed_s == 5.0
+        assert s.status(now_s=1008.0).elapsed_s == 8.0
+
+    @pytest.mark.parametrize("bad_now", [True, "bad", [], float("nan"), float("inf")])
+    def test_ready_rejects_bad_now(self, bad_now):
+        s = self._make_ready()
+        with pytest.raises(RuntimeFieldBindingError):
+            s.status(now_s=bad_now)
+
+    def test_ready_rejects_now_before_start(self):
+        s = self._make_ready()
+        with pytest.raises(RuntimeFieldBindingError):
+            s.status(now_s=999.0)
+
+    def test_failed_window_complete(self):
+        s = self._make_failed_insufficient()
+        st = s.status()
+        assert st.state == "failed"
+        assert st.window_complete is True
+        assert st.can_finalize is False
+
+    def test_failed_rejects_bad_now(self):
+        s = self._make_failed_insufficient()
+        with pytest.raises(RuntimeFieldBindingError):
+            s.status(now_s=float("nan"))
+
+
+# =========================================================================
+# R. Spread failure + geometry failure
+# =========================================================================
+
+
+class TestSpreadAndGeometryFailure:
+    def test_spread_above_threshold_fails(self):
+        profile = _profile()
+        profile.runtime_origin_sampling.max_horizontal_spread_m = 0.5
+        s = RuntimeFieldBindingSampler(profile)
+        s.start(started_at_s=1000.0)
+        step = 5.0 / 19.0
+        for i in range(19):
+            s.observe_snapshot(_valid_snapshot(2000.0 + i * 0.1), observed_at_s=1000.0 + i * step)
+        s.observe_snapshot(_valid_snapshot(2100.0, lat=34.103655, lon=108.642680), observed_at_s=1004.9)
+        with pytest.raises(RuntimeFieldBindingError, match="spread"):
+            s.finalize(completed_at_s=1005.0)
+        assert s.status().state == "failed"
+        assert s.status().window_complete is True
+
+    def test_geometry_failure_sets_failed(self):
+        profile = _profile()
+        # Move B too close so baseline < 30m
+        profile.binding_policy.min_baseline_m = 30.0
+        import math as _m
+        from app.field_reference import EARTH_RADIUS_M as _ER
+        profile.forward_marker.lat = 34.103649 + _m.degrees(20.0 / _ER)
+        s = RuntimeFieldBindingSampler(profile)
+        s.start(started_at_s=1000.0)
+        for i in range(20):
+            s.observe_snapshot(_valid_snapshot(2000.0 + i * 0.1), observed_at_s=1000.0 + i * 0.26)
+        with pytest.raises(RuntimeFieldBindingError, match="baseline"):
+            s.finalize(completed_at_s=1005.0)
+        assert s.status().state == "failed"
+        assert s.status().window_complete is True
+
+
+# =========================================================================
+# S. Profile immutability
+# =========================================================================
+
+
+class TestProfileImmutability:
+    def test_sampling_and_finalize_do_not_modify_profile(self):
+        profile = _profile()
+        before = copy.deepcopy(profile)
+        s = RuntimeFieldBindingSampler(profile)
+        s.start(started_at_s=1000.0)
+        for i in range(20):
+            s.observe_snapshot(_valid_snapshot(2000.0 + i * 0.1), observed_at_s=1000.0 + i * 0.26)
+        s.finalize(completed_at_s=1005.0)
+        assert profile == before
+
+
+# =========================================================================
+# O-z. Static checks (moved to end)
 # =========================================================================
 
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 import statistics
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Mapping, Optional, Tuple
 
 from .field_profile import (
@@ -162,7 +162,7 @@ class RuntimeFieldBindingSampler:
         self._rejected: int = 0
         self._duplicate: int = 0
         self._seen_source_times: set[float] = set()
-        self._last_source_time_s: Optional[float] = None
+        self._max_seen_source_time_s: Optional[float] = None
         self._last_rejection_reason: Optional[str] = None
 
         self._candidate: Optional[RuntimeFieldBindingCandidate] = None
@@ -189,7 +189,7 @@ class RuntimeFieldBindingSampler:
         self._rejected = 0
         self._duplicate = 0
         self._seen_source_times = set()
-        self._last_source_time_s = None
+        self._max_seen_source_time_s = None
         self._last_rejection_reason = None
         self._candidate = None
 
@@ -204,7 +204,7 @@ class RuntimeFieldBindingSampler:
         self._rejected = 0
         self._duplicate = 0
         self._seen_source_times = set()
-        self._last_source_time_s = None
+        self._max_seen_source_time_s = None
         self._last_rejection_reason = None
         self._candidate = None
         return self.status()
@@ -252,28 +252,39 @@ class RuntimeFieldBindingSampler:
                 duplicate_samples=self._duplicate,
                 window_complete=window_complete,
                 can_finalize=can_finalize,
-                last_source_time_s=self._last_source_time_s,
+                last_source_time_s=self._max_seen_source_time_s,
                 last_rejection_reason=self._last_rejection_reason,
             )
 
         # ready or failed
-        elapsed = 0.0
-        if self._completed_at_s is not None and self._started_at_s is not None:
-            if now_s is not None and now_s > self._completed_at_s:
-                elapsed = now_s - self._started_at_s
-            else:
-                elapsed = self._completed_at_s - self._started_at_s
-            elapsed = max(0.0, elapsed)
+        started = self._started_at_s
+        completed = self._completed_at_s
+        if started is None or completed is None:
+            elapsed = 0.0
+        elif now_s is None:
+            elapsed = completed - started
+        else:
+            if not _is_finite_number(now_s):
+                raise RuntimeFieldBindingError(
+                    f"now_s must be a finite number, got {now_s!r}"
+                )
+            if now_s < started:
+                raise RuntimeFieldBindingError(
+                    f"now_s ({now_s}) < started_at_s ({started})"
+                )
+            effective = max(completed, float(now_s))
+            elapsed = max(0.0, effective - started)
+        window_complete = elapsed >= window_s
 
         return RuntimeFieldSamplingStatus(
             state=self._state, profile_id=profile_id,
-            started_at_s=self._started_at_s, elapsed_s=elapsed,
+            started_at_s=started, elapsed_s=elapsed,
             sample_window_s=window_s, min_samples=min_samples,
             accepted_samples=self._accepted_n,
             rejected_samples=self._rejected,
             duplicate_samples=self._duplicate,
-            window_complete=False, can_finalize=False,
-            last_source_time_s=self._last_source_time_s,
+            window_complete=window_complete, can_finalize=False,
+            last_source_time_s=self._max_seen_source_time_s,
             last_rejection_reason=self._last_rejection_reason,
         )
 
@@ -310,6 +321,14 @@ class RuntimeFieldBindingSampler:
         if observed_at_s > started + window_s:
             return self.status(now_s=observed_at_s)
 
+        # Defend against non-Mapping snapshot
+        if not isinstance(snapshot, Mapping):
+            self._rejected += 1
+            self._last_rejection_reason = (
+                "snapshot must be a mapping"
+            )
+            return self.status(now_s=observed_at_s)
+
         # Extract source time
         src_time = snapshot.get("last_global_position_time")
         if src_time is None:
@@ -332,7 +351,7 @@ class RuntimeFieldBindingSampler:
             return self.status(now_s=observed_at_s)
 
         # Non-monotonic check
-        if self._last_source_time_s is not None and src_time_f < self._last_source_time_s:
+        if self._max_seen_source_time_s is not None and src_time_f < self._max_seen_source_time_s:
             self._rejected += 1
             self._last_rejection_reason = (
                 "last_global_position_time is not monotonic"
@@ -340,9 +359,13 @@ class RuntimeFieldBindingSampler:
             self._seen_source_times.add(src_time_f)
             return self.status(now_s=observed_at_s)
 
-        # Mark seen before quality checks — a bad message with same timestamp
-        # should not count as duplicate on retry.
+        # Mark source time as seen and advance max_seen BEFORE payload/quality
+        # checks so repeated reads of the same bad GPS message are counted as
+        # duplicates instead of repeatedly increasing rejected_samples, and so
+        # that a later message with an older timestamp is correctly rejected as
+        # non-monotonic.
         self._seen_source_times.add(src_time_f)
+        self._max_seen_source_time_s = src_time_f
 
         # global_position_valid
         if snapshot.get("global_position_valid") is not True:
@@ -457,7 +480,6 @@ class RuntimeFieldBindingSampler:
             epv=float(epv),
         )
         self._accepted.append(sample)
-        self._last_source_time_s = src_time_f
         # Do NOT clear last_rejection_reason
         return self.status(now_s=observed_at_s)
 
