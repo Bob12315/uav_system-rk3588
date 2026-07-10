@@ -63,16 +63,18 @@ def _endpoint(app, method, path):
 def test_field_profile_frontend_uses_available_dom_helper_and_v2_fields():
     source = (_STATIC_DIR / "js" / "field_profile.js").read_text(encoding="utf-8")
 
-    assert "function setText(element, value, tone)" in source
-    assert "dom.setText" not in source
+    # Competition panel uses inline setText helper and UavApi
+    assert "function setText(id, text)" in source
+    assert "window.UavApi" in source or "var api = window.UavApi" in source
+    # Competition-specific elements
     for field in (
-        "data.anchor",
-        "data.centerline_points",
-        "data.current_start_error_m",
-        "data.yaw_error_deg",
-        "data.max_residual_m",
-        "data.rms_residual_m",
-        "data.centerline_residuals",
+        "cfsForwardLat",
+        "cfsForwardLon",
+        "cfsStart",
+        "cfsFinalize",
+        "cfsCancel",
+        "cfsReset",
+        "onFieldReferenceStatus",
     ):
         assert field in source
 
@@ -96,8 +98,8 @@ def test_field_profile_frontend_dom_and_script_order_are_current():
         "/static/js/format_utils.js",
         "/static/js/dom_utils.js",
         "/static/js/field_reference.js",
-        "/static/js/field_profile.js?v=field-profile-persist-20260704",
-        "/static/app.js?v=field-ref-bridge-fix-20260704",
+        "/static/js/field_profile.js",
+        "/static/app.js",
     )
     positions = [html.index(script) for script in scripts]
     assert positions == sorted(positions)

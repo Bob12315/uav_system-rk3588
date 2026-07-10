@@ -11,7 +11,7 @@ import yaml
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictFloat
 
 from app.mission_orchestrator import MissionActionStep
 from app.app_config import ROOT_DIR, UiConfig
@@ -58,8 +58,9 @@ class ManualStepMoveRequest(BaseModel):
 
 
 class RuntimeSamplingStartRequest(BaseModel):
-    forward_marker_lat: float
-    forward_marker_lon: float
+    forward_marker_lat: StrictFloat
+    forward_marker_lon: StrictFloat
+    model_config = {"extra": "forbid"}
 
 
 ACTION_MISSION_TEMPLATE_DIR = ROOT_DIR / "config" / "action_missions"
@@ -416,39 +417,40 @@ def create_app(runner, config: UiConfig) -> FastAPI:
     @app.post("/api/field-reference/runtime-sampling/start")
     def competition_runtime_sampling_start(request: RuntimeSamplingStartRequest):
         import math
-        try:
-            lat = request.forward_marker_lat
-            lon = request.forward_marker_lon
-            # Validate: not bool, finite, in range
-            if isinstance(lat, bool) or isinstance(lon, bool):
-                raise HTTPException(
-                    status_code=422,
-                    detail="forward_marker_lat/lon must be numbers, not bool",
-                )
-            if not math.isfinite(lat) or not math.isfinite(lon):
-                raise HTTPException(
-                    status_code=400,
-                    detail="forward_marker_lat/lon must be finite numbers",
-                )
-            if lat > 90.0 or lat < -90.0:
-                raise HTTPException(
-                    status_code=400,
-                    detail="forward_marker_lat out of range [-90, 90]",
-                )
-            if lon > 180.0 or lon < -180.0:
-                raise HTTPException(
-                    status_code=400,
-                    detail="forward_marker_lon out of range [-180, 180]",
-                )
-            result = runner.competition_runtime_sampling_start(lat, lon)
-        except HTTPException:
-            raise
-        except Exception as exc:
-            result = {"ok": False, "error": str(exc)}
-        _append_field_reference_audit(
-            "competition_runtime_sampling_start", result
-        )
-        return result
+        lat = request.forward_marker_lat
+        lon = request.forward_marker_lon
+        # Validate: finite, in range (bool already rejected by StrictFloat + extra='forbid')
+        if not math.isfinite(lat) or not math.isfinite(lon):
+            raise HTTPException(
+                status_code=400,
+                detail="forward_marker_lat/lon must be finite numbers",
+            )
+        if lat > 90.0 or lat < -90.0:
+            raise HTTPException(
+                status_code=400,
+                detail="forward_marker_lat out of range [-90, 90]",
+            )
+        if lon > 180.0 or lon < -180.0:
+            raise HTTPException(
+                status_code=400,
+                detail="forward_marker_lon out of range [-180, 180]",
+            )
+        result = runner.competition_runtime_sampling_start(lat, lon)
+        ok = result.get("ok")
+        if ok is True:
+            _append_field_reference_audit("competition_runtime_sampling_start", result)
+            return result
+        state = result.get("state", "")
+        error = result.get("error", "unknown error")
+        if state in ("sampling", "sampling_failed", "apply_failed", "applied"):
+            raise HTTPException(status_code=409, detail=error)
+        elif "frozen" in str(error).lower():
+            raise HTTPException(status_code=409, detail=error)
+        elif "invalid" in str(error).lower() or "coordinate" in str(error).lower():
+            raise HTTPException(status_code=400, detail=error)
+        else:
+            _append_field_reference_audit("competition_runtime_sampling_start", result)
+            return result
 
     @app.get("/api/field-profiles")
     def field_profiles_list():

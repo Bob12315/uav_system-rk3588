@@ -273,13 +273,13 @@ window.UavFieldProfiles = (function () {
     }
 
     // ── actions ────────────────────────────────────────────────────────
-    async function _doPost(url, confirmMsg, onOk) {
+    async function _doPost(url, confirmMsg, body, onOk) {
         if (requestBusy) return;
         if (confirmMsg && !window.confirm(confirmMsg)) return;
         requestBusy = true;
         updateButtons();
         try {
-            var r = await api.request(url, { method: "POST", body: "{}" });
+            var r = await api.request(url, { method: "POST", body: body || "{}" });
             if (r && r.ok === false) {
                 var msg = r.error || "unknown error";
                 alert(msg);
@@ -301,6 +301,10 @@ window.UavFieldProfiles = (function () {
         _doPost(
             "/api/field-reference/runtime-sampling/start",
             "将使用当前飞机 WGS84 GPS 采样起点 A，\n并使用输入的远点 B 定义场地 +Y。\n请保持无人机静止。\n该操作不会启动 Mission，不会发送飞控命令。",
+            JSON.stringify({
+                forward_marker_lat: coords.lat,
+                forward_marker_lon: coords.lon
+            }),
             null
         );
     }
@@ -328,24 +332,25 @@ window.UavFieldProfiles = (function () {
         if (!confirmed) return;
         requestBusy = true;
         updateButtons();
-        try {
-            api.request("/api/field-reference/reset", { method: "POST", body: "{}" }).then(function (r) {
+        api.request("/api/field-reference/reset", { method: "POST", body: "{}" }).then(function (r) {
+            if (r && r.ok === true) {
                 var latEl = $("cfsForwardLat"), lonEl = $("cfsForwardLon");
                 if (latEl) latEl.value = "";
                 if (lonEl) lonEl.value = "";
-                requestBusy = false;
-                updateButtons();
-                if (window.UavFieldRef && window.UavFieldRef.fetchFieldReferenceStatus) {
-                    window.UavFieldRef.fetchFieldReferenceStatus({ scheduleNext: false });
-                }
-            }).catch(function () {
-                requestBusy = false;
-                updateButtons();
-            });
-        } catch (e) {
+            } else {
+                var msg = (r && r.error) ? r.error : "Reset failed";
+                alert(msg);
+            }
             requestBusy = false;
             updateButtons();
-        }
+            if (window.UavFieldRef && window.UavFieldRef.fetchFieldReferenceStatus) {
+                window.UavFieldRef.fetchFieldReferenceStatus({ scheduleNext: false });
+            }
+        }).catch(function (e) {
+            alert("Reset 网络异常: " + (e && e.message ? e.message : e));
+            requestBusy = false;
+            updateButtons();
+        });
     }
 
     // ── init ───────────────────────────────────────────────────────────

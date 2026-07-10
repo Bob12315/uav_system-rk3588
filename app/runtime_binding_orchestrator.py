@@ -530,18 +530,18 @@ class RuntimeBindingOrchestrator:
 
     def status(self, *, now_s: float | None = None) -> dict[str, object]:
         sampling: dict[str, object] | None = None
-        if self._sampler is not None and self._state == "sampling":
+        if self._sampler is not None and self._state in ("sampling", "sampling_failed", "apply_failed"):
             timestamp = now_s if now_s is not None else self._last_observed_at_s
             try:
                 raw_status = self._sampler.status(now_s=timestamp)
                 sampling = _status_dict(raw_status)
                 # Override can_finalize with preview-based check
-                if self._preview_candidate is not None:
+                if self._preview_candidate is not None and self._state == "sampling":
                     sampling["can_finalize"] = True
-                elif self._preview_error is not None:
+                else:
                     sampling["can_finalize"] = False
             except Exception as exc:
-                sampling = {"state": "sampling", "error": str(exc)}
+                sampling = {"state": self._state, "error": str(exc)}
 
         # Use preview candidate for summary/geometry if available (before finalize)
         candidate_summary: dict[str, object] | None = None

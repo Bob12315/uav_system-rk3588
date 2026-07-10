@@ -136,35 +136,62 @@ function setRuntimeGeometry(geometry, confirmed) {
   if (!geometry) {
     runtimeGeometry = null;
     runtimeGeometryConfirmed = false;
+    profilePreview = null;
     scheduleFieldMapRender();
     return;
   }
   runtimeGeometry = geometry;
   runtimeGeometryConfirmed = Boolean(confirmed);
+  var labelSuffix = runtimeGeometryConfirmed ? " (confirmed)" : " (unconfirmed)";
   // Convert to profilePreview-compatible format for rendering
   var boxes = [];
-  // Drop area corners
+  // Drop area corners (D1-D4)
   if (Array.isArray(geometry.drop_area_corners) && geometry.drop_area_corners.length === 4) {
     boxes.push({
       kind: "drop_area",
-      label: "Drop area" + (runtimeGeometryConfirmed ? "" : " (unconfirmed)"),
+      label: "Drop area" + labelSuffix,
       corners: geometry.drop_area_corners.map(function (pt) {
         return { field_x: pt.field_x_m, field_y: pt.field_y_m, lat: pt.lat, lon: pt.lon, name: pt.name };
       })
     });
   }
-  // Recce area corners
+  // Recce area corners (R1-R4)
   if (Array.isArray(geometry.recce_area_corners) && geometry.recce_area_corners.length === 4) {
     boxes.push({
       kind: "recce_area",
-      label: "Recce area" + (runtimeGeometryConfirmed ? "" : " (unconfirmed)"),
+      label: "Recce area" + labelSuffix,
       corners: geometry.recce_area_corners.map(function (pt) {
         return { field_x: pt.field_x_m, field_y: pt.field_y_m, lat: pt.lat, lon: pt.lon, name: pt.name };
       })
     });
   }
+  // Field bounds (derived from drop/recce corners extent)
+  var allCorners = [];
+  (geometry.drop_area_corners || []).forEach(function (c) { allCorners.push(c); });
+  (geometry.recce_area_corners || []).forEach(function (c) { allCorners.push(c); });
+  if (allCorners.length) {
+    var xs = allCorners.map(function (c) { return c.field_x_m; });
+    var ys = allCorners.map(function (c) { return c.field_y_m; });
+    var xMin = Math.min.apply(null, xs);
+    var xMax = Math.max.apply(null, xs);
+    var yMin = Math.min.apply(null, ys);
+    var yMax = Math.max.apply(null, ys);
+    var margin = 4;  // half-lane-width visual margin
+    boxes.push({
+      kind: "field_bounds",
+      label: "Field bounds" + labelSuffix,
+      corners: [
+        { field_x: xMin - margin, field_y: yMin, lat: 0, lon: 0, name: "SW" },
+        { field_x: xMax + margin, field_y: yMin, lat: 0, lon: 0, name: "SE" },
+        { field_x: xMax + margin, field_y: yMax, lat: 0, lon: 0, name: "NE" },
+        { field_x: xMin - margin, field_y: yMax, lat: 0, lon: 0, name: "NW" }
+      ]
+    });
+  }
   // Home point
   var home = geometry.home;
+  // Forward marker
+  var fwd = geometry.forward_marker;
   // Build reference
   var heading = (geometry.heading || {});
   profilePreview = {
@@ -173,9 +200,14 @@ function setRuntimeGeometry(geometry, confirmed) {
     reference: {
       origin_lat: home ? home.lat : 0,
       origin_lon: home ? home.lon : 0,
-      field_heading_deg: heading.degrees || 0
+      field_heading_deg: heading.degrees || 0,
+      field_heading_yaw_rad: heading.yaw_rad || 0
     },
     boxes: boxes,
+    // Extra geometry points for rendering
+    _home: home,
+    _forward_marker: fwd,
+    _drop_scan_waypoints: geometry.drop_scan_waypoints || [],
     _runtime: true,
     _confirmed: runtimeGeometryConfirmed
   };
