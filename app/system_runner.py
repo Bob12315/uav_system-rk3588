@@ -205,6 +205,13 @@ class SystemRunner:
                 )
                 health = SimpleNamespace(hold_reason="mission_disabled")
 
+                field_reference_status = self.field_reference_controller.status()
+                field_reference = (
+                    field_reference_status.get("field_reference", {})
+                    if isinstance(field_reference_status, dict)
+                    else {}
+                )
+
                 with self.control_command_log_lock:
                     self.latest_mission_name = "action_lab_only"
                     self.latest_mission_stage = "NO_MISSION"
@@ -223,7 +230,7 @@ class SystemRunner:
                             "name": "action_lab_only",
                             "reason": "mission_modules_unavailable",
                         },
-                        "field_reference": self.field_reference_controller.status().get("field_reference", {}),
+                        "field_reference": field_reference,
                     }
 
                 self._record_blackbox_cycle(

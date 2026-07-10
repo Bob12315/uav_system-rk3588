@@ -546,7 +546,8 @@ def create_app(runner, config: UiConfig) -> FastAPI:
         await websocket.accept()
         try:
             while True:
-                await websocket.send_json(runner.web_status_snapshot())
+                snapshot = await asyncio.to_thread(runner.web_status_snapshot)
+                await websocket.send_json(snapshot)
                 await asyncio.sleep(0.25)
         except (WebSocketDisconnect, RuntimeError):
             return
