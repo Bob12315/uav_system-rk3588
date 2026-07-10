@@ -1,163 +1,316 @@
-"""Tests for Step 3.2 — gps drop dispatcher control loop."""
+from __future__ import annotations
+
+from typing import Any
 
 import pytest
 
-from missions.common.actions.align_descend import AlignDescendAction
+from missions.common.actions import gps_drop_sequence as sequence_module
 from missions.common.actions.gps_drop_sequence import GpsDropSequenceAction
-from missions.common.actions.action_lab import create_action_lab_registry
-from app.dispatch.policy import ACTION_DISPATCH_POLICY
+from missions.common.actions.result import ActionResult
 
 
-# =============================================================================
-# Policy tests
-# =============================================================================
-
-class TestDispatcherPolicy:
-    def test_gps_multi_view_localize_in_global_goto(self):
-        rule = ACTION_DISPATCH_POLICY["global_goto"]
-        assert "gps_multi_view_localize" in rule.allowed_actions
-        assert "gps_drop_sequence" in rule.allowed_actions
-
-    def test_gps_drop_sequence_in_flight_command(self):
-        rule = ACTION_DISPATCH_POLICY["flight_command"]
-        assert "gps_drop_sequence" in rule.allowed_actions
-
-    def test_gps_drop_sequence_in_set_servo(self):
-        rule = ACTION_DISPATCH_POLICY["set_servo"]
-        assert "gps_drop_sequence" in rule.allowed_actions
-
-    def test_gps_in_lock_policy(self):
-        rule = ACTION_DISPATCH_POLICY.get("yolo_lock_target")
-        assert rule is not None
-        assert "gps_target_lock" in rule.allowed_actions
-        assert "gps_drop_sequence" in rule.allowed_actions
-
-    def test_clear_continuous_commands_policy(self):
-        rule = ACTION_DISPATCH_POLICY.get("clear_continuous_commands")
-        assert rule is not None
-        assert "gps_drop_sequence" in rule.allowed_actions
+TARGETS = [
+    {"valid": True, "lat": 34.00001, "lon": 108.00001, "class_name": "bucket", "target_id": "t0"},
+    {"valid": True, "lat": 34.00021, "lon": 108.00031, "class_name": "bucket", "target_id": "t1"},
+]
+PAYLOADS = [
+    {"payload_id": "p0", "servo_outputs": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}]},
+    {"payload_id": "p1", "servo_outputs": [{"channel": 9, "release_pwm": 1250, "hold_pwm": 1750}]},
+]
 
 
-# =============================================================================
-# AlignDescend strict finish ordering
-# =============================================================================
+def _params(**overrides: Any) -> dict[str, Any]:
+    params: dict[str, Any] = {
+        "targets": TARGETS,
+        "payloads": PAYLOADS,
+        "goto_max_updates": 3,
+        "target_lock_max_updates": 3,
+        "align_descend_max_updates": 3,
+        "climb_max_updates": 3,
+        "release_wait_updates": 2,
+    }
+    params.update(overrides)
+    return params
 
-def _align_ctx(alt=5.0, ex=0.0, ey=0.0, locked=True, target_valid=True):
+
+def _global_action(params: dict[str, Any]) -> dict[str, Any]:
     return {
-        "drone": {"relative_altitude": alt, "local_x": 0.0, "local_y": 0.0, "local_z": -alt,
-                  "yaw": 0.0, "local_position_valid": True},
-        "ex_cam": ex, "ey_cam": ey, "target_locked": locked, "target_valid": target_valid,
-        "control_allowed": True,
+        "action_type": "global_goto",
+        "params": {"lat": params["lat"], "lon": params["lon"], "alt": params["altitude_m"], "frame": params["frame"]},
+        "input_frame": "global",
+        "key": params["key"],
+        "once": False,
     }
 
 
-class TestStrictAlignDescend:
-    def test_finish_before_min_altitude_strict(self):
-        """Strict mode: finish_altitude (1.3m) checked before min_altitude (2.0m default)."""
-        a = AlignDescendAction()
-        a.start({"finish_altitude_m": 1.3, "finish_policy": "require_alignment_or_timeout",
-                  "max_updates": 100, "config": {"min_altitude_m": 2.0, "max_ex_cam": 0.5, "max_ey_cam": 0.5}})
-        r = a.update(_align_ctx(alt=4.0, ex=0.01, ey=0.01))
-        # Should be active aligning (not min_altitude_reached)
-        assert not r.done
-        assert not r.failed
+class ScriptedGoto:
+    fail_keys: set[str] = set()
+    hang_keys: set[str] = set()
+    starts: list[dict[str, Any]] = []
 
-    def test_default_1_3m_can_complete(self):
-        """Default finish_altitude 1.3m can reach aligned_at_finish_altitude."""
-        a = AlignDescendAction()
-        a.start({"finish_altitude_m": 1.3, "finish_policy": "require_alignment_or_timeout",
-                  "max_updates": 100,
-                  "config": {"min_altitude_m": 1.0, "max_ex_cam": 0.5, "max_ey_cam": 0.5}})
-        for _ in range(15):
-            r = a.update(_align_ctx(alt=1.2, ex=0.01, ey=0.01))
-            if r.done: break
-        assert r.done
-        assert r.reason == "aligned_at_finish_altitude"
+    @classmethod
+    def reset(cls) -> None:
+        cls.fail_keys = set()
+        cls.hang_keys = set()
+        cls.starts = []
 
+    def start(self, params: dict[str, Any]) -> None:
+        self.params = dict(params)
+        self.calls = 0
+        type(self).starts.append(self.params)
 
-# =============================================================================
-# GpsDropSequence command envelopes
-# =============================================================================
-
-class TestGpsDropEnvelopes:
-
-        # set_servo should appear via PayloadRelease sub-action
-
-    def test_zero_envelope_has_vx_cmd(self):
-        from missions.common.actions.gps_drop_sequence import _zero_velocity_command
-        z = _zero_velocity_command()
-        assert z["action_type"] == "flight_command"
-        assert "vx_cmd" in z["params"]
-        assert z["params"]["vx_cmd"] == 0.0
-        assert "vx" not in z["params"]
-
-    def test_clear_envelope(self):
-        from missions.common.actions.gps_drop_sequence import _clear_continuous_command
-        c = _clear_continuous_command("test")
-        assert c["action_type"] == "clear_continuous_commands"
-        assert c["params"]["send_stop_first"] is True
+    def update(self, context: dict[str, Any]) -> ActionResult:
+        self.calls += 1
+        key = self.params["key"]
+        if key in type(self).fail_keys:
+            return ActionResult(failed=True, reason="waypoint_failed")
+        if key in type(self).hang_keys or self.calls == 1:
+            return ActionResult(actions=[_global_action(self.params)], reason="goto_active")
+        return ActionResult(done=True, reason="waypoint_reached")
 
 
-# =============================================================================
-# Registry
-# =============================================================================
+class ScriptedLock:
+    fail_target_ids: set[str] = set()
+    starts: list[dict[str, Any]] = []
 
-class TestRegistry:
-    def test_actions_registered(self):
-        r = create_action_lab_registry()
-        assert r.create("gps_target_lock") is not None
-        assert r.create("gps_drop_sequence") is not None
+    @classmethod
+    def reset(cls) -> None:
+        cls.fail_target_ids = set()
+        cls.starts = []
 
-    def test_registry_no_duplicates(self):
-        r = create_action_lab_registry()
-        names = r.list()
-        assert len(names) == len(set(names)), f"duplicates: {[n for n in names if names.count(n) > 1]}"
+    def start(self, params: dict[str, Any]) -> None:
+        self.params = dict(params)
+        type(self).starts.append(self.params)
+
+    def update(self, context: dict[str, Any]) -> ActionResult:
+        target_id = self.params["target"]["id"]
+        if target_id in type(self).fail_target_ids:
+            return ActionResult(failed=True, reason="gps_target_lock_timeout")
+        track_id = 100 + len(type(self).starts) - 1
+        return ActionResult(
+            actions=[{"action_type": "yolo_lock_target", "params": {"track_id": track_id}}],
+            done=True,
+            reason="gps_target_locked",
+        )
 
 
-# =============================================================================
-# Climb uses current target GPS
-# =============================================================================
+FULL_COMMAND = {
+    "type": "flight_command",
+    "valid": True,
+    "active": True,
+    "enable_body": True,
+    "vx_cmd": 0.12,
+    "vy_cmd": -0.08,
+    "vz_cmd": 0.18,
+    "yaw_rate_cmd": 0.0,
+    "yaw_hold_rad": 0.25,
+    "velocity_yaw_rad": 0.2,
+    "priority": 7,
+}
 
-class TestClimbTarget:
-    def test_climb_at_current_target_before_switch(self):
-        a = GpsDropSequenceAction()
-        a.start({
-            "targets": [{"valid": True, "lat": 34.0, "lon": 108.0, "class_name": "b", "target_id": "t0"},
-                        {"valid": True, "lat": 34.1, "lon": 108.1, "class_name": "b", "target_id": "t1"}],
-            "payloads": [{"servo_outputs": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}], "payload_id": "p0"},
-                         {"servo_outputs": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}], "payload_id": "p1"}],
-        })
-        # Manually set to climb at target 0
-        a.phase = "climb"
-        a.target_index = 0
-        a.payload_index = 1
-        a.released_count = 1
-        ctx = {"drone": {"lat": 34.0, "lon": 108.0, "yaw": 0.0, "relative_altitude": 5.0, "global_position_valid": True}}
-        r = a.update(ctx)
-        # Should produce global_goto for climb at target 0
-        if r.actions:
-            for act in r.actions:
-                if act.get("action_type") == "global_goto":
-                    assert act["params"]["lat"] == pytest.approx(34.0)
 
-    def test_aligned_terminal_goes_to_release(self):
-        """Aligned terminal tick: phase→release, zero+clear, no set_servo."""
-        a = GpsDropSequenceAction()
-        a.start({
-            "targets": [{"valid": True, "lat": 34.0, "lon": 108.0, "class_name": "b", "target_id": "t0"},
-                        {"valid": True, "lat": 34.1, "lon": 108.1, "class_name": "b", "target_id": "t1"}],
-            "payloads": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700, "payload_id": "p0",
-                          "servo_outputs": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}]},
-                         {"channel": 8, "release_pwm": 1200, "hold_pwm": 1700, "payload_id": "p1",
-                          "servo_outputs": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}]}],
-            "goto_max_updates": 200, "target_lock_max_updates": 40,
-        })
-        # Drive through goto and lock to reach align
-        ctx = {"drone": {"lat": 34.0, "lon": 108.0, "yaw": 0.0, "relative_altitude": 5.0, "global_position_valid": True},
-               "scene": {"detections": [], "image_width": 640, "image_height": 480}}
-        for _ in range(50):
-            r = a.update(ctx)
-            if a.phase in ("done", "failed", "release"):
-                break
-        # Verify zero phase is gone
-        assert "zero" not in a.phase
+class ScriptedAlign:
+    scripts: list[str] = []
+    starts: list[dict[str, Any]] = []
+
+    @classmethod
+    def reset(cls, scripts: list[str] | None = None) -> None:
+        cls.scripts = list(scripts or ["aligned", "aligned"])
+        cls.starts = []
+
+    def start(self, params: dict[str, Any]) -> None:
+        self.params = dict(params)
+        self.calls = 0
+        self.script = type(self).scripts.pop(0)
+        type(self).starts.append(self.params)
+
+    def update(self, context: dict[str, Any]) -> ActionResult:
+        self.calls += 1
+        if self.script == "active_forever":
+            return ActionResult(detail={"command": dict(FULL_COMMAND)}, reason="align_descending")
+        if self.script == "child_timeout":
+            return ActionResult(failed=True, reason="align_descend_timeout")
+        if self.script in {"missing_altitude", "target_lost_timeout"}:
+            return ActionResult(failed=True, reason=self.script)
+        if self.script == "unexpected_done":
+            return ActionResult(done=True, reason="min_altitude_reached")
+        if self.calls == 1:
+            return ActionResult(detail={"command": dict(FULL_COMMAND)}, reason="align_descending")
+        return ActionResult(done=True, reason="aligned_at_finish_altitude", detail={"command": {}})
+
+
+class FailingPayloadRelease:
+    def start(self, params: dict[str, Any]) -> None:
+        self.params = params
+
+    def update(self, context: dict[str, Any]) -> ActionResult:
+        return ActionResult(failed=True, reason="servo_failed")
+
+
+@pytest.fixture
+def scripted_children(monkeypatch: pytest.MonkeyPatch) -> None:
+    ScriptedGoto.reset()
+    ScriptedLock.reset()
+    ScriptedAlign.reset()
+    monkeypatch.setattr(sequence_module, "GotoWaypointAction", ScriptedGoto)
+    monkeypatch.setattr(sequence_module, "GpsTargetLockAction", ScriptedLock)
+    monkeypatch.setattr(sequence_module, "AlignDescendAction", ScriptedAlign)
+
+
+def _types(result: ActionResult) -> list[str]:
+    return [action["action_type"] for action in result.actions]
+
+
+def _servo_pwms(result: ActionResult) -> list[int]:
+    return [action["params"]["pwm"] for action in result.actions if action["action_type"] == "set_servo"]
+
+
+def _drive_until_terminal(action: GpsDropSequenceAction, limit: int = 80) -> list[ActionResult]:
+    results: list[ActionResult] = []
+    for _ in range(limit):
+        result = action.update({})
+        results.append(result)
+        if result.done or result.failed:
+            return results
+    raise AssertionError("sequence did not reach a terminal state")
+
+
+def test_dual_target_happy_path_from_start(scripted_children: None) -> None:
+    action = GpsDropSequenceAction()
+    action.start(_params())
+    results = _drive_until_terminal(action)
+
+    assert results[-1].done
+    assert results[-1].reason == "gps_drop_sequence_done"
+    assert (action.released_count, action.payload_index, action.target_index) == (2, 2, 1)
+
+    action_types = [_types(result) for result in results]
+    assert action_types == [
+        ["global_goto"], [], ["yolo_lock_target"], ["flight_command"],
+        ["flight_command", "clear_continuous_commands"],
+        ["flight_command", "set_servo"], ["flight_command"],
+        ["flight_command", "set_servo", "clear_continuous_commands"],
+        ["global_goto"], [], ["global_goto"], [], ["yolo_lock_target"],
+        ["flight_command"], ["flight_command", "clear_continuous_commands"],
+        ["flight_command", "set_servo"], ["flight_command"],
+        ["flight_command", "set_servo", "clear_continuous_commands"],
+    ]
+    assert results[3].actions[0]["params"] == FULL_COMMAND
+    for terminal_index in (4, 14):
+        assert _servo_pwms(results[terminal_index]) == []
+        assert results[terminal_index].detail["release_reason"] == "aligned_release"
+    assert _servo_pwms(results[5]) == [1200]
+    assert _servo_pwms(results[7]) == [1700]
+    assert _servo_pwms(results[15]) == [1250]
+    assert _servo_pwms(results[17]) == [1750]
+
+    goto_starts = ScriptedGoto.starts
+    assert [(item["lat"], item["lon"], item["altitude_m"]) for item in goto_starts] == [
+        (TARGETS[0]["lat"], TARGETS[0]["lon"], 3.0),
+        (TARGETS[0]["lat"], TARGETS[0]["lon"], 5.0),
+        (TARGETS[1]["lat"], TARGETS[1]["lon"], 3.0),
+    ]
+    assert all(item["target_frame"] == "global" for item in goto_starts)
+    assert all(item["waypoint_mode"] == "absolute" for item in goto_starts)
+    assert all(item["yaw_mode"] == "hold" for item in goto_starts)
+    assert [item["target"]["id"] for item in ScriptedLock.starts] == ["t0", "t1"]
+    assert not any(kind == "local_position" for kinds in action_types for kind in kinds)
+    assert sum(pwm in {1200, 1250} for result in results for pwm in _servo_pwms(result)) == 2
+    assert sum(pwm in {1700, 1750} for result in results for pwm in _servo_pwms(result)) == 2
+
+
+@pytest.mark.parametrize("timeout_kind", ["sequence", "child"])
+def test_align_timeout_stops_then_releases_next_tick(
+    scripted_children: None, timeout_kind: str
+) -> None:
+    ScriptedAlign.reset(["active_forever" if timeout_kind == "sequence" else "child_timeout"])
+    action = GpsDropSequenceAction()
+    action.start(_params(align_descend_max_updates=1))
+
+    results: list[ActionResult] = []
+    while action.phase != "release":
+        results.append(action.update({}))
+    terminal = results[-1]
+    assert _types(terminal) == ["flight_command", "clear_continuous_commands"]
+    assert _servo_pwms(terminal) == []
+    assert terminal.detail["release_reason"] == "align_timeout_release"
+
+    release = action.update({})
+    assert _types(release) == ["flight_command", "set_servo"]
+    assert _servo_pwms(release) == [1200]
+    assert release.detail["release_reason"] == "align_timeout_release"
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected_reason"),
+    [
+        ("goto_timeout", "goto_timeout"),
+        ("goto_failed", "goto_failed"),
+        ("lock", "no_lockable_drop_targets"),
+        ("missing_altitude", "missing_altitude"),
+        ("target_lost_timeout", "target_lost_timeout"),
+        ("unexpected_done", "align_unexpected_done"),
+        ("payload", "payload_release_failed"),
+        ("climb_timeout", "climb_timeout"),
+        ("climb_failed", "climb_failed"),
+    ],
+)
+def test_failures_are_stably_latched(
+    scripted_children: None,
+    monkeypatch: pytest.MonkeyPatch,
+    scenario: str,
+    expected_reason: str,
+) -> None:
+    if scenario == "goto_timeout":
+        ScriptedGoto.hang_keys = {"gps_drop_goto_0"}
+    elif scenario == "goto_failed":
+        ScriptedGoto.fail_keys = {"gps_drop_goto_0"}
+    elif scenario == "lock":
+        ScriptedLock.fail_target_ids = {"t0"}
+    elif scenario in {"missing_altitude", "target_lost_timeout", "unexpected_done"}:
+        ScriptedAlign.reset([scenario])
+    elif scenario == "payload":
+        monkeypatch.setattr(sequence_module, "PayloadReleaseAction", FailingPayloadRelease)
+    elif scenario == "climb_timeout":
+        ScriptedGoto.hang_keys = {"gps_drop_climb_0"}
+    elif scenario == "climb_failed":
+        ScriptedGoto.fail_keys = {"gps_drop_climb_0"}
+
+    action = GpsDropSequenceAction()
+    action.start(_params(goto_max_updates=1, climb_max_updates=1))
+    results = _drive_until_terminal(action)
+    failure = results[-1]
+    assert failure.failed and failure.reason == expected_reason
+    assert _types(failure) == ["flight_command", "clear_continuous_commands"]
+    snapshot = (action.phase, action.target_index, action.payload_index, action.released_count)
+
+    for _ in range(2):
+        repeated = action.update({})
+        assert repeated.failed and repeated.reason == expected_reason
+        assert repeated.actions == []
+        assert (action.phase, action.target_index, action.payload_index, action.released_count) == snapshot
+
+
+def test_strict_min_altitude_is_nested_and_rejects_above_finish(scripted_children: None) -> None:
+    action = GpsDropSequenceAction()
+    action.start(_params())
+    assert action.align_cfg["finish_policy"] == "require_alignment_or_timeout"
+    assert action.align_cfg["config"]["min_altitude_m"] == 1.3
+
+    with pytest.raises(ValueError, match="min_altitude_m must be <= finish_altitude_m"):
+        GpsDropSequenceAction().start(
+            _params(align_descend={"config": {"min_altitude_m": 2.0}})
+        )
+
+
+@pytest.mark.parametrize(
+    "targets",
+    [
+        [TARGETS[0], {**TARGETS[1], "target_id": "t0"}],
+        [TARGETS[0], {**TARGETS[1], "lat": TARGETS[0]["lat"], "lon": TARGETS[0]["lon"]}],
+        [TARGETS[0], {**TARGETS[1], "target_id": ""}],
+    ],
+)
+def test_start_rejects_non_distinct_targets(targets: list[dict[str, Any]]) -> None:
+    with pytest.raises(ValueError):
+        GpsDropSequenceAction().start(_params(targets=targets))

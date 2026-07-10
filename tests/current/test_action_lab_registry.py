@@ -10,12 +10,16 @@ from missions.common.actions.registry import default_registry
 def test_create_action_lab_registry_lists_supported_actions() -> None:
     registry = create_action_lab_registry()
 
-    assert registry.list() == [
+    names = registry.list()
+    assert names == [
         "align_descend",
         "build_recon_report",
         "drop_sequence",
         "fixed_view_localize",
         "goto_waypoint",
+        "gps_drop_sequence",
+        "gps_multi_view_localize",
+        "gps_target_lock",
         "land",
         "multi_view_localize",
         "payload_release",
@@ -23,13 +27,6 @@ def test_create_action_lab_registry_lists_supported_actions() -> None:
         "recon_inspect_target",
         "recon_scan",
         "recon_sequence",
-        "gps_multi_view_localize",
-        "gps_target_lock",
-        "gps_drop_sequence",
-        "gps_multi_view_localize",
-        "gps_target_lock",
-        "gps_drop_sequence",
-        "gps_multi_view_localize",
         "resolve_gps_targets",
         "select_drop_targets",
         "select_recon_targets",
@@ -37,8 +34,18 @@ def test_create_action_lab_registry_lists_supported_actions() -> None:
         "survey_area",
         "takeoff",
         "target_lock",
+        "validate_target",
         "yaw_align",
     ]
+    assert len(names) == len(set(names))
+    for name in (
+        "validate_target",
+        "resolve_gps_targets",
+        "gps_multi_view_localize",
+        "gps_target_lock",
+        "gps_drop_sequence",
+    ):
+        assert names.count(name) == 1
 
 
 def test_action_lab_registry_can_create_each_action() -> None:
@@ -52,7 +59,8 @@ def test_action_lab_specs_are_json_serializable() -> None:
     specs = action_lab_specs()
 
     json.dumps(specs)
-    assert [item["name"] for item in specs] == [
+    spec_names = [item["name"] for item in specs]
+    assert spec_names == [
         "takeoff",
         "land",
         "yaw_align",
@@ -75,14 +83,11 @@ def test_action_lab_specs_are_json_serializable() -> None:
         "gps_multi_view_localize",
         "gps_target_lock",
         "gps_drop_sequence",
-        "gps_multi_view_localize",
-        "gps_target_lock",
-        "gps_drop_sequence",
-        "gps_multi_view_localize",
-        "gps_target_lock",
-        "gps_drop_sequence",
-        "gps_multi_view_localize",
     ]
+    assert len(spec_names) == len(set(spec_names))
+    assert spec_names.count("gps_multi_view_localize") == 1
+    assert spec_names.count("gps_target_lock") == 1
+    assert spec_names.count("gps_drop_sequence") == 1
 
 
 def test_payload_release_spec_defaults_to_servo_output_8() -> None:
@@ -195,13 +200,6 @@ def test_action_lab_does_not_auto_register_default_registry() -> None:
         "gps_multi_view_localize",
         "gps_target_lock",
         "gps_drop_sequence",
-        "gps_multi_view_localize",
-        "gps_target_lock",
-        "gps_drop_sequence",
-        "gps_multi_view_localize",
-        "gps_target_lock",
-        "gps_drop_sequence",
-        "gps_multi_view_localize",
     ):
         assert name not in default_registry.list()
 

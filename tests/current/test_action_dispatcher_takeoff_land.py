@@ -36,6 +36,7 @@ class FakeLinkManager:
         alt: float,
         frame: int,
         priority: int = 4,
+        yaw_rad: float | None = None,
     ) -> None:
         self.calls.append(("global_goto", lat, lon, alt, frame, priority))
 

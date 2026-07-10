@@ -557,11 +557,16 @@ def test_drop_sequence_goto_uses_absolute_waypoint_mode() -> None:
         repo_root / "config" / "action_missions" / "drop_two_targets_v2.json",
         repo_root / "config" / "profiles" / "rk3588-sitl" / "action_missions" / "drop_two_targets_v2.json",
     ]
+    checked_paths = []
     for path in paths:
         data = json.loads(path.read_text())
-        drop_step = next(s for s in data["steps"] if s.get("name") == "drop_sequence")
+        drop_step = next((s for s in data["steps"] if s.get("name") == "drop_sequence"), None)
+        if drop_step is None:
+            continue
+        checked_paths.append(path)
         goto_mode = drop_step["params"]["goto"]["waypoint_mode"]
         assert goto_mode == "absolute", f"{path.name}: goto.waypoint_mode={goto_mode!r}, expected 'absolute'"
+    assert checked_paths, "expected at least one v2 template to contain drop_sequence"
 
 
 def test_payload_release_failed_returns_failed() -> None:

@@ -1,0 +1,166 @@
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from app.action_dispatcher import ActionDispatcher
+
+
+class FakeLinkManager:
+    def __init__(self) -> None:
+        self.calls: list[tuple[Any, ...]] = []
+
+    def global_goto(
+        self,
+        *,
+        lat: float,
+        lon: float,
+        alt: float,
+        frame: int,
+        priority: int,
+        yaw_rad: float | None = None,
+    ) -> None:
+        self.calls.append(("global_goto", lat, lon, alt, frame, priority, yaw_rad))
+
+    def send_body_velocity(
+        self,
+        *,
+        vx_forward_mps: float,
+        vy_right_mps: float,
+        vz_down_mps: float,
+    ) -> None:
+        self.calls.append(("send_body_velocity", vx_forward_mps, vy_right_mps, vz_down_mps))
+
+    def stop_body_velocity_and_clear(self) -> None:
+        self.calls.append(("stop_body_velocity_and_clear",))
+
+    def clear_pending_local_position_actions(self) -> None:
+        self.calls.append(("clear_pending_local_position_actions",))
+
+    def set_servo_output_pwm(self, *, servo_output: int, pwm: int, priority: int) -> None:
+        self.calls.append(("set_servo_output_pwm", servo_output, pwm, priority))
+
+
+class FakeYoloClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int]] = []
+
+    def lock_target(self, track_id: int) -> None:
+        self.calls.append(("lock_target", track_id))
+
+
+def _global(key: str) -> dict[str, Any]:
+    return {
+        "action_type": "global_goto",
+        "params": {"lat": 34.0, "lon": 108.0, "alt": 5.0, "frame": 6},
+        "key": key,
+        "once": False,
+        "priority": 4,
+    }
+
+
+def _velocity(key: str, vx: float, vy: float, vz: float) -> dict[str, Any]:
+    return {
+        "action_type": "flight_command",
+        "params": {
+            "type": "flight_command",
+            "valid": True,
+            "active": True,
+            "enable_body": True,
+            "vx_cmd": vx,
+            "vy_cmd": vy,
+            "vz_cmd": vz,
+            "yaw_rate_cmd": 0.0,
+            "priority": 5,
+        },
+        "key": key,
+        "once": False,
+    }
+
+
+def test_gps_action_dispatcher_sends_all_eight_required_paths() -> None:
+    link = FakeLinkManager()
+    yolo = FakeYoloClient()
+    dispatcher = ActionDispatcher(yolo_client=yolo)
+    dispatcher.send_actions = True
+
+    cases = [
+        ("gps_multi_view_localize", _global("scan_global")),
+        ("gps_drop_sequence", _global("drop_global")),
+        ("gps_drop_sequence", _velocity("align_nonzero", 0.2, -0.1, 0.15)),
+        ("gps_drop_sequence", _velocity("align_zero", 0.0, 0.0, 0.0)),
+        (
+            "gps_drop_sequence",
+            {
+                "action_type": "clear_continuous_commands",
+                "params": {"send_stop_first": True, "clear_pending_local_position": False},
+                "key": "align_clear",
+                "once": True,
+            },
+        ),
+        ("gps_target_lock", {"action_type": "yolo_lock_target", "params": {"track_id": 41}}),
+        ("gps_drop_sequence", {"action_type": "yolo_lock_target", "params": {"track_id": 42}}),
+        (
+            "gps_drop_sequence",
+            {
+                "action_type": "set_servo",
+                "params": {"channel": 8, "pwm": 1200},
+                "key": "payload_release",
+                "once": True,
+                "priority": 5,
+            },
+        ),
+    ]
+
+    sent: list[dict[str, Any]] = []
+    for action_name, action in cases:
+        result = dispatcher.dispatch_actions(
+            [action],
+            action_name=action_name,
+            send_commands=True,
+            link_manager=link,
+        )
+        assert result["errors"] == []
+        assert result["skipped"] == []
+        assert len(result["sent"]) == 1
+        sent.extend(result["sent"])
+
+    assert len(sent) == 8
+    assert [item["action_type"] for item in sent] == [
+        "global_goto",
+        "global_goto",
+        "flight_command",
+        "flight_command",
+        "clear_continuous_commands",
+        "yolo_lock_target",
+        "yolo_lock_target",
+        "set_servo",
+    ]
+    assert link.calls == [
+        ("global_goto", 34.0, 108.0, 5.0, 6, 4, None),
+        ("global_goto", 34.0, 108.0, 5.0, 6, 4, None),
+        ("send_body_velocity", 0.2, -0.1, 0.15),
+        ("send_body_velocity", 0.0, 0.0, 0.0),
+        ("stop_body_velocity_and_clear",),
+        ("set_servo_output_pwm", 8, 1200, 5),
+    ]
+    assert yolo.calls == [("lock_target", 41), ("lock_target", 42)]
+
+
+@pytest.mark.parametrize("send_actions,send_commands", [(False, True), (True, False)])
+def test_gps_motion_dispatch_still_requires_both_send_gates(
+    send_actions: bool, send_commands: bool
+) -> None:
+    link = FakeLinkManager()
+    dispatcher = ActionDispatcher()
+    dispatcher.send_actions = send_actions
+    result = dispatcher.dispatch_actions(
+        [_velocity("gated", 0.2, 0.0, 0.0)],
+        action_name="gps_drop_sequence",
+        send_commands=send_commands,
+        link_manager=link,
+    )
+    assert result["sent"] == []
+    assert link.calls == []
+

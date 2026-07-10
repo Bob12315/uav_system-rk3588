@@ -30,19 +30,23 @@ class GpsDropSequenceAction(ActionModule):
 
         # ── targets (exactly 2 valid GPS targets) ──
         raw_targets = data.get("targets", [])
-        if not isinstance(raw_targets, list):
-            raise ValueError("targets must be a list")
+        if not isinstance(raw_targets, list) or len(raw_targets) != 2:
+            raise ValueError("targets must contain exactly 2 entries")
         self.targets: list[dict[str, Any]] = []
         seen_ids = set()
         for t in raw_targets:
-            if not isinstance(t, dict): continue
-            if not t.get("valid", False): continue
+            if not isinstance(t, dict):
+                continue
+            if not t.get("valid", False):
+                continue
             try:
                 lat = float(t["lat"]); lon = float(t["lon"])
                 if not math.isfinite(lat) or not math.isfinite(lon): continue
                 if lat < -90 or lat > 90 or lon < -180 or lon > 180: continue
             except (KeyError, TypeError, ValueError): continue
-            tid = str(t.get("target_id", t.get("id", "")))
+            tid = str(t.get("target_id", t.get("id", ""))).strip()
+            if not tid:
+                continue
             if tid in seen_ids: continue  # dedup
             seen_ids.add(tid)
             self.targets.append({
@@ -50,23 +54,18 @@ class GpsDropSequenceAction(ActionModule):
                 "class_name": str(t.get("class_name", "")),
                 "target_id": tid,
             })
-            if len(self.targets) >= 2:
-                break
-        if len(self.targets) < 2:
+        if len(self.targets) != 2:
             raise ValueError("exactly 2 valid GPS targets required, got " + str(len(self.targets)))
+        if _same_gps_position(self.targets[0], self.targets[1]):
+            raise ValueError("GPS targets must have distinct positions")
 
         # ── payloads (exactly 2) ──
         raw_payloads = data.get("payloads", [])
-        if not isinstance(raw_payloads, list):
-            raise ValueError("payloads must be a list")
+        if not isinstance(raw_payloads, list) or len(raw_payloads) != 2:
+            raise ValueError("payloads must contain exactly 2 entries")
         self.payloads: list[dict[str, Any]] = []
         for p in raw_payloads:
-            if not isinstance(p, dict): continue
-            self.payloads.append(dict(p))
-            if len(self.payloads) >= 2:
-                break
-        if len(self.payloads) < 2:
-            raise ValueError("exactly 2 payloads required, got " + str(len(self.payloads)))
+            self.payloads.append(_validated_payload(p))
 
         # ── altitudes ──
         self.approach_altitude_m = float(data.get("approach_altitude_m", 3.0))
@@ -96,8 +95,17 @@ class GpsDropSequenceAction(ActionModule):
         self.lock_cfg = dict(data.get("target_lock") or {})
         self.align_cfg = dict(data.get("align_descend") or {})
         self.align_cfg.setdefault("finish_policy", "require_alignment_or_timeout")
-        if "min_altitude_m" not in self.align_cfg:
-            self.align_cfg["min_altitude_m"] = self.finish_altitude_m
+        align_config = dict(self.align_cfg.get("config") or {})
+        align_config.setdefault("min_altitude_m", self.finish_altitude_m)
+        min_altitude_m = float(align_config["min_altitude_m"])
+        if not math.isfinite(min_altitude_m) or min_altitude_m <= 0.0:
+            raise ValueError("align_descend.config.min_altitude_m must be finite and > 0")
+        if min_altitude_m > self.finish_altitude_m:
+            raise ValueError(
+                "align_descend.config.min_altitude_m must be <= finish_altitude_m"
+            )
+        align_config["min_altitude_m"] = min_altitude_m
+        self.align_cfg["config"] = align_config
 
         # ── state ──
         self.phase = "goto"
@@ -223,8 +231,8 @@ class GpsDropSequenceAction(ActionModule):
         if self.sub_action is None:
             aa = AlignDescendAction()
             aa.start({
-                "finish_altitude_m": self.finish_altitude_m,
                 **self.align_cfg,
+                "finish_altitude_m": self.finish_altitude_m,
             })
             self.sub_action = aa
             self.update_count_at_phase = 0
@@ -266,10 +274,9 @@ class GpsDropSequenceAction(ActionModule):
                     reason="gps_drop_align_timeout_release", detail=self._detail(),
                 )
             # Other failures: zero + clear, no release
-            return ActionResult(
-                actions=[_zero_velocity_command(), _clear_continuous_command("2")],
-                failed=True, reason=reason or "align_failed",
-                detail=self._detail(),
+            return self._fail(
+                reason or "align_failed",
+                actions=[_zero_velocity_command(), _clear_continuous_command("align_fail")],
             )
 
         if not result.done:
@@ -326,9 +333,20 @@ class GpsDropSequenceAction(ActionModule):
                 actions=[_zero_velocity_command()] + (hold or []) + [_clear_continuous_command("release_done")],
                 reason="gps_drop_climb_start", detail=self._detail(),
             )
+        terminal_actions = (
+            [_zero_velocity_command()]
+            + hold
+            + [_clear_continuous_command("release_done")]
+        )
+        if not (
+            self.released_count == 2
+            and self.payload_index == 2
+            and self.target_index == 1
+        ):
+            return self._fail("incomplete_dual_target_drop", actions=terminal_actions)
         self.phase = "done"
         return ActionResult(
-            actions=hold + [_zero_velocity_command(), _clear_continuous_command("5")],
+            actions=terminal_actions,
             done=True, reason="gps_drop_sequence_done",
             detail=self._detail(done=True),
         )
@@ -365,11 +383,21 @@ class GpsDropSequenceAction(ActionModule):
 
     # ── helpers ─────────────────────────────────────────────────────
 
-    def _fail(self, reason: str) -> ActionResult:
+    def _fail(
+        self,
+        reason: str,
+        *,
+        actions: list[dict[str, Any]] | None = None,
+    ) -> ActionResult:
         self.phase = "failed"
         self._failed_reason = reason
+        self.sub_action = None
         return ActionResult(
-            actions=[_zero_velocity_command(), _clear_continuous_command("6")],
+            actions=(
+                actions
+                if actions is not None
+                else [_zero_velocity_command(), _clear_continuous_command("failed")]
+            ),
             failed=True, reason=reason,
             detail=self._detail(),
         )
@@ -400,3 +428,45 @@ def _clear_continuous_command(key_suffix: str = "") -> dict[str, Any]:
             "params": {"clear_pending_local_position": False, "send_stop_first": True},
             "once": True,
             "key": f"gps_drop_clear_{key_suffix}"}
+
+
+def _same_gps_position(first: dict[str, Any], second: dict[str, Any]) -> bool:
+    return math.isclose(first["lat"], second["lat"], rel_tol=0.0, abs_tol=1e-9) and math.isclose(
+        first["lon"], second["lon"], rel_tol=0.0, abs_tol=1e-9
+    )
+
+
+def _validated_payload(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ValueError("payload entries must be dicts")
+    payload_id = str(raw.get("payload_id", "")).strip()
+    if not payload_id:
+        raise ValueError("payload_id is required")
+    outputs = raw.get("servo_outputs")
+    if not isinstance(outputs, list) or not outputs:
+        raise ValueError("payload servo_outputs must be a non-empty list")
+
+    validated_outputs: list[dict[str, int]] = []
+    for output in outputs:
+        if not isinstance(output, dict):
+            raise ValueError("servo_outputs entries must be dicts")
+        try:
+            channel = int(output["channel"])
+            release_pwm = int(output["release_pwm"])
+            hold_pwm = int(output["hold_pwm"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "servo_outputs require integer channel, release_pwm, and hold_pwm"
+            ) from exc
+        if channel <= 0:
+            raise ValueError("servo output channel must be positive")
+        if not (500 <= release_pwm <= 2500 and 500 <= hold_pwm <= 2500):
+            raise ValueError("servo PWM values must be between 500 and 2500")
+        validated_outputs.append(
+            {"channel": channel, "release_pwm": release_pwm, "hold_pwm": hold_pwm}
+        )
+
+    payload = dict(raw)
+    payload["payload_id"] = payload_id
+    payload["servo_outputs"] = validated_outputs
+    return payload
