@@ -40,7 +40,7 @@ window.UavFieldRef = (function () {
     // ── fetch ────────────────────────────────────────────────────────
     async function fetchFieldReferenceStatus(options) {
         options = options || {};
-        if (pollInFlight && options.scheduleNext !== false) return null;
+        if (pollInFlight) return null;
         pollInFlight = true;
         try {
             var data = await api.request("/api/field-reference/status");
@@ -97,6 +97,7 @@ window.UavFieldRef = (function () {
         if (f) f.onclick = async function () {
             await frPost("/api/field-reference/freeze");
         };
+        window.addEventListener("beforeunload", stopPolling, { once: true });
         startPolling();
     }
 

@@ -13,6 +13,7 @@ let lastActionMissionStatus = null;
 let lastActionMissionResult = null;
 let lastActionMissionSummaryHtml = "";
 let actionMissionAutoTickTimer = null;
+let statusUpdatesStop = null;
 // latestCameraRecording moved to video_panel.js (WU-6 v2)
 const fallbackStageModes = ["AUTO", "IDLE", "APPROACH_TRACK", "OVERHEAD_HOLD", "CORRIDOR_FOLLOW"];
 const ACTION_SAFETY_HINTS = {
@@ -429,7 +430,7 @@ function updateActionMissionAutoTickButton() {
 }
 function stopActionMissionAutoTick() {
   if (actionMissionAutoTickTimer) {
-    clearInterval(actionMissionAutoTickTimer);
+    clearTimeout(actionMissionAutoTickTimer);
     actionMissionAutoTickTimer = null;
   }
   updateActionMissionAutoTickButton();
@@ -877,16 +878,19 @@ async function toggleActionMissionAutoTick() {
     stopActionMissionAutoTick();
     return;
   }
-  actionMissionAutoTickTimer = setInterval(() => {
-    if (!lastActionMissionStatus?.running) {
-      updateActionMissionAutoTickButton();
-      return;
-    }
-    tickActionMission().catch(error => {
-      stopActionMissionAutoTick();
-      $("completionHint").textContent = error.message;
-    });
-  }, 500);
+  const scheduleTick = () => {
+    actionMissionAutoTickTimer = setTimeout(async () => {
+      try {
+        if (lastActionMissionStatus?.running) await tickActionMission();
+        updateActionMissionAutoTickButton();
+        if (actionMissionAutoTickTimer !== null) scheduleTick();
+      } catch (error) {
+        stopActionMissionAutoTick();
+        $("completionHint").textContent = error.message;
+      }
+    }, 500);
+  };
+  scheduleTick();
   updateActionMissionAutoTickButton();
   $("completionHint").textContent = lastActionMissionStatus?.running
     ? "自动推进已开启"
@@ -911,33 +915,91 @@ var stopActionLabAction = function () { return window.UavActionLab.stopActionLab
 var resetActionLabAction = function () { return window.UavActionLab.resetActionLabAction(); };
 
 function startStatusUpdates() {
+  if (statusUpdatesStop !== null) return statusUpdatesStop;
+  let stopped = false;
   let fallbackTimer = null;
   let actionTimer = null;
-  const pollStatus = () => json("/api/status").then(renderStatus).catch(error => {
-    $("completionHint").textContent = `状态刷新失败: ${error.message}`;
-  });
+  let reconnectTimer = null;
+  let socket = null;
+  const pollStatus = async () => {
+    try {
+      renderStatus(await json("/api/status"));
+    } catch (error) {
+      $("completionHint").textContent = `状态刷新失败: ${error.message}`;
+    } finally {
+      if (!stopped && fallbackTimer !== null) {
+        fallbackTimer = setTimeout(pollStatus, 500);
+      }
+    }
+  };
+  const pollAction = async () => {
+    try {
+      await refreshActionStatus();
+    } catch (error) {
+      $("completionHint").textContent = `Action Lab 刷新失败: ${error.message}`;
+    } finally {
+      if (!stopped && actionTimer !== null) {
+        actionTimer = setTimeout(pollAction, 1000);
+      }
+    }
+  };
   const startActionTimer = () => {
     if (actionTimer !== null) return;
-    actionTimer = setInterval(() => refreshActionStatus().catch(error => {
-      $("completionHint").textContent = `Action Lab 刷新失败: ${error.message}`;
-    }), 1000);
+    actionTimer = setTimeout(pollAction, 0);
   };
   // Field Reference polling moved to UavFieldRef.init()
   const startFallback = () => {
     if (fallbackTimer !== null) return;
-    pollStatus();
-    fallbackTimer = setInterval(pollStatus, 500);
+    fallbackTimer = setTimeout(pollStatus, 0);
     startActionTimer();
   };
-  try {
-    const socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/status`);
-    socket.onmessage = event => renderStatus(JSON.parse(event.data));
-    socket.onerror = startFallback;
-    socket.onclose = startFallback;
-    socket.onopen = () => { startActionTimer(); };
-  } catch {
-    startFallback();
-  }
+  const stopFallback = () => {
+    if (fallbackTimer !== null) clearTimeout(fallbackTimer);
+    fallbackTimer = null;
+  };
+  const connect = () => {
+    if (stopped) return;
+    try {
+      socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/status`);
+      socket.onmessage = event => renderStatus(JSON.parse(event.data));
+      socket.onerror = () => socket?.close();
+      socket.onclose = () => {
+        socket = null;
+        startFallback();
+        if (!stopped && reconnectTimer === null) {
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            connect();
+          }, 2000);
+        }
+      };
+      socket.onopen = () => {
+        stopFallback();
+        startActionTimer();
+      };
+    } catch {
+      startFallback();
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, 2000);
+    }
+  };
+  statusUpdatesStop = () => {
+    if (stopped) return;
+    stopped = true;
+    stopFallback();
+    if (actionTimer !== null) clearTimeout(actionTimer);
+    if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+    actionTimer = null;
+    reconnectTimer = null;
+    if (socket !== null) socket.close();
+    socket = null;
+    statusUpdatesStop = null;
+  };
+  window.addEventListener("beforeunload", statusUpdatesStop, {once: true});
+  connect();
+  return statusUpdatesStop;
 }
 var setupActionStatusJsonCopyGuard = function () { window.UavActionLab.setupActionStatusJsonCopyGuard(); };
 

@@ -10,10 +10,26 @@ window.UavApi = (function () {
   async function request(url, options) {
     if (options === undefined) options = {};
     const fetchOptions = Object.assign({headers: {"Content-Type": "application/json"}}, options);
-    const response = await fetch(url, fetchOptions);
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || "request failed");
-    return data;
+    const timeoutMs = Number(fetchOptions.timeoutMs || 10000);
+    delete fetchOptions.timeoutMs;
+    const controller = !fetchOptions.signal && typeof AbortController !== "undefined"
+      ? new AbortController()
+      : null;
+    if (controller) fetchOptions.signal = controller.signal;
+    const timeout = controller && timeoutMs > 0
+      ? setTimeout(function () { controller.abort(); }, timeoutMs)
+      : null;
+    try {
+      const response = await fetch(url, fetchOptions);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "request failed");
+      return data;
+    } catch (error) {
+      if (error && error.name === "AbortError") throw new Error("request timeout");
+      throw error;
+    } finally {
+      if (timeout !== null) clearTimeout(timeout);
+    }
   }
 
   // ------------------------------------------------------------------

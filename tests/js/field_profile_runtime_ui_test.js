@@ -1031,6 +1031,36 @@ test("startPolling second call does not add timer", async function () {
     assertEqual(countPendingTimers(), 1, "second startPolling should not add timer");
 });
 
+test("field reference polling does not overlap an in-flight request", async function () {
+    var callCount = 0;
+    var resolveRequest;
+    var s = loadBoth();
+    apiResponses["/api/field-reference/status"] = function () {
+        callCount++;
+        return new Promise(function (resolve) { resolveRequest = resolve; });
+    };
+
+    var first = s.window.UavFieldRef.fetchFieldReferenceStatus({ scheduleNext: false });
+    var second = await s.window.UavFieldRef.fetchFieldReferenceStatus({ scheduleNext: false });
+
+    assertEqual(second, null, "overlapping request should be skipped");
+    assertEqual(callCount, 1, "only one status request may be active");
+    resolveRequest({ field_reference: { runtime_binding: { state: "idle" } } });
+    await first;
+    delete apiResponses["/api/field-reference/status"];
+});
+
+test("stopPolling clears the owner timer", async function () {
+    var s = loadBoth();
+    s.window.UavFieldRef.startPolling();
+    await flushPromises();
+    assertEqual(countPendingTimers(), 1, "poll owner should have one timer");
+
+    s.window.UavFieldRef.stopPolling();
+
+    assertEqual(countPendingTimers(), 0, "stopPolling must clear its timer");
+});
+
 test("manual fetch with scheduleNext:false does not add timer", async function () {
     var s = loadBoth();
     s.window.UavFieldRef.startPolling();
