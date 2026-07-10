@@ -146,23 +146,23 @@ class GpsDerivedEnuFusion:
             north_m = float(obj.get("y", obj.get("local_y", 0.0)))
             lat, lon = self._enu_to_gps(east_m, north_m)
 
-            # Collect source metadata
+            # Collect source metadata from MultiPhotoFusion members
             members = obj.get("members", [])
-            if not members:
-                # fallback: use top-level fields
-                source_waypoints: list[str] = []
-                source_frames: list[int] = []
-            else:
-                source_waypoints = [
-                    str(m.get("source_waypoint", ""))
-                    for m in members
-                    if isinstance(m, dict)
-                ]
-                source_frames = [
-                    int(m.get("frame_id", 0))
-                    for m in members
-                    if isinstance(m, dict) and m.get("frame_id") is not None
-                ]
+            wp_set: set[str] = set()
+            fr_set: set[int] = set()
+            for m in (members or []):
+                if isinstance(m, dict):
+                    sw = m.get("source_waypoint")
+                    if sw is not None and str(sw):
+                        wp_set.add(str(sw))
+                    fid = m.get("frame_id")
+                    if fid is not None:
+                        try:
+                            fr_set.add(int(fid))
+                        except (TypeError, ValueError):
+                            pass
+            source_waypoints = sorted(wp_set)
+            source_frames = sorted(fr_set)
 
             result.append(GpsLocalizedObject(
                 id=i,
@@ -179,6 +179,10 @@ class GpsDerivedEnuFusion:
                 source_frames=tuple(source_frames),
             ))
 
+        # Stable sort: class_name, then lat, then lon
+        result.sort(key=lambda o: (o.class_name, o.lat, o.lon))
+        for i, obj in enumerate(result):
+            object.__setattr__(obj, 'id', i)
         return result
 
     # ------------------------------------------------------------------
@@ -195,17 +199,15 @@ class GpsDerivedEnuFusion:
         return d_east, d_north
 
     def _enu_to_gps(self, east_m: float, north_m: float) -> Tuple[float, float]:
-        """Convert east/north metres relative to origin back to GPS."""
-        d_lat_deg = math.degrees(north_m / self._EARTH_RADIUS_M)
-        cos_lat = math.cos(math.radians(self.origin_lat))
-        d_lon_deg = math.degrees(east_m / (self._EARTH_RADIUS_M * cos_lat))
-        lat = self.origin_lat + d_lat_deg
-        lon = self.origin_lon + d_lon_deg
-        # Normalise
-        if lat > 90.0 or lat < -90.0:
-            raise ValueError(f"computed lat {lat} out of range")
-        if lon > 180.0:
-            lon -= 360.0
-        elif lon < -180.0:
-            lon += 360.0
-        return lat, lon
+        """Convert east/north metres relative to origin back to GPS.
+        Uses field_to_gps_from_origin with heading=0 (east=x, north=y)."""
+        from app.coordinate_transform import field_to_gps_from_origin  # noqa: PLC0415
+        gps = field_to_gps_from_origin(
+            field_x_m=east_m,
+            field_y_m=north_m,
+            altitude_m=0.0,
+            origin_lat=self.origin_lat,
+            origin_lon=self.origin_lon,
+            field_heading_yaw_rad=0.0,
+        )
+        return gps.lat, gps.lon

@@ -167,6 +167,10 @@ class MultiPhotoFusion:
             },
             "estimate": estimate,
             "cluster_key": self._cluster_key(estimate),
+            # source metadata pass-through (backward-compatible)
+            "source_waypoint": estimate.get("source_waypoint"),
+            "frame_id": estimate.get("frame_id"),
+            "timestamp": estimate.get("timestamp"),
         }
 
     def _passes_edge_filter(self, estimate: dict[str, Any]) -> bool:
@@ -282,6 +286,9 @@ class MultiPhotoFusion:
                 "class_name": self._json_safe_value(point["class_name"]),
                 "class_id": self._json_safe_value(point["class_id"]),
                 "source": point["source"],
+                "source_waypoint": point.get("source_waypoint"),
+                "frame_id": point.get("frame_id"),
+                "timestamp": point.get("timestamp"),
             }
             for point in kept_points
         ]

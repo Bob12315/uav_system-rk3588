@@ -116,6 +116,14 @@ class GpsMultiViewLocalizeAction(ActionModule):
             return ActionResult(failed=True, reason=self.failure_reason or "gps_multi_view_failed",
                                 detail=self._detail())
 
+        # Shared timeout: covers goto + settle + capture per waypoint
+        if self.phase != "init":
+            self.update_count_at_waypoint += 1
+            if self.update_count_at_waypoint > self._params_max_updates:
+                self.phase = "failed"
+                self.failure_reason = "waypoint_timeout"
+                return ActionResult(failed=True, reason="waypoint_timeout", detail=self._detail())
+
         data = context or {}
 
         if self.phase == "init":
@@ -228,16 +236,10 @@ class GpsMultiViewLocalizeAction(ActionModule):
 
         self.phase = "settle"
         self.settle_count = 0
-        self.update_count_at_waypoint = 0
         return ActionResult(reason="gps_multi_view_settle", detail=self._detail())
 
     def _update_settle(self) -> ActionResult:
         self.settle_count += 1
-        self.update_count_at_waypoint += 1
-        if self.update_count_at_waypoint > self._params_max_updates:
-            self.phase = "failed"
-            self.failure_reason = "waypoint_timeout"
-            return ActionResult(failed=True, reason="waypoint_timeout", detail=self._detail())
         if self.settle_count >= self._params_settle_updates:
             self.phase = "capture"
             self.capture_count = 0
@@ -245,21 +247,15 @@ class GpsMultiViewLocalizeAction(ActionModule):
         return ActionResult(reason="gps_multi_view_settle", detail=self._detail())
 
     def _update_capture(self, context: dict[str, Any]) -> ActionResult:
-        self.update_count_at_waypoint += 1
-        if self.update_count_at_waypoint > self._params_max_updates:
-            self.phase = "failed"
-            self.failure_reason = "waypoint_timeout"
-            return ActionResult(failed=True, reason="waypoint_timeout", detail=self._detail())
-
-        # ── capture-time telemetry snapshot (priority: capture_telemetry > drone) ──
-        capture_snapshot = self._capture_snapshot(context)
-        if capture_snapshot is None:
+        # ── capture-time: per-detection telemetry priority ───────────
+        drone_snapshot = self._drone_snapshot(context)
+        detections, image_width, image_height = self._detections(context)
+        if drone_snapshot is None:
             self.phase = "failed"
             self.failure_reason = "invalid_capture_telemetry"
             return ActionResult(failed=True, reason="invalid_capture_telemetry",
                                 detail=self._detail())
 
-        detections, image_width, image_height = self._detections(context)
         new_estimates: list[GpsRawEstimate] = []
 
         for det in detections:
@@ -288,12 +284,20 @@ class GpsMultiViewLocalizeAction(ActionModule):
                     self._inc_reject("missing_ex_ey")
                     continue
 
+                # ── per-detection telemetry resolution ─────────────
+                # Priority: 1) detection.capture_telemetry  2) detection.source
+                #           3) scene.capture_telemetry      4) drone snapshot
+                telem = self._resolve_detection_telemetry(det, context, drone_snapshot)
+                if telem is None:
+                    self._inc_reject("invalid_detection_capture_telemetry")
+                    continue
+
                 # GPS project
                 est = self.projector.project(
-                    drone_lat=capture_snapshot["drone_lat"],
-                    drone_lon=capture_snapshot["drone_lon"],
-                    drone_yaw_rad=capture_snapshot["drone_yaw_rad"],
-                    relative_altitude_m=capture_snapshot["relative_altitude_m"],
+                    drone_lat=telem["drone_lat"],
+                    drone_lon=telem["drone_lon"],
+                    drone_yaw_rad=telem["drone_yaw_rad"],
+                    relative_altitude_m=telem["relative_altitude_m"],
                     ex=ex, ey=ey,
                     class_name=class_name,
                     confidence=conf,
@@ -312,7 +316,7 @@ class GpsMultiViewLocalizeAction(ActionModule):
             "waypoint_index": self.waypoint_index,
             "detections_count": len(detections),
             "new_estimates_count": len(new_estimates),
-            "drone_snapshot": {k: v for k, v in capture_snapshot.items() if k != "source_waypoint"},
+            "drone_snapshot": {k: v for k, v in (drone_snapshot or {}).items() if k != "source_waypoint"},
         })
 
         self.capture_count += 1
@@ -329,7 +333,6 @@ class GpsMultiViewLocalizeAction(ActionModule):
             self.waypoint_index += 1
             self.phase = "goto"
             self.capture_count = 0
-            self.update_count_at_waypoint = 0
             self.goto_action = self._new_goto_action()
             return ActionResult(reason="gps_multi_view_next_waypoint", detail=self._detail())
 
@@ -370,45 +373,108 @@ class GpsMultiViewLocalizeAction(ActionModule):
         action.start(gp)
         return action
 
-    def _capture_snapshot(self, context: dict[str, Any]) -> dict[str, Any] | None:
-        """Extract capture-time telemetry, preferring bound capture telemetry."""
-        # Priority 1: detection already has capture telemetry
-        # (not yet in current architecture; falls through to 2)
-
-        # Priority 2: scene/detection source capture telemetry
-        scene = (context or {}).get("scene", {})
-        if isinstance(scene, dict) and all(k in scene for k in ("drone_lat", "drone_lon", "drone_yaw_rad", "relative_altitude_m")):
-            return {
-                "drone_lat": float(scene["drone_lat"]),
-                "drone_lon": float(scene["drone_lon"]),
-                "drone_yaw_rad": float(scene["drone_yaw_rad"]),
-                "relative_altitude_m": float(scene["relative_altitude_m"]),
-                "source_waypoint": f"DROP_SCAN_{self.waypoint_index + 1}",
-            }
-
-        # Priority 3: current drone snapshot
+    def _drone_snapshot(self, context: dict[str, Any]) -> dict[str, Any] | None:
+        """Capture current drone telemetry as fallback snapshot."""
         drone = (context or {}).get("drone", {})
         if not isinstance(drone, dict):
             return None
-
         lat = drone.get("lat")
         lon = drone.get("lon")
         yaw = drone.get("yaw")
         alt = drone.get("relative_altitude") or drone.get("relative_altitude_m")
         if alt is None:
             alt = drone.get("altitude") or drone.get("altitude_m")
-
         if lat is None or lon is None or yaw is None or alt is None:
             return None
-
         try:
-            return {
-                "drone_lat": float(lat),
-                "drone_lon": float(lon),
-                "drone_yaw_rad": float(yaw),
-                "relative_altitude_m": float(alt),
-                "source_waypoint": f"DROP_SCAN_{self.waypoint_index + 1}",
-            }
+            lat_f = float(lat); lon_f = float(lon)
+            if not (-90 <= lat_f <= 90) or not (-180 <= lon_f <= 180):
+                return None
+            alt_f = float(alt)
+            if alt_f <= 0:
+                return None
+            import math
+            if not math.isfinite(lat_f) or not math.isfinite(lon_f):
+                return None
+            yaw_f = float(yaw)
+            if not math.isfinite(yaw_f):
+                return None
+            return {"drone_lat": lat_f, "drone_lon": lon_f,
+                    "drone_yaw_rad": yaw_f, "relative_altitude_m": alt_f}
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _resolve_detection_telemetry(
+        det: dict[str, Any],
+        context: dict[str, Any],
+        drone_snapshot: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Resolve capture-time telemetry for a single detection.
+
+        Priority: 1) det.capture_telemetry  2) det.source fields
+                  3) scene.capture_telemetry  4) drone_snapshot
+        """
+        # Priority 1: detection-bound capture telemetry
+        ct = det.get("capture_telemetry")
+        if ct is not None:
+            if isinstance(ct, dict):
+                r = GpsMultiViewLocalizeAction._parse_telem_dict(ct)
+                if r is not None:
+                    return r
+            # capture_telemetry present but invalid → reject
+            return None
+
+        # Priority 2: detection.source fields
+        src = det.get("source")
+        if isinstance(src, dict):
+            r = GpsMultiViewLocalizeAction._parse_telem_dict(src)
+            if r is not None:
+                return r
+
+        # Priority 3: scene capture_telemetry
+        scene = (context or {}).get("scene", {})
+        if isinstance(scene, dict):
+            sct = scene.get("capture_telemetry")
+            if isinstance(sct, dict):
+                r = GpsMultiViewLocalizeAction._parse_telem_dict(sct)
+                if r is not None:
+                    return r
+            # Also check scene top-level fields
+            r = GpsMultiViewLocalizeAction._parse_telem_dict(scene)
+            if r is not None:
+                return r
+
+        # Priority 4: drone snapshot
+        if drone_snapshot is not None:
+            return dict(drone_snapshot)
+
+        return None
+
+    @staticmethod
+    def _parse_telem_dict(d: dict[str, Any]) -> dict[str, Any] | None:
+        """Try to extract drone_lat/lon/yaw/alt from a dict."""
+        lat = d.get("drone_lat")
+        lon = d.get("drone_lon")
+        yaw = d.get("drone_yaw_rad") or d.get("yaw_rad") or d.get("yaw")
+        alt = d.get("relative_altitude_m") or d.get("altitude_m") or d.get("relative_altitude") or d.get("altitude")
+        if lat is None or lon is None or yaw is None or alt is None:
+            return None
+        try:
+            lat_f = float(lat); lon_f = float(lon)
+            if not (-90 <= lat_f <= 90) or not (-180 <= lon_f <= 180):
+                return None
+            alt_f = float(alt)
+            if alt_f <= 0:
+                return None
+            import math
+            if not math.isfinite(lat_f) or not math.isfinite(lon_f) or not math.isfinite(alt_f):
+                return None
+            yaw_f = float(yaw)
+            if not math.isfinite(yaw_f):
+                return None
+            return {"drone_lat": lat_f, "drone_lon": lon_f,
+                    "drone_yaw_rad": yaw_f, "relative_altitude_m": alt_f}
         except (TypeError, ValueError):
             return None
 

@@ -104,6 +104,17 @@ class RuntimeFieldTargetResolver:
         if not isinstance(home, dict) or "lat" not in home or "lon" not in home:
             self._error = "geometry.home missing or invalid"
             return
+        # Validate HOME WGS84
+        try:
+            hlat = float(home["lat"]); hlon = float(home["lon"])
+            import math
+            if not math.isfinite(hlat) or not math.isfinite(hlon):
+                raise ValueError
+            if not (-90.0 <= hlat <= 90.0) or not (-180.0 <= hlon <= 180.0):
+                raise ValueError
+        except (ValueError, TypeError):
+            self._error = "geometry.home lat/lon not valid finite WGS84"
+            return
         self._home = dict(home)
 
         scans = geometry.get("drop_scan_waypoints")
@@ -113,6 +124,24 @@ class RuntimeFieldTargetResolver:
         for i, wp in enumerate(scans):
             if not isinstance(wp, dict) or "lat" not in wp or "lon" not in wp:
                 self._error = f"geometry.drop_scan_waypoints[{i}] invalid"
+                return
+            # Validate name and GPS
+            wname = str(wp.get("name", ""))
+            expected = f"DROP_SCAN_{i+1}"
+            if wname != expected:
+                self._error = f"geometry.drop_scan_waypoints[{i}] name={wname!r} expected={expected!r}"
+                return
+            try:
+                wlat = float(wp["lat"]); wlon = float(wp["lon"]); walt = float(wp.get("altitude_m", 0))
+                import math
+                if not math.isfinite(wlat) or not math.isfinite(wlon) or not math.isfinite(walt):
+                    raise ValueError
+                if not (-90.0 <= wlat <= 90.0) or not (-180.0 <= wlon <= 180.0):
+                    raise ValueError
+                if walt <= 0.0:
+                    raise ValueError("altitude_m must be > 0")
+            except (ValueError, TypeError) as e:
+                self._error = f"geometry.drop_scan_waypoints[{i}] invalid: {e}"
                 return
         self._scan_waypoints = [dict(wp) for wp in scans]
 
