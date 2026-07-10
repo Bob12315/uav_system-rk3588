@@ -311,7 +311,170 @@ class TestBuilderSnapshotRestore:
 # =========================================================================
 
 
+
+# =========================================================================
+# H2. Service malformed geometry tests (5B.1.3)
+# =========================================================================
+
+
+class TestServiceMalformedGeometry:
+    def _make_c(self):
+        return _make_candidate()
+
+    def _apply(self, c):
+        svc = FieldReferenceService()
+        before = svc.snapshot()
+        r = svc.apply_runtime_binding(c, profile_name="Test")
+        after = svc.snapshot()
+        return r, before, after
+
+    def test_geometry_origin_bad(self):
+        c = self._make_c()
+        c = dc_replace(c, geometry=dc_replace(c.geometry, origin_lat="bad"))
+        r, before, after = self._apply(c)
+        assert r["ok"] is False
+        assert before == after
+
+    def test_geometry_home_none(self):
+        c = self._make_c()
+        c = dc_replace(c, geometry=dc_replace(c.geometry, home=None))
+        r, before, after = self._apply(c)
+        assert r["ok"] is False
+        assert before == after
+
+    def test_geometry_marker_none(self):
+        c = self._make_c()
+        c = dc_replace(c, geometry=dc_replace(c.geometry, forward_marker=None))
+        r, before, after = self._apply(c)
+        assert r["ok"] is False
+        assert before == after
+
+    def test_malformed_warnings(self):
+        c = self._make_c()
+        c = dc_replace(c, warnings=("ok", 123))
+        r, before, after = self._apply(c)
+        assert r["ok"] is False
+        assert before == after
+
+
+# =========================================================================
+# H3. Legacy transition tests (5B.1.3)
+# =========================================================================
+
+
+class TestLegacyTransition:
+    def test_runtime_to_legacy_without_gps(self):
+        b = RuntimeContextBuilder()
+        c = _make_candidate()
+        b.confirm_runtime_gps_reference(c)
+        assert b.field_origin_gps_confirmed is True
+        b.confirm_field_reference(
+            0.5, 10.0, 20.0,
+            origin_lat=None, origin_lon=None,
+        )
+        assert b.field_origin_confirmed is True
+        assert b.field_origin_gps_confirmed is False
+        assert b.field_transform_ready() is True
+        assert b.field_gps_transform_ready() is False
+        assert b.field_reference_mode == ""
+        assert b.field_forward_marker_lat is None
+        assert b.field_baseline_m is None
+        assert b.field_gps_sample_count is None
+        assert b.field_runtime_profile_id == ""
+
+    def test_runtime_to_legacy_with_gps(self):
+        b = RuntimeContextBuilder()
+        c = _make_candidate()
+        b.confirm_runtime_gps_reference(c)
+        b.confirm_field_reference(
+            0.5, 10.0, 20.0,
+            origin_lat=34.103649, origin_lon=108.642674,
+        )
+        assert b.field_origin_confirmed is True
+        assert b.field_origin_gps_confirmed is True
+        assert b.field_transform_ready() is True
+        assert b.field_gps_transform_ready() is True
+        assert b.field_reference_mode == ""
+
+
+# =========================================================================
+# H4. Action context diagnostics (5B.1.3)
+# =========================================================================
+
+
+class TestContextDiagnostics:
+    @pytest.mark.parametrize("snap", [{}, {"drone": {}}, {"drone": {"armed": False}}])
+    def test_all_diagnostics_present(self, snap):
+        b = RuntimeContextBuilder()
+        c = _make_candidate()
+        b.confirm_runtime_gps_reference(c)
+        ctx = b.build_action_context(snap)
+        mapping = {
+            "field_gps_sample_count": c.sample_count,
+            "field_gps_rejected_sample_count": c.rejected_sample_count,
+            "field_gps_duplicate_sample_count": c.duplicate_sample_count,
+            "field_gps_sample_duration_s": c.sample_duration_s,
+            "field_gps_horizontal_spread_m": c.horizontal_spread_m,
+            "field_gps_fix_type": c.gps_fix_type,
+            "field_gps_satellites": c.gps_satellites,
+            "field_gps_eph": c.gps_eph,
+            "field_gps_epv": c.gps_epv,
+        }
+        for field, expected in mapping.items():
+            assert field in ctx, f"missing {field}"
+            assert ctx[field] == expected, f"{field}: {ctx[field]} != {expected}"
+
+
+# =========================================================================
+# H5. Restore malformed tests (5B.1.3)
+# =========================================================================
+
+
+class TestRestoreMalformed:
+    def _make_snap(self):
+        b = RuntimeContextBuilder()
+        b.confirm_runtime_gps_reference(_make_candidate())
+        return b.snapshot_field_reference_state()
+
+    def _check_restore_fails_no_mutation(self, b, snap):
+        before = b.snapshot_field_reference_state()
+        assert b.restore_field_reference_state(snap) is False
+        assert b.snapshot_field_reference_state() == before
+
+    @pytest.mark.parametrize("key", [
+        "field_gps_rejected_sample_count", "field_gps_duplicate_sample_count",
+        "field_gps_sample_duration_s", "field_gps_horizontal_spread_m",
+        "field_gps_fix_type", "field_gps_satellites", "field_gps_eph", "field_gps_epv",
+    ])
+    def test_missing_runtime_field(self, key):
+        snap = self._make_snap()
+        snap[key] = None
+        self._check_restore_fails_no_mutation(RuntimeContextBuilder(), snap)
+
+    @pytest.mark.parametrize("key, bad", [
+        ("field_gps_rejected_sample_count", True), ("field_gps_duplicate_sample_count", 1.5),
+        ("field_gps_sample_duration_s", float("nan")), ("field_gps_eph", -1.0),
+    ])
+    def test_bad_runtime_type(self, key, bad):
+        snap = self._make_snap()
+        snap[key] = bad
+        self._check_restore_fails_no_mutation(RuntimeContextBuilder(), snap)
+
+    @pytest.mark.parametrize("mods", [
+        {"field_heading_confirmed": True, "field_heading_yaw_rad": None},
+        {"field_heading_confirmed": True, "field_heading_source": ""},
+        {"field_origin_confirmed": True, "field_origin_local_x": None},
+        {"field_origin_gps_confirmed": True, "field_origin_lat": 90.0},
+        {"field_reference_mode": "runtime_origin_forward_marker", "field_forward_marker_lon": None},
+    ])
+    def test_flag_consistency(self, mods):
+        snap = self._make_snap()
+        snap.update(mods)
+        self._check_restore_fails_no_mutation(RuntimeContextBuilder(), snap)
+
+
 class TestParity:
+
     def test_service_and_builder_apply_same(self):
         c = _make_candidate()
         svc = FieldReferenceService()

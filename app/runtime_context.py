@@ -450,84 +450,68 @@ class RuntimeContextBuilder:
         keys = self._FIELD_REFERENCE_KEYS
         if set(keys) != set(snapshot.keys()):
             return False
-        # Validate contents
         for key in ("field_heading_confirmed", "field_origin_confirmed", "field_origin_gps_confirmed"):
             if not isinstance(snapshot.get(key), bool):
                 return False
         for key in ("field_heading_source", "field_reference_mode", "field_runtime_profile_id"):
             if not isinstance(snapshot.get(key), str):
                 return False
-        # heading consistency
         if snapshot.get("field_heading_confirmed") is True:
             if not _is_finite_number(snapshot.get("field_heading_yaw_rad")):
                 return False
             if not snapshot.get("field_heading_source"):
                 return False
-        # LOCAL consistency
         if snapshot.get("field_origin_confirmed") is True:
             if not _is_finite_number(snapshot.get("field_origin_local_x")):
                 return False
             if not _is_finite_number(snapshot.get("field_origin_local_y")):
                 return False
-        # GPS consistency
         if snapshot.get("field_origin_gps_confirmed") is True:
-            olat = snapshot.get("field_origin_lat")
-            olon = snapshot.get("field_origin_lon")
-            if not _is_finite_number(olat) or not _is_finite_number(olon):
-                return False
-            f_lat = float(olat)
-            if f_lat < -90.0 or f_lat > 90.0:
-                return False
-            f_lon = float(olon)
-            if f_lon < -180.0 or f_lon > 180.0:
-                return False
-            if abs(math.cos(math.radians(f_lat))) < 1e-9:
-                return False
-            if not snapshot.get("field_heading_confirmed"):
-                return False
-        # Optional non-negative
+            olat = snapshot.get("field_origin_lat"); olon = snapshot.get("field_origin_lon")
+            if not _is_finite_number(olat) or not _is_finite_number(olon): return False
+            f_lat = float(olat); f_lon = float(olon)
+            if f_lat < -90.0 or f_lat > 90.0: return False
+            if f_lon < -180.0 or f_lon > 180.0: return False
+            if abs(math.cos(math.radians(f_lat))) < 1e-9: return False
+            if not snapshot.get("field_heading_confirmed"): return False
         for key in ("field_gps_sample_duration_s", "field_gps_horizontal_spread_m", "field_gps_eph", "field_gps_epv"):
             v = snapshot.get(key)
-            if v is not None and (not _is_finite_number(v) or float(v) < 0.0):
-                return False
+            if v is not None and (not _is_finite_number(v) or float(v) < 0.0): return False
         for key in ("field_gps_sample_count", "field_gps_rejected_sample_count", "field_gps_duplicate_sample_count", "field_gps_fix_type", "field_gps_satellites"):
             v = snapshot.get(key)
-            if v is not None and not (isinstance(v, int) and not isinstance(v, bool) and v >= 0):
-                return False
-        # Optional finite
+            if v is not None and not (isinstance(v, int) and not isinstance(v, bool) and v >= 0): return False
         for key in ("field_heading_yaw_rad", "field_heading_time",
                      "field_origin_local_x", "field_origin_local_y", "field_origin_local_z",
                      "field_origin_lat", "field_origin_lon", "field_origin_time",
                      "field_forward_marker_lat", "field_forward_marker_lon", "field_baseline_m"):
             v = snapshot.get(key)
-            if v is not None and not _is_finite_number(v):
-                return False
-        # Baseline >0
+            if v is not None and not _is_finite_number(v): return False
         bm = snapshot.get("field_baseline_m")
-        if bm is not None and float(bm) <= 0.0:
-            return False
-        # lat/lon range
+        if bm is not None and float(bm) <= 0.0: return False
         for lat_key in ("field_origin_lat", "field_forward_marker_lat"):
             v = snapshot.get(lat_key)
-            if v is not None and (float(v) < -90.0 or float(v) > 90.0):
-                return False
+            if v is not None and (float(v) < -90.0 or float(v) > 90.0): return False
         for lon_key in ("field_origin_lon", "field_forward_marker_lon"):
             v = snapshot.get(lon_key)
-            if v is not None and (float(v) < -180.0 or float(v) > 180.0):
-                return False
-        # Runtime mode
+            if v is not None and (float(v) < -180.0 or float(v) > 180.0): return False
         mode = snapshot.get("field_reference_mode", "")
         if mode == "runtime_origin_forward_marker":
             if not snapshot.get("field_heading_confirmed"): return False
             if not snapshot.get("field_origin_gps_confirmed"): return False
-            hsrc = snapshot.get("field_heading_source", "")
-            if hsrc != "runtime_forward_marker": return False
+            if snapshot.get("field_heading_source", "") != "runtime_forward_marker": return False
             if not _is_finite_number(snapshot.get("field_forward_marker_lat")): return False
             if not _is_finite_number(snapshot.get("field_forward_marker_lon")): return False
             if not _is_finite_number(snapshot.get("field_baseline_m")) or float(snapshot["field_baseline_m"]) <= 0.0: return False
             if not snapshot.get("field_runtime_profile_id"): return False
-            sc = snapshot.get("field_gps_sample_count")
-            if not (isinstance(sc, int) and not isinstance(sc, bool) and sc >= 1): return False
+            for key, minimum in (("field_gps_sample_count", 1), ("field_gps_rejected_sample_count", 0),
+                                 ("field_gps_duplicate_sample_count", 0), ("field_gps_fix_type", 0),
+                                 ("field_gps_satellites", 0)):
+                v = snapshot.get(key)
+                if not (isinstance(v, int) and not isinstance(v, bool) and v >= minimum): return False
+            for key in ("field_gps_sample_duration_s", "field_gps_horizontal_spread_m",
+                         "field_gps_eph", "field_gps_epv"):
+                v = snapshot.get(key)
+                if not _is_finite_number(v) or float(v) < 0.0: return False
         elif mode != "": return False
         else:
             for key in ("field_forward_marker_lat", "field_forward_marker_lon", "field_baseline_m",

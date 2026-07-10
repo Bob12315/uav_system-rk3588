@@ -4,6 +4,7 @@ import copy
 import math
 import statistics
 from dataclasses import FrozenInstanceError
+from dataclasses import replace as dc_replace
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from app.field_profile import FieldProfile, parse_field_profile
 from app.runtime_field_binding import (
     RuntimeFieldBindingCandidate,
     RuntimeFieldBindingError,
+    validate_runtime_field_binding_candidate,
     RuntimeFieldBindingSampler,
     RuntimeFieldSamplingStatus,
     RuntimeGpsSample,
@@ -755,7 +757,80 @@ class TestProfileImmutability:
 # =========================================================================
 
 
-def test_no_local():
+
+# =========================================================================
+# P. Shared validator tests (5B.1.3)
+# =========================================================================
+
+
+def _make_candidate_for_validator():
+    profile = parse_field_profile(_make_valid_v3_dict())
+    s = RuntimeFieldBindingSampler(profile)
+    s.start(started_at_s=1000.0)
+    for i in range(20):
+        s.observe_snapshot({
+            "global_position_valid": True, "last_global_position_time": 2000.0 + i * 0.1,
+            "lat": 34.103649, "lon": 108.642674,
+            "gps_fix_type": 3, "satellites_visible": 12, "gps_eph": 1.0, "gps_epv": 1.5,
+        }, observed_at_s=1000.0 + i * 0.26)
+    return s.finalize(completed_at_s=1005.0)
+
+
+class TestSharedValidator:
+    def test_accepts_valid_candidate(self):
+        assert validate_runtime_field_binding_candidate(_make_candidate_for_validator()) == ()
+
+    @pytest.mark.parametrize("field, bad_value", [
+        ("origin_lat", "bad"), ("field_heading_yaw_rad", None), ("home", None),
+        ("forward_marker", "bad"), ("warnings", ("ok", 123)),
+        ("drop_scan_waypoints", []), ("drop_area_corners", (None,)),
+        ("recce_area_corners", ("bad",)),
+    ])
+    def test_rejects_malformed_geometry(self, field, bad_value):
+        c = _make_candidate_for_validator()
+        bad_geom = dc_replace(c.geometry, **{field: bad_value})
+        c = dc_replace(c, geometry=bad_geom)
+        errs = validate_runtime_field_binding_candidate(c)
+        assert len(errs) > 0
+        assert not any(isinstance(e, (TypeError, AttributeError, ValueError, KeyError)) for e in [None])
+
+    def test_rejects_malformed_warnings(self):
+        c = _make_candidate_for_validator()
+        c = dc_replace(c, warnings=("ok", 123))
+        errs = validate_runtime_field_binding_candidate(c)
+        assert len(errs) > 0
+
+    def test_rejects_unnormalized_heading(self):
+        c = _make_candidate_for_validator()
+        c = dc_replace(c, field_heading_yaw_rad=2 * math.pi, field_heading_deg=360.0)
+        bad_geom = dc_replace(c.geometry, field_heading_yaw_rad=2 * math.pi, field_heading_deg=360.0)
+        c = dc_replace(c, geometry=bad_geom)
+        errs = validate_runtime_field_binding_candidate(c)
+        assert len(errs) > 0
+        assert any("normaliz" in e.lower() for e in errs)
+
+    def test_rejects_bad_home_field(self):
+        c = _make_candidate_for_validator()
+        bad_home = dc_replace(c.geometry.home, field_x_m="bad")
+        bad_geom = dc_replace(c.geometry, home=bad_home)
+        c = dc_replace(c, geometry=bad_geom)
+        errs = validate_runtime_field_binding_candidate(c)
+        assert len(errs) > 0
+
+    def test_rejects_bad_marker_field(self):
+        c = _make_candidate_for_validator()
+        bad_fwd = dc_replace(c.geometry.forward_marker, field_y_m=None)
+        bad_geom = dc_replace(c.geometry, forward_marker=bad_fwd)
+        c = dc_replace(c, geometry=bad_geom)
+        errs = validate_runtime_field_binding_candidate(c)
+        assert len(errs) > 0
+
+
+# =========================================================================
+# O-z. Static checks
+# =========================================================================
+
+
     src = Path("app/runtime_field_binding.py").read_text()
     for token in ["local_x", "local_y", "local_z", "origin_local_n_m", "origin_local_e_m",
                   "field_to_local_ned", "gps_to_local_ned", "local_ned_to_field"]:
