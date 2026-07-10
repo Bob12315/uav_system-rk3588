@@ -131,7 +131,9 @@
                 "hold_pwm": 1250
               }
             ],
-            "priority": 3
+            "priority": 3,
+            "payload_forward_m": -0.06,
+            "payload_right_m": 0.0
           },
           {
             "payload_id": "payload_2",
@@ -142,7 +144,9 @@
                 "hold_pwm": 1185
               }
             ],
-            "priority": 3
+            "priority": 3,
+            "payload_forward_m": 0.06,
+            "payload_right_m": 0.0
           }
         ],
         "approach_altitude_m": 3.5,
@@ -156,7 +160,10 @@
         "goto": {
           "tolerance_xy_m": 0.25,
           "tolerance_z_m": 0.25,
-          "min_hold_updates": 5
+          "min_hold_updates": 5,
+          "require_velocity_valid": true,
+          "max_horizontal_speed_mps": 0.15,
+          "max_vertical_speed_mps": 0.1
         },
         "target_lock": {
           "max_match_distance_m": 1.2,
@@ -198,7 +205,13 @@
             "fov_x_deg": 51.3,
             "fov_y_deg": 39.6,
             "image_x_sign": 1.0,
-            "image_y_sign": -1.0
+            "image_y_sign": -1.0,
+            "yaw_control_mode": "ignore",
+            "payload_offset_enabled": true,
+            "slow_descend_max_ex_cam": 0.4,
+            "slow_descend_max_ey_cam": 0.4,
+            "max_payload_offset_ex_cam": 0.8,
+            "max_payload_offset_ey_cam": 0.8
           }
         }
       }

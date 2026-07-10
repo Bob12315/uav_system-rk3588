@@ -44,7 +44,7 @@ class GpsDropSequenceAction(ActionModule):
                 if not math.isfinite(lat) or not math.isfinite(lon): continue
                 if lat < -90 or lat > 90 or lon < -180 or lon > 180: continue
             except (KeyError, TypeError, ValueError): continue
-            tid = str(t.get("target_id", t.get("id", ""))).strip()
+            raw_tid = t.get("target_id"); tid = str(raw_tid).strip() if raw_tid is not None and str(raw_tid).strip() and str(raw_tid).strip().lower() != "none" else str(t.get("id", "")).strip()
             if not tid:
                 continue
             if tid in seen_ids: continue  # dedup
