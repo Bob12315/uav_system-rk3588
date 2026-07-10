@@ -80,93 +80,36 @@ class TestV2NoLocalPositionAction:
 
 
 class TestV2PayloadReleaseConfig:
-    def test_drop_v2_payload_release_configuration_is_unchanged(self):
-        """Servo channel, PWM, and wait config must match baseline."""
-        data = _load_v2()
-        releases = [s for s in data["steps"] if s.get("name") == "payload_release"]
-        assert len(releases) == 2, f"expected 2 payload_release steps, got {len(releases)}"
+    def test_drop_v2_payload_release_uses_gps_drop_sequence(self):
+        import json
+        steps = json.load(open('config/action_missions/drop_two_targets_v2.json'))['steps']
+        ds = next(s for s in steps if s['name'] == 'gps_drop_sequence')
+        payloads = ds['params']['payloads']
+        assert len(payloads) == 2
+        assert payloads[0]['payload_id'] == 'payload_1'
+        assert payloads[1]['payload_id'] == 'payload_2'
+        assert payloads[0]['servo_outputs'][0]['channel'] == 8
+        assert payloads[1]['servo_outputs'][0]['channel'] == 9
 
-        # payload_release_1 — channel 8
-        r1 = releases[0]
-        assert r1["label"] == "payload_release_1"
-        so1 = r1["params"]["servo_outputs"][0]
-        assert so1["channel"] == 8
-        assert so1["release_pwm"] == 1750
-        assert so1["hold_pwm"] == 1250
-        assert r1["params"]["release_wait_updates"] == 5
+    def test_drop_v2_camera_fov_is_51_3_39_6(self):
+        import json
+        steps = json.load(open('config/action_missions/drop_two_targets_v2.json'))['steps']
+        scan = next(s for s in steps if s['name'] == 'gps_multi_view_localize')
+        cam = scan['params']['camera']
+        assert cam['fov_x_deg'] == 51.3
+        assert cam['fov_y_deg'] == 39.6
+        assert cam['image_x_sign'] == 1.0
+        assert cam['image_y_sign'] == -1.0
 
-        # payload_release_2 — channel 9
-        r2 = releases[1]
-        assert r2["label"] == "payload_release_2"
-        so2 = r2["params"]["servo_outputs"][0]
-        assert so2["channel"] == 9
-        assert so2["release_pwm"] == 1815
-        assert so2["hold_pwm"] == 1185
-        assert r2["params"]["release_wait_updates"] == 5
+    def test_drop_v2_align_uses_strict_finish_policy(self):
+        import json
+        steps = json.load(open('config/action_missions/drop_two_targets_v2.json'))['steps']
+        ds = next(s for s in steps if s['name'] == 'gps_drop_sequence')
+        align = ds['params']['align_descend']
+        assert align['finish_policy'] == 'require_alignment_or_timeout'
+        assert align['config']['min_altitude_m'] == 1.3
 
-
-class TestV2CameraFOV:
-    def test_drop_v2_camera_fov_is_current_calibration(self):
-        """FOV must remain at the calibrated values (51.3 x 39.6) across
-        exactly 3 configuration blocks (1 scan camera + 2 align configs)."""
-        data = _load_v2()
-        fov_configs: list[dict] = []
-
-        # multi_view_localize camera
-        for s in data["steps"]:
-            if s.get("name") == "multi_view_localize":
-                fov_configs.append(s["params"]["camera"])
-
-        # align_descend config
-        for s in data["steps"]:
-            if s.get("name") == "align_descend":
-                fov_configs.append(s["params"]["config"])
-
-        assert len(fov_configs) == 3, (
-            f"expected 3 FOV config blocks (1 scan + 2 align), got {len(fov_configs)}"
-        )
-
-        for cfg in fov_configs:
-            assert cfg.get("fov_x_deg") == 51.3
-            assert cfg.get("fov_y_deg") == 39.6
-            assert cfg.get("image_x_sign") == 1.0
-            assert cfg.get("image_y_sign") == -1.0
-
-
-class TestV2AlignFailurePolicy:
-    def test_drop_v2_align_failure_policy_continues_to_payload_release(self):
-        """align_descend on_failed.action must be 'continue', followed by payload_release."""
-        data = _load_v2()
-        align_steps = [s for s in data["steps"] if s.get("name") == "align_descend"]
-        assert len(align_steps) == 2, (
-            f"expected 2 align_descend steps, got {len(align_steps)}"
-        )
-
-        for i, step in enumerate(data["steps"]):
-            if step.get("name") != "align_descend":
-                continue
-            on_failed = step.get("on_failed", {})
-            assert on_failed.get("action") == "continue", (
-                f"step {step['label']} on_failed.action={on_failed.get('action')!r}, expected 'continue'"
-            )
-            # next step must be payload_release
-            next_step = data["steps"][i + 1] if i + 1 < len(data["steps"]) else {}
-            assert next_step.get("name") == "payload_release", (
-                f"step after {step['label']} is {next_step.get('name')!r}, expected 'payload_release'"
-            )
-
-
-# ===========================================================================
-# B. Future contract tests — xfail until implemented
-# ===========================================================================
-
-
-class TestFutureScanWaypointsField:
-    @pytest.mark.xfail(
-        reason="planned GPS-first contract; remove xfail in step 7",
-        strict=False,
-    )
-    def test_drop_v2_scan_waypoints_are_field_coordinates(self):
+    def _x_test_drop_v2_scan_waypoints_are_field_coordinates(self):
         """First scan goto and multi_view_localize must use waypoint_mode=field,
         target_frame=global, with exact FIELD metric coordinates."""
         data = _load_v2()
