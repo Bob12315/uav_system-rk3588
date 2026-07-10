@@ -5,6 +5,7 @@ window.UavFieldProfiles = (function () {
     var lastStatus = null;
     var requestBusy = false;
     var templateSummary = null;
+    var initCalled = false;
 
     function $(id) { return document.getElementById(id); }
     function setText(id, text) {
@@ -289,6 +290,11 @@ window.UavFieldProfiles = (function () {
             if (window.UavFieldRef && window.UavFieldRef.fetchFieldReferenceStatus) {
                 window.UavFieldRef.fetchFieldReferenceStatus({ scheduleNext: false });
             }
+        } catch (error) {
+            alert(error && error.message ? error.message : String(error));
+            if (window.UavFieldRef && window.UavFieldRef.fetchFieldReferenceStatus) {
+                window.UavFieldRef.fetchFieldReferenceStatus({ scheduleNext: false });
+            }
         } finally {
             requestBusy = false;
             updateButtons();
@@ -355,6 +361,8 @@ window.UavFieldProfiles = (function () {
 
     // ── init ───────────────────────────────────────────────────────────
     function init() {
+        if (initCalled) return;
+        initCalled = true;
         // Wire competition buttons
         var sb = $("cfsStart"); if (sb) sb.addEventListener("click", onStart);
         var fb = $("cfsFinalize"); if (fb) fb.addEventListener("click", onFinalize);

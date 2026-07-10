@@ -218,20 +218,19 @@ class FieldReferenceController:
         4. Validate and start sampling.
         """
         # Check state
-        if self._runtime_binding.state == "applied":
+        if self._runtime_binding.state != "idle":
             return {
                 "ok": False,
-                "state": "applied",
+                "state": self._runtime_binding.state,
                 "error": (
-                    "runtime binding is already applied; "
-                    "use field reference reset first"
+                    f"cannot start competition field setup in state "
+                    f"{self._runtime_binding.state}; "
+                    + (
+                        "use field reference reset first"
+                        if self._runtime_binding.state == "applied"
+                        else "cancel or reset the current session first"
+                    )
                 ),
-            }
-        if self._runtime_binding.state == "sampling":
-            return {
-                "ok": False,
-                "state": "sampling",
-                "error": "runtime sampling is already in progress",
             }
         if self._svc.reference.is_frozen:
             return {

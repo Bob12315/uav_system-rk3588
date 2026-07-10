@@ -4,35 +4,29 @@ Tests the new POST /api/field-reference/runtime-sampling/start endpoint
 via the FieldReferenceController in real production paths.
 """
 
+import asyncio
 import json
-import math
-import os
-import shutil
-import tempfile
-from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
+import httpx
 import pytest
 
 from app.field_profile import (
-    FieldProfile,
-    ForwardMarker,
     load_field_profile_json,
-    parse_field_profile,
-    validate_field_profile,
 )
 from app.field_reference import (
-    FieldReference,
-    HeadingSource,
-    OriginSource,
     normalize_longitude_deg,
-    validate_wgs84_lat_lon,
 )
 from app.field_reference_controller import FieldReferenceController
 from app.field_reference_service import FieldReferenceService
 from app.runtime_context import RuntimeContextBuilder
 from app.runtime_binding_orchestrator import RuntimeBindingOrchestrator
+from app.coordinate_transform import field_to_gps_from_origin
+from app.app_config import build_arg_parser, load_app_config
+from app.system_runner import SystemRunner
+from web_ui.server import create_app
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -62,6 +56,29 @@ def _read_template():
     return load_field_profile_json(
         "config/field_profiles/competition_runtime_v3.json"
     )
+
+
+def _sample_competition_baseline(distance_m):
+    ctl = _make_controller()
+    origin = _drone_snapshot()
+    marker = field_to_gps_from_origin(
+        0.0,
+        distance_m,
+        0.0,
+        origin_lat=origin["lat"],
+        origin_lon=origin["lon"],
+        field_heading_yaw_rad=0.0,
+    )
+    assert ctl.start_competition_runtime_sampling(
+        marker.lat, marker.lon, started_at_s=1000.0
+    )["ok"] is True
+    for index in range(21):
+        snapshot = dict(origin)
+        snapshot["last_global_position_time"] = 2000.0 + index
+        ctl.observe_runtime_profile_sampling(
+            snapshot, observed_at_s=1000.0 + index * 0.25
+        )
+    return ctl
 
 
 # ── template validation ──────────────────────────────────────────────────────
@@ -114,10 +131,11 @@ class TestTemplate:
         """Template file on disk must not be modified by session creation."""
         path = "config/field_profiles/competition_runtime_v3.json"
         before = Path(path).read_bytes()
-        orig = _read_template()
-        # Simulate deepcopy+replace as controller does
-        candidate = deepcopy(orig)
-        # Don't write anything back
+        ctl = _make_controller()
+        result = ctl.start_competition_runtime_sampling(
+            34.1234567, 108.1234567, started_at_s=1000.0
+        )
+        assert result["ok"] is True
         after = Path(path).read_bytes()
         assert before == after, "template file modified on disk!"
 
@@ -212,6 +230,22 @@ class TestCompetitionStart:
         assert result.get("ok") is False
         assert "applied" in str(result.get("error", "")).lower()
 
+    @pytest.mark.parametrize(
+        "state",
+        ["sampling", "sampling_failed", "candidate_ready", "apply_failed", "applied", "unexpected"],
+    )
+    def test_orchestrator_defensively_rejects_every_non_idle_state(self, state):
+        orchestrator = RuntimeBindingOrchestrator(
+            FieldReferenceService(), RuntimeContextBuilder()
+        )
+        orchestrator._state = state
+        candidate = object()
+        orchestrator._candidate = candidate
+        result = orchestrator.start(_read_template(), started_at_s=1000.0)
+        assert result["ok"] is False
+        assert result["state"] == state
+        assert orchestrator._candidate is candidate
+
 
 # ── template-only rejection ──────────────────────────────────────────────────
 
@@ -225,36 +259,12 @@ class TestTemplateOnlyRejection:
         assert result.get("ok") is False
         assert "template-only" in str(result.get("error", "")).lower()
 
-    def test_non_template_v3_still_works(self):
-        # Verify a regular v3 profile can still use old endpoint
-        ctl = _make_controller()
-        # Load a non-template v3 profile
-        from app.field_profile import parse_field_profile
-        v3_dict = {
-            "schema_version": 3,
-            "profile_id": "test_reg_v3",
-            "name": "Test Regular V3",
-            "coordinate_convention": {"field_x_positive": "right", "field_y_positive": "forward", "altitude_positive": "up"},
-            "forward_marker": {"name": "far", "lat": 34.104189, "lon": 108.642674, "coordinate_system": "WGS84"},
-            "field_geometry": {"lane_half_width_m": 4.0, "drop_area_y_min_m": 30.0, "drop_area_y_max_m": 35.0, "drop_center_y_m": 32.5, "recce_area_y_min_m": 55.0, "recce_area_y_max_m": 60.0, "recce_center_y_m": 57.5},
-            "drop_scan": {"waypoints": [{"x_m": -2.0, "y_m": 31.25, "altitude_m": 5.0}, {"x_m": 2.0, "y_m": 31.25, "altitude_m": 5.0}, {"x_m": 2.0, "y_m": 33.75, "altitude_m": 5.0}, {"x_m": -2.0, "y_m": 33.75, "altitude_m": 5.0}]},
-            "gps_quality": {"min_fix_type": 3, "min_satellites": 10, "max_eph": 2.5, "max_epv": 5.0},
-            "runtime_origin_sampling": {"min_samples": 10, "sample_window_s": 2.0, "max_horizontal_spread_m": 2.0, "estimator": "median"},
-            "binding_policy": {"min_baseline_m": 10.0, "warn_baseline_below_m": 20.0},
-        }
-        p = parse_field_profile(v3_dict)
-        # This profile doesn't exist on disk so _load_profile won't find it
-        # Test the principle: non-template-only reject
-        assert p.extra.get("template_only") is not True
-
-
 # ── preview / finalize consistency ───────────────────────────────────────────
 
 
 class TestPreviewFinalize:
     def test_preview_no_side_effects(self):
         from app.runtime_field_binding import RuntimeFieldBindingSampler
-        from app.field_profile import parse_field_profile
         profile = _read_template()
         sampler = RuntimeFieldBindingSampler(profile)
         sampler.start(started_at_s=1000.0)
@@ -352,6 +362,51 @@ class TestPreviewFinalize:
         assert sampler._state != "ready"
 
 
+class TestBaselineWarningLifecycle:
+    def test_below_minimum_baseline_fails_and_cannot_finalize(self):
+        ctl = _sample_competition_baseline(20.0)
+        status = ctl._runtime_binding.status(now_s=1005.0)
+        assert status["state"] == "sampling_failed"
+        assert status["sampling"]["can_finalize"] is False
+        result = ctl.finalize_runtime_profile_binding(completed_at_s=1005.0)
+        assert result["ok"] is False
+        assert result["state"] == "sampling_failed"
+
+    def test_warning_baseline_survives_preview_and_finalize(self):
+        ctl = _sample_competition_baseline(40.0)
+        status = ctl._runtime_binding.status(now_s=1005.0)
+        warnings = status["candidate_summary"]["warnings"]
+        assert any("below warning threshold" in warning for warning in warnings)
+
+        result = ctl.finalize_runtime_profile_binding(completed_at_s=1005.0)
+
+        assert result["ok"] is True
+        assert any("below warning threshold" in warning for warning in result["warnings"])
+        retained = ctl._runtime_binding.status()["candidate_summary"]["warnings"]
+        assert retained == result["warnings"]
+
+    def test_try_preview_persists_warning_added_by_orchestrator(self, monkeypatch):
+        ctl = _sample_competition_baseline(40.0)
+        orchestrator = ctl._runtime_binding
+        candidate = orchestrator._preview_candidate
+        stripped = replace(candidate, warnings=())
+        orchestrator._preview_candidate = None
+        monkeypatch.setattr(
+            orchestrator._sampler, "preview_candidate", lambda **_kwargs: stripped
+        )
+
+        orchestrator._try_preview(observed_at_s=1005.0)
+
+        warnings = orchestrator.status(now_s=1005.0)["candidate_summary"]["warnings"]
+        assert any("below warning threshold" in warning for warning in warnings)
+
+    def test_baseline_at_warning_threshold_has_no_baseline_warning(self):
+        ctl = _sample_competition_baseline(50.0)
+        status = ctl._runtime_binding.status(now_s=1005.0)
+        warnings = status["candidate_summary"]["warnings"]
+        assert not any("below warning threshold" in warning for warning in warnings)
+
+
 # ── status payload ───────────────────────────────────────────────────────────
 
 
@@ -446,3 +501,208 @@ class TestNoFlightCalls:
         assert "LinkManager" not in method_body
         assert "dispatcher" not in method_body
         assert "set_servo" not in method_body
+
+
+# ── real ASGI endpoint coverage ─────────────────────────────────────────────
+
+
+def _make_http_app(tmp_path):
+    args = build_arg_parser().parse_args(["--run-seconds", "0.1", "--no-yolo-udp"])
+    config = load_app_config(args)
+    config.ui.audit_log_path = str(tmp_path / "audit.jsonl")
+    runner = SystemRunner(config)
+    return create_app(runner, config.ui), runner
+
+
+def _asgi_request(app, method, path, *, json_body=None, content=None):
+    async def request():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            kwargs = {}
+            if json_body is not None:
+                kwargs["json"] = json_body
+            if content is not None:
+                kwargs["content"] = content
+                kwargs["headers"] = {"content-type": "application/json"}
+            return await client.request(method, path, **kwargs)
+
+    return asyncio.run(request())
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"forward_marker_lat": 34.25, "forward_marker_lon": 108.25},
+        {"forward_marker_lat": 34, "forward_marker_lon": 108},
+    ],
+)
+def test_competition_start_http_accepts_real_numbers(tmp_path, payload):
+    app, _runner = _make_http_app(tmp_path)
+    response = _asgi_request(
+        app, "POST", "/api/field-reference/runtime-sampling/start", json_body=payload
+    )
+    assert response.status_code == 200
+    assert response.json()["state"] == "sampling"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"forward_marker_lat": True, "forward_marker_lon": 108.0},
+        {"forward_marker_lat": "34.0", "forward_marker_lon": 108.0},
+        {"forward_marker_lat": None, "forward_marker_lon": 108.0},
+        {"forward_marker_lon": 108.0},
+        {"forward_marker_lat": 34.0, "forward_marker_lon": 108.0, "extra": 1},
+    ],
+)
+def test_competition_start_http_rejects_invalid_structure(tmp_path, payload):
+    app, _runner = _make_http_app(tmp_path)
+    response = _asgi_request(
+        app, "POST", "/api/field-reference/runtime-sampling/start", json_body=payload
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"forward_marker_lat": NaN, "forward_marker_lon": 108.0}',
+        '{"forward_marker_lat": 34.0, "forward_marker_lon": Infinity}',
+    ],
+)
+def test_competition_start_http_rejects_non_finite(tmp_path, content):
+    app, _runner = _make_http_app(tmp_path)
+    response = _asgi_request(
+        app, "POST", "/api/field-reference/runtime-sampling/start", content=content
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"forward_marker_lat": 90.1, "forward_marker_lon": 108.0},
+        {"forward_marker_lat": 34.0, "forward_marker_lon": 180.1},
+        {"forward_marker_lat": 90.0, "forward_marker_lon": 108.0},
+    ],
+)
+def test_competition_start_http_rejects_coordinate_bounds(tmp_path, payload):
+    app, _runner = _make_http_app(tmp_path)
+    response = _asgi_request(
+        app, "POST", "/api/field-reference/runtime-sampling/start", json_body=payload
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "state",
+    ["sampling", "sampling_failed", "candidate_ready", "apply_failed", "applied", "unexpected"],
+)
+def test_competition_start_http_returns_409_for_non_idle_state(tmp_path, state):
+    app, runner = _make_http_app(tmp_path)
+    binding = runner.field_reference_controller._runtime_binding
+    binding._state = state
+    binding._forward_marker_lat = 35.0
+    binding._forward_marker_lon = 109.0
+    candidate = object()
+    if state == "apply_failed":
+        binding._candidate = candidate
+
+    response = _asgi_request(
+        app,
+        "POST",
+        "/api/field-reference/runtime-sampling/start",
+        json_body={"forward_marker_lat": 34.0, "forward_marker_lon": 108.0},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]
+    assert binding._forward_marker_lat == 35.0
+    assert binding._forward_marker_lon == 109.0
+    if state == "apply_failed":
+        assert binding._candidate is candidate
+
+
+def test_competition_start_http_returns_409_when_frozen(tmp_path):
+    app, runner = _make_http_app(tmp_path)
+    runner.field_reference_service.reference.is_frozen = True
+    response = _asgi_request(
+        app,
+        "POST",
+        "/api/field-reference/runtime-sampling/start",
+        json_body={"forward_marker_lat": 34.0, "forward_marker_lon": 108.0},
+    )
+    assert response.status_code == 409
+
+
+def test_sampling_failed_http_preserves_real_session_B(tmp_path):
+    app, runner = _make_http_app(tmp_path)
+    first = _asgi_request(
+        app,
+        "POST",
+        "/api/field-reference/runtime-sampling/start",
+        json_body={"forward_marker_lat": 34.25, "forward_marker_lon": 108.25},
+    )
+    assert first.status_code == 200
+    binding = runner.field_reference_controller._runtime_binding
+    binding._state = "sampling_failed"
+
+    second = _asgi_request(
+        app,
+        "POST",
+        "/api/field-reference/runtime-sampling/start",
+        json_body={"forward_marker_lat": 35.0, "forward_marker_lon": 109.0},
+    )
+
+    assert second.status_code == 409
+    assert binding._forward_marker_lat == pytest.approx(34.25)
+    assert binding._forward_marker_lon == pytest.approx(108.25)
+
+
+def test_cancel_then_competition_start_http_succeeds(tmp_path):
+    app, runner = _make_http_app(tmp_path)
+    binding = runner.field_reference_controller._runtime_binding
+    binding._state = "sampling_failed"
+    assert binding.cancel()["state"] == "idle"
+    response = _asgi_request(
+        app,
+        "POST",
+        "/api/field-reference/runtime-sampling/start",
+        json_body={"forward_marker_lat": 34.0, "forward_marker_lon": 108.0},
+    )
+    assert response.status_code == 200
+
+
+def test_reset_then_competition_start_http_succeeds(tmp_path):
+    app, runner = _make_http_app(tmp_path)
+    binding = runner.field_reference_controller._runtime_binding
+    binding._state = "applied"
+    assert runner.field_reference_controller.reset()["ok"] is True
+    response = _asgi_request(
+        app,
+        "POST",
+        "/api/field-reference/runtime-sampling/start",
+        json_body={"forward_marker_lat": 34.0, "forward_marker_lon": 108.0},
+    )
+    assert response.status_code == 200
+
+
+def test_regular_v3_profile_starts_through_real_http_endpoint(tmp_path):
+    raw = json.loads(Path("config/field_profiles/competition_runtime_v3.json").read_text())
+    raw["profile_id"] = "ordinary_v3"
+    raw["name"] = "Ordinary v3"
+    raw["template_only"] = False
+    profile_path = tmp_path / "ordinary_v3.json"
+    profile_path.write_text(json.dumps(raw), encoding="utf-8")
+    app, runner = _make_http_app(tmp_path)
+    runner.field_reference_controller._PROFILE_DIRS = [str(tmp_path)]
+
+    response = _asgi_request(
+        app, "POST", "/api/field-profiles/ordinary_v3/runtime-sampling/start"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert response.json()["state"] == "sampling"

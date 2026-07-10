@@ -142,7 +142,7 @@ function setRuntimeGeometry(geometry, confirmed) {
   }
   runtimeGeometry = geometry;
   runtimeGeometryConfirmed = Boolean(confirmed);
-  var labelSuffix = runtimeGeometryConfirmed ? " (confirmed)" : " (unconfirmed)";
+  var labelSuffix = runtimeGeometryConfirmed ? " (CONFIRMED / FROZEN)" : " (UNCONFIRMED)";
   // Convert to profilePreview-compatible format for rendering
   var boxes = [];
   // Drop area corners (D1-D4)
@@ -165,29 +165,6 @@ function setRuntimeGeometry(geometry, confirmed) {
       })
     });
   }
-  // Field bounds (derived from drop/recce corners extent)
-  var allCorners = [];
-  (geometry.drop_area_corners || []).forEach(function (c) { allCorners.push(c); });
-  (geometry.recce_area_corners || []).forEach(function (c) { allCorners.push(c); });
-  if (allCorners.length) {
-    var xs = allCorners.map(function (c) { return c.field_x_m; });
-    var ys = allCorners.map(function (c) { return c.field_y_m; });
-    var xMin = Math.min.apply(null, xs);
-    var xMax = Math.max.apply(null, xs);
-    var yMin = Math.min.apply(null, ys);
-    var yMax = Math.max.apply(null, ys);
-    var margin = 4;  // half-lane-width visual margin
-    boxes.push({
-      kind: "field_bounds",
-      label: "Field bounds" + labelSuffix,
-      corners: [
-        { field_x: xMin - margin, field_y: yMin, lat: 0, lon: 0, name: "SW" },
-        { field_x: xMax + margin, field_y: yMin, lat: 0, lon: 0, name: "SE" },
-        { field_x: xMax + margin, field_y: yMax, lat: 0, lon: 0, name: "NE" },
-        { field_x: xMin - margin, field_y: yMax, lat: 0, lon: 0, name: "NW" }
-      ]
-    });
-  }
   // Home point
   var home = geometry.home;
   // Forward marker
@@ -198,16 +175,17 @@ function setRuntimeGeometry(geometry, confirmed) {
     ok: true,
     profile_id: "runtime_geometry",
     reference: {
-      origin_lat: home ? home.lat : 0,
-      origin_lon: home ? home.lon : 0,
-      field_heading_deg: heading.degrees || 0,
-      field_heading_yaw_rad: heading.yaw_rad || 0
+      origin_lat: home ? home.lat : null,
+      origin_lon: home ? home.lon : null,
+      field_heading_deg: heading.degrees,
+      field_heading_yaw_rad: heading.yaw_rad
     },
     boxes: boxes,
     // Extra geometry points for rendering
     _home: home,
     _forward_marker: fwd,
     _drop_scan_waypoints: geometry.drop_scan_waypoints || [],
+    _runtime_geometry: geometry,
     _runtime: true,
     _confirmed: runtimeGeometryConfirmed
   };
@@ -625,6 +603,7 @@ function drawField(ctx, model) {
   if (model.profilePreview) {
     drawProfilePreviewBoxes(ctx, model);
     drawProfileCornerPoints(ctx, model);
+    drawRuntimeGeometryPoints(ctx, model);
   } else {
     drawArea(ctx, model, model.areas.takeoff, "rgba(147,168,191,.10)", "rgba(147,168,191,.75)");
     drawArea(ctx, model, model.areas.drop, "rgba(57,200,191,.12)", "rgba(57,200,191,.82)");
@@ -632,6 +611,41 @@ function drawField(ctx, model) {
   }
   drawFieldLabel(ctx, "+x →", model.rect.width - 50, 22, {color: "#93a8bf"});
   drawFieldLabel(ctx, "+y ↑", model.rect.width - 50, 40, {color: "#93a8bf"});
+}
+
+function drawRuntimeGeometryPoints(ctx, model) {
+  var preview = model && model.profilePreview;
+  var geometry = preview && preview._runtime_geometry;
+  if (!geometry || !model.rect) return [];
+  var entries = [];
+  if (geometry.home) entries.push({point: geometry.home, label: "HOME / A"});
+  if (geometry.forward_marker) {
+    entries.push({point: geometry.forward_marker, label: "B / Forward Marker"});
+  }
+  (geometry.drop_scan_waypoints || []).forEach(function (point, index) {
+    entries.push({point: point, label: "SCAN" + (index + 1)});
+  });
+  (geometry.drop_area_corners || []).forEach(function (point) {
+    entries.push({point: point, label: point.name});
+  });
+  (geometry.recce_area_corners || []).forEach(function (point) {
+    entries.push({point: point, label: point.name});
+  });
+  entries.forEach(function (entry) {
+    var point = entry.point;
+    var pos = worldToCanvas(point.field_x_m, point.field_y_m, model.rect);
+    ctx.beginPath();
+    ctx.arc(pos[0], pos[1], 5, 0, Math.PI * 2);
+    ctx.fillStyle = preview._confirmed ? "#39c8bf" : "#eda93d";
+    ctx.strokeStyle = "#08111a";
+    ctx.lineWidth = 1.5;
+    ctx.fill();
+    ctx.stroke();
+    drawFieldLabel(ctx, entry.label, pos[0] + 8, pos[1] - 8, {
+      align: "left", color: "#e6edf6", font: "10px Consolas, monospace"
+    });
+  });
+  return entries.map(function (entry) { return entry.label; });
 }
 function drawSurveyPoints(ctx, model) {
   const drawPoint = (point, index, activeIndex, color) => {
@@ -890,6 +904,7 @@ function drawProfilePreviewBoxes(ctx, model) {
 function drawProfileCornerPoints(ctx, model) {
   var preview = model.profilePreview;
   if (!preview || !Array.isArray(preview.boxes)) return;
+  if (preview._runtime_geometry) return;
   preview.boxes.forEach(function (box) {
     box.corners.forEach(function (pt) {
       var pos = worldToCanvas(pt.field_x, pt.field_y, model.rect);
@@ -916,14 +931,42 @@ function renderFieldMapInfoBox(model) {
     return;
   }
   // Simple key: profile_id + corner GPS summary (changes only on new profile)
-  var key = preview.profile_id + "|" + JSON.stringify(preview.reference);
+  var key = preview.profile_id + "|" + JSON.stringify(preview.reference) + "|" +
+    String(Boolean(preview._confirmed)) + "|" + JSON.stringify(preview._runtime_geometry || null);
   if (key === fieldMapInfoBoxKey) return;
   fieldMapInfoBoxKey = key;
   el.style.display = "block";
   var lines = [];
   lines.push("Field Profile: " + escapeHtml(preview.profile_id || "--"));
-  lines.push("Heading: " + (preview.reference && preview.reference.field_heading_deg != null ? preview.reference.field_heading_deg.toFixed(2) + "°" : "--"));
-  lines.push("Origin O: " + (preview.reference ? preview.reference.origin_lat.toFixed(7) + ", " + preview.reference.origin_lon.toFixed(7) : "--"));
+  if (preview._runtime_geometry) {
+    var runtime = preview._runtime_geometry;
+    var pointLine = function (prefix, point, includeAltitude) {
+      if (!point) return prefix + ": --";
+      var line = prefix + " " + point.name +
+        " FIELD x=" + Number(point.field_x_m).toFixed(2) +
+        " y=" + Number(point.field_y_m).toFixed(2) +
+        " GPS " + Number(point.lat).toFixed(7) + ", " + Number(point.lon).toFixed(7);
+      if (includeAltitude) line += " altitude=" + Number(point.altitude_m).toFixed(2) + "m";
+      return line;
+    };
+    lines.push(runtimeGeometryConfirmed ? "CONFIRMED / FROZEN" : "UNCONFIRMED");
+    lines.push("A GPS: " + Number(runtime.home.lat).toFixed(7) + ", " + Number(runtime.home.lon).toFixed(7));
+    lines.push("B GPS: " + Number(runtime.forward_marker.lat).toFixed(7) + ", " + Number(runtime.forward_marker.lon).toFixed(7));
+    lines.push("baseline: " + Number(runtime.baseline).toFixed(2) + "m");
+    lines.push("heading: " + Number(runtime.heading.degrees).toFixed(2) + "°");
+    (runtime.drop_scan_waypoints || []).forEach(function (point, index) {
+      lines.push(pointLine("SCAN" + (index + 1), point, true));
+    });
+    (runtime.drop_area_corners || []).forEach(function (point) {
+      lines.push(pointLine(point.name, point, false));
+    });
+    (runtime.recce_area_corners || []).forEach(function (point) {
+      lines.push(pointLine(point.name, point, false));
+    });
+  } else {
+    lines.push("Heading: " + (preview.reference && preview.reference.field_heading_deg != null ? preview.reference.field_heading_deg.toFixed(2) + "°" : "--"));
+    lines.push("Origin O: " + (preview.reference ? preview.reference.origin_lat.toFixed(7) + ", " + preview.reference.origin_lon.toFixed(7) : "--"));
+  }
   lines.push("");
 
   var boxes = preview.boxes || [];
@@ -1337,5 +1380,7 @@ function renderFieldMapNow(next) {
     renderFieldMap: renderFieldMap,
     setProfilePreview: setProfilePreview,
     setRuntimeGeometry: setRuntimeGeometry,
+    drawRuntimeGeometryPoints: drawRuntimeGeometryPoints,
+    renderFieldMapInfoBox: renderFieldMapInfoBox,
   };
 })();

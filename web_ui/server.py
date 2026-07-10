@@ -442,7 +442,7 @@ def create_app(runner, config: UiConfig) -> FastAPI:
             return result
         state = result.get("state", "")
         error = result.get("error", "unknown error")
-        if state in ("sampling", "sampling_failed", "apply_failed", "applied"):
+        if state != "idle":
             raise HTTPException(status_code=409, detail=error)
         elif "frozen" in str(error).lower():
             raise HTTPException(status_code=409, detail=error)

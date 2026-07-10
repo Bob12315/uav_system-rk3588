@@ -55,14 +55,19 @@ class TestOrchestratorLifecycle:
         assert r["is_frozen"] is True
         assert r["is_ready_for_field_to_gps"] is True
 
-    def test_finalize_idempotent(self):
+    def test_applied_finalize_requires_reset(self):
         o = RuntimeBindingOrchestrator(FieldReferenceService(), RuntimeContextBuilder())
         o.start(_make_profile(), started_at_s=1000.0)
         for i in range(20):
             o.observe(_valid_snap(2000.0 + i * 0.1), observed_at_s=1000.0 + i * 0.26)
         r1 = o.finalize(completed_at_s=1005.0)
         r2 = o.finalize(completed_at_s=1006.0)
-        assert r1 == r2
+        assert r1["ok"] is True
+        assert r2 == {
+            "ok": False,
+            "state": "applied",
+            "error": "runtime binding is already applied; use field reference reset",
+        }
 
     def test_insufficient_samples_fails(self):
         o = RuntimeBindingOrchestrator(FieldReferenceService(), RuntimeContextBuilder())
@@ -126,12 +131,14 @@ class TestTransactionFailure:
         assert r2["ok"] is True
         assert r2["state"] == "applied"
 
-    def test_idempotent_finalize(self):
+    def test_applied_finalize_requires_reset(self):
         o = self._setup()
         r1 = o.finalize(completed_at_s=1005.0)
         assert r1["ok"] is True
         r2 = o.finalize(completed_at_s=1006.0)
-        assert r1 == r2
+        assert r2["ok"] is False
+        assert r2["state"] == "applied"
+        assert "reset" in r2["error"]
 
     def test_sync_failure_before_freeze(self, monkeypatch):
         o = self._setup()
@@ -581,7 +588,7 @@ def test_apply_failure_retries_same_candidate_without_refinalize(monkeypatch):
     assert calls == {"apply": 2, "finalize": 1}
 
 
-def test_applied_finalize_has_no_transaction_side_effects(monkeypatch):
+def test_applied_finalize_is_rejected_without_transaction_side_effects(monkeypatch):
     orchestrator = _ready_orchestrator()
     first = orchestrator.finalize(completed_at_s=1005.0)
     monkeypatch.setattr(
@@ -599,7 +606,10 @@ def test_applied_finalize_has_no_transaction_side_effects(monkeypatch):
         "freeze",
         Mock(side_effect=AssertionError("must not freeze twice")),
     )
-    assert orchestrator.finalize(completed_at_s=1006.0) == first
+    result = orchestrator.finalize(completed_at_s=1006.0)
+    assert result["ok"] is False
+    assert result["state"] == "applied"
+    assert "reset" in result["error"]
 
 
 def test_applied_cancel_preserves_complete_successful_state():
@@ -621,7 +631,9 @@ def test_applied_cancel_preserves_complete_successful_state():
     assert orchestrator._svc.snapshot() == service_snapshot
     assert orchestrator._builder.snapshot_field_reference_state() == builder_snapshot
     assert orchestrator.synced_to_runtime(require_frozen=True) is True
-    assert orchestrator.finalize(completed_at_s=1006.0) == successful
+    finalized = orchestrator.finalize(completed_at_s=1006.0)
+    assert finalized["ok"] is False
+    assert finalized["state"] == "applied"
 
 
 def test_applied_start_does_not_overwrite_successful_result():
@@ -635,13 +647,18 @@ def test_applied_start_does_not_overwrite_successful_result():
     assert restarted["state"] == "applied"
     assert orchestrator._candidate is candidate
     assert orchestrator._last_error is last_error
-    assert orchestrator.finalize(completed_at_s=2001.0) == successful
+    finalized = orchestrator.finalize(completed_at_s=2001.0)
+    assert finalized["ok"] is False
+    assert finalized["state"] == "applied"
+    assert orchestrator._last_result == successful
 
 
-def test_applied_invalid_repeated_finalize_returns_first_success():
+def test_applied_invalid_repeated_finalize_requires_reset_and_preserves_success():
     orchestrator, successful = _applied_orchestrator()
     stored = orchestrator._last_result
-    assert orchestrator.finalize(completed_at_s=float("nan")) == successful
+    finalized = orchestrator.finalize(completed_at_s=float("nan"))
+    assert finalized["ok"] is False
+    assert finalized["state"] == "applied"
     assert orchestrator._last_result is stored
 
 
@@ -653,7 +670,10 @@ def test_applied_observe_is_noop_even_with_invalid_time():
     assert observed == {"ok": True, "observed": False, "state": "applied"}
     assert orchestrator._candidate is candidate
     assert orchestrator._last_result is stored
-    assert orchestrator.finalize(completed_at_s=1006.0) == successful
+    finalized = orchestrator.finalize(completed_at_s=1006.0)
+    assert finalized["ok"] is False
+    assert finalized["state"] == "applied"
+    assert orchestrator._last_result == successful
 
 
 def test_cancel_then_late_observe_cannot_restore_sampling_state():

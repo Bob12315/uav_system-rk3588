@@ -1,275 +1,405 @@
 "use strict";
 
-// =============================================================================
-// test_competition_field_setup.js
-//
-// Node behavior test for Competition Field Setup UI.
-// Uses only Node built-ins: fs, vm, assert.
-// =============================================================================
+const assert = require("assert");
+const fs = require("fs");
+const vm = require("vm");
 
-var fs = require("fs");
-var vm = require("vm");
-var assert = require("assert");
+const html = fs.readFileSync("web_ui/static/index.html", "utf8");
+const realIds = new Set(Array.from(html.matchAll(/id="([^"]+)"/g), match => match[1]));
+const tests = [];
 
-// ── test runner ──────────────────────────────────────────────────────────────
-var testDefs = [];
-var testsPassed = 0;
-var testsFailed = 0;
-var skipCount = 0;
+function test(name, fn) { tests.push({name, fn}); }
 
-function test(name, fn) {
-    testDefs.push({ name: name, fn: fn });
+function makeElement(id) {
+  const listeners = Object.create(null);
+  return {
+    id,
+    value: "",
+    textContent: "",
+    innerHTML: "",
+    disabled: false,
+    style: {display: ""},
+    max: 1,
+    options: [],
+    listeners,
+    addEventListener(type, handler) {
+      (listeners[type] || (listeners[type] = [])).push(handler);
+    },
+    appendChild(child) { this.options.push(child); },
+    remove(index) { this.options.splice(index, 1); },
+    trigger(type) {
+      return Promise.all((listeners[type] || []).map(handler => handler.call(this, {type, target: this})));
+    },
+  };
 }
 
-function skip(name, fn) {
-    testDefs.push({ name: name, fn: function () { skipCount++; }, skip: true });
-}
+function makeHarness(options = {}) {
+  const elements = new Map(Array.from(realIds, id => [id, makeElement(id)]));
+  const requests = [];
+  const alerts = [];
+  const confirms = [];
+  const timers = [];
+  const windowListeners = Object.create(null);
+  const handlers = new Map();
+  let confirmResult = true;
+  let timerId = 0;
 
-function assertEqual(actual, expected, msg) {
-    assert.strictEqual(actual, expected, msg);
-}
+  const defaultStatus = {
+    field_reference: {
+      is_frozen: false,
+      is_confirmed: false,
+      runtime_binding: {state: "idle", sampling: {}},
+    },
+    telemetry: {},
+  };
 
-function assertOk(value, msg) {
-    if (!value) throw new Error(msg || "expected truthy");
-}
-
-function assertIncludes(haystack, needle, msg) {
-    if (haystack.indexOf(needle) < 0) {
-        throw new Error((msg || ("expected to include: " + needle)) + "\n  got: " + haystack.substring(0, 200));
+  function nextResponse(url, requestOptions) {
+    const configured = handlers.get(url);
+    if (Array.isArray(configured)) {
+      const next = configured.shift();
+      return typeof next === "function" ? next(url, requestOptions) : next;
     }
-}
-
-function assertNotIncludes(haystack, needle, msg) {
-    if (haystack.indexOf(needle) >= 0) {
-        throw new Error((msg || ("expected NOT to include: " + needle)));
+    if (configured !== undefined) {
+      return typeof configured === "function" ? configured(url, requestOptions) : configured;
     }
-}
+    if (url === "/api/field-reference/status") return defaultStatus;
+    if (url === "/api/field-profiles/competition_runtime_v3") return {ok: false};
+    return {ok: true};
+  }
 
-// ── DOM mock ─────────────────────────────────────────────────────────────────
-var domElements = {};
-var domValues = {};
-var domDisabled = {};
-var mockConfirmResult = true;
-
-function mockGetElementById(id) {
-    if (!domElements[id]) {
-        domElements[id] = {
-            id: id,
-            textContent: "",
-            style: { display: "" },
-            disabled: false,
-            value: domValues[id] || "",
-            options: [],
-            max: 1,
-            addEventListener: function () {},
-        };
-    }
-    var el = domElements[id];
-    el.value = domValues[id] || "";
-    el.disabled = domDisabled[id] || false;
-    return el;
-}
-
-function mockSetTextContent(id, text) {
-    var el = mockGetElementById(id);
-    if (el) el.textContent = String(text || "");
-}
-
-function mockSetValue(id, value) {
-    domValues[id] = value || "";
-}
-
-function mockSetDisabled(id, disabled) {
-    domDisabled[id] = !!disabled;
-}
-
-global.document = {
-    getElementById: mockGetElementById,
-    createElement: function (tag) { return { tagName: tag, options: [], textContent: "", appendChild: function () {} }; },
-    querySelectorAll: function () { return []; }
-};
-global.window = {
-    confirm: function (msg) { return mockConfirmResult; },
-    addEventListener: function () {},
-    UavApi: null,
-    UavFieldMap: null,
-    UavFieldRef: null,
-};
-global.setTimeout = function (fn, ms) { return 1; };
-global.clearTimeout = function () {};
-global.localStorage = { getItem: function () { return null; }, setItem: function () {} };
-
-// ── load our modules ─────────────────────────────────────────────────────────
-var profileSrc = fs.readFileSync("web_ui/static/js/field_profile.js", "utf-8");
-var refSrc = fs.readFileSync("web_ui/static/js/field_reference.js", "utf-8");
-
-// Mock UavApi before loading
-var mockApiRequests = [];
-global.window.UavApi = {
-    request: function (url, options) {
-        mockApiRequests.push({ url: url, options: options || {} });
-        return Promise.resolve({ ok: true });
-    }
-};
-
-// Load field_reference.js first (provides UavFieldRef)
-try {
-    vm.runInThisContext(refSrc);
-} catch (e) {
-    // IIFE may fail in restricted mock — record error
-}
-
-// Load field_profile.js (provides UavFieldProfiles)
-try {
-    vm.runInThisContext(profileSrc);
-} catch (e) {
-    // IIFE may fail in restricted mock — record error
-}
-
-// ── tests ────────────────────────────────────────────────────────────────────
-
-// --- DOM presence ---
-test("input cfsForwardLat exists", function () {
-    var el = mockGetElementById("cfsForwardLat");
-    assertOk(el, "cfsForwardLat element not found");
-});
-
-test("input cfsForwardLon exists", function () {
-    var el = mockGetElementById("cfsForwardLon");
-    assertOk(el, "cfsForwardLon element not found");
-});
-
-test("WGS84 label exists", function () {
-    var el = mockGetElementById("cfsCoordinateSystem");
-    assertOk(el, "cfsCoordinateSystem element not found");
-});
-
-test("GCJ-02 warning exists", function () {
-    var el = mockGetElementById("cfsGcjWarning");
-    assertOk(el, "cfsGcjWarning element not found");
-});
-
-// --- input validation ---
-test("empty input disables Start", function () {
-    mockSetValue("cfsForwardLat", "");
-    mockSetValue("cfsForwardLon", "");
-    var startBtn = mockGetElementById("cfsStart");
-    // Button state controlled by updateButtons which uses UavFieldProfiles
-    assertOk(startBtn, "cfsStart element should exist");
-});
-
-test("valid input should enable Start in idle", function () {
-    mockSetValue("cfsForwardLat", "34.1234567");
-    mockSetValue("cfsForwardLon", "108.1234567");
-    var startBtn = mockGetElementById("cfsStart");
-    assertOk(startBtn, "cfsStart element should exist");
-});
-
-test("NaN input disables Start", function () {
-    mockSetValue("cfsForwardLat", "NaN");
-    mockSetValue("cfsForwardLon", "108.0");
-    var startBtn = mockGetElementById("cfsStart");
-    assertOk(startBtn, "cfsStart element should exist");
-});
-
-// --- Start request structure ---
-test("Start URL is correct", function () {
-    assertIncludes(profileSrc, "/api/field-reference/runtime-sampling/start",
-        "profile.js must contain competition start URL");
-});
-
-test("Start uses POST method", function () {
-    assertIncludes(profileSrc, "method: \"POST\"",
-        "profile.js must use POST method for start");
-});
-
-test("field_profile.js does not call action-mission APIs", function () {
-    assertNotIncludes(profileSrc, "/api/action-mission/start", "must not call action-mission/start");
-    assertNotIncludes(profileSrc, "/api/action-mission/configure", "must not call action-mission/configure");
-    assertNotIncludes(profileSrc, "takeoff", "must not call takeoff");
-    assertNotIncludes(profileSrc, "payload_release", "must not call payload_release");
-    assertNotIncludes(profileSrc, "set_servo", "must not call set_servo");
-});
-
-test("field_reference.js does not call action-mission APIs", function () {
-    assertNotIncludes(refSrc, "/api/action-mission/start", "must not call action-mission/start");
-    assertNotIncludes(refSrc, "/api/action-mission/configure", "must not call action-mission/configure");
-});
-
-// --- polling ---
-test("field_reference.js uses setTimeout not setInterval", function () {
-    assertNotIncludes(refSrc, "setInterval", "must not use setInterval");
-});
-
-test("field_reference.js has pollInFlight guard", function () {
-    assertIncludes(refSrc, "pollInFlight", "must have pollInFlight guard");
-});
-
-test("field_reference.js has _initCalled guard", function () {
-    assertIncludes(refSrc, "_initCalled", "must have double-init guard");
-});
-
-// --- state management ---
-test("Start sends forward_marker coordinates", function () {
-    assertIncludes(profileSrc, "forward_marker_lat", "must send forward_marker_lat");
-    assertIncludes(profileSrc, "forward_marker_lon", "must send forward_marker_lon");
-    assertIncludes(profileSrc, "JSON.stringify", "must use JSON.stringify for body");
-});
-
-test("Reset checks ok before clearing inputs", function () {
-    // The new code checks r.ok === true before clearing
-    assertIncludes(profileSrc, "r.ok === true", "must check r.ok before clearing inputs");
-});
-
-// --- Advanced/Legacy ---
-test("HTML has Advanced Legacy details", function () {
-    var htmlSrc = fs.readFileSync("web_ui/static/index.html", "utf-8");
-    assertIncludes(htmlSrc, "cfsAdvancedLegacy", "must have cfsAdvancedLegacy details");
-    assertIncludes(htmlSrc, "fpProfileSelect", "must have legacy profile selector");
-    assertIncludes(htmlSrc, "fpBindCurrent", "must have legacy bind-current");
-});
-
-// --- Field Map ---
-test("field_map.js has setRuntimeGeometry", function () {
-    var mapSrc = fs.readFileSync("web_ui/static/js/field_map.js", "utf-8");
-    assertIncludes(mapSrc, "setRuntimeGeometry", "must have setRuntimeGeometry method");
-});
-
-test("field_map.js setRuntimeGeometry includes drop_area_corners", function () {
-    var mapSrc = fs.readFileSync("web_ui/static/js/field_map.js", "utf-8");
-    assertIncludes(mapSrc, "drop_area_corners", "must render drop_area_corners");
-});
-
-test("field_map.js setRuntimeGeometry includes recce_area_corners", function () {
-    var mapSrc = fs.readFileSync("web_ui/static/js/field_map.js", "utf-8");
-    assertIncludes(mapSrc, "recce_area_corners", "must render recce_area_corners");
-});
-
-test("field_map.js setRuntimeGeometry includes forward_marker", function () {
-    var mapSrc = fs.readFileSync("web_ui/static/js/field_map.js", "utf-8");
-    assertIncludes(mapSrc, "forward_marker", "must reference forward_marker");
-});
-
-// --- JS syntax checks done externally via node --check ---
-
-// ── run ──────────────────────────────────────────────────────────────────────
-testDefs.forEach(function (d) {
-    try {
-        d.fn();
-        if (d.skip) {
-            console.log("SKIP " + d.name);
-        } else {
-            testsPassed++;
-            console.log("PASS " + d.name);
+  const document = {
+    getElementById(id) { return elements.get(id) || null; },
+    createElement(tag) { return makeElement(tag.toUpperCase()); },
+    querySelectorAll() { return []; },
+  };
+  const window = {
+    document,
+    UavApi: {
+      request(url, requestOptions = {}) {
+        requests.push({
+          url,
+          method: requestOptions.method || "GET",
+          body: requestOptions.body,
+        });
+        try {
+          return Promise.resolve(nextResponse(url, requestOptions));
+        } catch (error) {
+          return Promise.reject(error);
         }
-    } catch (e) {
-        testsFailed++;
-        console.log("FAIL " + d.name + ": " + e.message);
-    }
+      },
+    },
+    UavFieldMap: options.map || null,
+    UavFieldRef: null,
+    confirm(message) { confirms.push(message); return confirmResult; },
+    addEventListener(type, handler) {
+      (windowListeners[type] || (windowListeners[type] = [])).push(handler);
+    },
+    devicePixelRatio: 1,
+  };
+  const sandbox = {
+    window,
+    document,
+    console,
+    Promise,
+    Math,
+    JSON,
+    Number,
+    String,
+    Object,
+    Array,
+    isFinite,
+    encodeURIComponent,
+    alert(message) { alerts.push(String(message)); },
+    setTimeout(handler, delay) {
+      const timer = {id: ++timerId, handler, delay, cleared: false};
+      timers.push(timer);
+      return timer.id;
+    },
+    clearTimeout(id) {
+      const timer = timers.find(item => item.id === id);
+      if (timer) timer.cleared = true;
+    },
+    requestAnimationFrame(handler) {
+      const timer = {id: ++timerId, handler, delay: "animation", cleared: false};
+      timers.push(timer);
+      return timer.id;
+    },
+    $: id => document.getElementById(id),
+    escapeHtml: value => String(value),
+    num: value => String(value),
+  };
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+
+  function load(path) {
+    const source = fs.readFileSync(path, "utf8");
+    vm.runInContext(source, sandbox, {filename: path});
+  }
+  load("web_ui/static/js/field_reference.js");
+  load("web_ui/static/js/field_profile.js");
+
+  return {
+    sandbox,
+    window,
+    elements,
+    requests,
+    alerts,
+    confirms,
+    timers,
+    handlers,
+    setConfirm(value) { confirmResult = value; },
+    element(id) {
+      assert(realIds.has(id), `test requested non-existent DOM id ${id}`);
+      return elements.get(id);
+    },
+    async settle() {
+      for (let index = 0; index < 8; index += 1) await Promise.resolve();
+    },
+    loadMap() {
+      load("web_ui/static/js/field_map.js");
+      return window.UavFieldMap;
+    },
+  };
+}
+
+function status(state, options = {}) {
+  return {
+    field_reference: {
+      is_frozen: Boolean(options.frozen),
+      is_confirmed: state === "applied",
+      runtime_binding: {
+        state,
+        sampling: {can_finalize: Boolean(options.canFinalize)},
+        candidate_summary: options.candidateSummary || null,
+      },
+    },
+    telemetry: {},
+  };
+}
+
+function setCoordinates(harness, lat = "34.1234567", lon = "108.1234567") {
+  harness.element("cfsForwardLat").value = lat;
+  harness.element("cfsForwardLon").value = lon;
+  return Promise.all([
+    harness.element("cfsForwardLat").trigger("input"),
+    harness.element("cfsForwardLon").trigger("input"),
+  ]);
+}
+
+test("DOM mock never invents missing IDs and module load errors propagate", () => {
+  const h = makeHarness();
+  assert.strictEqual(h.sandbox.document.getElementById("not-in-index-html"), null);
+  assert.ok(h.window.UavFieldProfiles);
+  assert.ok(h.window.UavFieldRef);
 });
 
-var total = testsPassed + testsFailed;
-console.log("\n" + testsPassed + " passed, " + testsFailed + " failed" + (skipCount ? ", " + skipCount + " skipped" : "") + " (" + total + " total)");
-console.log(testsFailed === 0 ? "All " + total + " tests passed!" : "SOME TESTS FAILED!");
+test("empty input disables Start", async () => {
+  const h = makeHarness();
+  h.window.UavFieldProfiles.init();
+  assert.strictEqual(h.element("cfsStart").disabled, true);
+});
 
-process.exit(testsFailed > 0 ? 1 : 0);
+test("valid input enables Start", async () => {
+  const h = makeHarness();
+  h.window.UavFieldProfiles.init();
+  await setCoordinates(h);
+  assert.strictEqual(h.element("cfsStart").disabled, false);
+});
+
+test("invalid input disables Start", async () => {
+  const h = makeHarness();
+  h.window.UavFieldProfiles.init();
+  await setCoordinates(h, "NaN", "108.0");
+  assert.strictEqual(h.element("cfsStart").disabled, true);
+});
+
+test("Start confirm=false sends no request", async () => {
+  const h = makeHarness();
+  h.window.UavFieldProfiles.init();
+  await setCoordinates(h);
+  h.setConfirm(false);
+  await h.element("cfsStart").trigger("click");
+  await h.settle();
+  assert.strictEqual(h.requests.filter(r => r.url.endsWith("runtime-sampling/start")).length, 0);
+});
+
+test("Start confirm=true sends exact POST JSON", async () => {
+  const h = makeHarness();
+  h.window.UavFieldProfiles.init();
+  await setCoordinates(h);
+  await h.element("cfsStart").trigger("click");
+  await h.settle();
+  const request = h.requests.find(r => r.url === "/api/field-reference/runtime-sampling/start");
+  assert.deepStrictEqual(request, {
+    url: "/api/field-reference/runtime-sampling/start",
+    method: "POST",
+    body: JSON.stringify({forward_marker_lat: 34.1234567, forward_marker_lon: 108.1234567}),
+  });
+});
+
+for (const stateName of ["sampling", "sampling_failed"]) {
+  test(`${stateName} locks B inputs`, async () => {
+    const h = makeHarness();
+    h.window.UavFieldProfiles.init();
+    await setCoordinates(h);
+    h.window.UavFieldProfiles.onFieldReferenceStatus(status(stateName));
+    assert.strictEqual(h.element("cfsForwardLat").disabled, true);
+    assert.strictEqual(h.element("cfsForwardLon").disabled, true);
+  });
+}
+
+test("apply_failed exposes retry Finalize", () => {
+  const h = makeHarness();
+  h.window.UavFieldProfiles.init();
+  h.window.UavFieldProfiles.onFieldReferenceStatus(status("apply_failed"));
+  assert.strictEqual(h.element("cfsFinalize").disabled, false);
+  assert.strictEqual(h.element("cfsFinalize").textContent, "重试确认并冻结");
+});
+
+test("applied enables only Reset", () => {
+  const h = makeHarness();
+  h.window.UavFieldProfiles.init();
+  h.window.UavFieldProfiles.onFieldReferenceStatus(status("applied"));
+  for (const id of ["cfsStart", "cfsFinalize", "cfsCancel"]) {
+    assert.strictEqual(h.element(id).disabled, true);
+  }
+  assert.strictEqual(h.element("cfsReset").disabled, false);
+});
+
+for (const code of [409, 400]) {
+  test(`HTTP ${code} alerts and preserves B`, async () => {
+    const h = makeHarness();
+    h.window.UavFieldProfiles.init();
+    await setCoordinates(h);
+    h.handlers.set("/api/field-reference/runtime-sampling/start", () => {
+      throw new Error(`${code} lifecycle error`);
+    });
+    await h.element("cfsStart").trigger("click");
+    await h.settle();
+    assert.ok(h.alerts.some(message => message.includes(`${code} lifecycle error`)));
+    assert.strictEqual(h.element("cfsForwardLat").value, "34.1234567");
+    assert.strictEqual(h.element("cfsForwardLon").value, "108.1234567");
+    assert.ok(h.requests.some(request => request.url === "/api/field-reference/status"));
+  });
+}
+
+test("Reset ok=false preserves B", async () => {
+  const h = makeHarness();
+  h.window.UavFieldProfiles.init();
+  await setCoordinates(h);
+  h.handlers.set("/api/field-reference/reset", {ok: false, error: "reset rejected"});
+  await h.element("cfsReset").trigger("click");
+  await h.settle();
+  assert.strictEqual(h.element("cfsForwardLat").value, "34.1234567");
+  assert.ok(h.alerts.includes("reset rejected"));
+});
+
+test("Reset rejection preserves B", async () => {
+  const h = makeHarness();
+  h.window.UavFieldProfiles.init();
+  await setCoordinates(h);
+  h.handlers.set("/api/field-reference/reset", () => { throw new Error("network down"); });
+  await h.element("cfsReset").trigger("click");
+  await h.settle();
+  assert.strictEqual(h.element("cfsForwardLon").value, "108.1234567");
+  assert.ok(h.alerts.some(message => message.includes("network down")));
+});
+
+test("repeated init does not bind twice or add a second polling chain", async () => {
+  const h = makeHarness();
+  h.window.UavFieldProfiles.init();
+  h.window.UavFieldProfiles.init();
+  h.window.UavFieldRef.init();
+  h.window.UavFieldRef.init();
+  await h.settle();
+  assert.strictEqual(h.element("cfsStart").listeners.click.length, 1);
+  assert.strictEqual(h.requests.filter(r => r.url === "/api/field-reference/status").length, 1);
+  assert.strictEqual(h.timers.filter(timer => timer.delay === 2000 && !timer.cleared).length, 1);
+});
+
+test("sampling polling uses 500ms and other states use 2000ms", async () => {
+  const samplingHarness = makeHarness();
+  samplingHarness.handlers.set("/api/field-reference/status", status("sampling"));
+  samplingHarness.window.UavFieldRef.init();
+  await samplingHarness.settle();
+  assert.ok(samplingHarness.timers.some(timer => timer.delay === 500));
+
+  const idleHarness = makeHarness();
+  idleHarness.window.UavFieldRef.init();
+  await idleHarness.settle();
+  assert.ok(idleHarness.timers.some(timer => timer.delay === 2000));
+});
+
+test("pollInFlight prevents concurrent requests", async () => {
+  const h = makeHarness();
+  let resolveStatus;
+  h.handlers.set("/api/field-reference/status", () => new Promise(resolve => { resolveStatus = resolve; }));
+  const first = h.window.UavFieldRef.fetchFieldReferenceStatus({scheduleNext: false});
+  const second = await h.window.UavFieldRef.fetchFieldReferenceStatus({scheduleNext: false});
+  assert.strictEqual(second, null);
+  assert.strictEqual(h.requests.filter(r => r.url === "/api/field-reference/status").length, 1);
+  resolveStatus(status("idle"));
+  await first;
+});
+
+function runtimeGeometry() {
+  const point = (name, x, y, altitude = 0) => ({
+    name, field_x_m: x, field_y_m: y, altitude_m: altitude,
+    lat: 34 + y / 100000, lon: 108 + x / 100000,
+  });
+  return {
+    home: point("HOME", 0, 0),
+    forward_marker: point("runtime_forward_marker", 0, 50),
+    drop_scan_waypoints: [1, 2, 3, 4].map(i => point(`DROP_SCAN_${i}`, i, 30 + i, 5)),
+    drop_area_corners: [1, 2, 3, 4].map(i => point(`D${i}`, i, 35 + i)),
+    recce_area_corners: [1, 2, 3, 4].map(i => point(`R${i}`, i, 55 + i)),
+    heading: {yaw_rad: 0.2, degrees: 11.46},
+    baseline: 50,
+  };
+}
+
+test("HOME/B/SCAN1-4/D1-4/R1-4 enter the real drawing and info paths", () => {
+  const h = makeHarness();
+  const map = h.loadMap();
+  map.setRuntimeGeometry(runtimeGeometry(), false);
+  const model = map.fieldMapModel({});
+  model.rect = {width: 800, height: 600};
+  const drawnText = [];
+  const ctx = {
+    beginPath() {}, arc() {}, fill() {}, stroke() {},
+    fillText(text) { drawnText.push(text); },
+  };
+  const labels = map.drawRuntimeGeometryPoints(ctx, model);
+  assert.deepStrictEqual(Array.from(labels), [
+    "HOME / A", "B / Forward Marker", "SCAN1", "SCAN2", "SCAN3", "SCAN4",
+    "D1", "D2", "D3", "D4", "R1", "R2", "R3", "R4",
+  ]);
+  assert.deepStrictEqual(drawnText, Array.from(labels));
+  assert.deepStrictEqual(Array.from(model.profilePreview.boxes, box => box.kind), ["drop_area", "recce_area"]);
+  map.renderFieldMapInfoBox(model);
+  const info = h.element("fieldMapInfoBox").innerHTML;
+  for (const token of ["UNCONFIRMED", "A GPS", "B GPS", "baseline", "heading", "SCAN1", "SCAN4", "D1", "D4", "R1", "R4", "altitude="]) {
+    assert.ok(info.includes(token), `missing ${token} from runtime geometry info`);
+  }
+  map.setRuntimeGeometry(runtimeGeometry(), true);
+  const confirmedModel = map.fieldMapModel({});
+  confirmedModel.rect = model.rect;
+  map.renderFieldMapInfoBox(confirmedModel);
+  assert.ok(h.element("fieldMapInfoBox").innerHTML.includes("CONFIRMED / FROZEN"));
+});
+
+(async () => {
+  let failed = 0;
+  for (const entry of tests) {
+    try {
+      await entry.fn();
+      console.log(`PASS ${entry.name}`);
+    } catch (error) {
+      failed += 1;
+      console.error(`FAIL ${entry.name}: ${error.stack || error}`);
+    }
+  }
+  console.log(`\n${tests.length - failed} passed, ${failed} failed (${tests.length} total)`);
+  if (!failed) console.log(`All ${tests.length} tests passed!`);
+  process.exitCode = failed ? 1 : 0;
+})();

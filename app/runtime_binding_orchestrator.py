@@ -7,7 +7,7 @@ does not read hardware, use wall-clock time, expose Web APIs, or send commands.
 from __future__ import annotations
 
 import math
-from dataclasses import fields
+from dataclasses import fields, replace
 from typing import Mapping
 
 from .field_profile import FieldProfile
@@ -58,25 +58,29 @@ class RuntimeBindingOrchestrator:
         forward_marker_lat: float | None = None,
         forward_marker_lon: float | None = None,
     ) -> dict[str, object]:
-        if self._state == "applied":
+        if self._state != "idle":
             return {
                 "ok": False,
-                "state": "applied",
+                "state": self._state,
                 "error": (
-                    "runtime binding is already applied; "
-                    "use field reference reset"
+                    f"cannot start runtime binding in state {self._state}; "
+                    + (
+                        "use field reference reset"
+                        if self._state == "applied"
+                        else "cancel or reset the current session first"
+                    )
                 ),
+            }
+        if self._svc.reference.is_frozen:
+            return {
+                "ok": False,
+                "state": self._state,
+                "error": "field reference is frozen; reset first",
             }
         if not isinstance(profile, FieldProfile):
             return self._failure("profile must be a FieldProfile", state=self._state)
-        if self._state == "sampling":
-            return self._failure(
-                "runtime sampling is already in progress", state="sampling"
-            )
         if not _finite_number(started_at_s):
             return self._failure("started_at_s must be finite", state=self._state)
-        if self._svc.reference.is_frozen:
-            return self._failure("field reference is frozen", state=self._state)
         if profile.schema_version != 3:
             return self._failure(
                 "runtime GPS sampling requires schema v3", state=self._state
@@ -147,7 +151,11 @@ class RuntimeBindingOrchestrator:
 
     def finalize(self, *, completed_at_s: float) -> dict[str, object]:
         if self._state == "applied" and self._last_result is not None:
-            return dict(self._last_result)
+            return {
+                "ok": False,
+                "state": "applied",
+                "error": "runtime binding is already applied; use field reference reset",
+            }
         if not _finite_number(completed_at_s):
             return self._failure("completed_at_s must be finite", state=self._state)
         if self._sampler is None:
@@ -499,7 +507,9 @@ class RuntimeBindingOrchestrator:
         profile = self._profile
         if profile is not None:
             min_baseline = profile.binding_policy.min_baseline_m
-            if baseline_m < min_baseline:
+            if baseline_m < min_baseline and not math.isclose(
+                baseline_m, min_baseline, rel_tol=0.0, abs_tol=1e-6
+            ):
                 self._preview_candidate = None
                 self._preview_error = "baseline below minimum"
                 self._state = "sampling_failed"
@@ -508,16 +518,18 @@ class RuntimeBindingOrchestrator:
                 )
                 return
             warn_below = profile.binding_policy.warn_baseline_below_m
-            if baseline_m < warn_below:
+            if baseline_m < warn_below and not math.isclose(
+                baseline_m, warn_below, rel_tol=0.0, abs_tol=1e-6
+            ):
                 warning_msg = (
-                    f"baseline {baseline_m:.1f}m below warning threshold "
-                    f"{warn_below:.1f}m"
+                    f"A→B baseline {baseline_m:.1f} m is below warning threshold "
+                    f"{warn_below:.1f} m (minimum {min_baseline:.1f} m)"
                 )
                 if warning_msg not in warnings:
                     warnings.append(warning_msg)
 
         # Success — store preview (does NOT modify sampler state)
-        self._preview_candidate = candidate
+        self._preview_candidate = replace(candidate, warnings=tuple(warnings))
         self._preview_error = None
 
     def _safe_sampler_state(self) -> str | None:

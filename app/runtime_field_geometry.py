@@ -124,12 +124,16 @@ def build_runtime_field_geometry(
     warnings: list[str] = []
 
     # baseline policy
-    if baseline_m < bp.min_baseline_m:
+    if baseline_m < bp.min_baseline_m and not math.isclose(
+        baseline_m, bp.min_baseline_m, rel_tol=0.0, abs_tol=1e-6
+    ):
         raise RuntimeFieldGeometryError(
             f"A→B baseline {baseline_m:.1f} m is below minimum "
             f"{bp.min_baseline_m} m"
         )
-    if baseline_m < bp.warn_baseline_below_m:
+    if baseline_m < bp.warn_baseline_below_m and not math.isclose(
+        baseline_m, bp.warn_baseline_below_m, rel_tol=0.0, abs_tol=1e-6
+    ):
         warnings.append(
             f"A→B baseline {baseline_m:.1f} m is below warning threshold "
             f"{bp.warn_baseline_below_m} m (minimum {bp.min_baseline_m} m)"
