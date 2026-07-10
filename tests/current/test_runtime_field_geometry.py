@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from app.coordinate_transform import (
-    GpsPoint,
     field_to_gps,
     field_to_gps_from_origin,
 )
@@ -176,14 +175,42 @@ class TestFieldToGpsFromOrigin:
                 field_heading_yaw_rad=0.0,
             )
 
-    @pytest.mark.parametrize("bad", [None, True, "x", float("nan"), float("inf")])
-    def test_rejects_invalid_input(self, bad):
-        with pytest.raises(FieldReferenceError):
+    @pytest.mark.parametrize(
+        ("field_name", "bad_value"),
+        [
+            ("field_x_m", None),
+            ("field_x_m", True),
+            ("field_x_m", float("nan")),
+            ("field_y_m", "bad"),
+            ("field_y_m", float("inf")),
+            ("altitude_m", None),
+            ("altitude_m", float("-inf")),
+            ("origin_lat", True),
+            ("origin_lat", float("nan")),
+            ("origin_lon", "bad"),
+            ("origin_lon", float("inf")),
+            ("field_heading_yaw_rad", None),
+            ("field_heading_yaw_rad", float("nan")),
+        ],
+    )
+    def test_rejects_invalid_input_for_each_parameter(self, field_name, bad_value):
+        values = {
+            "field_x_m": 0.0,
+            "field_y_m": 0.0,
+            "altitude_m": 0.0,
+            "origin_lat": self.ORIGIN_LAT,
+            "origin_lon": self.ORIGIN_LON,
+            "field_heading_yaw_rad": 0.0,
+        }
+        values[field_name] = bad_value
+        with pytest.raises(FieldReferenceError, match=field_name):
             field_to_gps_from_origin(
-                0, 0, 0,
-                origin_lat=bad,
-                origin_lon=self.ORIGIN_LON,
-                field_heading_yaw_rad=0.0,
+                values["field_x_m"],
+                values["field_y_m"],
+                values["altitude_m"],
+                origin_lat=values["origin_lat"],
+                origin_lon=values["origin_lon"],
+                field_heading_yaw_rad=values["field_heading_yaw_rad"],
             )
 
     def test_origin_lat_out_of_range(self):
@@ -292,26 +319,41 @@ class TestBaselinePolicy:
         with pytest.raises(RuntimeFieldGeometryError, match="baseline"):
             build_runtime_field_geometry(p, origin_lat=34.103649, origin_lon=108.642674)
 
-    def test_baseline_at_min_warns(self):
-        p = self._make_marker_at(34.103649, 108.642674, 31.0)
-        g = build_runtime_field_geometry(p, origin_lat=34.103649, origin_lon=108.642674)
-        assert any("baseline" in w.lower() for w in g.warnings)
+    def test_baseline_equal_to_min_is_allowed_and_warns(self):
+        origin_lat = 34.103649
+        origin_lon = 108.642674
+        p = self._make_marker_at(origin_lat, origin_lon, 40.0)
+        dn, de = gps_enu_deltas(origin_lat, origin_lon, p.forward_marker.lat, p.forward_marker.lon)
+        actual_baseline = math.hypot(dn, de)
+        p.binding_policy.min_baseline_m = actual_baseline
+        p.binding_policy.warn_baseline_below_m = actual_baseline + 10.0
+        result = build_runtime_field_geometry(p, origin_lat=origin_lat, origin_lon=origin_lon)
+        assert result.baseline_m == pytest.approx(actual_baseline)
+        assert any("baseline" in w.lower() for w in result.warnings)
 
-    def test_baseline_at_warn_threshold_no_warn(self):
-        p = self._make_marker_at(34.103649, 108.642674, 51.0)
-        g = build_runtime_field_geometry(p, origin_lat=34.103649, origin_lon=108.642674)
-        assert not any("baseline" in w.lower() for w in g.warnings)
+    def test_baseline_between_min_and_warn_threshold_warns(self):
+        p = self._make_marker_at(34.103649, 108.642674, 40.0)
+        p.binding_policy.min_baseline_m = 30.0
+        p.binding_policy.warn_baseline_below_m = 50.0
+        result = build_runtime_field_geometry(p, origin_lat=34.103649, origin_lon=108.642674)
+        assert any("baseline" in w.lower() for w in result.warnings)
+
+    def test_baseline_equal_to_warn_threshold_has_no_warning(self):
+        origin_lat = 34.103649
+        origin_lon = 108.642674
+        p = self._make_marker_at(origin_lat, origin_lon, 50.0)
+        dn, de = gps_enu_deltas(origin_lat, origin_lon, p.forward_marker.lat, p.forward_marker.lon)
+        actual_baseline = math.hypot(dn, de)
+        p.binding_policy.min_baseline_m = actual_baseline - 10.0
+        p.binding_policy.warn_baseline_below_m = actual_baseline
+        result = build_runtime_field_geometry(p, origin_lat=origin_lat, origin_lon=origin_lon)
+        assert result.baseline_m == pytest.approx(actual_baseline)
+        assert not any("baseline" in w.lower() for w in result.warnings)
 
     def test_baseline_above_warn_no_warn(self):
         p = self._make_marker_at(34.103649, 108.642674, 60.0)
-        g = build_runtime_field_geometry(p, origin_lat=34.103649, origin_lon=108.642674)
-        assert not any("baseline" in w.lower() for w in g.warnings)
-
-
-# =========================================================================
-# D. Home and marker
-# =========================================================================
-
+        result = build_runtime_field_geometry(p, origin_lat=34.103649, origin_lon=108.642674)
+        assert not any("baseline" in w.lower() for w in result.warnings)
 
 class TestHomeAndMarker:
     def test_home(self):
@@ -486,10 +528,16 @@ class TestNoLocalDependencies:
     def test_output_points_have_no_local(self):
         p = _profile()
         g = build_runtime_field_geometry(p, origin_lat=34.103649, origin_lon=108.642674)
-        for point in [g.home, g.forward_marker] + list(g.drop_scan_waypoints) + list(g.drop_area_corners):
-            assert not hasattr(point, "local_x")
-            assert not hasattr(point, "local_y")
-            assert not hasattr(point, "local_z")
+        all_points = (
+            [g.home, g.forward_marker]
+            + list(g.drop_scan_waypoints)
+            + list(g.drop_area_corners)
+            + list(g.recce_area_corners)
+        )
+        for point in all_points:
+            assert not hasattr(point, "local_x"), f"{point.name} has local_x"
+            assert not hasattr(point, "local_y"), f"{point.name} has local_y"
+            assert not hasattr(point, "local_z"), f"{point.name} has local_z"
 
 
 def test_runtime_field_geometry_no_local_source():

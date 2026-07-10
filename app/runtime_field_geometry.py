@@ -18,9 +18,7 @@ from .field_profile import (
     DropScanConfig,
     FieldGeometry,
     FieldProfile,
-    FieldScanWaypoint,
     ForwardMarker,
-    RuntimeOriginSampling,
     validate_field_profile,
 )
 from .field_reference import gps_enu_deltas
