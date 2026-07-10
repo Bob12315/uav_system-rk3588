@@ -252,7 +252,6 @@ class GpsMultiViewLocalizeAction(ActionModule):
         detections, image_width, image_height = self._detections(context)
 
         new_estimates: list[GpsRawEstimate] = []
-        any_telem_found = False
 
         for det in detections:
             try:
@@ -315,13 +314,35 @@ class GpsMultiViewLocalizeAction(ActionModule):
             "drone_snapshot": {k: v for k, v in (drone_snapshot or {}).items() if k != "source_waypoint"},
         })
 
-        # If no valid telemetry was available for any detection AND no estimates were produced
-        # (not from detection telemetry), fail
-        if not new_estimates and len(detections) > 0:
-            self.phase = "failed"
-            self.failure_reason = "invalid_capture_telemetry"
-            return ActionResult(failed=True, reason="invalid_capture_telemetry",
-                                detail=self._detail())
+        # invalid_capture_telemetry: ONLY when truly no telemetry source exists.
+        # Class/confidence/ex-ey filtering is NOT a telemetry failure.
+        # Check: drone_snapshot is None AND no detection has capture_telemetry/source
+        # AND scene has no capture_telemetry AND we have detections.
+        _no_telem_at_all = (drone_snapshot is None)
+        if _no_telem_at_all and len(detections) > 0:
+            # Double-check: any detection has its own telemetry?
+            _any_det_telem = False
+            for det in detections:
+                ct = det.get("capture_telemetry")
+                if ct is not None:
+                    _any_det_telem = True
+                    break
+                src = det.get("source")
+                if isinstance(src, dict) and any(k in src for k in ("drone_lat", "drone_lon")):
+                    _any_det_telem = True
+                    break
+            scene = (context or {}).get("scene", {})
+            _scene_telem = (
+                isinstance(scene, dict) and (
+                    scene.get("capture_telemetry") or
+                    all(k in scene for k in ("drone_lat", "drone_lon", "drone_yaw_rad", "relative_altitude_m"))
+                )
+            )
+            if not _any_det_telem and not _scene_telem:
+                self.phase = "failed"
+                self.failure_reason = "invalid_capture_telemetry"
+                return ActionResult(failed=True, reason="invalid_capture_telemetry",
+                                    detail=self._detail())
 
         self.capture_count += 1
         detail = self._detail(extra={
@@ -386,27 +407,26 @@ class GpsMultiViewLocalizeAction(ActionModule):
         lat = drone.get("lat")
         lon = drone.get("lon")
         yaw = drone.get("yaw")
+        if lat is None or lon is None or yaw is None:
+            return None
         alt = drone.get("relative_altitude")
+        if alt is None: alt = drone.get("relative_altitude_m")
+        if alt is None: alt = drone.get("altitude")
+        if alt is None: alt = drone.get("altitude_m")
         if alt is None:
-            alt = drone.get("relative_altitude_m")
-        if alt is None:
-            alt = drone.get("altitude")
-        if alt is None:
-            alt = drone.get("altitude_m")
-        if lat is None or lon is None or yaw is None or alt is None:
             return None
         try:
             lat_f = float(lat); lon_f = float(lon)
             if not (-90 <= lat_f <= 90) or not (-180 <= lon_f <= 180):
-                return None
-            alt_f = float(alt)
-            if alt_f <= 0:
                 return None
             import math
             if not math.isfinite(lat_f) or not math.isfinite(lon_f):
                 return None
             yaw_f = float(yaw)
             if not math.isfinite(yaw_f):
+                return None
+            alt_f = float(alt)
+            if not math.isfinite(alt_f) or alt_f <= 0.0:
                 return None
             return {"drone_lat": lat_f, "drone_lon": lon_f,
                     "drone_yaw_rad": yaw_f, "relative_altitude_m": alt_f}
