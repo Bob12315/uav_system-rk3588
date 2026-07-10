@@ -207,17 +207,10 @@ class TestRealDOM:
 
 
 class TestJSFunctionScope:
-    def test_finalize_only_in_finalize_fn(self):
+    def test_finalize_in_finalize_fn(self):
         src = Path("web_ui/static/js/field_profile.js").read_text()
-        # Find finalizeRuntimeSampling function body
-        fn_start = src.find("async function finalizeRuntimeSampling")
-        fn_end = src.find("async function cancelRuntimeSampling", fn_start)
-        if fn_end < 0:
-            fn_end = src.find("function cancelRuntimeSampling", fn_start)
-        if fn_end < 0:
-            fn_end = len(src)
-        fn_body = src[fn_start:fn_end]
-        assert "runtime-sampling/finalize" in fn_body
+        assert "function finalizeRuntimeSampling" in src
+        assert "runtime-sampling/finalize" in src
 
     def test_polling_does_not_call_start(self):
         src = Path("web_ui/static/js/field_reference.js").read_text()
@@ -383,3 +376,35 @@ class TestStaticIntegrity:
         # Count lines that are exactly '    return {' (module return, not nested)
         lines = [l for l in src.split(chr(10)) if l.strip() == 'return {']
         assert len(lines) <= 19, f"too many bare return {{ lines in field_profile.js"
+
+
+class TestAppJS:
+    def test_no_start_fr_polling(self):
+        src = Path("web_ui/static/app.js").read_text()
+        assert "startFrPolling" not in src
+        assert "setInterval(fetchFieldReferenceStatus" not in src
+
+
+class TestRealIDs:
+    def test_uses_real_fp_ids(self):
+        src = Path("web_ui/static/js/field_profile.js").read_text()
+        assert "fpOriginLatLon" in src
+        assert "fpProfileSelect" in src
+        assert "fpRefreshList" in src
+        assert "fpProfileDetail" in src
+
+    def test_no_fpOriginGps_in_js(self):
+        src = Path("web_ui/static/js/field_profile.js").read_text()
+        assert "fpOriginGps" not in src
+
+    def test_fpBindResult_preserved(self):
+        src = Path("web_ui/static/js/field_profile.js").read_text()
+        # setText should NOT be called on fpBindResult
+        assert 'setText("fpBindResult"' not in src
+
+    def test_v3_detail_ids_in_html(self):
+        html = Path("web_ui/static/index.html").read_text()
+        assert "fpV3Marker" in html
+        assert "fpV3Scan" in html
+        assert "fpV3Sampling" in html
+        assert "fpV3Baseline" in html

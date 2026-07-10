@@ -922,23 +922,19 @@ function startStatusUpdates() {
       $("completionHint").textContent = `Action Lab 刷新失败: ${error.message}`;
     }), 1000);
   };
-  const startFrPolling = () => {
-    fetchFieldReferenceStatus();
-    setInterval(fetchFieldReferenceStatus, 2000);
-  };
+  // Field Reference polling moved to UavFieldRef.init()
   const startFallback = () => {
     if (fallbackTimer !== null) return;
     pollStatus();
     fallbackTimer = setInterval(pollStatus, 500);
     startActionTimer();
-    startFrPolling();
   };
   try {
     const socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/status`);
     socket.onmessage = event => renderStatus(JSON.parse(event.data));
     socket.onerror = startFallback;
     socket.onclose = startFallback;
-    socket.onopen = () => { startActionTimer(); startFrPolling(); };
+    socket.onopen = () => { startActionTimer(); };
   } catch {
     startFallback();
   }

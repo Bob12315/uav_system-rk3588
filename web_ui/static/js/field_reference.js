@@ -82,7 +82,7 @@ window.UavFieldRef = (function () {
     // ── posts ────────────────────────────────────────────────────────
     async function frPost(url) {
         var r = await api.request(url, { method: "POST", body: "{}" });
-        fetchFieldReferenceStatus();
+        fetchFieldReferenceStatus({ scheduleNext: false });
         return r;
     }
 
@@ -91,8 +91,11 @@ window.UavFieldRef = (function () {
         var r = $("frReset");
         if (r) r.onclick = async function () {
             if (!window.confirm("将清除 Field Reference、runtime sampling 和冻结状态。\n不会发送飞控命令。")) return;
-            var d = await frPost("/api/field-reference/reset");
-            fetchFieldReferenceStatus();
+            await frPost("/api/field-reference/reset");
+        };
+        var f = $("frFreeze");
+        if (f) f.onclick = async function () {
+            await frPost("/api/field-reference/freeze");
         };
         startPolling();
     }
