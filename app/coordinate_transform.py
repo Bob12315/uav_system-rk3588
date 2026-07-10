@@ -75,12 +75,12 @@ def field_to_local_ned(
 
     Raises :exc:`FieldReferenceError` if *reference* is not ready.
     """
-    if not reference.is_ready():
+    if not reference.is_ready_for_field_to_local():
         raise FieldReferenceError(
             "FieldReference is not ready for coordinate transform"
         )
 
-    yaw = reference.field_heading_yaw_rad  # type: float  (guaranteed by is_ready)
+    yaw = reference.field_heading_yaw_rad  # type: float
     cos_yaw = math.cos(yaw)
     sin_yaw = math.sin(yaw)
 
@@ -136,6 +136,11 @@ def field_to_gps(
     ):
         raise FieldReferenceError(
             "FieldReference contains non-finite field -> GPS values"
+        )
+
+    if not reference.is_ready_for_field_to_gps():
+        raise FieldReferenceError(
+            "FieldReference is not ready for field -> GPS conversion"
         )
 
     return field_to_gps_from_origin(

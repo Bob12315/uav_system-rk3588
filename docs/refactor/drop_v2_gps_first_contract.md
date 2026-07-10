@@ -52,6 +52,15 @@ V2 mission decisions MUST NOT depend on:
 - BODY_NED visual velocity commands
 - ArduPilot internal EKF (for local position — never exposed to mission logic)
 
+### FieldReference readiness split (step 4)
+
+
+
+GPS readiness does not require LOCAL_NED.
+LOCAL readiness does not require GPS.
+Neither readiness requires frozen.
+Mission execution will require frozen at the runtime-binding layer.
+
 ## 5. Dynamic Field Contract
 
 ### Config (on-disk, minimal)
@@ -255,6 +264,7 @@ The v1 mission file must not be modified by any step in this transformation.
 
 | Contract Item | Current faedb609 State | Target State | Planned Steps |
 |---|---|---|---|
+| FieldReference readiness | single local-only is_ready before step 4 | separate GPS/local readiness implemented in step 4; runtime GPS sampling and binding still not connected | steps 4–5 |
 | Dynamic origin A | Not implemented | GPS sampling while stationary during pre-mission confirmation | Steps 3–5 |
 | Schema v3 | Schema v2 (anchor + 4 centreline GPS points) | Schema v3 pure data/parse/validation implemented in step 2; runtime binding not yet implemented | Step 2 |
 | FIELD → GLOBAL | `field_to_gps` utility exists, but current v2 scan uses hardcoded absolute GPS waypoints | Pure runtime A/B heading and FIELD→GLOBAL geometry implemented in step 3; FieldReference lifecycle and runtime binding are not yet connected. | Steps 3–7 |

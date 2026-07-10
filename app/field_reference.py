@@ -26,6 +26,7 @@ class OriginSource(str, Enum):
     MANUAL_GPS_INPUT = "manual_gps_input"      # deprecated — not API-reachable
     PROFILE_GPS_BOUND = "profile_gps_bound"    # deprecated — replaced by PROFILE_CENTERLINE
     PROFILE_CENTERLINE = "profile_centerline"  # current — centerline profile binding
+    RUNTIME_CURRENT_GPS = "runtime_current_gps"  # step 4+ — dynamic origin from stationary GPS samples
 
 
 class HeadingSource(str, Enum):
@@ -34,6 +35,7 @@ class HeadingSource(str, Enum):
     MANUAL_ANGLE = "manual_angle"                  # deprecated — not API-reachable
     PROFILE_GPS_TWO_POINT = "profile_gps_two_point"  # deprecated — replaced by PROFILE_GPS_CENTERLINE
     PROFILE_GPS_CENTERLINE = "profile_gps_centerline"  # current — centerline profile heading
+    RUNTIME_FORWARD_MARKER = "runtime_forward_marker"  # step 4+ — A→B heading from dynamic origin to forward marker
 
 
 # ---------------------------------------------------------------------------
@@ -125,9 +127,8 @@ class FieldReference:
     # readiness
     # ------------------------------------------------------------------
 
-    def is_ready(self) -> bool:
-        """Return True when the reference is confirmed and has both origin
-        and heading, so it can service FIELD <-> LOCAL_NED transforms."""
+    def is_ready_for_field_to_local(self) -> bool:
+        """True when ready for FIELD ↔ LOCAL_NED transforms."""
         return (
             self.is_confirmed
             and self.origin_local_n_m is not None
@@ -137,6 +138,51 @@ class FieldReference:
             and math.isfinite(self.origin_local_e_m)
             and math.isfinite(self.field_heading_yaw_rad)
         )
+
+    def is_ready_for_field_to_gps(self) -> bool:
+        """True when ready for FIELD → GLOBAL GPS transforms.
+
+        Requires confirmed reference, WGS84 origin, and heading.
+        Does NOT require LOCAL_NED origin or forward marker.
+        Defensively handles non-finite / non-numeric field values.
+        """
+        if not self.is_confirmed:
+            return False
+
+        origin_lat = self.origin_lat
+        origin_lon = self.origin_lon
+        heading = self.field_heading_yaw_rad
+
+        if any(v is None for v in (origin_lat, origin_lon, heading)):
+            return False
+
+        if any(isinstance(v, bool) for v in (origin_lat, origin_lon, heading)):
+            return False
+
+        try:
+            lat = float(origin_lat)
+            lon = float(origin_lon)
+            hdg = float(heading)
+        except (TypeError, ValueError):
+            return False
+
+        if not (math.isfinite(lat) and math.isfinite(lon) and math.isfinite(hdg)):
+            return False
+
+        if not -90.0 <= lat <= 90.0:
+            return False
+
+        if not -180.0 <= lon <= 180.0:
+            return False
+
+        if abs(math.cos(math.radians(lat))) < 1e-9:
+            return False
+
+        return True
+
+    def is_ready(self) -> bool:
+        """Backward-compatible alias for FIELD ↔ LOCAL_NED readiness."""
+        return self.is_ready_for_field_to_local()
 
     # ------------------------------------------------------------------
     # setters  (each checks the frozen guard)

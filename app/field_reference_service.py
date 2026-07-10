@@ -134,6 +134,8 @@ class FieldReferenceService:
             "is_confirmed": self._ref.is_confirmed,
             "is_frozen": self._ref.is_frozen,
             "is_ready": self._ref.is_ready(),
+            "is_ready_for_field_to_local": self._ref.is_ready_for_field_to_local(),
+            "is_ready_for_field_to_gps": self._ref.is_ready_for_field_to_gps(),
             "origin_source": self._ref.origin_source,
             "heading_source": self._ref.heading_source,
             "origin_local_n_m": self._ref.origin_local_n_m,
