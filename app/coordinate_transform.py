@@ -138,15 +138,58 @@ def field_to_gps(
             "FieldReference contains non-finite field -> GPS values"
         )
 
-    cos_h = math.cos(heading)
-    sin_h = math.sin(heading)
-    d_north = field_y_m * cos_h - field_x_m * sin_h
-    d_east = field_y_m * sin_h + field_x_m * cos_h
+    return field_to_gps_from_origin(
+        field_x_m,
+        field_y_m,
+        altitude_m,
+        origin_lat=origin_lat,
+        origin_lon=origin_lon,
+        field_heading_yaw_rad=heading,
+    )
+
+
+def field_to_gps_from_origin(
+    field_x_m: float,
+    field_y_m: float,
+    altitude_m: float,
+    *,
+    origin_lat: float,
+    origin_lon: float,
+    field_heading_yaw_rad: float,
+) -> GpsPoint:
+    """Convert FIELD coordinates to GPS lat/lon given explicit origin and heading.
+
+    Pure function — does not read ``FieldReference`` or any global state.
+
+    Parameters must be finite numbers (not None, bool, str, NaN, Inf).
+    *origin_lat* ∈ [-90, 90], *origin_lon* ∈ [-180, 180].
+    Raises :exc:`FieldReferenceError` on invalid input.
+    """
+    for name, val in (
+        ("field_x_m", field_x_m),
+        ("field_y_m", field_y_m),
+        ("altitude_m", altitude_m),
+        ("origin_lat", origin_lat),
+        ("origin_lon", origin_lon),
+        ("field_heading_yaw_rad", field_heading_yaw_rad),
+    ):
+        if not (isinstance(val, (int, float)) and not isinstance(val, bool) and math.isfinite(float(val))):
+            raise FieldReferenceError(f"{name} must be a finite number, got {val!r}")
+
+    if origin_lat < -90.0 or origin_lat > 90.0:
+        raise FieldReferenceError(f"origin_lat {origin_lat} out of range [-90, 90]")
+    if origin_lon < -180.0 or origin_lon > 180.0:
+        raise FieldReferenceError(f"origin_lon {origin_lon} out of range [-180, 180]")
 
     origin_lat_rad = math.radians(origin_lat)
     cos_lat = math.cos(origin_lat_rad)
     if abs(cos_lat) < 1e-9:
         raise FieldReferenceError("origin latitude is too close to pole")
+
+    cos_h = math.cos(field_heading_yaw_rad)
+    sin_h = math.sin(field_heading_yaw_rad)
+    d_north = field_y_m * cos_h - field_x_m * sin_h
+    d_east = field_y_m * sin_h + field_x_m * cos_h
 
     lat = origin_lat + math.degrees(d_north / EARTH_RADIUS_M)
     lon = origin_lon + math.degrees(d_east / (EARTH_RADIUS_M * cos_lat))

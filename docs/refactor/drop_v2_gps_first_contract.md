@@ -257,7 +257,7 @@ The v1 mission file must not be modified by any step in this transformation.
 |---|---|---|---|
 | Dynamic origin A | Not implemented | GPS sampling while stationary during pre-mission confirmation | Steps 3–5 |
 | Schema v3 | Schema v2 (anchor + 4 centreline GPS points) | Schema v3 pure data/parse/validation implemented in step 2; runtime binding not yet implemented | Step 2 |
-| FIELD → GLOBAL | `field_to_gps` utility exists, but current v2 scan uses hardcoded absolute GPS waypoints | Dynamic GPS reference from runtime origin + forward marker | Steps 3–7 |
+| FIELD → GLOBAL | `field_to_gps` utility exists, but current v2 scan uses hardcoded absolute GPS waypoints | Pure runtime A/B heading and FIELD→GLOBAL geometry implemented in step 3; FieldReference lifecycle and runtime binding are not yet connected. | Steps 3–7 |
 | MultiView GPS-first | Single-frame local_x/local_y localization | GPS-based localization at capture instant | Steps 8–10 |
 | Post-fusion selection | select_drop_targets reads resolved_targets (1:1 with raw_estimates) | select_drop_targets reads localized_objects (fusion only) | Step 11 |
 | Velocity-stabilised arrival | min_hold_updates=1, no speed check | 0.25 m XY / 0.25 m Z / 0.15 m/s horizontal / 0.10 m/s vertical / 5 consecutive updates | Step 12 |
