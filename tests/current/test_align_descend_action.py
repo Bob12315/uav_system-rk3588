@@ -33,6 +33,7 @@ def test_align_descend_config_defaults() -> None:
     config = AlignDescendConfig()
     assert config.kp_vx == pytest.approx(0.8)
     assert config.descend_speed_mps == pytest.approx(0.2)
+    assert config.yaw_control_mode == "hold"
 
 
 @pytest.mark.parametrize(
@@ -64,6 +65,7 @@ def test_align_descend_config_defaults() -> None:
         {"gain_high_scale": -0.1},
         {"gain_high_scale": 1.1},
         {"descent_gate_policy": "invalid"},
+        {"yaw_control_mode": "invalid"},
         {"unaligned_descend_speed_mps": -0.01},
         {"descent_gate_policy": "allow_unaligned", "unaligned_descend_speed_mps": 0.5, "descend_speed_mps": 0.2},
         {"unaligned_descend_speed_mps": float("nan")},
@@ -535,6 +537,81 @@ def test_align_descend_uses_arm_heading_yaw_before_current_drone_yaw() -> None:
     assert result.detail["yaw_hold_source"] == "arm_heading"
     assert result.detail["command"]["yaw_hold_rad"] == pytest.approx(1.7)
     assert result.detail["command"]["velocity_yaw_rad"] == pytest.approx(0.2)
+
+
+def test_legacy_default_yaw_control_mode_holds_valid_yaw() -> None:
+    action = AlignDescendAction()
+    action.start()
+
+    result = action.update(
+        _active_context(
+            ex_cam=0.03,
+            ey_cam=0.04,
+            drone={"relative_altitude": 5.0, "attitude_valid": True, "yaw": 0.6},
+        )
+    )
+
+    assert action.config.yaw_control_mode == "hold"
+    assert result.detail["command"]["yaw_hold_rad"] == pytest.approx(0.6)
+    assert result.detail["command"]["velocity_yaw_rad"] == pytest.approx(0.6)
+
+
+def test_ignore_yaw_control_active_command_is_pure_body_ned() -> None:
+    action = AlignDescendAction()
+    action.start(
+        {
+            "finish_altitude_m": 1.3,
+            "config": {"min_altitude_m": 1.3, "yaw_control_mode": "ignore"},
+        }
+    )
+
+    result = action.update(
+        _active_context(
+            ex_cam=0.03,
+            ey_cam=0.04,
+            relative_altitude=5.0,
+            drone={"relative_altitude": 5.0, "attitude_valid": True, "yaw": 0.8},
+        )
+    )
+    command = result.detail["command"]
+
+    assert command["valid"] is True
+    assert command["active"] is True
+    assert any(abs(command[name]) > 0.0 for name in ("vx_cmd", "vy_cmd", "vz_cmd"))
+    assert "yaw_hold_rad" not in command
+    assert "velocity_yaw_rad" not in command
+
+
+def test_ignore_yaw_control_finish_altitude_commands_have_no_yaw() -> None:
+    action = AlignDescendAction()
+    action.start(
+        {
+            "finish_altitude_m": 1.3,
+            "finish_policy": "require_alignment_or_timeout",
+            "hold_updates_required": 2,
+            "config": {"min_altitude_m": 1.3, "yaw_control_mode": "ignore"},
+        }
+    )
+    yaw_context = {
+        "relative_altitude": 1.3,
+        "drone": {"relative_altitude": 1.3, "attitude_valid": True, "yaw": 1.1},
+    }
+
+    correcting = action.update(_active_context(ex_cam=0.2, ey_cam=0.0, **yaw_context))
+    correcting_command = correcting.detail["command"]
+    assert correcting.reason == "aligning_at_finish_altitude"
+    assert correcting_command["vz_cmd"] == pytest.approx(0.0)
+    assert abs(correcting_command["vy_cmd"]) > 0.0
+    assert "yaw_hold_rad" not in correcting_command
+    assert "velocity_yaw_rad" not in correcting_command
+
+    holding = action.update(_active_context(ex_cam=0.02, ey_cam=0.02, **yaw_context))
+    assert holding.done is False
+    done = action.update(_active_context(ex_cam=0.02, ey_cam=0.02, **yaw_context))
+    assert done.done is True
+    assert done.reason == "aligned_at_finish_altitude"
+    assert "yaw_hold_rad" not in done.detail["command"]
+    assert "velocity_yaw_rad" not in done.detail["command"]
 
 
 def test_align_descend_prefers_field_heading_over_arm_heading() -> None:

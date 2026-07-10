@@ -46,6 +46,8 @@ class AlignDescendConfig:
     # unaligned descent gate for recon mode (default keeps existing behaviour)
     descent_gate_policy: str = "aligned_or_slow"
     unaligned_descend_speed_mps: float = 0.0
+    # Hold preserves legacy yaw behavior; ignore emits pure BODY_NED velocity.
+    yaw_control_mode: str = "hold"
 
     def __post_init__(self) -> None:
         for name in ("kp_vx", "kp_vy"):
@@ -148,6 +150,8 @@ class AlignDescendConfig:
             and float(self.unaligned_descend_speed_mps) > float(self.descend_speed_mps)
         ):
             raise ValueError("unaligned_descend_speed_mps must be <= descend_speed_mps")
+        if self.yaw_control_mode not in ("hold", "ignore"):
+            raise ValueError("yaw_control_mode must be 'hold' or 'ignore'")
 
 
 @dataclass(frozen=True, slots=True)
@@ -633,6 +637,10 @@ class AlignDescendAction(ActionModule):
         self.last_detail: dict[str, Any] = {}
 
     def _ensure_yaw_hold(self, context: dict[str, Any]) -> None:
+        if self.config.yaw_control_mode == "ignore":
+            self.yaw_hold_rad = None
+            self.yaw_hold_source = None
+            return
         if self.yaw_hold_rad is not None:
             return
         yaw, source = self._current_yaw_rad(context)
@@ -640,6 +648,11 @@ class AlignDescendAction(ActionModule):
         self.yaw_hold_source = source
 
     def _command_with_yaw_hold(self, command: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+        if self.config.yaw_control_mode == "ignore":
+            result = dict(command)
+            result.pop("yaw_hold_rad", None)
+            result.pop("velocity_yaw_rad", None)
+            return result
         if self.yaw_hold_rad is None:
             return command
         result = {**command, "yaw_hold_rad": self.yaw_hold_rad}

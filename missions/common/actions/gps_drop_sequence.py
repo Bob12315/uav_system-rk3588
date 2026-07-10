@@ -95,8 +95,14 @@ class GpsDropSequenceAction(ActionModule):
         self.lock_cfg = dict(data.get("target_lock") or {})
         self.align_cfg = dict(data.get("align_descend") or {})
         self.align_cfg.setdefault("finish_policy", "require_alignment_or_timeout")
+        if self.align_cfg["finish_policy"] != "require_alignment_or_timeout":
+            raise ValueError(
+                "GPS drop align finish_policy must be 'require_alignment_or_timeout'"
+            )
         align_config = dict(self.align_cfg.get("config") or {})
         align_config.setdefault("min_altitude_m", self.finish_altitude_m)
+        align_config.setdefault("yaw_control_mode", "ignore")
+        align_config.setdefault("require_target_locked", True)
         min_altitude_m = float(align_config["min_altitude_m"])
         if not math.isfinite(min_altitude_m) or min_altitude_m <= 0.0:
             raise ValueError("align_descend.config.min_altitude_m must be finite and > 0")
@@ -104,6 +110,10 @@ class GpsDropSequenceAction(ActionModule):
             raise ValueError(
                 "align_descend.config.min_altitude_m must be <= finish_altitude_m"
             )
+        if align_config["yaw_control_mode"] != "ignore":
+            raise ValueError("GPS drop align yaw_control_mode must be 'ignore'")
+        if align_config["require_target_locked"] is not True:
+            raise ValueError("GPS drop align require_target_locked must be true")
         align_config["min_altitude_m"] = min_altitude_m
         self.align_cfg["config"] = align_config
 

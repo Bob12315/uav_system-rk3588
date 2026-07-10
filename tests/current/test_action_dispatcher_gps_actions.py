@@ -5,6 +5,10 @@ from typing import Any
 import pytest
 
 from app.action_dispatcher import ActionDispatcher
+from missions.common.actions import gps_drop_sequence as sequence_module
+from missions.common.actions.gps_drop_sequence import GpsDropSequenceAction
+from missions.common.actions.result import ActionResult
+from telemetry_link.frames import BODY_NED
 
 
 class FakeLinkManager:
@@ -31,6 +35,17 @@ class FakeLinkManager:
         vz_down_mps: float,
     ) -> None:
         self.calls.append(("send_body_velocity", vx_forward_mps, vy_right_mps, vz_down_mps))
+
+    def send_velocity_command(
+        self,
+        vx: float,
+        vy: float,
+        vz: float,
+        *,
+        frame: int,
+        yaw_rad: float | None = None,
+    ) -> None:
+        self.calls.append(("send_velocity_command", vx, vy, vz, frame, yaw_rad))
 
     def stop_body_velocity_and_clear(self) -> None:
         self.calls.append(("stop_body_velocity_and_clear",))
@@ -164,3 +179,92 @@ def test_gps_motion_dispatch_still_requires_both_send_gates(
     assert result["sent"] == []
     assert link.calls == []
 
+
+class _ImmediateGoto:
+    def start(self, params: dict[str, Any]) -> None:
+        self.params = params
+
+    def update(self, context: dict[str, Any]) -> ActionResult:
+        return ActionResult(done=True, reason="waypoint_reached")
+
+
+class _ImmediateLock:
+    def start(self, params: dict[str, Any]) -> None:
+        self.params = params
+
+    def update(self, context: dict[str, Any]) -> ActionResult:
+        return ActionResult(
+            actions=[{"action_type": "yolo_lock_target", "params": {"track_id": 77}}],
+            done=True,
+            reason="gps_target_locked",
+        )
+
+
+def test_real_gps_sequence_align_dispatches_body_ned_without_local_conversion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sequence_module, "GotoWaypointAction", _ImmediateGoto)
+    monkeypatch.setattr(sequence_module, "GpsTargetLockAction", _ImmediateLock)
+    sequence = GpsDropSequenceAction()
+    sequence.start(
+        {
+            "targets": [
+                {"valid": True, "target_id": "t0", "lat": 34.0, "lon": 108.0},
+                {"valid": True, "target_id": "t1", "lat": 34.001, "lon": 108.001},
+            ],
+            "payloads": [
+                {"payload_id": "p0", "servo_outputs": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}]},
+                {"payload_id": "p1", "servo_outputs": [{"channel": 9, "release_pwm": 1250, "hold_pwm": 1750}]},
+            ],
+        }
+    )
+    context = {
+        "relative_altitude": 5.0,
+        "target_valid": True,
+        "target_locked": True,
+        "control_allowed": True,
+        "ex_cam": 0.03,
+        "ey_cam": 0.04,
+        "drone": {"relative_altitude": 5.0, "attitude_valid": True, "yaw": 0.9},
+    }
+
+    sequence.update(context)  # goto -> lock
+    sequence.update(context)  # lock -> align
+    align_result = sequence.update(context)
+    assert len(align_result.actions) == 1
+    actual_action = align_result.actions[0]
+    command = actual_action["params"]
+    assert actual_action["action_type"] == "flight_command"
+    assert "yaw_hold_rad" not in command
+    assert "velocity_yaw_rad" not in command
+    assert command["vx_cmd"] != 0.0
+    assert command["vy_cmd"] != 0.0
+    assert command["vz_cmd"] != 0.0
+
+    link = FakeLinkManager()
+    dispatcher = ActionDispatcher()
+    dispatcher.send_actions = True
+    dispatch = dispatcher.dispatch_actions(
+        [actual_action],
+        action_name="gps_drop_sequence",
+        send_commands=True,
+        link_manager=link,
+    )
+
+    assert dispatch["errors"] == []
+    assert dispatch["skipped"] == []
+    assert len(dispatch["sent"]) == 1
+    sent_detail = dispatch["sent"][0]
+    assert sent_detail["frame"] == BODY_NED
+    assert sent_detail["vx_cmd"] == pytest.approx(command["vx_cmd"])
+    assert sent_detail["vy_cmd"] == pytest.approx(command["vy_cmd"])
+    assert sent_detail["vz_cmd"] == pytest.approx(command["vz_cmd"])
+    assert link.calls == [
+        (
+            "send_body_velocity",
+            command["vx_cmd"],
+            command["vy_cmd"],
+            command["vz_cmd"],
+        )
+    ]
+    assert not any(call[0] == "send_velocity_command" for call in link.calls)

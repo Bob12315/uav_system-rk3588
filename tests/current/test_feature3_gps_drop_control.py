@@ -103,8 +103,6 @@ FULL_COMMAND = {
     "vy_cmd": -0.08,
     "vz_cmd": 0.18,
     "yaw_rate_cmd": 0.0,
-    "yaw_hold_rad": 0.25,
-    "velocity_yaw_rad": 0.2,
     "priority": 7,
 }
 
@@ -196,6 +194,10 @@ def test_dual_target_happy_path_from_start(scripted_children: None) -> None:
         ["flight_command", "set_servo", "clear_continuous_commands"],
     ]
     assert results[3].actions[0]["params"] == FULL_COMMAND
+    for active_index in (3, 13):
+        command = results[active_index].actions[0]["params"]
+        assert "yaw_hold_rad" not in command
+        assert "velocity_yaw_rad" not in command
     for terminal_index in (4, 14):
         assert _servo_pwms(results[terminal_index]) == []
         assert results[terminal_index].detail["release_reason"] == "aligned_release"
@@ -214,6 +216,10 @@ def test_dual_target_happy_path_from_start(scripted_children: None) -> None:
     assert all(item["waypoint_mode"] == "absolute" for item in goto_starts)
     assert all(item["yaw_mode"] == "hold" for item in goto_starts)
     assert [item["target"]["id"] for item in ScriptedLock.starts] == ["t0", "t1"]
+    for align_start in ScriptedAlign.starts:
+        assert align_start["finish_policy"] == "require_alignment_or_timeout"
+        assert align_start["config"]["yaw_control_mode"] == "ignore"
+        assert align_start["config"]["require_target_locked"] is True
     assert not any(kind == "local_position" for kinds in action_types for kind in kinds)
     assert sum(pwm in {1200, 1250} for result in results for pwm in _servo_pwms(result)) == 2
     assert sum(pwm in {1700, 1750} for result in results for pwm in _servo_pwms(result)) == 2
@@ -296,11 +302,72 @@ def test_strict_min_altitude_is_nested_and_rejects_above_finish(scripted_childre
     action.start(_params())
     assert action.align_cfg["finish_policy"] == "require_alignment_or_timeout"
     assert action.align_cfg["config"]["min_altitude_m"] == 1.3
+    assert action.align_cfg["config"]["yaw_control_mode"] == "ignore"
+    assert action.align_cfg["config"]["require_target_locked"] is True
 
     with pytest.raises(ValueError, match="min_altitude_m must be <= finish_altitude_m"):
         GpsDropSequenceAction().start(
             _params(align_descend={"config": {"min_altitude_m": 2.0}})
         )
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"yaw_control_mode": "hold"},
+        {"require_target_locked": False},
+    ],
+)
+def test_gps_sequence_rejects_unsafe_align_overrides(config: dict[str, Any]) -> None:
+    with pytest.raises(ValueError):
+        GpsDropSequenceAction().start(_params(align_descend={"config": config}))
+
+
+def test_gps_sequence_rejects_legacy_finish_policy() -> None:
+    with pytest.raises(ValueError, match="finish_policy"):
+        GpsDropSequenceAction().start(
+            _params(align_descend={"finish_policy": "legacy"})
+        )
+
+
+def test_target_unlocked_never_descends_or_releases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ScriptedGoto.reset()
+    ScriptedLock.reset()
+    monkeypatch.setattr(sequence_module, "GotoWaypointAction", ScriptedGoto)
+    monkeypatch.setattr(sequence_module, "GpsTargetLockAction", ScriptedLock)
+    action = GpsDropSequenceAction()
+    action.start(
+        _params(
+            align_descend_max_updates=20,
+            align_descend={"lost_timeout_updates": 1, "max_retries": 0},
+        )
+    )
+    context = {
+        "relative_altitude": 5.0,
+        "target_valid": True,
+        "target_locked": False,
+        "control_allowed": True,
+        "ex_cam": 0.0,
+        "ey_cam": 0.0,
+        "drone": {"relative_altitude": 5.0, "attitude_valid": True, "yaw": 0.7},
+    }
+
+    results = _drive_until_terminal_with_context(action, context)
+
+    assert results[-1].failed is True
+    assert results[-1].reason == "target_lost_timeout"
+    assert _types(results[-1]) == ["flight_command", "clear_continuous_commands"]
+    assert not any("set_servo" in _types(result) for result in results)
+    for result in results:
+        for emitted in result.actions:
+            if emitted["action_type"] != "flight_command":
+                continue
+            command = emitted["params"]
+            assert command["vx_cmd"] == pytest.approx(0.0)
+            assert command["vy_cmd"] == pytest.approx(0.0)
+            assert command["vz_cmd"] == pytest.approx(0.0)
 
 
 @pytest.mark.parametrize(
@@ -314,3 +381,17 @@ def test_strict_min_altitude_is_nested_and_rejects_above_finish(scripted_childre
 def test_start_rejects_non_distinct_targets(targets: list[dict[str, Any]]) -> None:
     with pytest.raises(ValueError):
         GpsDropSequenceAction().start(_params(targets=targets))
+
+
+def _drive_until_terminal_with_context(
+    action: GpsDropSequenceAction,
+    context: dict[str, Any],
+    limit: int = 40,
+) -> list[ActionResult]:
+    results: list[ActionResult] = []
+    for _ in range(limit):
+        result = action.update(context)
+        results.append(result)
+        if result.done or result.failed:
+            return results
+    raise AssertionError("sequence did not reach a terminal state")
