@@ -256,7 +256,7 @@ The v1 mission file must not be modified by any step in this transformation.
 | Contract Item | Current faedb609 State | Target State | Planned Steps |
 |---|---|---|---|
 | Dynamic origin A | Not implemented | GPS sampling while stationary during pre-mission confirmation | Steps 3–5 |
-| Schema v3 | Schema v2 (anchor + 4 centreline GPS points) | Single forward marker + field geometry + drop_scan waypoints in FIELD metres | Step 2 |
+| Schema v3 | Schema v2 (anchor + 4 centreline GPS points) | Schema v3 pure data/parse/validation implemented in step 2; runtime binding not yet implemented | Step 2 |
 | FIELD → GLOBAL | `field_to_gps` utility exists, but current v2 scan uses hardcoded absolute GPS waypoints | Dynamic GPS reference from runtime origin + forward marker | Steps 3–7 |
 | MultiView GPS-first | Single-frame local_x/local_y localization | GPS-based localization at capture instant | Steps 8–10 |
 | Post-fusion selection | select_drop_targets reads resolved_targets (1:1 with raw_estimates) | select_drop_targets reads localized_objects (fusion only) | Step 11 |

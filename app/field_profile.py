@@ -5,6 +5,8 @@ This module does NOT write RuntimeContext, does NOT confirm/freeze, and does
 NOT send MAVLink commands.  It is a pure data-and-math layer.
 
 Schema version 2: takeoff-anchor + 4+ centerline GPS points.
+Schema version 3: single forward marker + field geometry + drop scan waypoints
+(in FIELD metres), with runtime origin sampling.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ from __future__ import annotations
 import json
 import math
 import os
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -71,6 +74,56 @@ class CenterlinePoint:
 
 
 @dataclass(slots=True)
+class ForwardMarker:
+    """Single remote forward marker B (Schema v3).
+
+    Obtained pre-competition via map or other means.  Must be WGS84.
+    This is NOT the field origin and NOT the return-to-home point.
+    """
+
+    name: str
+    lat: float
+    lon: float
+    coordinate_system: str = "WGS84"
+
+
+@dataclass(slots=True)
+class FieldScanWaypoint:
+    """A single scan waypoint in FIELD metre coordinates (Schema v3).
+
+    x_m: positive to the right, perpendicular to the centreline.
+    y_m: positive forward along the centreline.
+    altitude_m: positive up.
+    """
+
+    x_m: float
+    y_m: float
+    altitude_m: float
+
+
+@dataclass(slots=True)
+class DropScanConfig:
+    """Drop scan waypoints (Schema v3).  Exactly 4 waypoints required."""
+
+    waypoints: List[FieldScanWaypoint] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class RuntimeOriginSampling:
+    """Parameters for runtime origin sampling (Schema v3).
+
+    Sampling is performed while the drone is stationary during pre-mission
+    field confirmation, NOT after takeoff.  Only valid GPS samples are
+    accepted.
+    """
+
+    min_samples: int = 20
+    sample_window_s: float = 5.0
+    max_horizontal_spread_m: float = 1.0
+    estimator: str = "median"
+
+
+@dataclass(slots=True)
 class FieldGeometry:
     """Field geometry parameters."""
 
@@ -87,33 +140,37 @@ class FieldGeometry:
 class BindingPolicy:
     """Binding error/warning thresholds."""
 
+    # v2 fields — keep defaults unchanged
     max_start_error_m: float = 3.0
     warn_start_error_m: float = 1.5
     max_centerline_residual_m: float = 2.5
     warn_centerline_residual_m: float = 1.5
 
+    # v3 fields
+    min_baseline_m: float = 30.0
+    warn_baseline_below_m: float = 50.0
+
 
 @dataclass(slots=True)
 class FieldProfile:
-    """Deserialised, validated field profile (schema v2 — centerline).
+    """Deserialised, validated field profile.
 
-    Key differences from v1:
-    - ``anchor`` replaces ``origin``: lat/lon + field (0,0) anchor.
-    - ``centerline_points`` replaces ``forward`` + ``left_check`` / ``right_check``:
-      at least 4 GPS points along the centerline.
-    - ``field_geometry`` contains lane/drop/recce dimensions.
-    - ``binding_policy`` contains error/warning thresholds.
+    Schema v2: anchor + 4+ centerline_points.
+    Schema v3: forward_marker + drop_scan + runtime_origin_sampling.
     """
 
     schema_version: int
     profile_id: str
     name: str
     coordinate_convention: Dict[str, str]
-    anchor: AnchorPoint
-    centerline_points: List[CenterlinePoint]
+    anchor: Optional[AnchorPoint] = None
+    centerline_points: List[CenterlinePoint] = field(default_factory=list)
+    forward_marker: Optional[ForwardMarker] = None
+    drop_scan: Optional[DropScanConfig] = None
     gps_quality: GpsQualityThresholds = field(default_factory=GpsQualityThresholds)
     field_geometry: FieldGeometry = field(default_factory=FieldGeometry)
     binding_policy: BindingPolicy = field(default_factory=BindingPolicy)
+    runtime_origin_sampling: Optional[RuntimeOriginSampling] = None
     extra: Dict[str, Any] = field(default_factory=dict)
     """Unknown top-level JSON keys preserved for forward compatibility."""
 
@@ -191,57 +248,63 @@ def load_field_profile_json(path: str) -> FieldProfile:
 
 
 def parse_field_profile(data: Dict[str, Any]) -> FieldProfile:
-    """Construct a :class:`FieldProfile` from a raw JSON dict (schema v2)."""
-    _TOP_KEYS = {
-        "schema_version", "profile_id", "name", "created_at",
-        "coordinate_convention", "anchor", "centerline_points",
-        "gps_quality", "field_geometry", "binding_policy",
-    }
-    extra: Dict[str, Any] = {}
-    for key, value in data.items():
-        if key not in _TOP_KEYS:
-            extra[key] = value
+    """Construct a :class:`FieldProfile` from a raw JSON dict.
 
-    # -- schema_version --------------------------------------------------
-    try:
-        raw_sv = data.get("schema_version", 2)
-        if raw_sv is None:
-            raise FieldProfileValidationError(
-                FieldProfileDiagnostics(errors=["schema_version is None"])
-            )
-        if isinstance(raw_sv, bool):
-            raise FieldProfileValidationError(
-                FieldProfileDiagnostics(errors=["schema_version must be a number, got bool"])
-            )
-        if not isinstance(raw_sv, (int, float)):
-            raise FieldProfileValidationError(
-                FieldProfileDiagnostics(
-                    errors=[f"schema_version must be a number, got {type(raw_sv).__name__}"]
-                )
-            )
-        fv = float(raw_sv)
-        if not math.isfinite(fv):
-            raise FieldProfileValidationError(
-                FieldProfileDiagnostics(errors=[f"schema_version is not finite: {fv}"])
-            )
-        if fv != math.floor(fv):
-            raise FieldProfileValidationError(
-                FieldProfileDiagnostics(errors=[f"schema_version must be an integer, got {fv}"])
-            )
-        schema_version = int(fv)
-    except FieldProfileValidationError:
-        raise
-    except (ValueError, TypeError) as exc:
-        raise FieldProfileValidationError(
-            FieldProfileDiagnostics(errors=[f"schema_version invalid: {exc}"])
+    Dispatches to the v2 or v3 parser based on ``schema_version``.
+    """
+    schema_version = _parse_schema_version(data)
+    common = _parse_common_fields(data)
+
+    if schema_version == 2:
+        return _parse_field_profile_v2(data, common)
+
+    if schema_version == 3:
+        return _parse_field_profile_v3(data, common)
+
+    raise FieldProfileValidationError(
+        FieldProfileDiagnostics(
+            errors=[f"Unsupported schema_version {schema_version} (only 2 and 3 are supported)"]
+        )
+    )
+
+
+def validate_field_profile(profile: FieldProfile) -> FieldProfileDiagnostics:
+    """Run all semantic validation checks on *profile*.
+
+    Dispatches to the v2 or v3 validator based on ``schema_version``.
+    """
+    diag = FieldProfileDiagnostics()
+
+    if profile.schema_version == 2:
+        _validate_field_profile_v2(profile, diag)
+    elif profile.schema_version == 3:
+        _validate_field_profile_v3(profile, diag)
+    else:
+        diag.errors.append(
+            f"Unsupported schema_version {profile.schema_version} (only 2 and 3 are supported)"
         )
 
-    _require_str(data, "profile_id")
-    _require_str(data, "name")
+    return diag
 
-    profile_id = str(data["profile_id"])
-    name = str(data["name"])
-    coordinate_convention = _parse_coordinate_convention(data)
+
+# ---------------------------------------------------------------------------
+# Schema v2 parser (preserved behaviour)
+# ---------------------------------------------------------------------------
+
+_V2_TOP_KEYS = {
+    "schema_version", "profile_id", "name", "created_at",
+    "coordinate_convention", "anchor", "centerline_points",
+    "gps_quality", "field_geometry", "binding_policy",
+}
+
+
+def _parse_field_profile_v2(
+    data: Dict[str, Any], common: Dict[str, Any]
+) -> FieldProfile:
+    extra: Dict[str, Any] = {}
+    for key, value in data.items():
+        if key not in _V2_TOP_KEYS:
+            extra[key] = value
 
     # -- anchor ----------------------------------------------------------
     raw_anchor = data.get("anchor")
@@ -296,20 +359,15 @@ def parse_field_profile(data: Dict[str, Any]) -> FieldProfile:
             expected_field_y_m=expected_fy,
         ))
 
-    # -- gps_quality -----------------------------------------------------
     gps_quality = _parse_gps_quality_thresholds(data)
-
-    # -- field_geometry --------------------------------------------------
     field_geometry = _parse_field_geometry(data)
-
-    # -- binding_policy --------------------------------------------------
     binding_policy = _parse_binding_policy(data)
 
     return FieldProfile(
-        schema_version=schema_version,
-        profile_id=profile_id,
-        name=name,
-        coordinate_convention=coordinate_convention,
+        schema_version=common["schema_version"],
+        profile_id=common["profile_id"],
+        name=common["name"],
+        coordinate_convention=common["coordinate_convention"],
         anchor=anchor,
         centerline_points=centerline_points,
         gps_quality=gps_quality,
@@ -319,16 +377,424 @@ def parse_field_profile(data: Dict[str, Any]) -> FieldProfile:
     )
 
 
-def validate_field_profile(profile: FieldProfile) -> FieldProfileDiagnostics:
-    """Run all semantic validation checks on *profile*."""
-    diag = FieldProfileDiagnostics()
+# ---------------------------------------------------------------------------
+# Schema v3 parser
+# ---------------------------------------------------------------------------
 
-    # -- schema version --------------------------------------------------
-    if profile.schema_version != 2:
-        diag.errors.append(
-            f"Unsupported schema_version {profile.schema_version} (only 2 is supported)"
+_V3_TOP_KEYS = {
+    "schema_version", "profile_id", "name", "created_at",
+    "coordinate_convention", "forward_marker", "field_geometry",
+    "drop_scan", "gps_quality", "runtime_origin_sampling",
+    "binding_policy",
+}
+
+_V3_FORBIDDEN_KEYS = {"anchor", "centerline_points", "origin", "origin_lat", "origin_lon"}
+
+
+def _parse_field_profile_v3(
+    data: Dict[str, Any], common: Dict[str, Any]
+) -> FieldProfile:
+    extra: Dict[str, Any] = {}
+    for key, value in data.items():
+        if key not in _V3_TOP_KEYS:
+            if key in _V3_FORBIDDEN_KEYS:
+                raise FieldProfileValidationError(
+                    FieldProfileDiagnostics(
+                        errors=[f"schema v3 must not contain pre-surveyed '{key}'"]
+                    )
+                )
+            extra[key] = value
+
+    # -- forward_marker --------------------------------------------------
+    forward_marker = _parse_forward_marker(data)
+
+    # -- field_geometry (v3 JSON key names mapped to FieldGeometry) ------
+    field_geometry = _parse_field_geometry_v3(data)
+
+    # -- drop_scan -------------------------------------------------------
+    drop_scan = _parse_drop_scan_v3(data, field_geometry)
+
+    # -- gps_quality (v3 requires the object) ----------------------------
+    gps_quality = _parse_gps_quality_v3(data)
+
+    # -- runtime_origin_sampling -----------------------------------------
+    runtime_origin_sampling = _parse_runtime_origin_sampling_v3(data)
+
+    # -- binding_policy (v3 requires the object) -------------------------
+    binding_policy = _parse_binding_policy_v3(data)
+
+    return FieldProfile(
+        schema_version=common["schema_version"],
+        profile_id=common["profile_id"],
+        name=common["name"],
+        coordinate_convention=common["coordinate_convention"],
+        anchor=None,
+        centerline_points=[],
+        forward_marker=forward_marker,
+        drop_scan=drop_scan,
+        gps_quality=gps_quality,
+        field_geometry=field_geometry,
+        binding_policy=binding_policy,
+        runtime_origin_sampling=runtime_origin_sampling,
+        extra=extra,
+    )
+
+
+def _parse_forward_marker(data: Dict[str, Any]) -> ForwardMarker:
+    raw = data.get("forward_marker")
+    if raw is None or not isinstance(raw, dict):
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=["'forward_marker' is required and must be a JSON object"]
+            )
+        )
+    name = str(raw.get("name", "")).strip()
+    if not name:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(errors=["forward_marker.name must be a non-empty string"])
+        )
+    lat = _require_float_in_obj(raw, "lat", "forward_marker")
+    lon = _require_float_in_obj(raw, "lon", "forward_marker")
+    if lat < -90.0 or lat > 90.0:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(errors=[f"forward_marker.lat {lat} out of range [-90, 90]"])
+        )
+    if lon < -180.0 or lon > 180.0:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(errors=[f"forward_marker.lon {lon} out of range [-180, 180]"])
+        )
+    coord_sys = raw.get("coordinate_system")
+    if coord_sys is None:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=["forward_marker.coordinate_system is required"]
+            )
+        )
+    if coord_sys != "WGS84":
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=[f"forward_marker.coordinate_system must be 'WGS84', got {coord_sys!r}"]
+            )
+        )
+    return ForwardMarker(name=name, lat=lat, lon=lon, coordinate_system="WGS84")
+
+
+def _parse_field_geometry_v3(data: Dict[str, Any]) -> FieldGeometry:
+    raw = data.get("field_geometry")
+    if raw is None or not isinstance(raw, dict):
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=["'field_geometry' is required and must be a JSON object"]
+            )
         )
 
+    lane_half = _require_float_nonneg(
+        _require_in_obj(raw, "lane_half_width_m"),
+        "field_geometry.lane_half_width_m",
+    )
+    if lane_half <= 0.0:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=[f"field_geometry.lane_half_width_m must be > 0, got {lane_half}"]
+            )
+        )
+
+    drop_min = _require_float_nonneg(
+        _require_in_obj(raw, "drop_area_y_min_m"),
+        "field_geometry.drop_area_y_min_m",
+    )
+    drop_max = _require_float_nonneg(
+        _require_in_obj(raw, "drop_area_y_max_m"),
+        "field_geometry.drop_area_y_max_m",
+    )
+    drop_center = _require_float_nonneg(
+        _require_in_obj(raw, "drop_center_y_m"),
+        "field_geometry.drop_center_y_m",
+    )
+    recce_min = _require_float_nonneg(
+        _require_in_obj(raw, "recce_area_y_min_m"),
+        "field_geometry.recce_area_y_min_m",
+    )
+    recce_max = _require_float_nonneg(
+        _require_in_obj(raw, "recce_area_y_max_m"),
+        "field_geometry.recce_area_y_max_m",
+    )
+    recce_center = _require_float_nonneg(
+        _require_in_obj(raw, "recce_center_y_m"),
+        "field_geometry.recce_center_y_m",
+    )
+
+    return FieldGeometry(
+        lane_half_width_m=lane_half,
+        drop_center_y_m=drop_center,
+        recce_center_y_m=recce_center,
+        drop_area_y_min=drop_min,
+        drop_area_y_max=drop_max,
+        recce_area_y_min=recce_min,
+        recce_area_y_max=recce_max,
+    )
+
+
+def _parse_drop_scan_v3(data: Dict[str, Any], fg: FieldGeometry) -> DropScanConfig:
+    raw = data.get("drop_scan")
+    if raw is None or not isinstance(raw, dict):
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=["'drop_scan' is required and must be a JSON object"]
+            )
+        )
+    waypoints_raw = raw.get("waypoints")
+    if waypoints_raw is None or not isinstance(waypoints_raw, list):
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=["drop_scan.waypoints is required and must be a JSON array"]
+            )
+        )
+    if len(waypoints_raw) != 4:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=[f"drop_scan.waypoints must have exactly 4 waypoints, got {len(waypoints_raw)}"]
+            )
+        )
+
+    waypoints: List[FieldScanWaypoint] = []
+    for i, wp in enumerate(waypoints_raw):
+        if not isinstance(wp, dict):
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(
+                    errors=[f"drop_scan.waypoints[{i}] must be a JSON object, got {type(wp).__name__}"]
+                )
+            )
+        # reject GPS/local fields in waypoints
+        for forbidden in ("lat", "lon", "local_x", "local_y"):
+            if forbidden in wp:
+                raise FieldProfileValidationError(
+                    FieldProfileDiagnostics(
+                        errors=[
+                            f"drop_scan.waypoints[{i}] must not contain '{forbidden}'; "
+                            f"use FIELD metre coordinates (x_m, y_m)"
+                        ]
+                    )
+                )
+        x_m = _require_float_in_obj(wp, "x_m", f"drop_scan.waypoints[{i}]")
+        y_m = _require_float_in_obj(wp, "y_m", f"drop_scan.waypoints[{i}]")
+        alt = _require_float_in_obj(wp, "altitude_m", f"drop_scan.waypoints[{i}]")
+        if alt <= 0.0:
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(
+                    errors=[f"drop_scan.waypoints[{i}].altitude_m must be > 0, got {alt}"]
+                )
+            )
+        lane = fg.lane_half_width_m
+        if x_m < -lane or x_m > lane:
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(
+                    errors=[
+                        f"drop_scan.waypoints[{i}].x_m={x_m} outside "
+                        f"lane [-{lane}, {lane}]"
+                    ]
+                )
+            )
+        dmin = fg.drop_area_y_min
+        dmax = fg.drop_area_y_max
+        if dmin is not None and dmax is not None:
+            if y_m < dmin or y_m > dmax:
+                raise FieldProfileValidationError(
+                    FieldProfileDiagnostics(
+                        errors=[
+                            f"drop_scan.waypoints[{i}].y_m={y_m} outside "
+                            f"drop area [{dmin}, {dmax}]"
+                        ]
+                    )
+                )
+        waypoints.append(FieldScanWaypoint(x_m=x_m, y_m=y_m, altitude_m=alt))
+
+    # check not all identical
+    coords = {(w.x_m, w.y_m, w.altitude_m) for w in waypoints}
+    if len(coords) < 2:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=["drop_scan.waypoints must not be all identical"]
+            )
+        )
+
+    return DropScanConfig(waypoints=waypoints)
+
+
+def _parse_gps_quality_v3(data: Dict[str, Any]) -> GpsQualityThresholds:
+    raw = data.get("gps_quality")
+    if raw is None or not isinstance(raw, dict):
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=["'gps_quality' is required and must be a JSON object"]
+            )
+        )
+    # reject hdop fields
+    for hkey in ("hdop", "max_hdop"):
+        if hkey in raw:
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(
+                    errors=[
+                        f"gps_quality must not contain '{hkey}'; "
+                        f"Schema v3 uses EPH/EPV"
+                    ]
+                )
+            )
+
+    min_fix_type = _require_int_nonneg(
+        _require_in_obj(raw, "min_fix_type"), "gps_quality.min_fix_type"
+    )
+    if min_fix_type < 3:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=[f"gps_quality.min_fix_type must be >= 3, got {min_fix_type}"]
+            )
+        )
+    min_satellites = _require_int_nonneg(
+        _require_in_obj(raw, "min_satellites"), "gps_quality.min_satellites"
+    )
+    if min_satellites <= 0:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=[f"gps_quality.min_satellites must be > 0, got {min_satellites}"]
+            )
+        )
+    max_eph = _require_float_nonneg(
+        _require_in_obj(raw, "max_eph"), "gps_quality.max_eph"
+    )
+    if max_eph <= 0.0:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=[f"gps_quality.max_eph must be > 0, got {max_eph}"]
+            )
+        )
+    max_epv = _require_float_nonneg(
+        _require_in_obj(raw, "max_epv"), "gps_quality.max_epv"
+    )
+    if max_epv <= 0.0:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=[f"gps_quality.max_epv must be > 0, got {max_epv}"]
+            )
+        )
+
+    return GpsQualityThresholds(
+        min_fix_type=min_fix_type,
+        min_satellites=min_satellites,
+        max_eph=max_eph,
+        max_epv=max_epv,
+    )
+
+
+def _parse_runtime_origin_sampling_v3(data: Dict[str, Any]) -> RuntimeOriginSampling:
+    raw = data.get("runtime_origin_sampling")
+    if raw is None or not isinstance(raw, dict):
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=["'runtime_origin_sampling' is required and must be a JSON object"]
+            )
+        )
+    min_samp = _require_int_nonneg(
+        _require_in_obj(raw, "min_samples"),
+        "runtime_origin_sampling.min_samples",
+    )
+    if min_samp < 3:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=[
+                    f"runtime_origin_sampling.min_samples must be >= 3, got {min_samp}"
+                ]
+            )
+        )
+    window = _require_float_nonneg(
+        _require_in_obj(raw, "sample_window_s"),
+        "runtime_origin_sampling.sample_window_s",
+    )
+    if window <= 0.0:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=[
+                    f"runtime_origin_sampling.sample_window_s must be > 0, got {window}"
+                ]
+            )
+        )
+    spread = _require_float_nonneg(
+        _require_in_obj(raw, "max_horizontal_spread_m"),
+        "runtime_origin_sampling.max_horizontal_spread_m",
+    )
+    if spread <= 0.0:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=[
+                    f"runtime_origin_sampling.max_horizontal_spread_m must be > 0, got {spread}"
+                ]
+            )
+        )
+    estimator_raw = raw.get("estimator")
+    if estimator_raw is None or estimator_raw != "median":
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=[
+                    f"runtime_origin_sampling.estimator must be 'median', "
+                    f"got {estimator_raw!r}"
+                ]
+            )
+        )
+
+    return RuntimeOriginSampling(
+        min_samples=min_samp,
+        sample_window_s=window,
+        max_horizontal_spread_m=spread,
+        estimator="median",
+    )
+
+
+def _parse_binding_policy_v3(data: Dict[str, Any]) -> BindingPolicy:
+    raw = data.get("binding_policy")
+    if raw is None or not isinstance(raw, dict):
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=["'binding_policy' is required and must be a JSON object for schema v3"]
+            )
+        )
+    min_bl = _require_float_nonneg(
+        _require_in_obj(raw, "min_baseline_m"),
+        "binding_policy.min_baseline_m",
+    )
+    if min_bl <= 0.0:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=[f"binding_policy.min_baseline_m must be > 0, got {min_bl}"]
+            )
+        )
+    warn_bl = _require_float_nonneg(
+        _require_in_obj(raw, "warn_baseline_below_m"),
+        "binding_policy.warn_baseline_below_m",
+    )
+    if warn_bl <= min_bl:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=[
+                    f"binding_policy.warn_baseline_below_m ({warn_bl}) "
+                    f"must be > min_baseline_m ({min_bl})"
+                ]
+            )
+        )
+
+    return BindingPolicy(
+        min_baseline_m=min_bl,
+        warn_baseline_below_m=warn_bl,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Schema v2 validator (preserved behaviour)
+# ---------------------------------------------------------------------------
+
+
+def _validate_field_profile_v2(
+    profile: FieldProfile, diag: FieldProfileDiagnostics
+) -> None:
     # -- profile_id -------------------------------------------------------
     if not profile.profile_id.strip():
         diag.errors.append("profile_id must be non-empty")
@@ -338,22 +804,25 @@ def validate_field_profile(profile: FieldProfile) -> FieldProfileDiagnostics:
 
     # -- anchor -----------------------------------------------------------
     anchor = profile.anchor
-    if anchor.lat < -90.0 or anchor.lat > 90.0:
-        diag.errors.append(f"anchor.lat {anchor.lat} out of range [-90, 90]")
-    if anchor.lon < -180.0 or anchor.lon > 180.0:
-        diag.errors.append(f"anchor.lon {anchor.lon} out of range [-180, 180]")
-    if not math.isfinite(anchor.field_x_m):
-        diag.errors.append(f"anchor.field_x_m is not finite: {anchor.field_x_m}")
-    if not math.isfinite(anchor.field_y_m):
-        diag.errors.append(f"anchor.field_y_m is not finite: {anchor.field_y_m}")
-    if not math.isclose(anchor.field_x_m, 0.0, abs_tol=1e-9):
-        diag.errors.append(
-            f"anchor.field_x_m must be 0.0 (takeoff anchor is FIELD origin), got {anchor.field_x_m}"
-        )
-    if not math.isclose(anchor.field_y_m, 0.0, abs_tol=1e-9):
-        diag.errors.append(
-            f"anchor.field_y_m must be 0.0 (takeoff anchor is FIELD origin), got {anchor.field_y_m}"
-        )
+    if anchor is None:
+        diag.errors.append("anchor is required for schema v2")
+    else:
+        if anchor.lat < -90.0 or anchor.lat > 90.0:
+            diag.errors.append(f"anchor.lat {anchor.lat} out of range [-90, 90]")
+        if anchor.lon < -180.0 or anchor.lon > 180.0:
+            diag.errors.append(f"anchor.lon {anchor.lon} out of range [-180, 180]")
+        if not math.isfinite(anchor.field_x_m):
+            diag.errors.append(f"anchor.field_x_m is not finite: {anchor.field_x_m}")
+        if not math.isfinite(anchor.field_y_m):
+            diag.errors.append(f"anchor.field_y_m is not finite: {anchor.field_y_m}")
+        if not math.isclose(anchor.field_x_m, 0.0, abs_tol=1e-9):
+            diag.errors.append(
+                f"anchor.field_x_m must be 0.0 (takeoff anchor is FIELD origin), got {anchor.field_x_m}"
+            )
+        if not math.isclose(anchor.field_y_m, 0.0, abs_tol=1e-9):
+            diag.errors.append(
+                f"anchor.field_y_m must be 0.0 (takeoff anchor is FIELD origin), got {anchor.field_y_m}"
+            )
 
     # -- centerline_points ------------------------------------------------
     if len(profile.centerline_points) < 4:
@@ -367,41 +836,39 @@ def validate_field_profile(profile: FieldProfile) -> FieldProfileDiagnostics:
             diag.errors.append(f"centerline_points[{i}].lon {pt.lon} out of range [-180, 180]")
 
     if not diag.ok:
-        return diag
+        return
 
     # -- centerline fitting sanity ---------------------------------------
-    # Compute ENU coordinates relative to anchor
-    enu_points: List[Tuple[float, float]] = []
-    for pt in profile.centerline_points:
-        dn, de = _gps_enu_deltas(anchor.lat, anchor.lon, pt.lat, pt.lon)
-        enu_points.append((dn, de))
+    if anchor is not None:
+        enu_points: List[Tuple[float, float]] = []
+        for pt in profile.centerline_points:
+            dn, de = _gps_enu_deltas(anchor.lat, anchor.lon, pt.lat, pt.lon)
+            enu_points.append((dn, de))
 
-    # All points must be at a meaningful distance from anchor
-    min_dist = min(
-        math.hypot(dn, de) for dn, de in enu_points
-    )
-    if min_dist < 0.5:
-        diag.errors.append(
-            f"Minimum centerline point distance from anchor is {min_dist:.2f} m (< 0.5 m)"
+        min_dist = min(
+            math.hypot(dn, de) for dn, de in enu_points
         )
+        if min_dist < 0.5:
+            diag.errors.append(
+                f"Minimum centerline point distance from anchor is {min_dist:.2f} m (< 0.5 m)"
+            )
 
-    # Check that centerline points are roughly collinear (quick cosine check
-    # on farthest point direction)
-    farthest_idx = max(range(len(enu_points)), key=lambda i: math.hypot(*enu_points[i]))
-    farthest_n, farthest_e = enu_points[farthest_idx]
-    farthest_dist = math.hypot(farthest_n, farthest_e)
-    if farthest_dist > 0.0:
-        ref_n = farthest_n / farthest_dist
-        ref_e = farthest_e / farthest_dist
-        for i, (dn, de) in enumerate(enu_points):
-            d = math.hypot(dn, de)
-            if d < 0.01:
-                continue
-            dot = (dn * ref_n + de * ref_e) / d
-            if dot < 0.7:
-                diag.warnings.append(
-                    f"centerline_points[{i}] direction deviates from main axis (cos={dot:.2f})"
-                )
+        # check direction consistency
+        if len(enu_points) >= 2:
+            for i in range(len(enu_points)):
+                dn_i, de_i = enu_points[i]
+                for j in range(i + 1, len(enu_points)):
+                    dn_j, de_j = enu_points[j]
+                    dot = dn_i * dn_j + de_i * de_j
+                    ni = math.hypot(dn_i, de_i)
+                    nj = math.hypot(dn_j, de_j)
+                    if ni > 1e-9 and nj > 1e-9:
+                        cos_angle = dot / (ni * nj)
+                        if cos_angle < 0.707:
+                            diag.errors.append(
+                                f"centerline_points[{i}] direction deviates from main axis (cos={cos_angle:.2f})"
+                            )
+                            break
 
     # -- field_geometry ---------------------------------------------------
     fg = profile.field_geometry
@@ -409,8 +876,6 @@ def validate_field_profile(profile: FieldProfile) -> FieldProfileDiagnostics:
         diag.errors.append(f"field_geometry.lane_half_width_m must be > 0, got {fg.lane_half_width_m}")
     if fg.drop_center_y_m <= 0.0:
         diag.errors.append(f"field_geometry.drop_center_y_m must be > 0, got {fg.drop_center_y_m}")
-    if fg.recce_center_y_m <= 0.0:
-        diag.errors.append(f"field_geometry.recce_center_y_m must be > 0, got {fg.recce_center_y_m}")
 
     # -- binding_policy ---------------------------------------------------
     bp = profile.binding_policy
@@ -440,7 +905,164 @@ def validate_field_profile(profile: FieldProfile) -> FieldProfileDiagnostics:
                 f"Unknown top-level key '{key}' (retained for forward compatibility)"
             )
 
-    return diag
+
+# ---------------------------------------------------------------------------
+# Schema v3 validator
+# ---------------------------------------------------------------------------
+
+
+def _validate_field_profile_v3(
+    profile: FieldProfile, diag: FieldProfileDiagnostics
+) -> None:
+    # -- profile_id -------------------------------------------------------
+    if not profile.profile_id.strip():
+        diag.errors.append("profile_id must be non-empty")
+
+    # -- coordinate convention --------------------------------------------
+    _validate_coordinate_convention(profile.coordinate_convention, diag)
+
+    # -- forward_marker ---------------------------------------------------
+    fm = profile.forward_marker
+    if fm is None:
+        diag.errors.append("forward_marker is required for schema v3")
+    else:
+        if fm.lat < -90.0 or fm.lat > 90.0:
+            diag.errors.append(f"forward_marker.lat {fm.lat} out of range [-90, 90]")
+        if fm.lon < -180.0 or fm.lon > 180.0:
+            diag.errors.append(f"forward_marker.lon {fm.lon} out of range [-180, 180]")
+        if fm.coordinate_system != "WGS84":
+            diag.errors.append(
+                f"forward_marker.coordinate_system must be 'WGS84', got {fm.coordinate_system!r}"
+            )
+
+    # -- field_geometry ---------------------------------------------------
+    fg = profile.field_geometry
+    if fg.lane_half_width_m <= 0.0:
+        diag.errors.append(
+            f"field_geometry.lane_half_width_m must be > 0, got {fg.lane_half_width_m}"
+        )
+
+    # geometry range checks
+    dmin = fg.drop_area_y_min
+    dmax = fg.drop_area_y_max
+    dc = fg.drop_center_y_m
+    rmin = fg.recce_area_y_min
+    rmax = fg.recce_area_y_max
+    rc = fg.recce_center_y_m
+
+    if dmin is not None and dmax is not None:
+        if dmin >= dmax:
+            diag.errors.append(
+                f"field_geometry.drop_area_y_min_m ({dmin}) must be < drop_area_y_max_m ({dmax})"
+            )
+        if dc < dmin or dc > dmax:
+            diag.errors.append(
+                f"field_geometry.drop_center_y_m ({dc}) must be in "
+                f"[drop_area_y_min_m ({dmin}), drop_area_y_max_m ({dmax})]"
+            )
+        if dmin < 0:
+            diag.errors.append(f"field_geometry.drop_area_y_min_m must be >= 0, got {dmin}")
+
+    if rmin is not None and rmax is not None:
+        if rmin >= rmax:
+            diag.errors.append(
+                f"field_geometry.recce_area_y_min_m ({rmin}) must be < recce_area_y_max_m ({rmax})"
+            )
+        if rc < rmin or rc > rmax:
+            diag.errors.append(
+                f"field_geometry.recce_center_y_m ({rc}) must be in "
+                f"[recce_area_y_min_m ({rmin}), recce_area_y_max_m ({rmax})]"
+            )
+        if rmin < 0:
+            diag.errors.append(f"field_geometry.recce_area_y_min_m must be >= 0, got {rmin}")
+
+    if dmax is not None and rmin is not None and dmax >= rmin:
+        diag.errors.append(
+            f"field_geometry.drop_area_y_max_m ({dmax}) must be < recce_area_y_min_m ({rmin})"
+        )
+
+    # -- drop_scan --------------------------------------------------------
+    ds = profile.drop_scan
+    if ds is None:
+        diag.errors.append("drop_scan is required for schema v3")
+    else:
+        if len(ds.waypoints) != 4:
+            diag.errors.append(
+                f"drop_scan must have exactly 4 waypoints, got {len(ds.waypoints)}"
+            )
+        coords = set()
+        for i, wp in enumerate(ds.waypoints):
+            if wp.altitude_m <= 0.0:
+                diag.errors.append(
+                    f"drop_scan.waypoints[{i}].altitude_m must be > 0, got {wp.altitude_m}"
+                )
+            lane = fg.lane_half_width_m
+            if wp.x_m < -lane or wp.x_m > lane:
+                diag.errors.append(
+                    f"drop_scan.waypoints[{i}].x_m ({wp.x_m}) out of lane [-{lane}, {lane}]"
+                )
+            if dmin is not None and dmax is not None:
+                if wp.y_m < dmin or wp.y_m > dmax:
+                    diag.errors.append(
+                        f"drop_scan.waypoints[{i}].y_m ({wp.y_m}) out of "
+                        f"drop area [{dmin}, {dmax}]"
+                    )
+            coords.add((wp.x_m, wp.y_m, wp.altitude_m))
+        if len(coords) < 2:
+            diag.errors.append("drop_scan.waypoints must not be all identical")
+
+    # -- gps_quality ------------------------------------------------------
+    gq = profile.gps_quality
+    if gq.min_fix_type < 3:
+        diag.errors.append(f"gps_quality.min_fix_type must be >= 3, got {gq.min_fix_type}")
+    if gq.min_satellites <= 0:
+        diag.errors.append(f"gps_quality.min_satellites must be > 0, got {gq.min_satellites}")
+    if gq.max_eph <= 0.0:
+        diag.errors.append(f"gps_quality.max_eph must be > 0, got {gq.max_eph}")
+    if gq.max_epv <= 0.0:
+        diag.errors.append(f"gps_quality.max_epv must be > 0, got {gq.max_epv}")
+
+    # -- runtime_origin_sampling ------------------------------------------
+    ros = profile.runtime_origin_sampling
+    if ros is None:
+        diag.errors.append("runtime_origin_sampling is required for schema v3")
+    else:
+        if ros.min_samples < 3:
+            diag.errors.append(
+                f"runtime_origin_sampling.min_samples must be >= 3, got {ros.min_samples}"
+            )
+        if ros.sample_window_s <= 0.0:
+            diag.errors.append(
+                f"runtime_origin_sampling.sample_window_s must be > 0, got {ros.sample_window_s}"
+            )
+        if ros.max_horizontal_spread_m <= 0.0:
+            diag.errors.append(
+                f"runtime_origin_sampling.max_horizontal_spread_m must be > 0, "
+                f"got {ros.max_horizontal_spread_m}"
+            )
+        if ros.estimator != "median":
+            diag.errors.append(
+                f"runtime_origin_sampling.estimator must be 'median', got {ros.estimator!r}"
+            )
+
+    # -- binding_policy ---------------------------------------------------
+    bp = profile.binding_policy
+    if bp.min_baseline_m <= 0.0:
+        diag.errors.append(
+            f"binding_policy.min_baseline_m must be > 0, got {bp.min_baseline_m}"
+        )
+    if bp.warn_baseline_below_m <= bp.min_baseline_m:
+        diag.errors.append(
+            f"binding_policy.warn_baseline_below_m ({bp.warn_baseline_below_m}) "
+            f"must be > min_baseline_m ({bp.min_baseline_m})"
+        )
+
+    # -- unknown top-level keys → warning ----------------------------------
+    if profile.extra:
+        for key in sorted(profile.extra.keys()):
+            diag.warnings.append(
+                f"Unknown top-level key '{key}' (retained for forward compatibility)"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -594,8 +1216,55 @@ def fit_centerline(
 
 
 # ===================================================================
-# internal helpers — parsing
+# internal helpers — shared
 # ===================================================================
+
+
+def _parse_common_fields(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Parse fields shared by both schema versions."""
+    _require_str(data, "profile_id")
+    _require_str(data, "name")
+    return {
+        "schema_version": _parse_schema_version(data),
+        "profile_id": str(data["profile_id"]),
+        "name": str(data["name"]),
+        "coordinate_convention": _parse_coordinate_convention(data),
+    }
+
+
+def _parse_schema_version(data: Dict[str, Any]) -> int:
+    try:
+        raw_sv = data.get("schema_version", 2)
+        if raw_sv is None:
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(errors=["schema_version is None"])
+            )
+        if isinstance(raw_sv, bool):
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(errors=["schema_version must be a number, got bool"])
+            )
+        if not isinstance(raw_sv, (int, float)):
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(
+                    errors=[f"schema_version must be a number, got {type(raw_sv).__name__}"]
+                )
+            )
+        fv = float(raw_sv)
+        if not math.isfinite(fv):
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(errors=[f"schema_version is not finite: {fv}"])
+            )
+        if fv != math.floor(fv):
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(errors=[f"schema_version must be an integer, got {fv}"])
+            )
+        return int(fv)
+    except FieldProfileValidationError:
+        raise
+    except (ValueError, TypeError) as exc:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(errors=[f"schema_version invalid: {exc}"])
+        )
 
 
 def _require_str(data: Dict[str, Any], key: str) -> None:
@@ -603,6 +1272,15 @@ def _require_str(data: Dict[str, Any], key: str) -> None:
         raise FieldProfileValidationError(
             FieldProfileDiagnostics(errors=[f"'{key}' is required and must be a non-empty string"])
         )
+
+
+def _require_in_obj(obj: Dict[str, Any], key: str) -> Any:
+    """Require a key to be present in *obj* (return raw value)."""
+    if key not in obj:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(errors=[f"'{key}' is required but missing"])
+        )
+    return obj[key]
 
 
 def _require_float_in_obj(obj: Dict[str, Any], key: str, path: str) -> float:
@@ -779,6 +1457,8 @@ def _parse_binding_policy(data: Dict[str, Any]) -> BindingPolicy:
         warn_start_error_m=float(raw.get("warn_start_error_m", 1.5)),
         max_centerline_residual_m=float(raw.get("max_centerline_residual_m", 2.5)),
         warn_centerline_residual_m=float(raw.get("warn_centerline_residual_m", 1.5)),
+        min_baseline_m=float(raw.get("min_baseline_m", 30.0)),
+        warn_baseline_below_m=float(raw.get("warn_baseline_below_m", 50.0)),
     )
 
 
