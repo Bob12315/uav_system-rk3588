@@ -38,12 +38,25 @@ class RuntimeBindingOrchestrator:
         self._state = "idle"
         self._last_error: str | None = None
         self._last_result: dict[str, object] | None = None
+        # preview / competition session metadata
+        self._preview_candidate: RuntimeFieldBindingCandidate | None = None
+        self._preview_error: str | None = None
+        self._template_profile_id: str | None = None
+        self._runtime_profile_id: str | None = None
+        self._input_source: str | None = None
+        self._forward_marker_lat: float | None = None
+        self._forward_marker_lon: float | None = None
 
     def start(
         self,
         profile: FieldProfile,
         *,
         started_at_s: float,
+        template_profile_id: str | None = None,
+        runtime_profile_id: str | None = None,
+        input_source: str | None = None,
+        forward_marker_lat: float | None = None,
+        forward_marker_lon: float | None = None,
     ) -> dict[str, object]:
         if self._state == "applied":
             return {
@@ -82,6 +95,13 @@ class RuntimeBindingOrchestrator:
         self._last_observed_at_s = float(started_at_s)
         self._last_error = None
         self._last_result = None
+        self._preview_candidate = None
+        self._preview_error = None
+        self._template_profile_id = template_profile_id
+        self._runtime_profile_id = runtime_profile_id
+        self._input_source = input_source
+        self._forward_marker_lat = forward_marker_lat
+        self._forward_marker_lon = forward_marker_lon
         return {
             "ok": True,
             "profile_id": profile.profile_id,
@@ -116,6 +136,8 @@ class RuntimeBindingOrchestrator:
                 state="sampling_failed",
                 observed=True,
             )
+        # Try to generate a preview after the sampling window completes
+        self._try_preview(observed_at_s=float(observed_at_s))
         return {
             "ok": True,
             "observed": True,
@@ -150,6 +172,11 @@ class RuntimeBindingOrchestrator:
             return self._failure(
                 "sampling window not yet complete", state="sampling"
             )
+        if not sampling.can_finalize:
+            return self._failure(
+                "sampling cannot finalize — insufficient samples or other issue",
+                state="sampling",
+            )
 
         try:
             candidate = self._sampler.finalize(
@@ -166,6 +193,9 @@ class RuntimeBindingOrchestrator:
         self._candidate = candidate
         self._state = "candidate_ready"
         self._last_error = None
+        # Clear preview on formal finalize
+        self._preview_candidate = None
+        self._preview_error = None
         return self._apply(candidate, completed_at_s=float(completed_at_s))
 
     def cancel(self) -> dict[str, object]:
@@ -197,6 +227,13 @@ class RuntimeBindingOrchestrator:
         self._last_observed_at_s = None
         self._last_error = None
         self._last_result = None
+        self._preview_candidate = None
+        self._preview_error = None
+        self._template_profile_id = None
+        self._runtime_profile_id = None
+        self._input_source = None
+        self._forward_marker_lat = None
+        self._forward_marker_lon = None
         return {"ok": True, "state": "idle"}
 
     def _apply(
@@ -420,6 +457,69 @@ class RuntimeBindingOrchestrator:
         self._last_result = dict(result)
         return result
 
+    def _try_preview(self, *, observed_at_s: float) -> None:
+        """Attempt to generate a preview candidate after window completion.
+
+        Only runs when sampler state is still 'sampling' (not already failed).
+        On failure, sets ``_preview_error`` and optionally transitions to
+        ``sampling_failed``.  On success, stores ``_preview_candidate``.
+        """
+        if self._sampler is None or self._state != "sampling":
+            return
+        try:
+            sampling = self._sampler.status(now_s=observed_at_s)
+        except Exception:
+            return
+        if not sampling.window_complete:
+            return
+        # Try preview
+        try:
+            candidate = self._sampler.preview_candidate(
+                completed_at_s=observed_at_s
+            )
+        except Exception as exc:
+            error_msg = str(exc)
+            self._preview_candidate = None
+            self._preview_error = error_msg
+            # Determine failure state transition
+            if "accepted samples" in error_msg.lower() and "< required" in error_msg.lower():
+                self._state = "sampling_failed"
+                self._last_error = "accepted samples below required minimum"
+            elif "horizontal spread" in error_msg.lower() and "exceeds" in error_msg.lower():
+                self._state = "sampling_failed"
+                self._last_error = "horizontal spread exceeded"
+            elif "baseline" in error_msg.lower() and ("below" in error_msg.lower() or "minimum" in error_msg.lower()):
+                self._state = "sampling_failed"
+                self._last_error = "baseline below minimum"
+            return
+
+        # Check baseline policy
+        warnings: list[str] = list(candidate.warnings)
+        baseline_m = candidate.baseline_m
+        profile = self._profile
+        if profile is not None:
+            min_baseline = profile.binding_policy.min_baseline_m
+            if baseline_m < min_baseline:
+                self._preview_candidate = None
+                self._preview_error = "baseline below minimum"
+                self._state = "sampling_failed"
+                self._last_error = (
+                    f"baseline {baseline_m:.1f}m < minimum {min_baseline:.1f}m"
+                )
+                return
+            warn_below = profile.binding_policy.warn_baseline_below_m
+            if baseline_m < warn_below:
+                warning_msg = (
+                    f"baseline {baseline_m:.1f}m below warning threshold "
+                    f"{warn_below:.1f}m"
+                )
+                if warning_msg not in warnings:
+                    warnings.append(warning_msg)
+
+        # Success — store preview (does NOT modify sampler state)
+        self._preview_candidate = candidate
+        self._preview_error = None
+
     def _safe_sampler_state(self) -> str | None:
         if self._sampler is None:
             return None
@@ -433,34 +533,57 @@ class RuntimeBindingOrchestrator:
         if self._sampler is not None and self._state == "sampling":
             timestamp = now_s if now_s is not None else self._last_observed_at_s
             try:
-                sampling = _status_dict(self._sampler.status(now_s=timestamp))
+                raw_status = self._sampler.status(now_s=timestamp)
+                sampling = _status_dict(raw_status)
+                # Override can_finalize with preview-based check
+                if self._preview_candidate is not None:
+                    sampling["can_finalize"] = True
+                elif self._preview_error is not None:
+                    sampling["can_finalize"] = False
             except Exception as exc:
                 sampling = {"state": "sampling", "error": str(exc)}
 
+        # Use preview candidate for summary/geometry if available (before finalize)
         candidate_summary: dict[str, object] | None = None
         geometry: dict[str, object] | None = None
-        if self._candidate is not None:
-            candidate_summary = {
-                "origin_lat": self._candidate.origin_lat,
-                "origin_lon": self._candidate.origin_lon,
-                "forward_marker_lat": self._candidate.forward_marker_lat,
-                "forward_marker_lon": self._candidate.forward_marker_lon,
-                "field_heading_yaw_rad": self._candidate.field_heading_yaw_rad,
-                "baseline_m": self._candidate.baseline_m,
-                "sample_count": self._candidate.sample_count,
-                "horizontal_spread_m": self._candidate.horizontal_spread_m,
+        effective_candidate = self._candidate or self._preview_candidate
+        if effective_candidate is not None:
+            summary: dict[str, object] = {
+                "origin_lat": effective_candidate.origin_lat,
+                "origin_lon": effective_candidate.origin_lon,
+                "forward_marker_lat": effective_candidate.forward_marker_lat,
+                "forward_marker_lon": effective_candidate.forward_marker_lon,
+                "field_heading_yaw_rad": effective_candidate.field_heading_yaw_rad,
+                "field_heading_deg": effective_candidate.field_heading_deg,
+                "baseline_m": effective_candidate.baseline_m,
+                "sample_count": effective_candidate.sample_count,
+                "rejected_sample_count": effective_candidate.rejected_sample_count,
+                "duplicate_sample_count": effective_candidate.duplicate_sample_count,
+                "horizontal_spread_m": effective_candidate.horizontal_spread_m,
+                "gps_fix_type": effective_candidate.gps_fix_type,
+                "gps_satellites": effective_candidate.gps_satellites,
+                "gps_eph": effective_candidate.gps_eph,
+                "gps_epv": effective_candidate.gps_epv,
+                "warnings": list(effective_candidate.warnings),
             }
-            geometry = _geometry_payload(self._candidate.geometry)
+            candidate_summary = summary
+            geometry = _geometry_payload(effective_candidate.geometry)
 
         return {
             "state": self._state,
+            "template_profile_id": self._template_profile_id,
+            "runtime_profile_id": self._runtime_profile_id,
             "profile_id": (
                 self._candidate.profile_id
                 if self._candidate is not None
                 else self._profile.profile_id if self._profile is not None else None
             ),
             "profile_name": self._profile_name,
+            "input_source": self._input_source,
+            "forward_marker_lat": self._forward_marker_lat,
+            "forward_marker_lon": self._forward_marker_lon,
             "last_error": self._last_error,
+            "preview_error": self._preview_error,
             "candidate_ready": self._candidate is not None,
             "sampling": sampling,
             "candidate_summary": candidate_summary,

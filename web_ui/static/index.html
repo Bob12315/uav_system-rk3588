@@ -290,7 +290,86 @@
       </article>
 
       <article class="panel safety-panel field-reference-panel">
-        <div class="panel-title">Field Reference / 场地参考</div>
+        <div class="panel-title">Competition Field Setup / 比赛场地初始化</div>
+
+        <!-- ── far point B ────────────────────────────────────────────── -->
+        <div class="field-reference-status-grid">
+          <div><span>远点 B 纬度</span><input id="cfsForwardLat" type="text" placeholder="WGS84 纬度" autocomplete="off" spellcheck="false"></div>
+          <div><span>远点 B 经度</span><input id="cfsForwardLon" type="text" placeholder="WGS84 经度" autocomplete="off" spellcheck="false"></div>
+          <div><span>坐标系</span><strong id="cfsCoordinateSystem">WGS84</strong></div>
+          <div id="cfsGcjWarning" class="hint danger-text">
+            ⚠ 只能输入 WGS84 坐标，不得输入高德、腾讯或手机地图直接显示的 GCJ-02 坐标。
+          </div>
+        </div>
+
+        <!-- ── current aircraft A ─────────────────────────────────────── -->
+        <div class="field-reference-status-grid">
+          <div><span>当前飞机 GPS</span><strong id="cfsCurrentGps">--</strong></div>
+          <div><span>Fix / Sats</span><strong id="cfsGpsFixSats">--</strong></div>
+          <div><span>EPH / EPV</span><strong id="cfsGpsEphEpv">--</strong></div>
+          <div><span>GPS 有效</span><strong id="cfsGpsValid">--</strong></div>
+          <div><span>GPS 时间</span><strong id="cfsGpsTimestamp">--</strong></div>
+        </div>
+
+        <!-- ── fixed template summary ─────────────────────────────────── -->
+        <div class="field-reference-status-grid">
+          <div><span>车道半宽</span><strong id="cfsLaneHalfWidth">--</strong></div>
+          <div><span>投放区 Y</span><strong id="cfsDropRange">--</strong></div>
+          <div><span>侦察区 Y</span><strong id="cfsRecceRange">--</strong></div>
+          <div><span>扫描航点</span><strong id="cfsDropScanPoints">--</strong></div>
+          <div><span>扫描高度</span><strong id="cfsScanAltitude">--</strong></div>
+          <div><span>采样策略</span><strong id="cfsSamplingPolicy">--</strong></div>
+          <div><span>基线策略</span><strong id="cfsBaselinePolicy">--</strong></div>
+        </div>
+
+        <!-- ── runtime status ─────────────────────────────────────────── -->
+        <div id="cfsRuntimePanel" class="field-reference-status-grid" style="display:none">
+          <div><span>采样状态</span><strong id="cfsSamplingState">--</strong></div>
+          <div><span>已接受</span><strong id="cfsSamplingAccepted">--</strong></div>
+          <div><span>已拒绝</span><strong id="cfsSamplingRejected">--</strong></div>
+          <div><span>重复</span><strong id="cfsSamplingDuplicate">--</strong></div>
+          <div><span>耗时 / 窗口</span><strong id="cfsSamplingElapsed">--</strong></div>
+          <div><span>离散度</span><strong id="cfsSamplingSpread">--</strong></div>
+          <div><span>最后拒绝原因</span><strong id="cfsSamplingLastRejection">--</strong></div>
+          <div><progress id="cfsSamplingProgress" value="0" max="1"></progress></div>
+        </div>
+
+        <!-- ── candidate preview ──────────────────────────────────────── -->
+        <div id="cfsCandidatePanel" class="field-reference-status-grid" style="display:none">
+          <div><span>起点 A</span><strong id="cfsOriginA">--</strong></div>
+          <div><span>远点 B</span><strong id="cfsForwardB">--</strong></div>
+          <div><span>基线距离</span><strong id="cfsBaseline">--</strong></div>
+          <div><span>场地方向</span><strong id="cfsHeading">--</strong></div>
+          <div><span>警告</span><strong id="cfsWarnings">--</strong></div>
+          <div><span>错误</span><strong id="cfsError" class="danger-text">--</strong></div>
+        </div>
+
+        <!-- ── confirmed state ────────────────────────────────────────── -->
+        <div id="cfsConfirmedPanel" class="field-reference-status-grid" style="display:none">
+          <div><span>已确认</span><strong id="cfsConfirmed">--</strong></div>
+          <div><span>已冻结</span><strong id="cfsFrozen">--</strong></div>
+          <div><span>GPS 就绪</span><strong id="cfsGpsReady">--</strong></div>
+          <div><span>已同步</span><strong id="cfsSynced">--</strong></div>
+        </div>
+
+        <!-- ── buttons ────────────────────────────────────────────────── -->
+        <div class="button-row">
+          <button id="cfsStart">开始 GPS 采样</button>
+          <button id="cfsFinalize">确认并冻结</button>
+          <button id="cfsCancel">取消采样</button>
+          <button id="cfsReset">完整重置</button>
+        </div>
+        <div id="cfsHint" class="hint">
+          输入 WGS84 远点 B → 开始采样 → 确认冻结。该操作不会启动 Mission，不会发送飞控命令。
+        </div>
+      </article>
+
+      <!-- ── Advanced / Legacy ────────────────────────────────────────── -->
+      <details id="cfsAdvancedLegacy">
+        <summary>Advanced / Legacy Field Profile</summary>
+
+      <article class="panel safety-panel field-reference-panel">
+        <div class="panel-title">Field Reference / 场地参考 (Legacy)</div>
         <div class="field-reference-status-grid" id="fieldReferenceStatus">
           <div><span>confirmed</span><strong id="frConfirmed">--</strong></div>
           <div><span>frozen</span><strong id="frFrozen">--</strong></div>
@@ -352,7 +431,7 @@
       </article>
 
       <article class="panel safety-panel field-profile-panel">
-        <div class="panel-title">Field Profile / 场地配置</div>
+        <div class="panel-title">Field Profile / 场地配置 (Legacy)</div>
         <div class="field-profile-select-row">
           <select id="fpProfileSelect"><option value="">-- 选择 Profile --</option></select>
           <button id="fpRefreshList">刷新列表</button>
@@ -399,6 +478,8 @@
           GPS Profile 绑定 ≠ start mission ≠ freeze。Freeze 后不能重新 bind，除非先 reset。绑定只建立 FIELD↔LOCAL_NED 坐标关系。
         </div>
       </article>
+
+      </details>
 
       <article class="panel safety-panel">
         <div class="panel-title">Payload Release Action</div>

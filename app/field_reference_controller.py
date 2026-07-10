@@ -3,11 +3,17 @@ from __future__ import annotations
 import math
 import os
 import time as _time
+from copy import deepcopy
+from dataclasses import replace
 from typing import Any, Mapping, Optional
 
-from app.field_profile import FieldProfile, FieldProfileDiagnostics
+from app.field_profile import FieldProfile, FieldProfileDiagnostics, ForwardMarker
 from app.field_profile_service import BindResult, FieldProfileService
-from app.field_reference import _gps_distance_m
+from app.field_reference import (
+    _gps_distance_m,
+    normalize_longitude_deg,
+    validate_wgs84_lat_lon,
+)
 from app.field_reference_service import FieldReferenceService
 from app.runtime_binding_orchestrator import RuntimeBindingOrchestrator
 from app.runtime_context import RuntimeContextBuilder
@@ -52,6 +58,9 @@ class FieldReferenceController:
 
         telemetry: dict[str, object] = {
             "global_position_valid": bool(drone.get("global_position_valid", False)),
+            "lat": drone.get("lat"),
+            "lon": drone.get("lon"),
+            "last_global_position_time": drone.get("last_global_position_time"),
             "gps_fix_type": drone.get("gps_fix_type", 0),
             "satellites_visible": drone.get("satellites_visible", 0),
             "gps_eph": drone.get("gps_eph", -1.0),
@@ -167,6 +176,17 @@ class FieldReferenceController:
                 "error": errors[0] if errors else f"profile not found: {profile_id}",
                 "errors": errors,
             }
+        # Reject template-only profiles on the old start endpoint
+        if profile.extra.get("template_only") is True:
+            return {
+                "ok": False,
+                "state": self._runtime_binding.state,
+                "profile_id": profile_id,
+                "error": (
+                    "template-only profile requires "
+                    "/api/field-reference/runtime-sampling/start"
+                ),
+            }
         if profile.schema_version == 2:
             return {
                 "ok": False,
@@ -182,6 +202,139 @@ class FieldReferenceController:
                 "error": f"runtime GPS sampling requires schema v3, got v{profile.schema_version}",
             }
         return self._runtime_binding.start(profile, started_at_s=started_at_s)
+
+    def start_competition_runtime_sampling(
+        self,
+        forward_marker_lat: float,
+        forward_marker_lon: float,
+        *,
+        started_at_s: float,
+    ) -> dict[str, object]:
+        """Competition field setup: start runtime GPS sampling with user-supplied B.
+
+        1. Check orchestrator / Field Reference state.
+        2. Load competition_runtime_v3 template.
+        3. Deep-copy template, replace forward_marker with user input.
+        4. Validate and start sampling.
+        """
+        # Check state
+        if self._runtime_binding.state == "applied":
+            return {
+                "ok": False,
+                "state": "applied",
+                "error": (
+                    "runtime binding is already applied; "
+                    "use field reference reset first"
+                ),
+            }
+        if self._runtime_binding.state == "sampling":
+            return {
+                "ok": False,
+                "state": "sampling",
+                "error": "runtime sampling is already in progress",
+            }
+        if self._svc.reference.is_frozen:
+            return {
+                "ok": False,
+                "state": self._runtime_binding.state,
+                "error": "field reference is frozen; reset first",
+            }
+
+        # Load template
+        template_profile, errors = self._load_profile("competition_runtime_v3")
+        if template_profile is None:
+            return {
+                "ok": False,
+                "state": self._runtime_binding.state,
+                "error": (
+                    errors[0]
+                    if errors
+                    else "competition_runtime_v3 template not found"
+                ),
+            }
+        if template_profile.schema_version != 3:
+            return {
+                "ok": False,
+                "state": self._runtime_binding.state,
+                "error": (
+                    f"competition_runtime_v3 must be schema v3, "
+                    f"got v{template_profile.schema_version}"
+                ),
+            }
+        if template_profile.extra.get("template_only") is not True:
+            return {
+                "ok": False,
+                "state": self._runtime_binding.state,
+                "error": "competition_runtime_v3 must have template_only=true",
+            }
+
+        # Validate B coordinates
+        try:
+            lat_pair = validate_wgs84_lat_lon(
+                forward_marker_lat, forward_marker_lon, reject_pole=True
+            )
+        except Exception as exc:
+            return {
+                "ok": False,
+                "state": self._runtime_binding.state,
+                "error": f"invalid forward_marker coordinates: {exc}",
+            }
+        normalized_lat = lat_pair[0]
+        normalized_lon = normalize_longitude_deg(lat_pair[1])
+
+        # Deep-copy template
+        try:
+            candidate_base = deepcopy(template_profile)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "state": self._runtime_binding.state,
+                "error": f"failed to copy template: {exc}",
+            }
+
+        # Create session profile with user's B
+        runtime_profile = replace(
+            candidate_base,
+            profile_id="competition_runtime_session",
+            name="Competition Runtime Field Session",
+            forward_marker=ForwardMarker(
+                name="runtime_forward_marker",
+                lat=normalized_lat,
+                lon=normalized_lon,
+                coordinate_system="WGS84",
+            ),
+            extra={
+                **candidate_base.extra,
+                "template_profile_id": "competition_runtime_v3",
+                "runtime_input_source": "web_ui_runtime",
+                "template_only": False,
+            },
+        )
+
+        # Run existing validation on the session profile
+        from .field_profile import validate_field_profile
+
+        diag = validate_field_profile(runtime_profile)
+        if not diag.ok:
+            return {
+                "ok": False,
+                "state": self._runtime_binding.state,
+                "error": (
+                    f"session profile validation failed: {'; '.join(diag.errors)}"
+                ),
+            }
+
+        # Start sampling with session metadata
+        result = self._runtime_binding.start(
+            runtime_profile,
+            started_at_s=started_at_s,
+            template_profile_id="competition_runtime_v3",
+            runtime_profile_id="competition_runtime_session",
+            input_source="web_ui_runtime",
+            forward_marker_lat=normalized_lat,
+            forward_marker_lon=normalized_lon,
+        )
+        return result
 
     def observe_runtime_profile_sampling(
         self,

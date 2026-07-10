@@ -555,6 +555,16 @@ class SystemRunner:
         with self.action_runtime_lock:
             return self.field_reference_controller.cancel_runtime_profile_sampling()
 
+    def competition_runtime_sampling_start(
+        self, forward_marker_lat: float, forward_marker_lon: float
+    ) -> dict[str, object]:
+        with self.action_runtime_lock:
+            return self.field_reference_controller.start_competition_runtime_sampling(
+                forward_marker_lat=forward_marker_lat,
+                forward_marker_lon=forward_marker_lon,
+                started_at_s=time.time(),
+            )
+
     def field_profile_bind_current(self, profile_id: str) -> dict[str, object]:
         with self.action_runtime_lock:
             return self.field_reference_controller.bind_profile_current(profile_id)

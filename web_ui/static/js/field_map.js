@@ -129,6 +129,60 @@ function setProfilePreview(data) {
   scheduleFieldMapRender();
 }
 
+var runtimeGeometry = null;
+var runtimeGeometryConfirmed = false;
+
+function setRuntimeGeometry(geometry, confirmed) {
+  if (!geometry) {
+    runtimeGeometry = null;
+    runtimeGeometryConfirmed = false;
+    scheduleFieldMapRender();
+    return;
+  }
+  runtimeGeometry = geometry;
+  runtimeGeometryConfirmed = Boolean(confirmed);
+  // Convert to profilePreview-compatible format for rendering
+  var boxes = [];
+  // Drop area corners
+  if (Array.isArray(geometry.drop_area_corners) && geometry.drop_area_corners.length === 4) {
+    boxes.push({
+      kind: "drop_area",
+      label: "Drop area" + (runtimeGeometryConfirmed ? "" : " (unconfirmed)"),
+      corners: geometry.drop_area_corners.map(function (pt) {
+        return { field_x: pt.field_x_m, field_y: pt.field_y_m, lat: pt.lat, lon: pt.lon, name: pt.name };
+      })
+    });
+  }
+  // Recce area corners
+  if (Array.isArray(geometry.recce_area_corners) && geometry.recce_area_corners.length === 4) {
+    boxes.push({
+      kind: "recce_area",
+      label: "Recce area" + (runtimeGeometryConfirmed ? "" : " (unconfirmed)"),
+      corners: geometry.recce_area_corners.map(function (pt) {
+        return { field_x: pt.field_x_m, field_y: pt.field_y_m, lat: pt.lat, lon: pt.lon, name: pt.name };
+      })
+    });
+  }
+  // Home point
+  var home = geometry.home;
+  // Build reference
+  var heading = (geometry.heading || {});
+  profilePreview = {
+    ok: true,
+    profile_id: "runtime_geometry",
+    reference: {
+      origin_lat: home ? home.lat : 0,
+      origin_lon: home ? home.lon : 0,
+      field_heading_deg: heading.degrees || 0
+    },
+    boxes: boxes,
+    _runtime: true,
+    _confirmed: runtimeGeometryConfirmed
+  };
+  fieldMapInfoBoxKey = "";
+  scheduleFieldMapRender();
+}
+
 var fieldMapRenderPending = false;
 var latestFieldMapState = null;
 var fieldMapInfoBoxKey = "";
@@ -1250,5 +1304,6 @@ function renderFieldMapNow(next) {
     setupFieldMapInteractions: setupFieldMapInteractions,
     renderFieldMap: renderFieldMap,
     setProfilePreview: setProfilePreview,
+    setRuntimeGeometry: setRuntimeGeometry,
   };
 })();

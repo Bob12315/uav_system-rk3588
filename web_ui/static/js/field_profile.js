@@ -1,344 +1,383 @@
 window.UavFieldProfiles = (function () {
     "use strict";
 
-    var selectedProfileId = null;
-    var selectedProfileSchema = null;
-    var selectedProfileData = null;
-    var lastFieldReferenceStatus = null;
+    // ── module state ────────────────────────────────────────────────────
+    var lastStatus = null;
     var requestBusy = false;
-    var lastGeometryJson = "";
+    var templateSummary = null;
 
     function $(id) { return document.getElementById(id); }
-    function setText(id, text) { var e = $(id); if (e) e.textContent = typeof text === "string" ? text : String(text || ""); }
+    function setText(id, text) {
+        var e = $(id);
+        if (e) {
+            var t = typeof text === "string" ? text : String(text || "");
+            if (e.textContent !== t) e.textContent = t;
+        }
+    }
     var api = window.UavApi;
 
-    function gps2(x, y) { return x != null && y != null ? Number(x).toFixed(7) + ", " + Number(y).toFixed(7) : "--"; }
+    function gps2(lat, lon) {
+        if (lat == null || lon == null) return "--";
+        return Number(lat).toFixed(7) + ", " + Number(lon).toFixed(7);
+    }
 
-    // ── profile list ─────────────────────────────────────────────────
-    async function fetchProfileList() {
+    // ── fetch template summary (one-time) ──────────────────────────────
+    async function fetchTemplateSummary() {
         try {
-            var data = await api.request("/api/field-profiles");
-            var profiles = (data && data.ok === true && Array.isArray(data.profiles)) ? data.profiles : [];
-            renderProfileList(profiles);
-            return profiles;
-        } catch (e) { return []; }
-    }
-
-    function renderProfileList(profiles) {
-        var sel = $("fpProfileSelect");
-        if (!sel) return;
-        while (sel.options.length) sel.remove(0);
-        var opt = document.createElement("option"); opt.value = ""; opt.textContent = "-- Select --"; sel.appendChild(opt);
-        profiles.forEach(function (p) {
-            var o = document.createElement("option");
-            o.value = p.profile_id || "";
-            o.textContent = (p.source ? "[" + p.source + "] " : "") + (p.profile_id || "") + " — " + (p.name || "");
-            if (p.invalid) o.textContent += " (invalid)";
-            sel.appendChild(o);
-        });
-        restoreSelectedProfile(sel);
-    }
-
-    function restoreSelectedProfile(sel) {
-        if (!sel) return;
-        try { var saved = window.localStorage.getItem("uavSelectedProfileId"); } catch (e) { var saved = null; }
-        if (saved) {
-            for (var i = 0; i < sel.options.length; i++) {
-                if (sel.options[i].value === saved) { sel.selectedIndex = i; break; }
+            var d = await api.request("/api/field-profiles/competition_runtime_v3");
+            if (d && d.ok === true) {
+                templateSummary = d;
+                renderTemplateSummary(d);
             }
-        }
-        if (sel.selectedIndex > 0) {
-            loadAndRenderProfile(sel.value);
-        } else {
-            $("fpProfileDetail").style.display = "none";
-        }
+        } catch (e) { /* ignore */ }
     }
 
-    // ── profile loading ──────────────────────────────────────────────
-    async function loadAndRenderProfile(id) {
-        if (!id) {
-            selectedProfileId = selectedProfileSchema = selectedProfileData = null;
-            var pd = $("fpProfileDetail"); if (pd) pd.style.display = "none";
-            updateRuntimeControls();
-            return null;
+    function renderTemplateSummary(data) {
+        if (!data) return;
+        var fg = data.field_geometry || {};
+        setText("cfsLaneHalfWidth", (fg.lane_half_width_m || "--") + " m");
+        setText("cfsDropRange",
+            (fg.drop_area_y_min_m != null ? fg.drop_area_y_min_m : "--") + " – " +
+            (fg.drop_area_y_max_m != null ? fg.drop_area_y_max_m : "--") + " m");
+        setText("cfsRecceRange",
+            (fg.recce_area_y_min_m != null ? fg.recce_area_y_min_m : "--") + " – " +
+            (fg.recce_area_y_max_m != null ? fg.recce_area_y_max_m : "--") + " m");
+        var ds = data.drop_scan || {};
+        setText("cfsDropScanPoints",
+            (ds.waypoints || []).map(function (w, i) {
+                return "pt" + (i + 1) + "(" + w.x_m + "," + w.y_m + "," + w.altitude_m + ")";
+            }).join(" ") || "--");
+        setText("cfsScanAltitude",
+            (ds.waypoints && ds.waypoints.length ? ds.waypoints[0].altitude_m + " m" : "--"));
+        var ros = data.runtime_origin_sampling || {};
+        setText("cfsSamplingPolicy",
+            ros.min_samples + " samples / " + ros.sample_window_s + "s / spread<" +
+            ros.max_horizontal_spread_m + "m / " + ros.estimator);
+        var bp = data.binding_policy || {};
+        setText("cfsBaselinePolicy",
+            "min=" + (bp.min_baseline_m || "--") + "m warn=" + (bp.warn_baseline_below_m || "--") + "m");
+    }
+
+    // ── input validation ──────────────────────────────────────────────
+    function parseInputLatLon() {
+        var latEl = $("cfsForwardLat"), lonEl = $("cfsForwardLon");
+        if (!latEl || !lonEl) return null;
+        var latStr = (latEl.value || "").trim();
+        var lonStr = (lonEl.value || "").trim();
+        if (!latStr || !lonStr) return null;
+        var lat = Number(latStr), lon = Number(lonStr);
+        if (!isFinite(lat) || !isFinite(lon)) return null;
+        if (lat > 90 || lat < -90) return null;
+        if (lon > 180 || lon < -180) return null;
+        return { lat: lat, lon: lon };
+    }
+
+    function isInputValid() {
+        return parseInputLatLon() !== null;
+    }
+
+    // ── state machine ──────────────────────────────────────────────────
+    function getRuntimeState() {
+        var fr = (lastStatus || {}).field_reference || {};
+        var runtime = fr.runtime_binding || {};
+        return {
+            state: runtime.state || "idle",
+            canFinalize: (runtime.sampling || {}).can_finalize === true,
+            isFrozen: fr.is_frozen === true,
+            isConfirmed: fr.is_confirmed === true,
+            isApplied: runtime.state === "applied",
+            isSampling: runtime.state === "sampling",
+            isSamplingFailed: runtime.state === "sampling_failed",
+            isApplyFailed: runtime.state === "apply_failed"
+        };
+    }
+
+    function updateButtons() {
+        var rs = getRuntimeState();
+        var busy = requestBusy;
+        var inputOk = isInputValid();
+        var sBtn = $("cfsStart"), fBtn = $("cfsFinalize");
+        var cBtn = $("cfsCancel"), rBtn = $("cfsReset");
+
+        function disableAll() {
+            if (sBtn) sBtn.disabled = true;
+            if (fBtn) { fBtn.disabled = true; fBtn.textContent = "确认并冻结"; }
+            if (cBtn) cBtn.disabled = true;
+            if (rBtn) rBtn.disabled = true;
         }
-        try {
-            var data = await api.request("/api/field-profiles/" + encodeURIComponent(id));
-            if (!data || data.ok !== true) {
-                selectedProfileId = selectedProfileSchema = selectedProfileData = null;
-                var pd = $("fpProfileDetail"); if (pd) pd.style.display = "none";
-                updateRuntimeControls();
-                return data || null;
+
+        // Lock B inputs during non-idle states
+        var inputsLocked = rs.state !== "idle";
+        var latEl = $("cfsForwardLat"), lonEl = $("cfsForwardLon");
+        if (latEl) latEl.disabled = inputsLocked;
+        if (lonEl) lonEl.disabled = inputsLocked;
+
+        if (busy) { disableAll(); return; }
+
+        if (rs.isApplied) {
+            // applied — only Reset
+            disableAll();
+            if (rBtn) rBtn.disabled = false;
+            return;
+        }
+
+        if (rs.state === "idle") {
+            disableAll();
+            if (sBtn && inputOk && !rs.isFrozen) sBtn.disabled = false;
+            if (rBtn) rBtn.disabled = false;
+            return;
+        }
+
+        if (rs.isSampling) {
+            disableAll();
+            if (cBtn) cBtn.disabled = false;
+            if (fBtn) {
+                fBtn.disabled = !rs.canFinalize;
             }
-            selectedProfileId = data.profile_id;
-            selectedProfileSchema = Number(data.schema_version);
-            selectedProfileData = data;
-            try { window.localStorage.setItem("uavSelectedProfileId", String(id)); } catch (e) {}
-            renderProfileDetail(data);
-            updateRuntimeControls();
-            return data;
-        } catch (err) {
-            selectedProfileId = selectedProfileSchema = selectedProfileData = null;
-            var pd = $("fpProfileDetail"); if (pd) pd.style.display = "none";
-            updateRuntimeControls();
-            return null;
+            if (rBtn) rBtn.disabled = false;
+            return;
         }
-    }
 
-    function fetchMapPreview(id) {
-        return api.request("/api/field-profiles/" + encodeURIComponent(id) + "/map-preview").then(function (d) {
-            if (window.UavFieldMap && window.UavFieldMap.setProfilePreview) {
-                window.UavFieldMap.setProfilePreview(d);
-            }
-        }).catch(function () { });
-    }
-
-    function renderProfileDetail(data) {
-        if (!data || data.ok !== true) return;
-        var sv = Number(data.schema_version);
-        setText("fpProfileId", data.profile_id || "--");
-        setText("fpProfileName", data.name || "--");
-        setText("fpProfileSchema", sv === 3 ? "v3 Runtime GPS" : sv === 2 ? "v2 Legacy Centerline" : String(sv));
-        setText("fpProfileSource", data.source || "--");
-        var pd = $("fpProfileDetail"); if (pd) pd.style.display = "";
-
-        // GPS quality (both v2 and v3)
-        var gq = data.gps_quality || {};
-        setText("fpGpsQualityFixSats", "fix\u2265" + (gq.min_fix_type||"--") + " sats\u2265" + (gq.min_satellites||"--"));
-        setText("fpGpsQualityEphEpv", "eph\u2264" + (gq.max_eph||"--") + " epv\u2264" + (gq.max_epv||"--"));
-
-        // Clear all schema-specific fields before rendering
-        setText("fpOriginLatLon", "--");
-        setText("fpOriginField", "--");
-        setText("fpClPoints", "--");
-        setText("fpClDetails", "--");
-        setText("fpV3Marker", "--");
-        setText("fpV3Scan", "--");
-        setText("fpV3Sampling", "--");
-        setText("fpV3Baseline", "--");
-        setText("fpV3Geometry", "--");
-
-        if (sv === 2) {
-            var anc = data.anchor || {};
-            setText("fpOriginLatLon", gps2(anc.lat, anc.lon));
-            setText("fpOriginField", "(0,0) init");
-            var cl = data.centerline_points || [];
-            setText("fpClPoints", cl.length + " pts");
-            setText("fpClDetails", cl.map(function (p) { return p.name + " (" + p.lat.toFixed(7) + "," + p.lon.toFixed(7) + ")"; }).join("\\n") || "--");
-            fetchMapPreview(selectedProfileId);
-        } else if (sv === 3) {
-            var fm = data.forward_marker || {};
-            setText("fpOriginLatLon", gps2(fm.lat, fm.lon));
-            setText("fpV3Marker", (fm.name||"--") + " (" + gps2(fm.lat, fm.lon) + ") WGS84");
-            var ds = data.drop_scan || {};
-            setText("fpClPoints", "4 scan pts");
-            setText("fpV3Scan", (ds.waypoints || []).map(function (w, i) { return "pt" + (i + 1) + " (" + w.x_m + "," + w.y_m + "," + w.altitude_m + ")"; }).join("\\n") || "--");
-            var ros = data.runtime_origin_sampling || {};
-            setText("fpV3Sampling", ros.min_samples + " samples " + ros.sample_window_s + "s window spread<" + ros.max_horizontal_spread_m + " " + ros.estimator);
-            var bp = data.binding_policy || {};
-            setText("fpV3Baseline", "min=" + (bp.min_baseline_m||"--") + "m warn=" + (bp.warn_baseline_below_m||"--") + "m");
-            var fg = data.field_geometry || {};
-            setText("fpV3Geometry", "lane=" + (fg.lane_half_width_m||"--") + "m drop_y=" + (fg.drop_area_y_min_m||"--") + "-" + (fg.drop_area_y_max_m||"--") + "m recce_y=" + (fg.recce_area_y_min_m||"--") + "-" + (fg.recce_area_y_max_m||"--") + "m");
-            if (window.UavFieldMap && window.UavFieldMap.setProfilePreview) window.UavFieldMap.setProfilePreview(null);
-            setText("fpHint", "\u52a8\u6001 GPS \u573a\u5730\u56fe\u5c06\u5728 runtime reference \u786e\u8ba4\u540e\u7531 Step 7 \u63a5\u5165\u3002");
+        if (rs.isSamplingFailed) {
+            disableAll();
+            if (cBtn) cBtn.disabled = false;
+            if (rBtn) rBtn.disabled = false;
+            return;
         }
+
+        if (rs.isApplyFailed) {
+            disableAll();
+            if (fBtn) { fBtn.disabled = false; fBtn.textContent = "重试确认并冻结"; }
+            if (cBtn) cBtn.disabled = false;
+            if (rBtn) rBtn.disabled = false;
+            return;
+        }
+
+        disableAll();
+        if (rBtn) rBtn.disabled = false;
     }
 
-    // ── legacy bind ──────────────────────────────────────────────────
-    async function validateProfile() {
-        if (!selectedProfileId) { alert("请先选择 Profile"); return; }
-        try {
-            var d = await api.request("/api/field-profiles/" + encodeURIComponent(selectedProfileId) + "/validate");
-            alert("Validate: " + (d && d.ok === true ? "PASS" : ("FAIL — " + ((d||{}).error || "unknown"))));
-        } catch (e) { alert("Validate error: " + e.message); }
-    }
-
-    async function bindCurrentProfile() {
-        if (!selectedProfileId || selectedProfileSchema !== 2) { alert("仅 Schema v2 支持 bind-current"); return; }
-        if (requestBusy) return;
-        if (!confirm("将使用当前无人机 GPS + LOCAL_NED 绑定所选 Field Profile。\\n该操作不会启动 Mission，不会发送飞控命令。")) return;
-        requestBusy = true; updateRuntimeControls();
-        try {
-            var r = await api.request("/api/field-profiles/" + encodeURIComponent(selectedProfileId) + "/bind-current", { method: "POST", body: "{}" });
-            renderBindResult(r);
-            if (window.UavFieldRef && window.UavFieldRef.fetchFieldReferenceStatus) {
-                window.UavFieldRef.fetchFieldReferenceStatus({ scheduleNext: false });
-            }
-        } finally { requestBusy = false; updateRuntimeControls(); }
-    }
-
-    function renderBindResult(data) {
-        if (!data || data.ok !== true) return;
-        // Bind result is a grid container — do NOT replace its textContent
-        setText("fpBindOk", "YES");
-        setText("fpBindProfileId", data.profile_id || "--");
-        setText("fpBindSynced", data.synced_to_runtime ? "YES" : "no");
-        setText("fpBindHeading", data.field_heading_deg != null ? data.field_heading_deg.toFixed(2) + " deg" : "--");
-        setText("fpBindOriginLocal", data.origin_local_n_m != null ? data.origin_local_n_m.toFixed(2) + ", " + data.origin_local_e_m.toFixed(2) : "--");
-        setText("fpBindCurrentField", data.current_field_x_m != null ? data.current_field_x_m.toFixed(2) + ", " + data.current_field_y_m.toFixed(2) : "--");
-        var rdiv = $("fpBindResult"); if (rdiv) rdiv.style.display = "";
-    }
-
-    // ── runtime controls ──────────────────────────────────────────────
-    function updateRuntimeControls() {
-        var fr = (lastFieldReferenceStatus || {}).field_reference || {};
+    // ── render status ──────────────────────────────────────────────────
+    function onFieldReferenceStatus(data) {
+        lastStatus = data;
+        var fr = (data || {}).field_reference || {};
         var runtime = fr.runtime_binding || {};
         var sampling = runtime.sampling || {};
-        var busy = requestBusy;
-        var schema = selectedProfileSchema;
-        var frozen = fr.is_frozen === true;
-        var state = runtime.state || "idle";
+        var telemetry = (data || {}).telemetry || {};
 
-        var startBtn = $("fpRuntimeStart"), finBtn = $("fpRuntimeFinalize"), cancelBtn = $("fpRuntimeCancel");
-        var bindBtn = $("fpBindCurrent"), freezeBtn = $("frFreeze"), validateBtn = $("fpValidateProfile");
+        // ---- telemetry ----------------------------------------------------
+        setText("cfsCurrentGps", gps2(telemetry.lat, telemetry.lon));
+        setText("cfsGpsFixSats",
+            "fix=" + (telemetry.gps_fix_type != null ? telemetry.gps_fix_type : "--") +
+            " sats=" + (telemetry.satellites_visible != null ? telemetry.satellites_visible : "--"));
+        setText("cfsGpsEphEpv",
+            "eph=" + (telemetry.gps_eph != null ? Number(telemetry.gps_eph).toFixed(2) : "--") +
+            " epv=" + (telemetry.gps_epv != null ? Number(telemetry.gps_epv).toFixed(2) : "--"));
+        setText("cfsGpsValid", telemetry.global_position_valid ? "YES" : "no");
+        setText("cfsGpsTimestamp",
+            telemetry.last_global_position_time != null
+                ? String(telemetry.last_global_position_time)
+                : "--");
 
-        function allOff() {
-            if (startBtn) { startBtn.disabled = true; }
-            if (finBtn) { finBtn.disabled = true; finBtn.textContent = "确认并冻结"; }
-            if (cancelBtn) cancelBtn.disabled = true;
-            if (bindBtn) bindBtn.disabled = true;
-            if (freezeBtn) freezeBtn.disabled = true;
-            if (validateBtn) validateBtn.disabled = false;
+        // ---- runtime panel ------------------------------------------------
+        var rsPanel = $("cfsRuntimePanel");
+        if (rsPanel) {
+            rsPanel.style.display =
+                (runtime.state === "sampling" || runtime.state === "sampling_failed")
+                    ? "" : "none";
+        }
+        setText("cfsSamplingState", runtime.state || "--");
+        setText("cfsSamplingAccepted",
+            (sampling.accepted_samples != null ? sampling.accepted_samples : "--") +
+            " / " + (sampling.min_samples || 20));
+        setText("cfsSamplingRejected",
+            sampling.rejected_samples != null ? String(sampling.rejected_samples) : "--");
+        setText("cfsSamplingDuplicate",
+            sampling.duplicate_samples != null ? String(sampling.duplicate_samples) : "--");
+        setText("cfsSamplingElapsed",
+            (sampling.elapsed_s != null ? Number(sampling.elapsed_s).toFixed(1) : "--") +
+            " / " + (sampling.sample_window_s || 0) + " s");
+        var summary = runtime.candidate_summary;
+        setText("cfsSamplingSpread",
+            (summary && summary.horizontal_spread_m != null)
+                ? Number(summary.horizontal_spread_m).toFixed(3) + " m" : "--");
+        setText("cfsSamplingLastRejection", sampling.last_rejection_reason || "--");
+
+        var prog = $("cfsSamplingProgress");
+        if (prog) {
+            prog.max = Math.max(Number(sampling.sample_window_s) || 1, 1);
+            prog.value = Math.min(Number(sampling.elapsed_s) || 0, prog.max);
         }
 
-        if (busy) { allOff(); return; }
-        if (state === "applied") { allOff(); if (freezeBtn) freezeBtn.disabled = true; return; }
+        // ---- candidate preview --------------------------------------------
+        var preview_panel = $("cfsCandidatePanel");
+        var preview_error = $("cfsError");
+        if (preview_panel) {
+            var showPreview = (summary && runtime.state === "sampling" && sampling.window_complete);
+            if (runtime.preview_error) showPreview = true;
+            if (runtime.state === "sampling_failed") showPreview = true;
+            preview_panel.style.display = showPreview ? "" : "none";
+        }
+        if (summary) {
+            setText("cfsOriginA", gps2(summary.origin_lat, summary.origin_lon));
+            setText("cfsForwardB", gps2(summary.forward_marker_lat, summary.forward_marker_lon));
+            setText("cfsBaseline",
+                summary.baseline_m != null ? Number(summary.baseline_m).toFixed(2) + " m" : "--");
+            setText("cfsHeading",
+                summary.field_heading_deg != null
+                    ? Number(summary.field_heading_deg).toFixed(2) + " deg" : "--");
+            setText("cfsWarnings",
+                (summary.warnings && summary.warnings.length)
+                    ? summary.warnings.join("; ") : "--");
+        } else {
+            setText("cfsOriginA", "--");
+            setText("cfsForwardB",
+                gps2(runtime.forward_marker_lat, runtime.forward_marker_lon));
+            setText("cfsBaseline", "--");
+            setText("cfsHeading", "--");
+            setText("cfsWarnings", "--");
+        }
+        setText("cfsError", runtime.preview_error || runtime.last_error || "--");
 
-        if (state === "idle") {
-            allOff();
-            // Start / Bind based on schema
-            if (schema === 3) {
-                if (startBtn) startBtn.disabled = false;
-                if (bindBtn) bindBtn.disabled = true;
-            } else if (schema === 2) {
-                if (bindBtn) bindBtn.disabled = false;
-                if (startBtn) startBtn.disabled = true;
+        // ---- confirmed panel ----------------------------------------------
+        var cp = $("cfsConfirmedPanel");
+        if (cp) cp.style.display = (runtime.state === "applied") ? "" : "none";
+        setText("cfsConfirmed", fr.is_confirmed ? "YES" : "no");
+        setText("cfsFrozen", fr.is_frozen ? "YES" : "no");
+        setText("cfsGpsReady", fr.is_ready_for_field_to_gps ? "YES" : "no");
+        setText("cfsSynced", fr.synced_to_runtime ? "YES" : "no");
+
+        // ---- Field Map (runtime geometry) ---------------------------------
+        var geom = runtime.geometry || (runtime.last_result || {}).geometry;
+        if (geom && window.UavFieldMap) {
+            if (window.UavFieldMap.setRuntimeGeometry) {
+                window.UavFieldMap.setRuntimeGeometry(geom, runtime.state === "applied");
+            } else if (window.UavFieldMap.setProfilePreview) {
+                // adapter: pass geometry as a profile-preview-like object
+                window.UavFieldMap.setProfilePreview({
+                    ok: true,
+                    type: "runtime_geometry",
+                    geometry: geom,
+                    is_confirmed: runtime.state === "applied",
+                    is_frozen: runtime.state === "applied"
+                });
             }
-            // Freeze: strictly schema === 2, confirmed, not frozen, not busy
-            if (freezeBtn) {
-                freezeBtn.disabled = !(schema === 2 && fr.is_confirmed === true && frozen === false && busy === false);
-            }
-            return;
         }
-        if (state === "sampling") {
-            allOff();
-            if (cancelBtn) cancelBtn.disabled = false;
-            if (finBtn) finBtn.disabled = !(sampling.can_finalize === true);
-            return;
+
+        updateButtons();
+
+        // Also forward to legacy rendering for backward-compat
+        if (window.UavFieldRef && window.UavFieldRef.renderFieldReference) {
+            window.UavFieldRef.renderFieldReference(data);
         }
-        if (state === "sampling_failed") { allOff(); if (cancelBtn) cancelBtn.disabled = false; return; }
-        if (state === "apply_failed") {
-            allOff();
-            if (finBtn) { finBtn.disabled = false; finBtn.textContent = "重试确认并冻结"; }
-            if (cancelBtn) cancelBtn.disabled = false;
-            return;
-        }
-        allOff();
     }
 
-    async function _runtimeOp(url, confirmMsg) {
+    // ── actions ────────────────────────────────────────────────────────
+    async function _doPost(url, confirmMsg, onOk) {
         if (requestBusy) return;
-        if (!confirm(confirmMsg)) return;
-        requestBusy = true; updateRuntimeControls();
+        if (confirmMsg && !window.confirm(confirmMsg)) return;
+        requestBusy = true;
+        updateButtons();
         try {
             var r = await api.request(url, { method: "POST", body: "{}" });
             if (r && r.ok === false) {
                 var msg = r.error || "unknown error";
-                if (r.rollback_ok !== undefined) msg += "\nRollback: " + (r.rollback_ok ? "OK" : "FAILED");
                 alert(msg);
             }
+            if (onOk && r && r.ok === true) onOk(r);
+            // trigger immediate re-fetch
             if (window.UavFieldRef && window.UavFieldRef.fetchFieldReferenceStatus) {
                 window.UavFieldRef.fetchFieldReferenceStatus({ scheduleNext: false });
             }
-        } finally { requestBusy = false; updateRuntimeControls(); }
-    }
-
-    function startRuntimeSampling() {
-        if (selectedProfileSchema !== 3) { alert("请先选择 Schema v3 Profile"); return; }
-        _runtimeOp("/api/field-profiles/" + encodeURIComponent(selectedProfileId) + "/runtime-sampling/start",
-            "将使用当前飞行器 WGS84 GPS 采样动态原点。\n采样不会启动 Mission，不会发送飞控命令。\n采样期间请保持无人机静止。");
-    }
-
-    function finalizeRuntimeSampling() {
-        _runtimeOp("/api/field-reference/runtime-sampling/finalize",
-            "将结束 GPS 采样，应用动态原点和场地方向并冻结 Field Reference。\n成功后如需更改，必须执行完整重置。\n该操作不会启动 Mission，不会发送飞控命令。");
-    }
-
-    function cancelRuntimeSampling() {
-        _runtimeOp("/api/field-reference/runtime-sampling/cancel",
-            "取消当前 GPS 采样？\n已应用并冻结的 reference 不能通过取消清除。");
-    }
-
-    // ── status rendering ──────────────────────────────────────────────
-    function onFieldReferenceStatus(data) {
-        lastFieldReferenceStatus = data;
-        var fr = (data || {}).field_reference || {};
-        var runtime = fr.runtime_binding || {};
-        var sampling = runtime.sampling || {};
-
-        var panel = $("fpRuntimeSampling");
-        if (panel) panel.style.display = runtime.state && runtime.state !== "idle" ? "" : "none";
-
-        setText("fpSamplingState", runtime.state || "--");
-        setText("fpSamplingElapsed", sampling.elapsed_s != null ? sampling.elapsed_s.toFixed(1) + " / " + (sampling.sample_window_s || 0) + " s" : "--");
-        setText("fpSamplingAccepted", sampling.accepted_samples + " / " + (sampling.min_samples || 20));
-        setText("fpSamplingRejected", sampling.rejected_samples != null ? sampling.rejected_samples : "--");
-        setText("fpSamplingDuplicate", sampling.duplicate_samples != null ? sampling.duplicate_samples : "--");
-        setText("fpSamplingWindowComplete", sampling.window_complete ? "YES" : "no");
-        setText("fpSamplingCanFinalize", sampling.can_finalize ? "YES" : "no");
-        setText("fpSamplingLastRejection", sampling.last_rejection_reason || "--");
-        var prog = $("fpSamplingProgress");
-        if (prog) { prog.max = Math.max(Number(sampling.sample_window_s) || 1, 1); prog.value = Math.min(Number(sampling.elapsed_s) || 0, prog.max); }
-
-        var result = runtime.last_result || runtime.candidate_summary;
-        var rp = $("fpRuntimeResult");
-        if (rp) rp.style.display = result ? "" : "none";
-        if (result) {
-            setText("fpRuntimeOrigin", gps2(result.origin_lat, result.origin_lon));
-            setText("fpRuntimeMarker", gps2(result.forward_marker_lat, result.forward_marker_lon));
-            setText("fpRuntimeHeading", result.field_heading_deg != null ? result.field_heading_deg.toFixed(2) + " deg" : "--");
-            setText("fpRuntimeBaseline", result.baseline_m != null ? result.baseline_m.toFixed(2) + " m" : "--");
-            setText("fpRuntimeSpread", result.horizontal_spread_m != null ? result.horizontal_spread_m.toFixed(3) + " m" : "--");
-            setText("fpRuntimeSampleCount", result.sample_count || "--");
-            setText("fpRuntimeWarnings", (result.warnings || []).length ? result.warnings.join("; ") : "--");
-            if (result.geometry) {
-                var gs = JSON.stringify(result.geometry, null, 2);
-                var gp = $("fpRuntimeGeometry");
-                if (gp && gp.textContent !== gs) gp.textContent = gs;
-            }
+        } finally {
+            requestBusy = false;
+            updateButtons();
         }
-        updateRuntimeControls();
     }
 
-    function getRuntimeUiState() {
-        return { selectedProfileId: selectedProfileId, selectedProfileSchema: selectedProfileSchema, requestBusy: requestBusy };
+    function onStart() {
+        var coords = parseInputLatLon();
+        if (!coords) { alert("请先输入有效的 WGS84 坐标"); return; }
+        _doPost(
+            "/api/field-reference/runtime-sampling/start",
+            "将使用当前飞机 WGS84 GPS 采样起点 A，\n并使用输入的远点 B 定义场地 +Y。\n请保持无人机静止。\n该操作不会启动 Mission，不会发送飞控命令。",
+            null
+        );
     }
 
-    // ── init ──────────────────────────────────────────────────────────
+    function onFinalize() {
+        _doPost(
+            "/api/field-reference/runtime-sampling/finalize",
+            "将应用动态原点 A、远点 B 和固定场地几何，\n并冻结 Field Reference。\n成功后如需修改，必须完整重置。\n该操作不会启动 Mission，不会发送飞控命令。",
+            null
+        );
+    }
+
+    function onCancel() {
+        _doPost(
+            "/api/field-reference/runtime-sampling/cancel",
+            "取消当前 GPS 采样？\n该操作不会发送飞控命令。",
+            null
+        );
+    }
+
+    function onReset() {
+        var confirmed = window.confirm(
+            "将清除本次远点 B、GPS采样、Field Reference 和冻结状态。\n不会发送飞控命令。"
+        );
+        if (!confirmed) return;
+        requestBusy = true;
+        updateButtons();
+        try {
+            api.request("/api/field-reference/reset", { method: "POST", body: "{}" }).then(function (r) {
+                var latEl = $("cfsForwardLat"), lonEl = $("cfsForwardLon");
+                if (latEl) latEl.value = "";
+                if (lonEl) lonEl.value = "";
+                requestBusy = false;
+                updateButtons();
+                if (window.UavFieldRef && window.UavFieldRef.fetchFieldReferenceStatus) {
+                    window.UavFieldRef.fetchFieldReferenceStatus({ scheduleNext: false });
+                }
+            }).catch(function () {
+                requestBusy = false;
+                updateButtons();
+            });
+        } catch (e) {
+            requestBusy = false;
+            updateButtons();
+        }
+    }
+
+    // ── init ───────────────────────────────────────────────────────────
     function init() {
-        var sel = $("fpProfileSelect");
-        if (sel) sel.onchange = function () { loadAndRenderProfile(this.value || null); };
-        var rb = $("fpRefreshList"); if (rb) rb.addEventListener("click", fetchProfileList);
-        var vb = $("fpValidateProfile"); if (vb) vb.addEventListener("click", validateProfile);
-        var bb = $("fpBindCurrent"); if (bb) bb.addEventListener("click", bindCurrentProfile);
+        // Wire competition buttons
+        var sb = $("cfsStart"); if (sb) sb.addEventListener("click", onStart);
+        var fb = $("cfsFinalize"); if (fb) fb.addEventListener("click", onFinalize);
+        var cb = $("cfsCancel"); if (cb) cb.addEventListener("click", onCancel);
+        var rb = $("cfsReset"); if (rb) rb.addEventListener("click", onReset);
 
-        var sb = $("fpRuntimeStart"); if (sb) sb.addEventListener("click", startRuntimeSampling);
-        var fb = $("fpRuntimeFinalize"); if (fb) fb.addEventListener("click", finalizeRuntimeSampling);
-        var cb = $("fpRuntimeCancel"); if (cb) cb.addEventListener("click", cancelRuntimeSampling);
+        // Input listeners for enable/disable
+        var latEl = $("cfsForwardLat"), lonEl = $("cfsForwardLon");
+        var inputHandler = function () { updateButtons(); };
+        if (latEl) latEl.addEventListener("input", inputHandler);
+        if (lonEl) lonEl.addEventListener("input", inputHandler);
 
-        fetchProfileList();
-        updateRuntimeControls();
+        // Fetch template for fixed summary display
+        fetchTemplateSummary();
+
+        updateButtons();
     }
 
     return {
         init: init,
-        fetchProfileList: fetchProfileList,
-        loadAndRenderProfile: loadAndRenderProfile,
         onFieldReferenceStatus: onFieldReferenceStatus,
-        startRuntimeSampling: startRuntimeSampling,
-        finalizeRuntimeSampling: finalizeRuntimeSampling,
-        cancelRuntimeSampling: cancelRuntimeSampling,
-        updateRuntimeControls: updateRuntimeControls,
-        getRuntimeUiState: getRuntimeUiState
+        // Legacy API compat (exposed for App.js destructuring)
+        getRuntimeUiState: function () {
+            return { requestBusy: requestBusy };
+        },
+        updateRuntimeControls: updateButtons,
+        // v2 legacy compat placeholders
+        fetchProfileList: function () {},
+        loadAndRenderProfile: function () {}
     };
 })();

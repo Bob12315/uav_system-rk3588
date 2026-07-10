@@ -493,21 +493,22 @@ class RuntimeFieldBindingSampler:
         return self.status(now_s=observed_at_s)
 
     # ------------------------------------------------------------------
-    # finalize
+    # finalize / preview
     # ------------------------------------------------------------------
 
-    def finalize(
-        self, *, completed_at_s: float
+    def _build_candidate(
+        self,
+        *,
+        completed_at_s: float,
     ) -> RuntimeFieldBindingCandidate:
-        """Produce a binding candidate from the completed sampling session."""
+        """Construct a binding candidate from the current accepted samples.
 
-        if self._state == "ready":
-            assert self._candidate is not None
-            return self._candidate
-
+        Does NOT modify sampler state.  Pure computation — no side effects.
+        Raises RuntimeFieldBindingError on any failure.
+        """
         if self._state != "sampling":
             raise RuntimeFieldBindingError(
-                f"cannot finalize in state {self._state!r}"
+                f"cannot build candidate in state {self._state!r}"
             )
 
         if not _is_finite_number(completed_at_s):
@@ -530,8 +531,6 @@ class RuntimeFieldBindingSampler:
 
         n = self._accepted_n
         if n < self._ros.min_samples:
-            self._state = "failed"
-            self._completed_at_s = completed_at_s
             raise RuntimeFieldBindingError(
                 f"accepted samples {n} < required {self._ros.min_samples}"
             )
@@ -550,8 +549,6 @@ class RuntimeFieldBindingSampler:
         spread = max(radii) if radii else 0.0
 
         if spread > self._ros.max_horizontal_spread_m:
-            self._state = "failed"
-            self._completed_at_s = completed_at_s
             raise RuntimeFieldBindingError(
                 f"horizontal spread {spread:.3f}m exceeds "
                 f"max_horizontal_spread_m {self._ros.max_horizontal_spread_m}m"
@@ -565,8 +562,6 @@ class RuntimeFieldBindingSampler:
                 origin_lon=origin_lon,
             )
         except RuntimeFieldGeometryError as exc:
-            self._state = "failed"
-            self._completed_at_s = completed_at_s
             raise RuntimeFieldBindingError(str(exc)) from exc
 
         # Conservative GPS quality
@@ -575,7 +570,7 @@ class RuntimeFieldBindingSampler:
         gps_eph = max(s.eph for s in self._accepted)
         gps_epv = max(s.epv for s in self._accepted)
 
-        candidate = RuntimeFieldBindingCandidate(
+        return RuntimeFieldBindingCandidate(
             profile_id=self._profile.profile_id,
             origin_source=OriginSource.RUNTIME_CURRENT_GPS.value,
             heading_source=HeadingSource.RUNTIME_FORWARD_MARKER.value,
@@ -601,6 +596,34 @@ class RuntimeFieldBindingSampler:
             geometry=geometry,
             warnings=geometry.warnings,
         )
+
+    def preview_candidate(
+        self,
+        *,
+        completed_at_s: float,
+    ) -> RuntimeFieldBindingCandidate:
+        """Return a preview binding candidate without modifying sampler state.
+
+        Calls ``_build_candidate()`` — same math as ``finalize()``.
+        Does NOT set ``_state``, ``_completed_at_s``, or ``_candidate``.
+        """
+        return self._build_candidate(completed_at_s=completed_at_s)
+
+    def finalize(
+        self, *, completed_at_s: float
+    ) -> RuntimeFieldBindingCandidate:
+        """Produce a binding candidate from the completed sampling session."""
+
+        if self._state == "ready":
+            assert self._candidate is not None
+            return self._candidate
+
+        try:
+            candidate = self._build_candidate(completed_at_s=completed_at_s)
+        except RuntimeFieldBindingError:
+            self._state = "failed"
+            self._completed_at_s = completed_at_s
+            raise
 
         self._state = "ready"
         self._completed_at_s = completed_at_s

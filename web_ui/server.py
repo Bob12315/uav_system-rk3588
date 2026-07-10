@@ -57,6 +57,11 @@ class ManualStepMoveRequest(BaseModel):
     step_m: float = Field(gt=0, le=5.0)
 
 
+class RuntimeSamplingStartRequest(BaseModel):
+    forward_marker_lat: float
+    forward_marker_lon: float
+
+
 ACTION_MISSION_TEMPLATE_DIR = ROOT_DIR / "config" / "action_missions"
 ACTION_MISSION_TEMPLATE_NAMES = {
     "drop_two_targets_v2": "投放任务 v2",
@@ -406,6 +411,43 @@ def create_app(runner, config: UiConfig) -> FastAPI:
         except Exception as exc:
             result = {"ok": False, "error": str(exc)}
         _append_field_reference_audit("runtime_sampling_cancel", result)
+        return result
+
+    @app.post("/api/field-reference/runtime-sampling/start")
+    def competition_runtime_sampling_start(request: RuntimeSamplingStartRequest):
+        import math
+        try:
+            lat = request.forward_marker_lat
+            lon = request.forward_marker_lon
+            # Validate: not bool, finite, in range
+            if isinstance(lat, bool) or isinstance(lon, bool):
+                raise HTTPException(
+                    status_code=422,
+                    detail="forward_marker_lat/lon must be numbers, not bool",
+                )
+            if not math.isfinite(lat) or not math.isfinite(lon):
+                raise HTTPException(
+                    status_code=400,
+                    detail="forward_marker_lat/lon must be finite numbers",
+                )
+            if lat > 90.0 or lat < -90.0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="forward_marker_lat out of range [-90, 90]",
+                )
+            if lon > 180.0 or lon < -180.0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="forward_marker_lon out of range [-180, 180]",
+                )
+            result = runner.competition_runtime_sampling_start(lat, lon)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            result = {"ok": False, "error": str(exc)}
+        _append_field_reference_audit(
+            "competition_runtime_sampling_start", result
+        )
         return result
 
     @app.get("/api/field-profiles")

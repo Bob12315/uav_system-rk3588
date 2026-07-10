@@ -907,3 +907,36 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     .field-reference-status-grid { grid-template-columns: 1fr; }
     .button-row { flex-wrap: wrap; }
 }
+
+/* ── Competition Field Setup panel ──────────────────────────────────────── */
+#cfsForwardLat, #cfsForwardLon {
+  width: 180px;
+  padding: 3px 6px;
+  font-family: Consolas, monospace;
+  font-size: 13px;
+  background: #1a2838;
+  color: #e6edf6;
+  border: 1px solid #3a4f6a;
+  border-radius: 3px;
+}
+#cfsForwardLat:disabled, #cfsForwardLon:disabled {
+  opacity: .5;
+  background: #111b28;
+}
+#cfsGcjWarning {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: #f09050;
+}
+#cfsAdvancedLegacy {
+  margin-top: 12px;
+}
+#cfsAdvancedLegacy summary {
+  cursor: pointer;
+  color: #93a8bf;
+  font-size: 13px;
+  padding: 4px 0;
+}
+#cfsAdvancedLegacy .panel {
+  margin-top: 8px;
+}
