@@ -38,6 +38,7 @@ class FieldReferenceController:
         self._svc = field_reference_service
         self._builder = runtime_context_builder
         self._get_drone_snapshot = get_drone_snapshot
+        self._runtime_binding = RuntimeBindingOrchestrator(field_reference_service, runtime_context_builder)
         self._last_bind_result: Optional[BindResult] = None
         self._active_profile_id: Optional[str] = None
         self._last_bind_profile_id: Optional[str] = None
@@ -84,7 +85,7 @@ class FieldReferenceController:
         fr["is_ready_for_field_to_local"] = self._svc.reference.is_ready_for_field_to_local()
         fr["is_ready_for_field_to_gps"] = self._svc.reference.is_ready_for_field_to_gps()
         fr["is_frozen"] = self._svc.reference.is_frozen
-        fr["runtime_binding"] = self._runtime_binding.status() if hasattr(self, "_runtime_binding") else {"state": "not_initialized"}
+        fr["runtime_binding"] = self._runtime_binding.status()
         fr["synced_to_runtime"] = self._is_field_reference_synced(
             status, self._builder
         )
