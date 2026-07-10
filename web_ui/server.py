@@ -114,6 +114,16 @@ class WebUiServer:
 def create_app(runner, config: UiConfig) -> FastAPI:
     app = FastAPI(title="UAV Web Control")
     audit = AuditLog(config.audit_log_path)
+    def _append_field_reference_audit(action: str, result: dict, *, pid: str | None = None):
+        try:
+            st = result.get("state")
+            err = result.get("error")
+            msg = f"{action} profile_id={pid or result.get('profile_id') or '--'} state={st or '--'} error={err or '--'}"
+            audit.append("FIELD_REFERENCE", action, result.get("ok") is True, msg)
+        except Exception:
+            logging.getLogger("WebUiServer").warning("field reference audit append failed", exc_info=True)
+
+
     store = ConfigStore(ROOT_DIR)
     static_dir = Path(__file__).with_name("static")
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
@@ -377,31 +387,28 @@ def create_app(runner, config: UiConfig) -> FastAPI:
     def runtime_sampling_start(profile_id: str):
         try:
             result = runner.field_profile_runtime_sampling_start(profile_id)
-            _audit("FIELD_REFERENCE", "runtime_sampling_start", profile_id,
-                   ok=result.get("ok") is True, detail={"state": result.get("state"), "error": result.get("error"), "profile_id": profile_id})
-            return result
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            result = {"ok": False, "error": str(exc)}
+        _append_field_reference_audit("runtime_sampling_start", result, pid=profile_id)
+        return result
 
     @app.post("/api/field-reference/runtime-sampling/finalize")
     def runtime_sampling_finalize():
         try:
             result = runner.field_profile_runtime_sampling_finalize()
-            _audit("FIELD_REFERENCE", "runtime_sampling_finalize", "",
-                   ok=result.get("ok") is True, detail={"state": result.get("state"), "error": result.get("error")})
-            return result
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            result = {"ok": False, "error": str(exc)}
+        _append_field_reference_audit("runtime_sampling_finalize", result)
+        return result
 
     @app.post("/api/field-reference/runtime-sampling/cancel")
     def runtime_sampling_cancel():
         try:
             result = runner.field_profile_runtime_sampling_cancel()
-            _audit("FIELD_REFERENCE", "runtime_sampling_cancel", "",
-                   ok=result.get("ok") is True, detail={"state": result.get("state")})
-            return result
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            result = {"ok": False, "error": str(exc)}
+        _append_field_reference_audit("runtime_sampling_cancel", result)
+        return result
 
     @app.get("/api/field-profiles")
     def field_profiles_list():

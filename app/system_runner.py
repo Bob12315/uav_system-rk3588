@@ -555,6 +555,14 @@ class SystemRunner:
         for d in self._PROFILE_DIRS:
             try:
                 p = FieldProfileService.load_profile(profile_id, profile_dir=d)
+                if p.schema_version == 3:
+                    return {
+                        "ok": False,
+                        "profile_id": p.profile_id,
+                        "schema_version": 3,
+                        "reason": "runtime_reference_required",
+                        "error": "schema v3 GPS map preview requires an applied runtime reference",
+                    }
                 return FieldProfileService.build_map_preview(p)
             except FileNotFoundError:
                 continue

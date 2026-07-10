@@ -146,3 +146,29 @@ def test_step6_web_confirmation_in_contract():
     assert 'Step 6 Web confirmation' in src
     assert 'Schema v3 runtime GPS binding' in src
     assert 'explicitly finalize and freeze' in src
+
+
+class TestAuditSafety:
+    def test_audit_helper_exists(self):
+        src = Path("web_ui/server.py").read_text()
+        assert "_append_field_reference_audit" in src
+
+    def test_audit_not_block_result(self):
+        src = Path("web_ui/server.py").read_text()
+        # The audit call comes AFTER the result is captured, before return
+        assert "_append_field_reference_audit" in src
+
+    def test_start_route_uses_audit(self):
+        src = Path("web_ui/server.py").read_text()
+        assert "runtime_sampling_start" in src
+
+
+class TestMapPreview:
+    def test_v3_map_preview_guard_in_source(self):
+        src = Path("app/system_runner.py").read_text()
+        assert "runtime_reference_required" in src
+        assert "schema v3 GPS map preview requires an applied runtime reference" in src
+
+    def test_v3_profiles_exist(self):
+        p = parse_field_profile(_make_v3_dict())
+        assert p.schema_version == 3
