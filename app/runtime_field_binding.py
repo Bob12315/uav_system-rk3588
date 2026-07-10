@@ -27,6 +27,7 @@ from .field_reference import (
     HeadingSource,
     OriginSource,
     WGS84_POLE_COS_EPS,
+    circular_median_longitude_deg,
     gps_enu_deltas,
     normalize_longitude_deg,
     shortest_longitude_delta_deg,
@@ -537,8 +538,8 @@ class RuntimeFieldBindingSampler:
 
         # Median origin
         origin_lat = statistics.median(s.lat for s in self._accepted)
-        origin_lon = normalize_longitude_deg(
-            statistics.median(s.lon for s in self._accepted)
+        origin_lon = circular_median_longitude_deg(
+            s.lon for s in self._accepted
         )
 
         # Horizontal spread

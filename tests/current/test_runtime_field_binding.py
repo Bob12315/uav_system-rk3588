@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from app.field_profile import FieldProfile, parse_field_profile
+from app.field_reference import shortest_longitude_delta_deg
 from app.runtime_field_binding import (
     RuntimeFieldBindingCandidate,
     RuntimeFieldBindingError,
@@ -434,6 +435,78 @@ class TestMedian:
         assert c.origin_lat == pytest.approx(base + 0.000001, abs=1e-11)
 
 
+def _finalize_longitude_samples(longitudes, *, max_spread_m=1.0):
+    profile = _profile()
+    profile.forward_marker.lon = -179.9994
+    profile.runtime_origin_sampling.max_horizontal_spread_m = max_spread_m
+    sampler = RuntimeFieldBindingSampler(profile)
+    sampler.start(started_at_s=1000.0)
+    step = 5.0 / (len(longitudes) - 1)
+    for index, longitude in enumerate(longitudes):
+        sampler.observe_snapshot(
+            _valid_snapshot(
+                2000.0 + index * 0.1,
+                lat=34.103649,
+                lon=longitude,
+            ),
+            observed_at_s=1000.0 + index * step,
+        )
+    return sampler.finalize(completed_at_s=1005.0)
+
+
+class TestCircularLongitudeMedian:
+    def test_even_symmetric_dateline_samples(self):
+        candidate = _finalize_longitude_samples(
+            [179.999998] * 10 + [-179.999998] * 10
+        )
+        assert abs(
+            shortest_longitude_delta_deg(candidate.origin_lon, 180.0)
+        ) < 1e-9
+        assert candidate.origin_lon != 0.0
+        assert 0.0 < candidate.horizontal_spread_m < 1.0
+
+    def test_reversed_dateline_sample_order_is_circular_equivalent(self):
+        positive_first = _finalize_longitude_samples(
+            [179.999998] * 10 + [-179.999998] * 10
+        )
+        negative_first = _finalize_longitude_samples(
+            [-179.999998] * 10 + [179.999998] * 10
+        )
+        assert abs(
+            shortest_longitude_delta_deg(
+                positive_first.origin_lon, negative_first.origin_lon
+            )
+        ) < 1e-10
+
+    def test_odd_dateline_samples_remain_near_dateline(self):
+        candidate = _finalize_longitude_samples(
+            [179.999998] * 11 + [-179.999998] * 10
+        )
+        assert abs(
+            shortest_longitude_delta_deg(candidate.origin_lon, 180.0)
+        ) < 3e-6
+
+    def test_ordinary_longitudes_match_linear_median(self):
+        longitudes = [108.642670 + index * 0.0000001 for index in range(20)]
+        candidate = _finalize_longitude_samples(longitudes)
+        assert candidate.origin_lon == pytest.approx(
+            statistics.median(longitudes), abs=1e-12
+        )
+
+    def test_real_local_spread_still_fails(self):
+        longitudes = [108.64267] * 10 + [108.64271] * 10
+        with pytest.raises(RuntimeFieldBindingError, match="spread"):
+            _finalize_longitude_samples(longitudes)
+
+    def test_dateline_candidate_geometry_and_validator(self):
+        candidate = _finalize_longitude_samples(
+            [179.999998] * 10 + [-179.999998] * 10
+        )
+        assert -180.0 <= candidate.geometry.origin_lon < 180.0
+        assert candidate.geometry.home.lon == candidate.origin_lon
+        assert validate_runtime_field_binding_candidate(candidate) == ()
+
+
 # =========================================================================
 # K. Spread
 # =========================================================================
@@ -848,9 +921,18 @@ class TestSharedValidator:
 # =========================================================================
 
 
+def test_no_local():
     src = Path("app/runtime_field_binding.py").read_text()
-    for token in ["local_x", "local_y", "local_z", "origin_local_n_m", "origin_local_e_m",
-                  "field_to_local_ned", "gps_to_local_ned", "local_ned_to_field"]:
+    for token in (
+        "local_x",
+        "local_y",
+        "local_z",
+        "origin_local_n_m",
+        "origin_local_e_m",
+        "field_to_local_ned",
+        "gps_to_local_ned",
+        "local_ned_to_field",
+    ):
         assert token not in src, f"forbidden: {token}"
 
 

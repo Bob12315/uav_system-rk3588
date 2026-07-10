@@ -1,6 +1,6 @@
 """Tests for FieldReference centerline-only."""
 import math, pytest
-from app.field_reference import (FieldReference, FieldReferenceError, HeadingSource, OriginSource, WGS84_POLE_COS_EPS, _gps_distance_m, _gps_bearing_rad, gps_enu_deltas, normalize_longitude_deg, shortest_longitude_delta_deg, validate_wgs84_lat_lon)
+from app.field_reference import (FieldReference, FieldReferenceError, HeadingSource, OriginSource, WGS84_POLE_COS_EPS, _gps_distance_m, _gps_bearing_rad, circular_median_longitude_deg, gps_enu_deltas, normalize_longitude_deg, shortest_longitude_delta_deg, validate_wgs84_lat_lon)
 from app.field_reference_service import FieldReferenceService
 from app.field_profile_service import BindResult, FieldProfileService
 from app.field_profile import (AnchorPoint, BindingPolicy, CenterlinePoint, FieldGeometry, FieldProfile, GpsQualityThresholds)
@@ -54,6 +54,32 @@ def test_normalize_longitude_canonical(value, expected):
 def test_normalize_longitude_rejects_invalid_input(value):
     with pytest.raises(FieldReferenceError):
         normalize_longitude_deg(value)
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        ([10.0], 10.0),
+        ([10.0, 11.0, 12.0], 11.0),
+        ([179.9998, -179.9998], -180.0),
+        ([-179.9998, 179.9998], -180.0),
+        ([179.9998] * 10 + [-179.9998] * 10, -180.0),
+        ([-179.9998] * 10 + [179.9998] * 10, -180.0),
+        ([180.0, -180.0], -180.0),
+    ],
+)
+def test_circular_longitude_median(values, expected):
+    actual = circular_median_longitude_deg(values)
+    assert abs(shortest_longitude_delta_deg(expected, actual)) < 1e-10
+
+
+@pytest.mark.parametrize(
+    "values",
+    [[], [True], ["1"], [None], [math.nan], [math.inf], [181.0], object()],
+)
+def test_circular_longitude_median_rejects_invalid_input(values):
+    with pytest.raises(FieldReferenceError):
+        circular_median_longitude_deg(values)
 
 
 @pytest.mark.parametrize(

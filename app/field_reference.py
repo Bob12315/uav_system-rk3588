@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import math
+import statistics
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Tuple
+from typing import Iterable, Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -431,6 +432,47 @@ def shortest_longitude_delta_deg(
             f"to longitude must be a finite number, got {to_lon_deg!r}"
         )
     return normalize_longitude_deg(float(to_lon_deg) - float(from_lon_deg))
+
+
+def circular_median_longitude_deg(
+    longitudes_deg: Iterable[float],
+) -> float:
+    """Return a deterministic median longitude without a dateline seam."""
+    try:
+        values = tuple(longitudes_deg)
+    except Exception as exc:
+        raise FieldReferenceError(
+            f"longitudes must be an iterable of finite numbers: {exc}"
+        ) from exc
+    if not values:
+        raise FieldReferenceError("at least one longitude is required")
+    parsed: list[float] = []
+    for index, value in enumerate(values):
+        if not (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+        ):
+            raise FieldReferenceError(
+                f"longitude[{index}] must be a finite number, got {value!r}"
+            )
+        value_f = float(value)
+        if not -180.0 <= value_f <= 180.0:
+            raise FieldReferenceError(
+                f"longitude[{index}] {value_f} out of range [-180, 180]"
+            )
+        parsed.append(value_f)
+    reference = normalize_longitude_deg(parsed[0])
+    try:
+        median_delta = statistics.median(
+            shortest_longitude_delta_deg(reference, value)
+            for value in parsed
+        )
+    except Exception as exc:
+        raise FieldReferenceError(
+            f"failed to compute circular longitude median: {exc}"
+        ) from exc
+    return normalize_longitude_deg(reference + median_delta)
 
 
 def validate_wgs84_lat_lon(
