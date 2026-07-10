@@ -15,9 +15,9 @@ extensions to shared components (`missions/common/actions/`,
 ## 2. Target Runtime Flow
 
 ```
-1. Drone stabilises; current GPS = dynamic origin A.
-2. Config holds remote centreline point(s) B (WGS84).
-3. A → B defines FIELD +Y heading.
+1. Drone stabilises on the field centreline start point.
+2. Config holds a single forward marker B (WGS84).
+3. A (dynamic origin sampled from stationary GPS) → B defines FIELD +Y heading.
 4. FIELD metric scan waypoints are converted to GLOBAL GPS at runtime.
 5. GLOBAL GPS four-point scan.
 6. Capture-instant GPS / yaw / altitude / ex / ey → single-frame target GPS.
@@ -59,37 +59,89 @@ V2 mission decisions MUST NOT depend on:
 ```json
 {
   "schema_version": 3,
-  "remote_centreline": [
-    {"lat": 34.1036, "lon": 108.6430, "name": "far_marker"}
-  ],
+  "coordinate_convention": {
+    "field_x_positive": "right",
+    "field_y_positive": "forward",
+    "altitude_positive": "up"
+  },
+  "forward_marker": {
+    "name": "far_centerline_marker",
+    "lat": 34.1030000,
+    "lon": 108.6435000,
+    "coordinate_system": "WGS84"
+  },
   "field_geometry": {
-    "scan_points_field_m": [
-      {"x": 4.0, "y": 0.0},
-      {"x": 0.0, "y": 0.0},
-      {"x": 0.0, "y": 3.0},
-      {"x": 4.0, "y": 3.0}
+    "lane_half_width_m": 4.0,
+    "drop_area_y_min_m": 30.0,
+    "drop_area_y_max_m": 35.0,
+    "drop_center_y_m": 32.5,
+    "recce_area_y_min_m": 55.0,
+    "recce_area_y_max_m": 60.0,
+    "recce_center_y_m": 57.5
+  },
+  "drop_scan": {
+    "waypoints": [
+      {"x_m": -2.0, "y_m": 31.25, "altitude_m": 5.0},
+      {"x_m":  2.0, "y_m": 31.25, "altitude_m": 5.0},
+      {"x_m":  2.0, "y_m": 33.75, "altitude_m": 5.0},
+      {"x_m": -2.0, "y_m": 33.75, "altitude_m": 5.0}
     ]
   },
   "gps_quality": {
-    "min_satellites": 8,
-    "max_hdop": 1.5
+    "min_fix_type": 3,
+    "min_satellites": 10,
+    "max_eph": 2.5,
+    "max_epv": 5.0
   },
-  "sampling": {
-    "samples": 10,
-    "interval_s": 0.5
+  "runtime_origin_sampling": {
+    "min_samples": 20,
+    "sample_window_s": 5.0,
+    "max_horizontal_spread_m": 1.0,
+    "estimator": "median"
+  },
+  "binding_policy": {
+    "min_baseline_m": 30.0,
+    "warn_baseline_below_m": 50.0
   }
 }
 ```
 
-### Runtime (dynamic, derived from current GPS)
+### Runtime (dynamic, derived at field confirmation)
 
-- `origin_lat` / `origin_lon` — sampled from current GPS at takeoff
-- `forward_marker_lat` / `forward_marker_lon` — read from config remote centreline
-- `field_heading_yaw_rad` — computed from A → B bearing
-- `baseline_m` — distance from A to farthest centreline point
-- GPS sampling diagnostics (mean, stddev, satellite count, hdop)
+- `origin_lat` / `origin_lon` — sampled while stationary during pre-mission
+  field confirmation (median of valid GPS samples)
+- `forward_marker_lat` / `forward_marker_lon` — from config `forward_marker`
+- `field_heading_yaw_rad` — bearing from dynamic origin A to forward marker B
+- `baseline_m` — distance from dynamic origin A to the single forward marker B
+- `gps_sample_count` — number of valid GPS samples used
+- `gps_horizontal_spread_m` — max horizontal spread across samples
+- `gps_fix_type` — GPS fix type at confirmation time
+- `gps_satellites` — satellite count at confirmation time
+- `gps_eph` — horizontal position estimate error (m)
+- `gps_epv` — vertical position estimate error (m)
+- `field_reference_mode` — `runtime_origin_forward_marker`
 - `confirmed` — true after sampling passes quality thresholds
 - `frozen` — true after confirmation; prevents accidental re-binding
+
+### Origin sampling rules
+
+- Drone is stationary on the field centreline start point.
+- Sampling occurs during field confirmation, NOT after takeoff.
+- Only valid GPS samples are accepted (fix type, satellites, eph/epv within
+  thresholds).
+- Dynamic origin A is the median latitude/longitude of accepted samples.
+- If horizontal spread across samples exceeds `max_horizontal_spread_m`,
+  confirmation is rejected.
+- After confirmation, the origin is frozen — no re-sampling or drift during
+  mission execution.
+
+### Baseline rules
+
+- `baseline_m` = distance from dynamic origin A to the single forward marker B.
+- If baseline < `min_baseline_m` (30 m): confirmation fails.
+- If `min_baseline_m` ≤ baseline < `warn_baseline_below_m` (50 m): allowed with
+  warning.
+- If baseline ≥ `warn_baseline_below_m`: normal.
 
 ## 6. Localisation & Fusion Contract
 
@@ -121,43 +173,73 @@ localized_object = multi-view GPS/ENU fusion target
 
 ### GLOBAL goto target-above completion
 
+These strict parameters apply to fly-over above each drop target. Scan points
+and return-to-home may use different tolerances, but still use GLOBAL GPS.
+
 | Condition | Threshold |
 |---|---|
-| Horizontal position error | <= `tolerance_xy_m` |
-| Altitude error | <= `tolerance_z_m` |
-| Horizontal speed | <= `max_arrival_speed_mps` (e.g. 0.3) |
-| Vertical speed | <= `max_arrival_vz_mps` (e.g. 0.2) |
-| Consecutive stable ticks | >= `min_stable_updates` (e.g. 8) |
+| Horizontal position error | <= `tolerance_xy_m` (0.25 m) |
+| Altitude error | <= `tolerance_z_m` (0.25 m) |
+| Horizontal speed | <= `max_horizontal_speed_mps` (0.15 m/s) |
+| Vertical speed | <= `max_vertical_speed_mps` (0.10 m/s) |
+| Consecutive stable ticks | >= `min_hold_updates` (5) |
+| Require velocity valid | `require_velocity_valid = true` |
 
-### AlignDescend MUST:
+### TargetLock Contract
+
+- `match_mode = image_center` — locate target by proximity to image centre,
+  NOT by local_x/local_y distance.
+- Pre-filter detections by target `class_name`.
+- Select the detection with minimum `sqrt(ex² + ey²)` distance from image
+  centre.
+- Require a valid `track_id` on the selected detection.
+- Require the same `track_id` for `stable_track_updates = 3` consecutive frames.
+- If the candidate track changes, reset the counter.
+- Reject locking if `sqrt(ex² + ey²)` exceeds `max_center_distance`.
+- Do NOT read `target.local_x` or `target.local_y`.
+
+### AlignDescend Contract
 
 - `require_target_locked = true`
-- `match_mode = image_center` (not local_x/local_y distance)
-- Frame: `BODY_NED` (no yaw hold)
-- No LOCAL_NED conversion in dispatcher
-- No `yaw_hold_rad` attached to command
+- `yaw_control_mode = ignore` — no yaw hold.
+- Output frame: `BODY_NED`.
+- Do NOT attach `yaw_hold_rad` to the command.
+- All paths (target invalid, retry, done, failed) must use consistent BODY_NED
+  command semantics.
+- Do NOT convert to `LOCAL_NED` in the dispatcher.
 
 ## 8. Payload Release Contract
 
 ### Normal path
 
 ```
-altitude <= finish_altitude_m
-→ stop descent (zero velocity)
-→ continue alignment
-→ alignment hold >= hold_updates_required
-→ zero velocity
-→ payload_release
+1. altitude <= finish_altitude_m;
+2. Set vz to 0, stop further descent;
+3. Continue BODY_NED vx/vy horizontal alignment;
+4. aligned condition satisfied for hold_updates_required consecutive ticks;
+5. Send BODY_NED zero velocity;
+6. AlignDescend returns done, reason = aligned_at_min_altitude;
+7. Mission transitions to payload_release.
 ```
 
 ### Timeout path
 
 ```
-update_count > max_updates
-→ zero velocity
-→ align_descend returns failed (reason: timeout)
-→ on_failed = continue
-→ payload_release
+1. update_count exceeds max_updates;
+2. Send BODY_NED zero velocity;
+3. AlignDescend returns failed, reason = align_descend_timeout;
+4. Mission on_failed = continue;
+5. Transition to payload_release.
+```
+
+### Target lost path
+
+```
+Target lost (lost_timeout_updates exceeded without detection) is not the same
+as overall align timeout. Whether to continue to payload_release after target
+lost must be explicitly configured and tested by the mission policy.
+Current v2 keeps on_failed=continue, but final integration testing must cover
+this path separately.
 ```
 
 ## 9. V1 Protection Baseline
@@ -173,12 +255,12 @@ The v1 mission file must not be modified by any step in this transformation.
 
 | Contract Item | Current faedb609 State | Target State | Planned Steps |
 |---|---|---|---|
-| Dynamic origin A | Not implemented | GPS sampling at takeoff | Steps 3–5 |
-| Schema v3 | Schema v2 (anchor + 4 centreline) | Remote centreline only | Step 2 |
-| FIELD → GLOBAL | Partially (waypoint_mode=absolute + target_frame=global with hardcoded GPS) | Dynamic GPS reference from runtime origin | Steps 3–7 |
+| Dynamic origin A | Not implemented | GPS sampling while stationary during pre-mission confirmation | Steps 3–5 |
+| Schema v3 | Schema v2 (anchor + 4 centreline GPS points) | Single forward marker + field geometry + drop_scan waypoints in FIELD metres | Step 2 |
+| FIELD → GLOBAL | `field_to_gps` utility exists, but current v2 scan uses hardcoded absolute GPS waypoints | Dynamic GPS reference from runtime origin + forward marker | Steps 3–7 |
 | MultiView GPS-first | Single-frame local_x/local_y localization | GPS-based localization at capture instant | Steps 8–10 |
 | Post-fusion selection | select_drop_targets reads resolved_targets (1:1 with raw_estimates) | select_drop_targets reads localized_objects (fusion only) | Step 11 |
-| Velocity-stabilised arrival | min_hold_updates=1, no speed check | Speed + position hold with >=8 stable ticks | Step 12 |
-| image_center lock | TargetLock uses local_x/local_y distance matching | TargetLock uses image_center proximity matching | Step 13 |
-| BODY_NED align | BODY_NED with yaw_hold → dispatcher converts to LOCAL_NED | Pure BODY_NED, no yaw_hold | Step 14 |
-| Align complete/timeout drop | Done path uses _inactive_command; timeout continues to payload_release | Same behaviour, verified with integration tests | Step 15 |
+| Velocity-stabilised arrival | min_hold_updates=1, no speed check | 0.25 m XY / 0.25 m Z / 0.15 m/s horizontal / 0.10 m/s vertical / 5 consecutive updates | Step 12 |
+| image_center lock | TargetLock uses local_x/local_y distance matching | TargetLock uses image_centre proximity matching with stable_track_updates=3 | Step 13 |
+| BODY_NED align | BODY_NED with yaw_hold → dispatcher converts to LOCAL_NED | Pure BODY_NED, yaw_control_mode=ignore | Step 14 |
+| Align complete/timeout drop | Minimum altitude can return done without aligned hold; frame differs between normal/invalid/retry paths; zero-stop transition lacks end-to-end integration proof | Min altitude stops descent but continues horizontal alignment; done only after aligned hold; timeout zeroes then continues to release; all paths use consistent BODY_NED semantics | Step 15 |

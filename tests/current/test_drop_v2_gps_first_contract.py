@@ -53,9 +53,12 @@ class TestV2GotoWaypointsGlobal:
     def test_drop_v2_all_goto_waypoints_use_global_target_frame(self):
         """Every goto_waypoint step must use target_frame=global."""
         data = _load_v2()
-        for step in data["steps"]:
-            if step.get("name") != "goto_waypoint":
-                continue
+        gotos = [
+            s for s in data["steps"]
+            if s.get("name") == "goto_waypoint"
+        ]
+        assert gotos, "drop v2 must contain goto_waypoint steps"
+        for step in gotos:
             tf = step.get("params", {}).get("target_frame")
             assert tf == "global", (
                 f"step {step['label']} has target_frame={tf!r}, expected 'global'"
@@ -104,7 +107,8 @@ class TestV2PayloadReleaseConfig:
 
 class TestV2CameraFOV:
     def test_drop_v2_camera_fov_is_current_calibration(self):
-        """FOV must remain at the calibrated values (51.3 x 39.6)."""
+        """FOV must remain at the calibrated values (51.3 x 39.6) across
+        exactly 3 configuration blocks (1 scan camera + 2 align configs)."""
         data = _load_v2()
         fov_configs: list[dict] = []
 
@@ -118,6 +122,10 @@ class TestV2CameraFOV:
             if s.get("name") == "align_descend":
                 fov_configs.append(s["params"]["config"])
 
+        assert len(fov_configs) == 3, (
+            f"expected 3 FOV config blocks (1 scan + 2 align), got {len(fov_configs)}"
+        )
+
         for cfg in fov_configs:
             assert cfg.get("fov_x_deg") == 51.3
             assert cfg.get("fov_y_deg") == 39.6
@@ -129,6 +137,11 @@ class TestV2AlignFailurePolicy:
     def test_drop_v2_align_failure_policy_continues_to_payload_release(self):
         """align_descend on_failed.action must be 'continue', followed by payload_release."""
         data = _load_v2()
+        align_steps = [s for s in data["steps"] if s.get("name") == "align_descend"]
+        assert len(align_steps) == 2, (
+            f"expected 2 align_descend steps, got {len(align_steps)}"
+        )
+
         for i, step in enumerate(data["steps"]):
             if step.get("name") != "align_descend":
                 continue
@@ -155,30 +168,43 @@ class TestFutureScanWaypointsField:
     )
     def test_drop_v2_scan_waypoints_are_field_coordinates(self):
         """First scan goto and multi_view_localize must use waypoint_mode=field,
-        target_frame=global, with FIELD metric coordinates (not hardcoded GPS)."""
+        target_frame=global, with exact FIELD metric coordinates."""
         data = _load_v2()
         by_label = {s.get("label", ""): s for s in data["steps"]}
 
-        # first scan goto
+        # first scan goto — must equal first waypoint
         goto = by_label["goto_first_scan_point_gps"]
         assert goto["params"]["waypoint_mode"] == "field", (
             f"expected waypoint_mode=field, got {goto['params'].get('waypoint_mode')!r}"
         )
         assert goto["params"]["target_frame"] == "global"
+        assert goto["params"]["x"] == -2.0
+        assert goto["params"]["y"] == 31.25
+        assert goto["params"]["altitude_m"] == 5.0
 
         # multi_view_localize
         mvl = by_label["drop_multi_view_scan"]
         assert mvl["params"]["waypoint_mode"] == "field"
         assert mvl["params"]["target_frame"] == "global"
-        for wp in mvl["params"]["waypoints"]:
-            # FIELD metric coords should be small numbers, not GPS lat/lon
-            assert abs(wp["x"]) < 100, f"waypoint x={wp['x']} looks like GPS, expected field meters"
-            assert abs(wp["y"]) < 100, f"waypoint y={wp['y']} looks like GPS, expected field meters"
+
+        expected = [
+            (-2.0, 31.25, 5.0),
+            (2.0, 31.25, 5.0),
+            (2.0, 33.75, 5.0),
+            (-2.0, 33.75, 5.0),
+        ]
+        waypoints = mvl["params"]["waypoints"]
+        assert len(waypoints) == 4, f"expected 4 waypoints, got {len(waypoints)}"
+        for i, (ex, ey, ez) in enumerate(expected):
+            wp = waypoints[i]
+            assert wp["x"] == ex, f"waypoint[{i}] x={wp['x']}, expected {ex}"
+            assert wp["y"] == ey, f"waypoint[{i}] y={wp['y']}, expected {ey}"
+            assert wp["altitude_m"] == ez, f"waypoint[{i}] altitude={wp['altitude_m']}, expected {ez}"
 
 
 class TestFutureNoRawBucketResolution:
     @pytest.mark.xfail(
-        reason="planned GPS-first contract; remove xfail in step 8",
+        reason="planned GPS-first contract; remove xfail in step 11",
         strict=False,
     )
     def test_drop_v2_has_no_raw_drop_bucket_resolution_step(self):
@@ -200,13 +226,15 @@ class TestFutureSelectFromLocalizedObjects:
         """select_drop_targets.objects must be $drop_scan.localized_objects,
         not $drop_scan.raw_estimates or $drop_buckets.resolved_targets."""
         data = _load_v2()
-        for step in data["steps"]:
-            if step.get("name") != "select_drop_targets":
-                continue
-            assert step["params"]["objects"] == "$drop_scan.localized_objects", (
-                f"expected objects=$drop_scan.localized_objects, "
-                f"got {step['params'].get('objects')!r}"
-            )
+        select_steps = [s for s in data["steps"] if s.get("name") == "select_drop_targets"]
+        assert len(select_steps) == 1, (
+            f"expected exactly 1 select_drop_targets step, got {len(select_steps)}"
+        )
+        step = select_steps[0]
+        assert step["params"]["objects"] == "$drop_scan.localized_objects", (
+            f"expected objects=$drop_scan.localized_objects, "
+            f"got {step['params'].get('objects')!r}"
+        )
 
 
 class TestFutureImageCenterTargetLock:
@@ -216,14 +244,26 @@ class TestFutureImageCenterTargetLock:
     )
     def test_drop_v2_uses_image_center_target_lock_before_each_align(self):
         """Each align_descend must be preceded by a target_lock step
-        with match_mode=image_center."""
+        with match_mode=image_center. Expected order:
+        goto_drop_target_N_gps → target_lock_N → align_descend_N."""
         data = _load_v2()
+        align_steps = [s for s in data["steps"] if s.get("name") == "align_descend"]
+        assert len(align_steps) == 2, (
+            f"expected 2 align_descend steps, got {len(align_steps)}"
+        )
+
+        lock_steps = [s for s in data["steps"] if s.get("name") == "target_lock"]
+        assert len(lock_steps) == 2, (
+            f"expected 2 target_lock steps, got {len(lock_steps)}"
+        )
+
         for i, step in enumerate(data["steps"]):
             if step.get("name") != "align_descend":
                 continue
-            # find the preceding step (closest target_lock before this align_descend)
+            # find the preceding target_lock — must be right before align_descend,
+            # with a goto_waypoint before the target_lock
             found = False
-            for j in range(i - 1, -1, -1):
+            for j in range(i - 1, max(i - 3, -1), -1):
                 prev = data["steps"][j]
                 if prev.get("name") == "target_lock":
                     assert prev["params"].get("match_mode") == "image_center", (
@@ -231,12 +271,18 @@ class TestFutureImageCenterTargetLock:
                         f"{prev['params'].get('match_mode')!r}, expected 'image_center'"
                     )
                     found = True
+                    # also check that the step before target_lock is a goto
+                    if j > 0:
+                        before_lock = data["steps"][j - 1]
+                        assert before_lock.get("name") == "goto_waypoint", (
+                            f"step before target_lock for {step['label']} is "
+                            f"{before_lock.get('name')!r}, expected goto_waypoint"
+                        )
                     break
-                # stop if we hit another major action
-                if prev.get("name") in ("goto_waypoint", "align_descend", "payload_release", "land"):
+                if prev.get("name") in ("align_descend", "payload_release", "land"):
                     break
             assert found, (
-                f"no target_lock step found before {step['label']}"
+                f"no target_lock step found immediately before {step['label']}"
             )
 
 
