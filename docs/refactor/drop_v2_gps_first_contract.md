@@ -54,12 +54,42 @@ V2 mission decisions MUST NOT depend on:
 
 ### FieldReference readiness split (step 4)
 
+- :
+  confirmed + finite LOCAL origin N/E + finite field heading.
+
+- :
+  confirmed + finite WGS84 origin lat/lon + finite field heading.
+  It does not require LOCAL_NED or the original forward marker once
+  heading has been derived.
+
+- :
+  backward-compatible alias for .
+
+GPS readiness does not require LOCAL_NED.
+LOCAL readiness does not require GPS.
+Neither readiness requires frozen.
+Mission execution will require frozen at the runtime-binding layer.
+
 
 
 GPS readiness does not require LOCAL_NED.
 LOCAL readiness does not require GPS.
 Neither readiness requires frozen.
 Mission execution will require frozen at the runtime-binding layer.
+
+### Runtime GPS sampling semantics (step 5A)
+
+- Sampling uses  for unique GPS-message
+  identification.
+- The five-second session window uses caller-supplied observation time.
+- Repeated reads of the same GPS message are duplicates, not samples.
+- Only samples passing global-position and profile GPS-quality checks
+  are accepted.
+- Runtime origin latitude and longitude are coordinate-wise medians.
+-  is the maximum horizontal radius from the
+  median origin to any accepted sample.
+- The candidate is not confirmed, frozen, or written into runtime
+  state until step 5B.
 
 ## 5. Dynamic Field Contract
 
@@ -265,6 +295,7 @@ The v1 mission file must not be modified by any step in this transformation.
 | Contract Item | Current faedb609 State | Target State | Planned Steps |
 |---|---|---|---|
 | FieldReference readiness | single local-only is_ready before step 4 | separate GPS/local readiness implemented in step 4; runtime GPS sampling and binding still not connected | steps 4–5 |
+| Runtime GPS sampling | not implemented before step 5A | pure deterministic sampler and binding candidate implemented; controller/runtime application not connected | steps 5A–5B |
 | Dynamic origin A | Not implemented | GPS sampling while stationary during pre-mission confirmation | Steps 3–5 |
 | Schema v3 | Schema v2 (anchor + 4 centreline GPS points) | Schema v3 pure data/parse/validation implemented in step 2; runtime binding not yet implemented | Step 2 |
 | FIELD → GLOBAL | `field_to_gps` utility exists, but current v2 scan uses hardcoded absolute GPS waypoints | Pure runtime A/B heading and FIELD→GLOBAL geometry implemented in step 3; FieldReference lifecycle and runtime binding are not yet connected. | Steps 3–7 |
