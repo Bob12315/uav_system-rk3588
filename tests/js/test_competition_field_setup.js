@@ -483,6 +483,43 @@ test("new sampling before preview does not show old geometry", () => {
   assert.strictEqual(afterSampling[0], null, "sampling without preview should not show old geometry");
 });
 
+// ── Init isolation tests ─────────────────────────────────────────────────
+
+test("app.js init calls UavFieldProfiles.init before UavVideoPanel", () => {
+  const src = fs.readFileSync("web_ui/static/app.js", "utf8");
+  const fpPos = src.indexOf("UavFieldProfiles.init()");
+  const vpPos = src.indexOf("UavVideoPanel.setupVideoPanel");
+  assert.ok(fpPos > 0, "UavFieldProfiles.init() must exist in app.js");
+  assert.ok(fpPos < vpPos, "Field Setup init must come before Video Panel setup");
+});
+
+test("app.js Video Panel is guarded against missing module", () => {
+  const src = fs.readFileSync("web_ui/static/app.js", "utf8");
+  assert.ok(src.includes("UavVideoPanel unavailable"), "must have fallback for missing Video Panel");
+  assert.ok(src.includes("typeof window.UavVideoPanel.setupVideoPanel === \"function\""), "must guard setupVideoPanel call");
+});
+
+test("app.js init does not access UavVideoPanel.setupVideoPanel without guard", () => {
+  const src = fs.readFileSync("web_ui/static/app.js", "utf8");
+  // The guarded call pattern must exist with typeof check before the call
+  const guardedCall = src.indexOf('typeof window.UavVideoPanel.setupVideoPanel === "function"');
+  const directCall = src.indexOf('UavVideoPanel.setupVideoPanel()');
+  assert.ok(guardedCall > 0, "must have typeof guard");
+  assert.ok(guardedCall < directCall, "guard must come before setupVideoPanel call");
+});
+
+test("index.html uses new cache-busting keys", () => {
+  const html = fs.readFileSync("web_ui/static/index.html", "utf8");
+  assert.ok(html.includes("competition-field-20260710-1"), "must have new cache key");
+  assert.ok(!html.includes("field-profile-persist-20260704"), "must NOT have old field-profile cache key");
+  assert.ok(!html.includes("mission-v2-labels-20260706"), "must NOT have old app.js cache key");
+});
+
+test("double init is guarded in field_reference.js", () => {
+  const src = fs.readFileSync("web_ui/static/js/field_reference.js", "utf8");
+  assert.ok(src.includes("_initCalled"), "must have _initCalled guard");
+});
+
 (async () => {
   let failed = 0;
   for (const entry of tests) {

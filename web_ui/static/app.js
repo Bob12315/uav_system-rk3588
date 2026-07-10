@@ -1004,12 +1004,24 @@ function startStatusUpdates() {
 var setupActionStatusJsonCopyGuard = function () { window.UavActionLab.setupActionStatusJsonCopyGuard(); };
 
 async function init() {
-  // Video panel setup moved to video_panel.js (WU-6 v2)
-  window.UavVideoPanel.setupVideoPanel().catch(function (err) {
-  console.warn("video panel setup failed", err);
-});
-  if (window.UavFieldProfiles && window.UavFieldProfiles.init) {
+  // Competition Field Setup — must initialize BEFORE any optional modules
+  // so that a failure in Video Panel cannot block the Field Setup lifecycle.
+  if (window.UavFieldProfiles && typeof window.UavFieldProfiles.init === "function") {
     window.UavFieldProfiles.init();
+  }
+
+  if (window.UavFieldRef && typeof window.UavFieldRef.init === "function") {
+    window.UavFieldRef.init();
+  }
+
+  // Video panel setup — optional, must not block Field Setup
+  if (window.UavVideoPanel &&
+      typeof window.UavVideoPanel.setupVideoPanel === "function") {
+    Promise.resolve(window.UavVideoPanel.setupVideoPanel()).catch(function (err) {
+      console.warn("video panel setup failed", err);
+    });
+  } else {
+    console.warn("UavVideoPanel unavailable");
   }
   document.querySelectorAll("[data-command]").forEach(button => button.onclick = () => {
     if (button.dataset.confirm && !confirm(button.dataset.confirm)) return;
