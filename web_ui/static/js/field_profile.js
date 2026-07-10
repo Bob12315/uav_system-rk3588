@@ -300,217 +300,196 @@ window.UavFieldProfiles = (function () {
   }
 
   return { init, fetchProfileList, fetchFieldReferenceStatus };
-})();
 
 
-// ── Runtime GPS Sampling ──────────────────────────────────────────────
+    // ── Runtime GPS Sampling (integrated) ─────────────────────────────
 
-var selectedProfileId = null;
-var selectedProfileSchema = null;
-var selectedProfileData = null;
-var lastFieldReferenceStatus = null;
-var requestBusy = false;
+    var selectedProfileId = null;
+    var selectedProfileSchema = null;
+    var selectedProfileData = null;
+    var lastFieldReferenceStatus = null;
+    var requestBusy = false;
+    var lastGeometryJson = "";
 
-window.selectedProfileId = selectedProfileId;
-window.selectedProfileSchema = selectedProfileSchema;
-window.requestBusy = requestBusy;
-
-function onFieldReferenceStatus(data) {
-    lastFieldReferenceStatus = data;
-    var fr = data.field_reference || {};
-    var runtime = fr.runtime_binding || {};
-    var sampling = runtime.sampling || {};
-
-    // Runtime sampling panel
-    var panel = document.getElementById("fpRuntimeSampling");
-    if (panel) panel.style.display = runtime.state && runtime.state !== "idle" ? "" : "none";
-
-    setText("fpSamplingState", runtime.state || "--");
-    setText("fpSamplingElapsed", sampling.elapsed_s != null ? sampling.elapsed_s.toFixed(1) + " / " + (sampling.sample_window_s || 0) + " s" : "--");
-    setText("fpSamplingAccepted", sampling.accepted_samples + " / " + (sampling.min_samples || 20));
-    setText("fpSamplingRejected", sampling.rejected_samples != null ? sampling.rejected_samples : "--");
-    setText("fpSamplingDuplicate", sampling.duplicate_samples != null ? sampling.duplicate_samples : "--");
-    setText("fpSamplingWindowComplete", sampling.window_complete ? "YES" : "no");
-    setText("fpSamplingCanFinalize", sampling.can_finalize ? "YES" : "no");
-    setText("fpSamplingLastRejection", sampling.last_rejection_reason || "--");
-
-    var progress = document.getElementById("fpSamplingProgress");
-    if (progress) {
-        progress.max = Math.max(Number(sampling.sample_window_s) || 1, 1);
-        progress.value = Math.min(Number(sampling.elapsed_s) || 0, progress.max);
+    function setText(id, text) {
+        var el = document.getElementById(id);
+        if (el) el.textContent = String(text);
     }
 
-    // Runtime result panel
-    var resultPanel = document.getElementById("fpRuntimeResult");
-    var result = runtime.last_result || runtime.candidate_summary;
-    if (resultPanel) resultPanel.style.display = result ? "" : "none";
-    if (result) {
-        setText("fpRuntimeOrigin", result.origin_lat != null ? result.origin_lat.toFixed(7) + ", " + result.origin_lon.toFixed(7) : "--");
-        setText("fpRuntimeMarker", result.forward_marker_lat != null ? result.forward_marker_lat.toFixed(7) + ", " + result.forward_marker_lon.toFixed(7) : "--");
-        setText("fpRuntimeHeading", result.field_heading_deg != null ? result.field_heading_deg.toFixed(2) + " deg" : "--");
-        setText("fpRuntimeBaseline", result.baseline_m != null ? result.baseline_m.toFixed(2) + " m" : "--");
-        setText("fpRuntimeSpread", result.horizontal_spread_m != null ? result.horizontal_spread_m.toFixed(3) + " m" : "--");
-        setText("fpRuntimeSampleCount", result.sample_count || "--");
-        setText("fpRuntimeWarnings", result.warnings && result.warnings.length ? result.warnings.join("; ") : "--");
+    function updateRuntimeControls() {
+        var fr = (lastFieldReferenceStatus || {}).field_reference || {};
+        var runtime = fr.runtime_binding || {};
+        var sampling = runtime.sampling || {};
+        var busy = requestBusy;
+        var schema = selectedProfileSchema;
+        var frozen = fr.is_frozen === true;
+        var state = runtime.state || "idle";
 
-        var geomPre = document.getElementById("fpRuntimeGeometry");
-        if (geomPre && result.geometry) {
-            var geomStr = JSON.stringify(result.geometry, null, 2);
-            if (geomPre.textContent !== geomStr) geomPre.textContent = geomStr;
-        }
-    }
+        var startBtn = document.getElementById("fpRuntimeStart");
+        var finBtn = document.getElementById("fpRuntimeFinalize");
+        var cancelBtn = document.getElementById("fpRuntimeCancel");
+        var bindBtn = document.getElementById("fpBindCurrent");
+        var freezeBtn = document.getElementById("frFreeze");
 
-    updateRuntimeControls();
-}
-
-function updateRuntimeControls() {
-    var fr = (lastFieldReferenceStatus || {}).field_reference || {};
-    var runtime = fr.runtime_binding || {};
-    var sampling = runtime.sampling || {};
-    var busy = window.requestBusy || false;
-    var schema = window.selectedProfileSchema;
-    var frozen = fr.is_frozen === true;
-
-    var startBtn = document.getElementById("fpRuntimeStart");
-    var finBtn = document.getElementById("fpRuntimeFinalize");
-    var cancelBtn = document.getElementById("fpRuntimeCancel");
-    var bindBtn = document.getElementById("fpBindCurrent");
-    var freezeBtn = document.getElementById("frFreeze");
-    var resetBtn = document.getElementById("frReset");
-
-    function allOff() {
-        if (startBtn) startBtn.disabled = true;
-        if (finBtn) { finBtn.disabled = true; finBtn.textContent = "确认并冻结"; }
-        if (cancelBtn) cancelBtn.disabled = true;
-        if (bindBtn) bindBtn.disabled = true;
-        if (freezeBtn) freezeBtn.disabled = true;
-        if (resetBtn) resetBtn.disabled = false;
-    }
-
-    if (busy) { allOff(); return; }
-
-    var state = runtime.state || "idle";
-
-    if (state === "applied") {
-        allOff();
-        if (freezeBtn) freezeBtn.disabled = true;
-        return;
-    }
-
-    var isV3 = schema === 3;
-
-    if (state === "idle") {
-        allOff();
-        if (isV3) {
-            if (startBtn) startBtn.disabled = false;
+        function allOff() {
+            if (startBtn) startBtn.disabled = true;
+            if (finBtn) { finBtn.disabled = true; finBtn.textContent = "确认并冻结"; }
             if (cancelBtn) cancelBtn.disabled = true;
-        } else {
-            if (bindBtn) bindBtn.disabled = false;
+            if (bindBtn) bindBtn.disabled = true;
+            if (freezeBtn) freezeBtn.disabled = true;
         }
-        if (freezeBtn) freezeBtn.disabled = !(fr.is_confirmed && !frozen);
-        return;
-    }
 
-    if (state === "sampling") {
-        allOff();
-        if (cancelBtn) cancelBtn.disabled = false;
-        if (finBtn) {
-            finBtn.disabled = !(sampling.can_finalize === true);
-            finBtn.textContent = "确认并冻结";
+        if (busy) { allOff(); return; }
+        if (state === "applied") { allOff(); return; }
+
+        var isV3 = schema === 3;
+        if (state === "idle") {
+            allOff();
+            if (isV3) { if (startBtn) startBtn.disabled = false; }
+            else { if (bindBtn) bindBtn.disabled = false; }
+            if (freezeBtn) freezeBtn.disabled = !(fr.is_confirmed && !frozen);
+            return;
         }
-        return;
-    }
-
-    if (state === "sampling_failed") {
+        if (state === "sampling") {
+            allOff();
+            if (cancelBtn) cancelBtn.disabled = false;
+            if (finBtn) finBtn.disabled = !(sampling.can_finalize === true);
+            return;
+        }
+        if (state === "sampling_failed") { allOff(); if (cancelBtn) cancelBtn.disabled = false; return; }
+        if (state === "apply_failed") {
+            allOff();
+            if (finBtn) { finBtn.disabled = false; finBtn.textContent = "重试确认并冻结"; }
+            if (cancelBtn) cancelBtn.disabled = false;
+            return;
+        }
         allOff();
-        if (cancelBtn) cancelBtn.disabled = false;
-        return;
     }
 
-    if (state === "apply_failed") {
-        allOff();
-        if (finBtn) { finBtn.disabled = false; finBtn.textContent = "重试确认并冻结"; }
-        if (cancelBtn) cancelBtn.disabled = false;
-        return;
-    }
-
-    allOff();
-}
-
-async function startRuntimeSampling() {
-    var pid = window.selectedProfileId;
-    if (!pid) { alert("请先选择一个 Schema v3 Profile"); return; }
-    if (window.requestBusy) return;
-    if (!confirm("将使用当前飞行器 WGS84 GPS 采样动态原点。\n采样不会启动 Mission，不会发送飞控命令。\n采样期间请保持无人机静止。")) return;
-    window.requestBusy = true; updateRuntimeControls();
-    try {
-        var r = await fetch("/api/field-profiles/" + pid + "/runtime-sampling/start", {method:"POST"}).then(r => r.json());
-        showRuntimeResult(r);
-        await window.UavFieldRef.fetchFieldReferenceStatus();
-    } finally { window.requestBusy = false; updateRuntimeControls(); }
-}
-
-async function finalizeRuntimeSampling() {
-    if (window.requestBusy) return;
-    if (!confirm("将结束 GPS 采样，应用动态原点和场地方向并冻结 Field Reference。\n成功后如需更改，必须执行完整重置。\n该操作不会启动 Mission，不会发送飞控命令。")) return;
-    window.requestBusy = true; updateRuntimeControls();
-    try {
-        var r = await fetch("/api/field-reference/runtime-sampling/finalize", {method:"POST"}).then(r => r.json());
-        showRuntimeResult(r);
-        await window.UavFieldRef.fetchFieldReferenceStatus();
-    } finally { window.requestBusy = false; updateRuntimeControls(); }
-}
-
-async function cancelRuntimeSampling() {
-    if (window.requestBusy) return;
-    if (!confirm("取消当前 GPS 采样？\n已应用并冻结的 reference 不能通过取消清除。")) return;
-    window.requestBusy = true; updateRuntimeControls();
-    try {
-        var r = await fetch("/api/field-reference/runtime-sampling/cancel", {method:"POST"}).then(r => r.json());
-        showRuntimeResult(r);
-        await window.UavFieldRef.fetchFieldReferenceStatus();
-    } finally { window.requestBusy = false; updateRuntimeControls(); }
-}
-
-function showRuntimeResult(r) {
-    if (!r.ok) {
-        var msg = "Error: " + (r.error || "unknown") + "\nState: " + (r.state || "--");
-        if (r.rollback_ok !== undefined) msg += "\nRollback: " + (r.rollback_ok ? "OK" : "FAILED");
-        alert(msg);
-    }
-}
-
-function setText(id, text) {
-    var el = document.getElementById(id);
-    if (el) el.textContent = text;
-}
-
-// Hook into profile selection
-var _origLoadProfile = typeof loadProfile === "function" ? loadProfile : null;
-if (typeof loadProfile === "function") {
-    loadProfile = async function(profileId) {
-        if (_origLoadProfile) await _origLoadProfile(profileId);
-        window.selectedProfileId = profileId;
-        window.selectedProfileSchema = null;
+    async function startRuntimeSampling() {
+        var pid = selectedProfileId;
+        if (selectedProfileSchema !== 3) { alert("请先选择 Schema v3 Profile"); return; }
+        if (!pid) { alert("未选择 Profile"); return; }
+        if (requestBusy) return;
+        if (!confirm("将使用当前飞行器 WGS84 GPS 采样动态原点。\n采样不会启动 Mission，不会发送飞控命令。\n采样期间请保持无人机静止。")) return;
+        requestBusy = true; updateRuntimeControls();
         try {
-            var p = await fetch("/api/field-profiles/" + profileId).then(r => r.json());
-            window.selectedProfileSchema = p.schema_version;
-            selectedProfileData = p;
-            if (p.schema_version === 3 && window.UavFieldMap && window.UavFieldMap.setProfilePreview) {
+            var r = await window.UavApi.request("POST", "/api/field-profiles/" + encodeURIComponent(pid) + "/runtime-sampling/start");
+            showRuntimeResult(r);
+            if (window.UavFieldRef) window.UavFieldRef.fetchFieldReferenceStatus();
+        } finally { requestBusy = false; updateRuntimeControls(); }
+    }
+
+    async function finalizeRuntimeSampling() {
+        if (requestBusy) return;
+        if (!confirm("将结束 GPS 采样，应用动态原点和场地方向并冻结 Field Reference。\n成功后如需更改，必须执行完整重置。\n该操作不会启动 Mission，不会发送飞控命令。")) return;
+        requestBusy = true; updateRuntimeControls();
+        try {
+            var r = await window.UavApi.request("POST", "/api/field-reference/runtime-sampling/finalize");
+            showRuntimeResult(r);
+            if (window.UavFieldRef) window.UavFieldRef.fetchFieldReferenceStatus();
+        } finally { requestBusy = false; updateRuntimeControls(); }
+    }
+
+    async function cancelRuntimeSampling() {
+        if (requestBusy) return;
+        if (!confirm("取消当前 GPS 采样？\n已应用并冻结的 reference 不能通过取消清除。")) return;
+        requestBusy = true; updateRuntimeControls();
+        try {
+            var r = await window.UavApi.request("POST", "/api/field-reference/runtime-sampling/cancel");
+            showRuntimeResult(r);
+            if (window.UavFieldRef) window.UavFieldRef.fetchFieldReferenceStatus();
+        } finally { requestBusy = false; updateRuntimeControls(); }
+    }
+
+    function showRuntimeResult(r) {
+        if (!r.ok) {
+            var msg = "Error: " + (r.error || "unknown") + "\nState: " + (r.state || "--");
+            if (r.rollback_ok !== undefined) msg += "\nRollback: " + (r.rollback_ok ? "OK" : "FAILED");
+            alert(msg);
+        }
+    }
+
+    function onFieldReferenceStatus(data) {
+        lastFieldReferenceStatus = data;
+        var fr = data.field_reference || {};
+        var runtime = fr.runtime_binding || {};
+        var sampling = runtime.sampling || {};
+        var result = runtime.last_result || runtime.candidate_summary;
+
+        var panel = document.getElementById("fpRuntimeSampling");
+        if (panel) panel.style.display = runtime.state && runtime.state !== "idle" ? "" : "none";
+
+        setText("fpSamplingState", runtime.state || "--");
+        setText("fpSamplingElapsed", sampling.elapsed_s != null ? sampling.elapsed_s.toFixed(1) + " / " + (sampling.sample_window_s || 0) + " s" : "--");
+        setText("fpSamplingAccepted", sampling.accepted_samples + " / " + (sampling.min_samples || 20));
+        setText("fpSamplingRejected", sampling.rejected_samples != null ? sampling.rejected_samples : "--");
+        setText("fpSamplingDuplicate", sampling.duplicate_samples != null ? sampling.duplicate_samples : "--");
+        setText("fpSamplingWindowComplete", sampling.window_complete ? "YES" : "no");
+        setText("fpSamplingCanFinalize", sampling.can_finalize ? "YES" : "no");
+        setText("fpSamplingLastRejection", sampling.last_rejection_reason || "--");
+
+        var progress = document.getElementById("fpSamplingProgress");
+        if (progress) { progress.max = Math.max(Number(sampling.sample_window_s) || 1, 1); progress.value = Math.min(Number(sampling.elapsed_s) || 0, progress.max); }
+
+        var rp = document.getElementById("fpRuntimeResult");
+        if (rp) rp.style.display = result ? "" : "none";
+        if (result) {
+            setText("fpRuntimeOrigin", result.origin_lat != null ? result.origin_lat.toFixed(7) + ", " + result.origin_lon.toFixed(7) : "--");
+            setText("fpRuntimeMarker", result.forward_marker_lat != null ? result.forward_marker_lat.toFixed(7) + ", " + result.forward_marker_lon.toFixed(7) : "--");
+            setText("fpRuntimeHeading", result.field_heading_deg != null ? result.field_heading_deg.toFixed(2) + " deg" : "--");
+            setText("fpRuntimeBaseline", result.baseline_m != null ? result.baseline_m.toFixed(2) + " m" : "--");
+            setText("fpRuntimeSpread", result.horizontal_spread_m != null ? result.horizontal_spread_m.toFixed(3) + " m" : "--");
+            setText("fpRuntimeSampleCount", result.sample_count || "--");
+            setText("fpRuntimeWarnings", result.warnings && result.warnings.length ? result.warnings.join("; ") : "--");
+            if (result.geometry) {
+                var geomStr = JSON.stringify(result.geometry, null, 2);
+                var geomPre = document.getElementById("fpRuntimeGeometry");
+                if (geomPre && geomPre.textContent !== geomStr) geomPre.textContent = geomStr;
+            }
+        }
+
+        updateRuntimeControls();
+    }
+
+    // ── Hook profile loading ───────────────────────────────────────────
+
+    var _origLoadAndRender = loadAndRenderProfile;
+    loadAndRenderProfile = async function(id) {
+        var result = await _origLoadAndRender(id);
+        if (result && result.profile_id) {
+            selectedProfileId = result.profile_id;
+            selectedProfileSchema = Number(result.schema_version);
+            selectedProfileData = result;
+            if (result.schema_version === 3 && window.UavFieldMap && window.UavFieldMap.setProfilePreview) {
                 window.UavFieldMap.setProfilePreview(null);
             }
-        } catch(e) {}
+        } else {
+            selectedProfileId = selectedProfileSchema = selectedProfileData = null;
+        }
         updateRuntimeControls();
+        return result;
     };
-}
 
-// Wire buttons
-document.addEventListener("DOMContentLoaded", function() {
-    var startBtn = document.getElementById("fpRuntimeStart");
-    var finBtn = document.getElementById("fpRuntimeFinalize");
-    var cancelBtn = document.getElementById("fpRuntimeCancel");
-    if (startBtn) startBtn.addEventListener("click", startRuntimeSampling);
-    if (finBtn) finBtn.addEventListener("click", finalizeRuntimeSampling);
-    if (cancelBtn) cancelBtn.addEventListener("click", cancelRuntimeSampling);
-    updateRuntimeControls();
-});
+    // Wire buttons on load
+    document.addEventListener("DOMContentLoaded", function() {
+        var startBtn = document.getElementById("fpRuntimeStart");
+        var finBtn = document.getElementById("fpRuntimeFinalize");
+        var cancelBtn = document.getElementById("fpRuntimeCancel");
+        if (startBtn) startBtn.addEventListener("click", startRuntimeSampling);
+        if (finBtn) finBtn.addEventListener("click", finalizeRuntimeSampling);
+        if (cancelBtn) cancelBtn.addEventListener("click", cancelRuntimeSampling);
+        updateRuntimeControls();
+    });
+
+    return {
+        init: init,
+        fetchProfileList: fetchProfileList,
+        loadAndRenderProfile: loadAndRenderProfile,
+        onFieldReferenceStatus: onFieldReferenceStatus,
+        startRuntimeSampling: startRuntimeSampling,
+        finalizeRuntimeSampling: finalizeRuntimeSampling,
+        cancelRuntimeSampling: cancelRuntimeSampling,
+        updateRuntimeControls: updateRuntimeControls
+    };
+})();

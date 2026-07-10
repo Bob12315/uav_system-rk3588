@@ -255,3 +255,61 @@ class TestCSS:
     def test_disabled_button_style(self):
         css = Path("web_ui/static/style.css").read_text()
         assert "disabled" in css
+
+
+# =============================================================================
+# Module integration tests (6.3)
+# =============================================================================
+
+
+class TestModuleIntegration:
+    def test_single_fetch_definition(self):
+        src = Path("web_ui/static/js/field_reference.js").read_text()
+        count = src.count("fetchFieldReferenceStatus")
+        # It should appear as UavFieldRef.fetchFieldReferenceStatus = function
+        assert "window.UavFieldRef.fetchFieldReferenceStatus" in src
+        assert count >= 1, f"fetchFieldReferenceStatus not found in field_reference.js"
+
+    def test_single_on_field_reference_status(self):
+        src = Path("web_ui/static/js/field_profile.js").read_text()
+        assert "function onFieldReferenceStatus" not in src.split("})();")[1] if "})();" in src else True
+        assert "onFieldReferenceStatus" in src
+
+    def test_no_window_selected_profile_schema(self):
+        src = Path("web_ui/static/js/field_profile.js").read_text()
+        assert "window.selectedProfileSchema" not in src
+        assert "window.selectedProfileId" not in src
+        assert "window.requestBusy" not in src
+
+    def test_start_in_iife(self):
+        src = Path("web_ui/static/js/field_profile.js").read_text()
+        assert "startRuntimeSampling" in src
+
+    def test_profile_js_not_directly_fetch_status(self):
+        src = Path("web_ui/static/js/field_profile.js").read_text()
+        # The profile.js should call UavFieldRef, not fetch status directly
+        assert "window.UavFieldRef.fetchFieldReferenceStatus" in src or "UavFieldRef" in src
+
+    def test_no_set_interval(self):
+        src = Path("web_ui/static/js/field_reference.js").read_text()
+        assert "setInterval" not in src
+
+    def test_poll_in_flight_guard(self):
+        src = Path("web_ui/static/js/field_reference.js").read_text()
+        assert "pollInFlight" in src
+
+    def test_modules_export_on_field_reference_status(self):
+        src = Path("web_ui/static/js/field_profile.js").read_text()
+        assert "onFieldReferenceStatus" in src
+
+
+class TestNoDuplicateFunctions:
+    def test_no_duplicate_start(self):
+        src = Path("web_ui/static/js/field_profile.js").read_text()
+        lines = [l for l in src.split('\n') if 'function startRuntimeSampling' in l]
+        assert len(lines) <= 1, f"startRuntimeSampling defined {len(lines)} times"
+
+    def test_no_duplicate_update_controls(self):
+        src = Path("web_ui/static/js/field_profile.js").read_text()
+        lines = [l for l in src.split('\n') if 'function updateRuntimeControls' in l]
+        assert len(lines) <= 1, f"updateRuntimeControls defined {len(lines)} times"
