@@ -385,6 +385,20 @@ class TestAppJS:
         assert "setInterval(fetchFieldReferenceStatus" not in src
 
 
+class TestNodeBehavior:
+    """Run the full Node behavior test suite and verify exit code 0."""
+
+    def test_node_behavior_suite(self):
+        import subprocess
+        r = subprocess.run(
+            ["node", "tests/js/field_profile_runtime_ui_test.js"],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert r.returncode == 0, f"Node behavior test failed (rc={r.returncode}):\n{r.stdout}\n{r.stderr}"
+        assert "All " in r.stdout
+        assert " tests passed!" in r.stdout
+
+
 class TestRealIDs:
     def test_uses_real_fp_ids(self):
         src = Path("web_ui/static/js/field_profile.js").read_text()
