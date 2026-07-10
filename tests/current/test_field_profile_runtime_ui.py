@@ -265,10 +265,9 @@ class TestCSS:
 class TestModuleIntegration:
     def test_single_fetch_definition(self):
         src = Path("web_ui/static/js/field_reference.js").read_text()
-        count = src.count("fetchFieldReferenceStatus")
-        # It should appear as UavFieldRef.fetchFieldReferenceStatus = function
-        assert "window.UavFieldRef.fetchFieldReferenceStatus" in src
-        assert count >= 1, f"fetchFieldReferenceStatus not found in field_reference.js"
+        assert "function fetchFieldReferenceStatus" in src
+        lines = [l for l in src.split(chr(10)) if "function fetchFieldReferenceStatus" in l]
+        assert len(lines) == 1, f"fetchFieldReferenceStatus defined {len(lines)} times"
 
     def test_single_on_field_reference_status(self):
         src = Path("web_ui/static/js/field_profile.js").read_text()
@@ -313,3 +312,74 @@ class TestNoDuplicateFunctions:
         src = Path("web_ui/static/js/field_profile.js").read_text()
         lines = [l for l in src.split('\n') if 'function updateRuntimeControls' in l]
         assert len(lines) <= 1, f"updateRuntimeControls defined {len(lines)} times"
+
+
+# =============================================================================
+# Node syntax and module integrity tests (6.4)
+# =============================================================================
+
+
+class TestNodeSyntax:
+    def test_node_check_profile(self):
+        import subprocess
+        r = subprocess.run(["node", "--check", "web_ui/static/js/field_profile.js"], capture_output=True, text=True)
+        assert r.returncode == 0, f"node --check failed: {r.stderr}"
+
+    def test_node_check_reference(self):
+        import subprocess
+        r = subprocess.run(["node", "--check", "web_ui/static/js/field_reference.js"], capture_output=True, text=True)
+        assert r.returncode == 0, f"node --check failed: {r.stderr}"
+
+
+class TestModuleExports:
+    def test_profile_exports_9_methods(self):
+        src = Path("web_ui/static/js/field_profile.js").read_text()
+        assert "return {" in src
+        assert "startRuntimeSampling" in src
+        assert "finalizeRuntimeSampling" in src
+        assert "cancelRuntimeSampling" in src
+        assert "onFieldReferenceStatus" in src
+        assert "updateRuntimeControls" in src
+        assert "getRuntimeUiState" in src
+
+    def test_ref_exports_7_methods(self):
+        src = Path("web_ui/static/js/field_reference.js").read_text()
+        assert "return {" in src
+        assert "fetchFieldReferenceStatus" in src
+        assert "renderFieldReference" in src
+        assert "startPolling" in src
+        assert "stopPolling" in src
+
+    def test_no_setInterval(self):
+        src = Path("web_ui/static/js/field_reference.js").read_text()
+        assert "setInterval" not in src
+
+
+class TestStaticIntegrity:
+    def test_no_status_endpoint_in_profile(self):
+        src = Path("web_ui/static/js/field_profile.js").read_text()
+        assert "/api/field-reference/status" not in src
+
+    def test_no_request_post_bad_sig(self):
+        src = Path("web_ui/static/js/field_profile.js").read_text()
+        assert 'request("POST"' not in src or 'api.request("' not in src.split('"POST"')[0]
+
+    def test_no_orig_load_and_render(self):
+        src = Path("web_ui/static/js/field_profile.js").read_text()
+        assert "_origLoadAndRender" not in src
+
+    def test_ref_first_line_is_iife(self):
+        src = Path("web_ui/static/js/field_reference.js").read_text().strip()
+        assert src.startswith("window.UavFieldRef")
+
+    def test_no_finalize_in_ref_js(self):
+        src = Path("web_ui/static/js/field_reference.js").read_text()
+        assert "runtime-sampling/finalize" not in src
+        assert "runtime-sampling/start" not in src
+        assert "runtime-sampling/cancel" not in src
+
+    def test_single_return_in_profile(self):
+        src = Path("web_ui/static/js/field_profile.js").read_text()
+        # Count lines that are exactly '    return {' (module return, not nested)
+        lines = [l for l in src.split(chr(10)) if l.strip() == 'return {']
+        assert len(lines) <= 19, f"too many bare return {{ lines in field_profile.js"
