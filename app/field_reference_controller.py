@@ -9,6 +9,7 @@ from app.field_profile import FieldProfileDiagnostics
 from app.field_profile_service import BindResult, FieldProfileService
 from app.field_reference import _gps_distance_m
 from app.field_reference_service import FieldReferenceService
+from app.runtime_binding_orchestrator import RuntimeBindingOrchestrator
 from app.runtime_context import RuntimeContextBuilder
 
 
@@ -79,6 +80,11 @@ class FieldReferenceController:
         }
 
         # synced-to-legacy-runtime check
+        fr["is_ready"] = self._svc.reference.is_ready()
+        fr["is_ready_for_field_to_local"] = self._svc.reference.is_ready_for_field_to_local()
+        fr["is_ready_for_field_to_gps"] = self._svc.reference.is_ready_for_field_to_gps()
+        fr["is_frozen"] = self._svc.reference.is_frozen
+        fr["runtime_binding"] = self._runtime_binding.status() if hasattr(self, "_runtime_binding") else {"state": "not_initialized"}
         fr["synced_to_runtime"] = self._is_field_reference_synced(
             status, self._builder
         )

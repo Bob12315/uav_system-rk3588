@@ -486,6 +486,27 @@ class SystemRunner:
             profile_id, f"profile not found: {profile_id}"
         )
 
+
+    def _observe_runtime_field_sampling(self, drone, *, now_s):
+        try:
+            from dataclasses import asdict as _ad
+            snap = _ad(drone) if hasattr(drone, '__dataclass_fields__') else {}
+            self.field_reference_controller.observe_runtime_profile_sampling(snap, observed_at_s=now_s)
+        except Exception:
+            self.logger.warning("runtime field sampling observe failed", exc_info=True)
+
+    def field_profile_runtime_sampling_start(self, profile_id):
+        with self.action_runtime_lock:
+            return self.field_reference_controller.start_runtime_profile_sampling(profile_id, started_at_s=time.time())
+
+    def field_profile_runtime_sampling_finalize(self):
+        with self.action_runtime_lock:
+            return self.field_reference_controller.finalize_runtime_profile_binding(completed_at_s=time.time())
+
+    def field_profile_runtime_sampling_cancel(self):
+        with self.action_runtime_lock:
+            return self.field_reference_controller.cancel_runtime_profile_sampling()
+
     def field_profile_bind_current(self, profile_id: str) -> dict[str, object]:
         with self.action_runtime_lock:
             return self.field_reference_controller.bind_profile_current(profile_id)

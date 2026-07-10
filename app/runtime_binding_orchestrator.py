@@ -40,6 +40,7 @@ class RuntimeBindingOrchestrator:
         self._svc = svc
         self._builder = builder
 
+        self._last_observed_at_s: float | None = None
         self._sampler: RuntimeFieldBindingSampler | None = None
         self._profile: FieldProfile | None = None
         self._profile_name: str | None = None
@@ -238,17 +239,39 @@ class RuntimeBindingOrchestrator:
     def state(self) -> str:
         return self._state
 
-    def status(self) -> dict[str, object]:
+    def _failure(self, error: object, *, state: str, rollback_ok: bool | None = None) -> dict[str, object]:
+        self._state = state
+        self._last_error = str(error)
+        result: dict[str, object] = {"ok": False, "state": state, "error": str(error)}
+        if rollback_ok is not None:
+            result["rollback_ok"] = rollback_ok
+        if self._candidate is not None:
+            result["profile_id"] = self._candidate.profile_id
+        self._last_result = result
+        return result
+
+    def status(self, *, now_s: float | None = None) -> dict[str, object]:
         result: dict[str, object] = {
             "state": self._state,
-            "profile_id": self._candidate.profile_id if self._candidate else None,
+            "profile_id": self._candidate.profile_id if self._candidate else self._profile.profile_id if self._profile else None,
+            "profile_name": self._profile_name,
             "last_error": self._last_error,
+            "candidate_ready": self._candidate is not None,
         }
-        if self._sampler is not None and self._state == "sampling":
+        if self._sampler is not None and self._state in ("sampling", "candidate_ready"):
             try:
-                result["sampling"] = _status_dict(self._sampler.status())
+                ts = now_s if now_s is not None else self._last_observed_at_s
+                if ts is not None:
+                    result["sampling"] = _status_dict(self._sampler.status(now_s=ts))
+                else:
+                    result["sampling"] = _status_dict(self._sampler.status())
             except Exception:
                 pass
+        if self._candidate is not None:
+            result["candidate_summary"] = {
+                "origin_lat": self._candidate.origin_lat, "origin_lon": self._candidate.origin_lon,
+                "sample_count": self._candidate.sample_count, "baseline_m": self._candidate.baseline_m,
+            }
         return result
 
 
@@ -265,38 +288,21 @@ def _synced(
     require_frozen: bool,
 ) -> bool:
     try:
-        if not svc_status.get("is_confirmed"):
-            return False
-        if not svc_status.get("is_ready_for_field_to_gps"):
-            return False
-        if svc_status.get("origin_source") != "runtime_current_gps":
-            return False
-        if require_frozen and not svc_status.get("is_frozen"):
-            return False
-        if not builder.field_heading_confirmed:
-            return False
-        if not builder.field_origin_gps_confirmed:
-            return False
-        if builder.field_origin_confirmed:
-            return False
-        if not builder.field_gps_transform_ready():
-            return False
-        if builder.field_transform_ready():
-            return False
-        for cv, bv in (
-            (candidate.origin_lat, builder.field_origin_lat),
-            (candidate.origin_lon, builder.field_origin_lon),
-        ):
-            if bv is None:
-                return False
-            if not math.isfinite(float(bv)):
-                return False
-            if not math.isclose(float(cv), float(bv), rel_tol=1e-9, abs_tol=1e-9):
-                return False
+        m = __import__('math')
+        if not svc_status.get("is_confirmed"): return False
+        if not svc_status.get("is_ready_for_field_to_gps"): return False
+        if svc_status.get("origin_source") != "runtime_current_gps": return False
+        if require_frozen and not svc_status.get("is_frozen"): return False
+        if not builder.field_heading_confirmed: return False
+        if not builder.field_origin_gps_confirmed: return False
+        if builder.field_origin_confirmed: return False
+        for cv, bv in ((candidate.origin_lat, builder.field_origin_lat), (candidate.origin_lon, builder.field_origin_lon)):
+            if bv is None: return False
+            if not m.isfinite(float(bv)): return False
+            if not m.isclose(float(cv), float(bv), rel_tol=1e-9, abs_tol=1e-9): return False
         return True
     except Exception:
         return False
-
 
 def _status_dict(status: object) -> dict[str, object]:
     """Convert a slotted dataclass to a dict (handles slots=True)."""
