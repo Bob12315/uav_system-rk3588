@@ -172,3 +172,86 @@ class TestMapPreview:
     def test_v3_profiles_exist(self):
         p = parse_field_profile(_make_v3_dict())
         assert p.schema_version == 3
+
+
+# =============================================================================
+# Real DOM and JS tests (6.2)
+# =============================================================================
+
+
+class TestRealDOM:
+    def test_all_runtime_ids_exist_once(self):
+        html = Path("web_ui/static/index.html").read_text()
+        ids = ["frGpsReady", "frLocalReady", "frForwardMarkerGps",
+               "frRuntimeState", "frRuntimeProfile", "frRuntimeError",
+               "fpSamplingState", "fpSamplingElapsed", "fpSamplingAccepted",
+               "fpSamplingRejected", "fpSamplingDuplicate",
+               "fpSamplingWindowComplete", "fpSamplingCanFinalize",
+               "fpSamplingLastRejection", "fpSamplingProgress",
+               "fpRuntimeOrigin", "fpRuntimeMarker", "fpRuntimeHeading",
+               "fpRuntimeBaseline", "fpRuntimeSpread", "fpRuntimeSampleCount",
+               "fpRuntimeWarnings", "fpRuntimeGeometry",
+               "fpRuntimeStart", "fpRuntimeFinalize", "fpRuntimeCancel"]
+        for id_ in ids:
+            count = html.count('id="' + id_ + '"')
+            assert count == 1, f"DOM id '{id_}' found {count} times, expected 1"
+
+    def test_no_centerline_only_in_title(self):
+        html = Path("web_ui/static/index.html").read_text()
+        assert "(Centerline Only)" not in html
+        assert "Field Reference / 场地参考" in html
+
+    def test_progress_element_exists(self):
+        html = Path("web_ui/static/index.html").read_text()
+        assert '<progress id="fpSamplingProgress"' in html
+
+
+class TestJSFunctionScope:
+    def test_finalize_only_in_finalize_fn(self):
+        src = Path("web_ui/static/js/field_profile.js").read_text()
+        # Find finalizeRuntimeSampling function body
+        fn_start = src.find("async function finalizeRuntimeSampling")
+        fn_end = src.find("async function cancelRuntimeSampling", fn_start)
+        if fn_end < 0:
+            fn_end = src.find("function cancelRuntimeSampling", fn_start)
+        if fn_end < 0:
+            fn_end = len(src)
+        fn_body = src[fn_start:fn_end]
+        assert "runtime-sampling/finalize" in fn_body
+
+    def test_polling_does_not_call_start(self):
+        src = Path("web_ui/static/js/field_reference.js").read_text()
+        # Polling function should not contain start
+        poll_start = src.find("function fetchFieldReferenceStatus")
+        poll_end = src.find("function startPolling", poll_start + 10)
+        if poll_end < 0:
+            poll_end = src.find("function stopPolling", poll_start)
+        if poll_end < 0:
+            poll_end = len(src)
+        poll_body = src[poll_start:poll_end]
+        assert "runtime-sampling/start" not in poll_body
+        assert "runtime-sampling/finalize" not in poll_body
+        assert "runtime-sampling/cancel" not in poll_body
+
+    def test_no_set_interval(self):
+        src = Path("web_ui/static/js/field_reference.js").read_text()
+        assert "setInterval" not in src, "setInterval found — should use recursive setTimeout"
+
+    def test_poll_in_flight_guard(self):
+        src = Path("web_ui/static/js/field_reference.js").read_text()
+        assert "pollInFlight" in src
+
+    def test_requestBusy_in_profile_js(self):
+        src = Path("web_ui/static/js/field_profile.js").read_text()
+        assert "requestBusy" in src
+        assert "updateRuntimeControls()" in src
+
+
+class TestCSS:
+    def test_runtime_progress_style(self):
+        css = Path("web_ui/static/style.css").read_text()
+        assert "fpSamplingProgress" in css
+
+    def test_disabled_button_style(self):
+        css = Path("web_ui/static/style.css").read_text()
+        assert "disabled" in css

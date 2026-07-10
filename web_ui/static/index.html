@@ -290,10 +290,16 @@
       </article>
 
       <article class="panel safety-panel field-reference-panel">
-        <div class="panel-title">Field Reference / 场地参考 (Centerline Only)</div>
+        <div class="panel-title">Field Reference / 场地参考</div>
         <div class="field-reference-status-grid" id="fieldReferenceStatus">
           <div><span>confirmed</span><strong id="frConfirmed">--</strong></div>
           <div><span>frozen</span><strong id="frFrozen">--</strong></div>
+          <div><span>GPS ready</span><strong id="frGpsReady">--</strong></div>
+          <div><span>LOCAL ready</span><strong id="frLocalReady">--</strong></div>
+          <div><span>forward marker GPS</span><strong id="frForwardMarkerGps">--</strong></div>
+          <div><span>runtime state</span><strong id="frRuntimeState">--</strong></div>
+          <div><span>runtime profile</span><strong id="frRuntimeProfile">--</strong></div>
+          <div><span>runtime error</span><strong id="frRuntimeError">--</strong></div>
           <div><span>origin source</span><strong id="frOriginSource">--</strong></div>
           <div><span>heading source</span><strong id="frHeadingSource">--</strong></div>
           <div><span>field heading deg</span><strong id="frHeadingDeg">--</strong></div>
@@ -312,12 +318,36 @@
           <div><span>warnings</span><strong id="frWarnings">--</strong></div>
         </div>
         <div id="frResidualTable" class="fr-residual-table"></div>
+        <div id="fpRuntimeSampling" class="field-reference-status-grid" style="display:none">
+          <div><span>Sampling State</span><strong id="fpSamplingState">--</strong></div>
+          <div><span>Elapsed / Window</span><strong id="fpSamplingElapsed">--</strong></div>
+          <div><span>Accepted / Min</span><strong id="fpSamplingAccepted">--</strong></div>
+          <div><span>Rejected</span><strong id="fpSamplingRejected">--</strong></div>
+          <div><span>Duplicate</span><strong id="fpSamplingDuplicate">--</strong></div>
+          <div><span>Window Complete</span><strong id="fpSamplingWindowComplete">--</strong></div>
+          <div><span>Can Finalize</span><strong id="fpSamplingCanFinalize">--</strong></div>
+          <div><span>Last Rejection</span><strong id="fpSamplingLastRejection">--</strong></div>
+          <div><progress id="fpSamplingProgress" value="0" max="1"></progress></div>
+        </div>
+        <div id="fpRuntimeResult" class="field-reference-status-grid" style="display:none">
+          <div><span>Origin GPS</span><strong id="fpRuntimeOrigin">--</strong></div>
+          <div><span>Forward Marker GPS</span><strong id="fpRuntimeMarker">--</strong></div>
+          <div><span>Heading deg</span><strong id="fpRuntimeHeading">--</strong></div>
+          <div><span>Baseline m</span><strong id="fpRuntimeBaseline">--</strong></div>
+          <div><span>Spread m</span><strong id="fpRuntimeSpread">--</strong></div>
+          <div><span>Sample Count</span><strong id="fpRuntimeSampleCount">--</strong></div>
+          <div><span>Warnings</span><strong id="fpRuntimeWarnings">--</strong></div>
+          <div><pre id="fpRuntimeGeometry"></pre></div>
+        </div>
         <div class="button-row">
+          <button id="fpRuntimeStart">开始 GPS 采样</button>
+          <button id="fpRuntimeFinalize">确认并冻结</button>
+          <button id="fpRuntimeCancel">取消采样</button>
           <button id="frReset">Reset</button>
           <button id="frFreeze">Freeze</button>
         </div>
         <div id="frHint" class="hint">
-          Field Reference — centerline profile binding only. Use Field Profile panel below to bind.
+          Field Reference — supports Schema v2 Legacy Centerline and Schema v3 Runtime GPS.
         </div>
       </article>
 

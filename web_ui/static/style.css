@@ -895,3 +895,15 @@ button.active-choice {
   color: var(--text);
   font-family: Consolas, monospace;
 }
+
+/* ── Runtime GPS Sampling ── */
+#fpSamplingProgress { width: 100%; max-width: 300px; height: 1em; }
+#fpRuntimeGeometry { max-height: 200px; overflow-y: auto; font-size: 0.8em; white-space: pre-wrap; }
+.fr-residual-table { max-height: 150px; overflow-y: auto; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+.field-reference-status-grid { display: grid; grid-template-columns: 1fr 2fr; gap: 0.25em 0.5em; margin: 0.5em 0; }
+.field-reference-status-grid strong { word-break: break-all; }
+@media (max-width: 600px) {
+    .field-reference-status-grid { grid-template-columns: 1fr; }
+    .button-row { flex-wrap: wrap; }
+}

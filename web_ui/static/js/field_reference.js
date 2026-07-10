@@ -103,3 +103,74 @@ window.UavFieldRef = (function () {
     init: init,
   };
 })();
+
+
+// ── Polling ────────────────────────────────────────────────────────────
+
+var pollTimer = null;
+var pollInFlight = false;
+var pollingStarted = false;
+
+function fetchFieldReferenceStatus() {
+    if (pollInFlight) return Promise.resolve(null);
+    pollInFlight = true;
+    return fetch("/api/field-reference/status").then(r => r.json()).then(function(data) {
+        renderFieldReference(data);
+        if (window.UavFieldProfiles && window.UavFieldProfiles.onFieldReferenceStatus) {
+            window.UavFieldProfiles.onFieldReferenceStatus(data);
+        }
+        var runtime = (data.field_reference || {}).runtime_binding || {};
+        var delay = (runtime.state === "sampling") ? 500 : 2000;
+        scheduleNextPoll(delay);
+        return data;
+    }).catch(function() {
+        scheduleNextPoll(2000);
+        return null;
+    }).finally(function() { pollInFlight = false; });
+}
+
+function scheduleNextPoll(delayMs) {
+    if (pollTimer) clearTimeout(pollTimer);
+    pollTimer = setTimeout(fetchFieldReferenceStatus, delayMs);
+}
+
+function startPolling() {
+    if (pollingStarted) return;
+    pollingStarted = true;
+    fetchFieldReferenceStatus();
+}
+
+function stopPolling() {
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+    pollingStarted = false;
+}
+
+function renderFieldReference(data) {
+    var fr = data.field_reference || {};
+    setText("frConfirmed", fr.is_confirmed ? "YES" : "no");
+    setText("frFrozen", fr.is_frozen ? "YES" : "no");
+    setText("frGpsReady", fr.is_ready_for_field_to_gps ? "YES" : "no");
+    setText("frLocalReady", fr.is_ready_for_field_to_local ? "YES" : "no");
+    setText("frOriginSource", fr.origin_source || "--");
+    setText("frHeadingSource", fr.heading_source || "--");
+    setText("frActiveSource", fr.active_source || "--");
+    setText("frSynced", fr.synced_to_runtime ? "YES" : "no");
+    setText("frOriginGps", fr.origin_lat != null ? fr.origin_lat.toFixed(7)+", "+fr.origin_lon.toFixed(7) : "--");
+    setText("frForwardMarkerGps", fr.forward_marker_lat != null ? fr.forward_marker_lat.toFixed(7)+", "+fr.forward_marker_lon.toFixed(7) : "--");
+    setText("frHeadingDeg", fr.field_heading_yaw_rad != null ? (fr.field_heading_yaw_rad*180/Math.PI).toFixed(2)+" deg" : "--");
+
+    var runtime = fr.runtime_binding || {};
+    setText("frRuntimeState", runtime.state || "--");
+    setText("frRuntimeProfile", runtime.profile_id || "--");
+    setText("frRuntimeError", runtime.last_error || "--");
+}
+
+function setText(id, text) {
+    var el = document.getElementById(id);
+    if (el && el.textContent !== text) el.textContent = text;
+}
+
+// Start polling on init
+document.addEventListener("DOMContentLoaded", function() {
+    startPolling();
+});
