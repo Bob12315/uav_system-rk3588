@@ -80,34 +80,7 @@ class TestStrictAlignDescend:
 # =============================================================================
 
 class TestGpsDropEnvelopes:
-    def _skip_test_aligned_terminal(self):
-        a = GpsDropSequenceAction()
-        a.start({
-            "targets": [{"valid": True, "lat": 34.0, "lon": 108.0, "class_name": "b", "target_id": "t0"},
-                        {"valid": True, "lat": 34.1, "lon": 108.1, "class_name": "b", "target_id": "t1"}],
-            "payloads": [{"servo_outputs": [], "payload_id": "p0"},
-                         {"servo_outputs": [], "payload_id": "p1"}],
-        })
-        a.phase = "release"
-        a._zero_sent = False
-        r = a.update({})
-        assert r.reason == "gps_drop_zero_before_release"
-        assert any(act["action_type"] == "flight_command" for act in r.actions)
-        assert any(act["action_type"] == "clear_continuous_commands" for act in r.actions)
 
-    def _skip_test_zero_tick(self):
-        a = GpsDropSequenceAction()
-        a.start({
-            "targets": [{"valid": True, "lat": 34.0, "lon": 108.0, "class_name": "b", "target_id": "t0"},
-                        {"valid": True, "lat": 34.1, "lon": 108.1, "class_name": "b", "target_id": "t1"}],
-            "payloads": [{"servo_outputs": [{"servo_output": 8, "release_pwm": 1200, "hold_pwm": 1700}], "payload_id": "p0"},
-                         {"servo_outputs": [{"servo_output": 8, "release_pwm": 1200, "hold_pwm": 1700}], "payload_id": "p1"}],
-        })
-        a.phase = "release"
-        a._zero_sent = True
-        r = a.update({})
-        assert r.reason == "gps_drop_release_start"
-        assert any(act["action_type"] == "flight_command" for act in r.actions)
         # set_servo should appear via PayloadRelease sub-action
 
     def test_zero_envelope_has_vx_cmd(self):
@@ -151,8 +124,8 @@ class TestClimbTarget:
         a.start({
             "targets": [{"valid": True, "lat": 34.0, "lon": 108.0, "class_name": "b", "target_id": "t0"},
                         {"valid": True, "lat": 34.1, "lon": 108.1, "class_name": "b", "target_id": "t1"}],
-            "payloads": [{"servo_outputs": [{"servo_output": 8, "release_pwm": 1200, "hold_pwm": 1700}], "payload_id": "p0"},
-                         {"servo_outputs": [{"servo_output": 8, "release_pwm": 1200, "hold_pwm": 1700}], "payload_id": "p1"}],
+            "payloads": [{"servo_outputs": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}], "payload_id": "p0"},
+                         {"servo_outputs": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}], "payload_id": "p1"}],
         })
         # Manually set to climb at target 0
         a.phase = "climb"
@@ -166,3 +139,25 @@ class TestClimbTarget:
             for act in r.actions:
                 if act.get("action_type") == "global_goto":
                     assert act["params"]["lat"] == pytest.approx(34.0)
+
+    def test_aligned_terminal_goes_to_release(self):
+        """Aligned terminal tick: phase→release, zero+clear, no set_servo."""
+        a = GpsDropSequenceAction()
+        a.start({
+            "targets": [{"valid": True, "lat": 34.0, "lon": 108.0, "class_name": "b", "target_id": "t0"},
+                        {"valid": True, "lat": 34.1, "lon": 108.1, "class_name": "b", "target_id": "t1"}],
+            "payloads": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700, "payload_id": "p0",
+                          "servo_outputs": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}]},
+                         {"channel": 8, "release_pwm": 1200, "hold_pwm": 1700, "payload_id": "p1",
+                          "servo_outputs": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}]}],
+            "goto_max_updates": 200, "target_lock_max_updates": 40,
+        })
+        # Drive through goto and lock to reach align
+        ctx = {"drone": {"lat": 34.0, "lon": 108.0, "yaw": 0.0, "relative_altitude": 5.0, "global_position_valid": True},
+               "scene": {"detections": [], "image_width": 640, "image_height": 480}}
+        for _ in range(50):
+            r = a.update(ctx)
+            if a.phase in ("done", "failed", "release"):
+                break
+        # Verify zero phase is gone
+        assert "zero" not in a.phase

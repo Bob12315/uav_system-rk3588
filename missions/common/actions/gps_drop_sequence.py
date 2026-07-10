@@ -277,16 +277,16 @@ class GpsDropSequenceAction(ActionModule):
 
         # Align done — only "aligned_at_finish_altitude" allows release
         if result.reason != "aligned_at_finish_altitude":
-            return ActionResult(
-                actions=[_zero_velocity_command(), _clear_continuous_command("3")],
-                failed=True, reason="align_unexpected_done",
-                detail=self._detail(),
-            )
+            return self._fail("align_unexpected_done")
 
-        self.phase = "zero"
+        self.phase = "release"
+        self.sub_action = None
         self.update_count_at_phase = 0
         self._release_reason = "aligned_release"
-        return ActionResult(reason="gps_drop_align_done", detail=self._detail())
+        return ActionResult(
+            actions=[_zero_velocity_command(), _clear_continuous_command("aligned")],
+            reason="gps_drop_release_start", detail=self._detail(),
+        )
 
     def _update_release(self, context: dict[str, Any]) -> ActionResult:
         if self.sub_action is None:
