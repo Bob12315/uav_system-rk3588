@@ -24,6 +24,9 @@ def test_create_action_lab_registry_lists_supported_actions() -> None:
         "recon_scan",
         "recon_sequence",
         "gps_multi_view_localize",
+        "gps_target_lock",
+        "gps_drop_sequence",
+        "gps_multi_view_localize",
         "resolve_gps_targets",
         "select_drop_targets",
         "select_recon_targets",
@@ -66,6 +69,12 @@ def test_action_lab_specs_are_json_serializable() -> None:
         "drop_sequence",
         "build_recon_report",
         "recon_sequence",
+        "gps_multi_view_localize",
+        "gps_target_lock",
+        "gps_drop_sequence",
+        "gps_multi_view_localize",
+        "gps_target_lock",
+        "gps_drop_sequence",
         "gps_multi_view_localize",
     ]
 
@@ -177,6 +186,12 @@ def test_action_lab_does_not_auto_register_default_registry() -> None:
         "drop_sequence",
         "build_recon_report",
         "recon_sequence",
+        "gps_multi_view_localize",
+        "gps_target_lock",
+        "gps_drop_sequence",
+        "gps_multi_view_localize",
+        "gps_target_lock",
+        "gps_drop_sequence",
         "gps_multi_view_localize",
     ):
         assert name not in default_registry.list()

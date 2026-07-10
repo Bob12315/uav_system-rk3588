@@ -5,6 +5,8 @@ from typing import Any
 from .align_descend import AlignDescendAction
 from .build_recon_report import BuildReconReportAction
 from .gps_multi_view_localize import GpsMultiViewLocalizeAction
+from .gps_target_lock import GpsTargetLockAction
+from .gps_drop_sequence import GpsDropSequenceAction
 from .goto_waypoint import GotoWaypointAction
 from .land import LandAction
 from .multi_view_localize import MultiViewLocalizeAction
@@ -51,6 +53,8 @@ def create_action_lab_registry() -> ActionRegistry:
     registry.register("drop_sequence", DropSequenceAction)
     registry.register("recon_sequence", ReconSequenceAction)
     registry.register("gps_multi_view_localize", GpsMultiViewLocalizeAction)
+    registry.register("gps_target_lock", GpsTargetLockAction)
+    registry.register("gps_drop_sequence", GpsDropSequenceAction)
     return registry
 
 
@@ -541,6 +545,35 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "min_confidence": 0.35,
                 "camera": {"fov_x_deg": 51.3, "fov_y_deg": 39.6, "image_x_sign": 1.0, "image_y_sign": -1.0},
                 "fusion": {"cluster_radius_m": 0.8, "outlier_radius_m": 0.8, "min_cluster_size": 2, "center_weight_power": 1.0}
+            },
+        },
+        {
+            "name": "gps_target_lock",
+            "label": "GPS Target Lock",
+            "description": "Lock onto a GPS target by correlating capture-time detection projections.",
+            "default_params": {
+                "target": {},
+                "max_match_distance_m": 1.2,
+                "max_updates": 40,
+                "camera": {"fov_x_deg": 51.3, "fov_y_deg": 39.6, "image_x_sign": 1.0, "image_y_sign": -1.0},
+            },
+        },
+        {
+            "name": "gps_drop_sequence",
+            "label": "GPS Drop Sequence",
+            "description": "GPS-first dual-target drop: GLOBAL goto \u2192 GPS lock \u2192 align \u2192 release \u2192 climb.",
+            "default_params": {
+                "targets": [],
+                "payloads": [],
+                "approach_altitude_m": 3.0,
+                "finish_altitude_m": 1.3,
+                "climb_after_drop_m": 5.0,
+                "goto_max_updates": 160,
+                "target_lock_max_updates": 40,
+                "align_descend_max_updates": 250,
+                "climb_max_updates": 120,
+                "release_wait_updates": 5,
+                "align_descend": {"finish_policy": "require_alignment_or_timeout"},
             },
         },
     ]

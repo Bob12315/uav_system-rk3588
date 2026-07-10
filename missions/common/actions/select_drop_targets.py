@@ -93,6 +93,9 @@ class SelectDropTargetsAction(ActionModule):
         self.zone_center_mode = str(data.get("zone_center_mode", "local"))
         if self.zone_center_mode not in ("local", "field"):
             raise ValueError("zone_center_mode must be 'local' or 'field'")
+        self.coordinate_mode = str(data.get("coordinate_mode", "local")).strip().lower()
+        if self.coordinate_mode not in ("local", "gps_enu"):
+            raise ValueError("coordinate_mode must be 'local' or 'gps_enu'")
         self.started = True
         self.stopped = False
         self.done = False
@@ -178,6 +181,7 @@ class SelectDropTargetsAction(ActionModule):
         self.multi_target_first_servo_outputs: list[dict[str, Any]] | None = None
         self.zone_center: tuple[float, float] | None = None
         self.zone_center_mode = "local"
+        self.coordinate_mode = "local"
         self._effective_zone_center: tuple[float, float] | None = None
         self.key = "select_drop_targets"
         self.started = False
@@ -252,6 +256,19 @@ class SelectDropTargetsAction(ActionModule):
         local_x, local_y = xy
         if not math.isfinite(local_x) or not math.isfinite(local_y):
             return None, {**base_rejection, "reason": "invalid_xy"}
+        # GPS mode: also validate lat/lon
+        if self.coordinate_mode == "gps_enu":
+            lat = obj.get("lat"); lon = obj.get("lon")
+            if lat is None or lon is None:
+                return None, {**base_rejection, "reason": "missing_gps"}
+            try:
+                lat_f = float(lat); lon_f = float(lon)
+                if not math.isfinite(lat_f) or not math.isfinite(lon_f):
+                    return None, {**base_rejection, "reason": "invalid_gps"}
+                if lat_f < -90 or lat_f > 90 or lon_f < -180 or lon_f > 180:
+                    return None, {**base_rejection, "reason": "invalid_gps"}
+            except (TypeError, ValueError):
+                return None, {**base_rejection, "reason": "invalid_gps"}
 
         seen_count = self._int_value(
             obj.get("seen_count", obj.get("count", obj.get("raw_count", 0))),
@@ -334,6 +351,8 @@ class SelectDropTargetsAction(ActionModule):
                     "local_y": candidate.local_y,
                     "x": candidate.local_x,
                     "y": candidate.local_y,
+                    "east_m": candidate.local_x,
+                    "north_m": candidate.local_y,
                     "score": candidate.score,
                     "seen_count": candidate.seen_count,
                     "count": candidate.seen_count,
@@ -459,6 +478,15 @@ class SelectDropTargetsAction(ActionModule):
         return None
 
     def _xy(self, obj: dict[str, Any]) -> tuple[float, float] | None:
+        if self.coordinate_mode == "gps_enu":
+            east = obj.get("east_m")
+            north = obj.get("north_m")
+            if east is not None and north is not None:
+                try:
+                    return (float(east), float(north))
+                except (TypeError, ValueError):
+                    return None
+            return None
         x_value = obj.get("local_x")
         y_value = obj.get("local_y")
         if x_value is None or y_value is None:
