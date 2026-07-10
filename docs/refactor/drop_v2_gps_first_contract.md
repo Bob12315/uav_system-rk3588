@@ -91,6 +91,21 @@ Mission execution will require frozen at the runtime-binding layer.
 - The candidate is not confirmed, frozen, or written into runtime
   state until step 5B.
 
+### Runtime GPS binding integration (step 5B.2.3)
+
+- `FieldReferenceController` owns the runtime binding orchestrator and exposes
+  the start, observe, finalize, and cancel lifecycle.
+- `SystemRunner` feeds exactly one current `DroneState` snapshot into the
+  Controller on each main-loop iteration. Start, finalize, and cancel remain
+  explicit operator-side operations; sampling does not auto-finalize.
+- Applying a candidate is one transaction across `FieldReferenceService` and
+  `RuntimeContextBuilder`. A failure at snapshot, apply, synchronization,
+  freeze, or post-freeze verification attempts to restore both owners from
+  their complete snapshots, and retains the candidate for retry.
+- Freeze occurs only after Service and Builder match every runtime GPS binding
+  field. The frozen state is verified again before success is reported.
+- Runtime binding currently adds no Web endpoint and sends no flight command.
+
 ## 5. Dynamic Field Contract
 
 ### Config (on-disk, minimal)

@@ -11,7 +11,7 @@ import time
 from collections import deque
 from dataclasses import asdict, dataclass
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Mapping
 
 from pymavlink import mavutil
 
@@ -181,6 +181,10 @@ class SystemRunner:
                 perception = self.services.get_perception(now)
                 scene = self.services.get_scene_detections(now)
                 drone = self.services.get_drone_state()
+                self._observe_runtime_field_sampling(
+                    drone,
+                    now_s=now,
+                )
                 gimbal = self.services.get_gimbal_state()
                 link = self.services.get_link_status()
                 fused = self.services.fusion_manager.update(perception, drone, gimbal)
@@ -487,11 +491,23 @@ class SystemRunner:
         )
 
 
-    def _observe_runtime_field_sampling(self, drone, *, now_s):
+    def _observe_runtime_field_sampling(
+        self,
+        drone: object,
+        *,
+        now_s: float,
+    ) -> None:
         try:
-            from dataclasses import asdict as _ad
-            snap = _ad(drone) if hasattr(drone, '__dataclass_fields__') else {}
-            self.field_reference_controller.observe_runtime_profile_sampling(snap, observed_at_s=now_s)
+            if hasattr(drone, "__dataclass_fields__"):
+                snapshot = asdict(drone)
+            elif isinstance(drone, Mapping):
+                snapshot = dict(drone)
+            else:
+                snapshot = {}
+            self.field_reference_controller.observe_runtime_profile_sampling(
+                snapshot,
+                observed_at_s=now_s,
+            )
         except Exception:
             self.logger.warning("runtime field sampling observe failed", exc_info=True)
 

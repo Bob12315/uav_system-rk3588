@@ -1,14 +1,18 @@
 """Tests for runtime binding orchestrator (step 5B.2)."""
 
 import copy
+from dataclasses import dataclass
+from unittest.mock import Mock
 
 import pytest
 
 from app.field_profile import parse_field_profile, validate_field_profile
 from app.field_reference import FieldReference
 from app.field_reference_service import FieldReferenceService
-from app.runtime_binding_orchestrator import RuntimeBindingOrchestrator
+from app.runtime_binding_orchestrator import RuntimeBindingOrchestrator, _synced
 from app.runtime_context import RuntimeContextBuilder
+from app.field_reference_controller import FieldReferenceController
+from app.system_runner import SystemRunner
 
 
 def _make_profile():
@@ -308,3 +312,374 @@ class TestServiceFields:
         r = o.start(_make_profile(), started_at_s=1000.0)
         assert r["ok"] is False
         assert "frozen" in r.get("error", "").lower()
+
+
+# =============================================================================
+# Real Controller lifecycle (5B.2.3)
+# =============================================================================
+
+
+def _controller_with_profile(monkeypatch):
+    svc = FieldReferenceService()
+    builder = RuntimeContextBuilder()
+    controller = FieldReferenceController(svc, builder, lambda: {})
+    profile = _make_profile()
+    monkeypatch.setattr(
+        controller, "_load_profile", lambda profile_id: (profile, [])
+    )
+    return controller, svc, builder
+
+
+class TestControllerRuntimeLifecycle:
+    def test_start_observe_finalize_status_end_to_end(self, monkeypatch):
+        controller, svc, builder = _controller_with_profile(monkeypatch)
+        started = controller.start_runtime_profile_sampling(
+            "test_orch", started_at_s=1000.0
+        )
+        assert started["state"] == "sampling"
+        for i in range(20):
+            observed = controller.observe_runtime_profile_sampling(
+                _valid_snap(2000.0 + i * 0.1),
+                observed_at_s=1000.0 + i * 0.25,
+            )
+            assert observed["observed"] is True
+        finalized = controller.finalize_runtime_profile_binding(
+            completed_at_s=1005.0
+        )
+        assert finalized["state"] == "applied"
+        assert finalized["geometry"]["home"]["name"] == "HOME"
+        status = controller.status()["field_reference"]
+        assert svc.reference.is_frozen is True
+        assert svc.reference.is_ready_for_field_to_gps() is True
+        assert svc.reference.is_ready_for_field_to_local() is False
+        assert builder.field_gps_transform_ready() is True
+        assert builder.field_transform_ready() is False
+        assert status["synced_to_runtime"] is True
+        assert status["active_source"] == "runtime_origin_forward_marker"
+
+    def test_cancel_calls_real_orchestrator(self, monkeypatch):
+        controller, _, _ = _controller_with_profile(monkeypatch)
+        controller.start_runtime_profile_sampling("test_orch", started_at_s=1.0)
+        result = controller.cancel_runtime_profile_sampling()
+        assert result == {"ok": True, "state": "idle"}
+        assert controller._runtime_binding.state == "idle"
+
+    def test_reset_cancels_and_clears_both_owners(self, monkeypatch):
+        controller, svc, builder = _controller_with_profile(monkeypatch)
+        controller.start_runtime_profile_sampling("test_orch", started_at_s=1.0)
+        svc.reference.origin_lat = 34.0
+        builder.field_origin_lat = 34.0
+        result = controller.reset()
+        assert result["ok"] is True
+        assert controller._runtime_binding.state == "idle"
+        assert svc.reference.origin_lat is None
+        assert builder.field_origin_lat is None
+
+    def test_missing_profile_rejected(self, monkeypatch):
+        controller, _, _ = _controller_with_profile(monkeypatch)
+        monkeypatch.setattr(
+            controller,
+            "_load_profile",
+            lambda profile_id: (None, [f"profile not found: {profile_id}"]),
+        )
+        result = controller.start_runtime_profile_sampling(
+            "missing", started_at_s=1.0
+        )
+        assert result["ok"] is False
+        assert "not found" in result["error"]
+
+    def test_schema_v2_explicitly_rejected(self, monkeypatch):
+        controller, _, _ = _controller_with_profile(monkeypatch)
+        profile = copy.deepcopy(_make_profile())
+        profile.schema_version = 2
+        monkeypatch.setattr(
+            controller, "_load_profile", lambda profile_id: (profile, [])
+        )
+        result = controller.start_runtime_profile_sampling(
+            "old", started_at_s=1.0
+        )
+        assert result["ok"] is False
+        assert "schema v2" in result["error"]
+
+    def test_frozen_reference_rejected(self, monkeypatch):
+        controller, svc, _ = _controller_with_profile(monkeypatch)
+        svc.reference.is_confirmed = True
+        svc.reference.freeze()
+        result = controller.start_runtime_profile_sampling(
+            "test_orch", started_at_s=1.0
+        )
+        assert result["ok"] is False
+        assert "frozen" in result["error"]
+
+
+# =============================================================================
+# Transaction exceptions, returned failures, retry and rollback
+# =============================================================================
+
+
+def _ready_orchestrator():
+    orchestrator = RuntimeBindingOrchestrator(
+        FieldReferenceService(), RuntimeContextBuilder()
+    )
+    orchestrator.start(_make_profile(), started_at_s=1000.0)
+    for i in range(20):
+        orchestrator.observe(
+            _valid_snap(2000.0 + i * 0.1),
+            observed_at_s=1000.0 + i * 0.25,
+        )
+    return orchestrator
+
+
+@pytest.mark.parametrize("failure_stage", ["service", "builder", "freeze"])
+def test_returned_transaction_failure_restores_both_owners(
+    monkeypatch, failure_stage
+):
+    orchestrator = _ready_orchestrator()
+    service_before = orchestrator._svc.snapshot()
+    builder_before = orchestrator._builder.snapshot_field_reference_state()
+    if failure_stage == "service":
+        monkeypatch.setattr(
+            orchestrator._svc,
+            "apply_runtime_binding",
+            lambda *args, **kwargs: {"ok": False, "error": "injected"},
+        )
+    elif failure_stage == "builder":
+        monkeypatch.setattr(
+            orchestrator._builder,
+            "confirm_runtime_gps_reference",
+            lambda *args, **kwargs: False,
+        )
+    else:
+        monkeypatch.setattr(
+            orchestrator._svc,
+            "freeze",
+            lambda: {"ok": False, "error": "injected freeze"},
+        )
+    result = orchestrator.finalize(completed_at_s=1005.0)
+    assert result["state"] == "apply_failed"
+    assert result["rollback_ok"] is True
+    assert orchestrator._candidate is not None
+    assert orchestrator._svc.snapshot() == service_before
+    assert orchestrator._builder.snapshot_field_reference_state() == builder_before
+
+
+@pytest.mark.parametrize(
+    "failure_stage", ["service_apply", "builder_apply", "status", "freeze"]
+)
+def test_transaction_exceptions_do_not_escape(monkeypatch, failure_stage):
+    orchestrator = _ready_orchestrator()
+    if failure_stage == "service_apply":
+        monkeypatch.setattr(
+            orchestrator._svc,
+            "apply_runtime_binding",
+            Mock(side_effect=RuntimeError("service boom")),
+        )
+    elif failure_stage == "builder_apply":
+        monkeypatch.setattr(
+            orchestrator._builder,
+            "confirm_runtime_gps_reference",
+            Mock(side_effect=RuntimeError("builder boom")),
+        )
+    elif failure_stage == "status":
+        monkeypatch.setattr(
+            orchestrator._svc,
+            "status",
+            Mock(side_effect=RuntimeError("status boom")),
+        )
+    else:
+        monkeypatch.setattr(
+            orchestrator._svc,
+            "freeze",
+            Mock(side_effect=RuntimeError("freeze boom")),
+        )
+    result = orchestrator.finalize(completed_at_s=1005.0)
+    assert result["ok"] is False
+    assert result["state"] == "apply_failed"
+    assert result["rollback_ok"] is True
+
+
+def test_rollback_reports_both_restore_failures(monkeypatch):
+    orchestrator = _ready_orchestrator()
+    monkeypatch.setattr(
+        orchestrator._svc,
+        "apply_runtime_binding",
+        lambda *args, **kwargs: {"ok": False, "error": "injected"},
+    )
+    monkeypatch.setattr(
+        orchestrator._svc,
+        "restore",
+        Mock(side_effect=RuntimeError("restore boom")),
+    )
+    monkeypatch.setattr(
+        orchestrator._builder,
+        "restore_field_reference_state",
+        lambda snapshot: False,
+    )
+    result = orchestrator.finalize(completed_at_s=1005.0)
+    assert result["rollback_ok"] is False
+
+
+def test_apply_failure_retries_same_candidate_without_refinalize(monkeypatch):
+    orchestrator = _ready_orchestrator()
+    real_apply = orchestrator._svc.apply_runtime_binding
+    calls = {"apply": 0, "finalize": 0}
+    real_finalize = orchestrator._sampler.finalize
+
+    def counted_finalize(*args, **kwargs):
+        calls["finalize"] += 1
+        return real_finalize(*args, **kwargs)
+
+    def fail_once(*args, **kwargs):
+        calls["apply"] += 1
+        if calls["apply"] == 1:
+            return {"ok": False, "error": "first apply fails"}
+        return real_apply(*args, **kwargs)
+
+    monkeypatch.setattr(orchestrator._sampler, "finalize", counted_finalize)
+    monkeypatch.setattr(orchestrator._svc, "apply_runtime_binding", fail_once)
+    first = orchestrator.finalize(completed_at_s=1005.0)
+    retained = orchestrator._candidate
+    second = orchestrator.finalize(completed_at_s=1006.0)
+    assert first["state"] == "apply_failed"
+    assert second["state"] == "applied"
+    assert orchestrator._candidate is retained
+    assert calls == {"apply": 2, "finalize": 1}
+
+
+def test_applied_finalize_has_no_transaction_side_effects(monkeypatch):
+    orchestrator = _ready_orchestrator()
+    first = orchestrator.finalize(completed_at_s=1005.0)
+    monkeypatch.setattr(
+        orchestrator._svc,
+        "apply_runtime_binding",
+        Mock(side_effect=AssertionError("must not apply twice")),
+    )
+    monkeypatch.setattr(
+        orchestrator._builder,
+        "confirm_runtime_gps_reference",
+        Mock(side_effect=AssertionError("must not sync twice")),
+    )
+    monkeypatch.setattr(
+        orchestrator._svc,
+        "freeze",
+        Mock(side_effect=AssertionError("must not freeze twice")),
+    )
+    assert orchestrator.finalize(completed_at_s=1006.0) == first
+
+
+# =============================================================================
+# Full synchronization tamper checks
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("owner", "field", "bad_value"),
+    [
+        ("service", "heading_source", "bad"),
+        ("service", "forward_marker_lat", 0.0),
+        ("service", "field_heading_yaw_rad", 0.5),
+        ("service", "profile_id", "bad"),
+        ("service", "is_ready_for_field_to_local", True),
+        ("builder", "field_forward_marker_lat", 0.0),
+        ("builder", "field_baseline_m", 1.0),
+        ("builder", "field_runtime_profile_id", "bad"),
+        ("builder", "field_gps_rejected_sample_count", 1),
+        ("builder", "field_gps_duplicate_sample_count", 1),
+        ("builder", "field_gps_sample_duration_s", 4.0),
+        ("builder", "field_gps_horizontal_spread_m", 1.0),
+        ("builder", "field_gps_fix_type", 4),
+        ("builder", "field_gps_satellites", 11),
+        ("builder", "field_gps_eph", 2.0),
+        ("builder", "field_gps_epv", 2.0),
+    ],
+)
+def test_synced_rejects_each_tampered_runtime_field(owner, field, bad_value):
+    orchestrator = _ready_orchestrator()
+    result = orchestrator.finalize(completed_at_s=1005.0)
+    assert result["ok"] is True
+    candidate = orchestrator._candidate
+    status = orchestrator._svc.status()
+    if owner == "service":
+        status[field] = bad_value
+    else:
+        setattr(orchestrator._builder, field, bad_value)
+    assert _synced(
+        candidate, status, orchestrator._builder, require_frozen=True
+    ) is False
+
+
+# =============================================================================
+# SystemRunner sampling bridge
+# =============================================================================
+
+
+@dataclass
+class _DroneDataclass:
+    lat: float
+    lon: float
+
+
+def _runner_sampling_spy():
+    runner = SystemRunner.__new__(SystemRunner)
+    runner.logger = Mock()
+    runner.field_reference_controller = Mock()
+    return runner
+
+
+def test_system_runner_preserves_mapping_snapshot():
+    runner = _runner_sampling_spy()
+    snapshot = {"lat": 34.0, "nested": {"valid": True}}
+    runner._observe_runtime_field_sampling(snapshot, now_s=10.0)
+    passed = runner.field_reference_controller.observe_runtime_profile_sampling.call_args.args[0]
+    assert passed == snapshot
+    assert passed is not snapshot
+
+
+def test_system_runner_converts_dataclass_snapshot():
+    runner = _runner_sampling_spy()
+    runner._observe_runtime_field_sampling(
+        _DroneDataclass(lat=34.0, lon=108.0), now_s=10.0
+    )
+    runner.field_reference_controller.observe_runtime_profile_sampling.assert_called_once_with(
+        {"lat": 34.0, "lon": 108.0}, observed_at_s=10.0
+    )
+
+
+def test_system_runner_isolates_controller_observe_exception():
+    runner = _runner_sampling_spy()
+    runner.field_reference_controller.observe_runtime_profile_sampling.side_effect = RuntimeError("boom")
+    runner._observe_runtime_field_sampling({}, now_s=10.0)
+    runner.logger.warning.assert_called_once()
+
+
+def test_system_runner_loop_source_observes_immediately_after_drone_read():
+    import inspect
+
+    source = inspect.getsource(SystemRunner._action_lab_only_loop)
+    read_at = source.index("drone = self.services.get_drone_state()")
+    observe_at = source.index("self._observe_runtime_field_sampling", read_at)
+    gimbal_at = source.index("gimbal = self.services.get_gimbal_state()", read_at)
+    assert read_at < observe_at < gimbal_at
+
+
+@pytest.mark.parametrize(
+    ("wrapper", "controller_method"),
+    [
+        ("field_profile_runtime_sampling_start", "start_runtime_profile_sampling"),
+        ("field_profile_runtime_sampling_finalize", "finalize_runtime_profile_binding"),
+        ("field_profile_runtime_sampling_cancel", "cancel_runtime_profile_sampling"),
+    ],
+)
+def test_system_runner_runtime_wrappers_use_controller_and_lock(
+    monkeypatch, wrapper, controller_method
+):
+    import threading
+
+    runner = SystemRunner.__new__(SystemRunner)
+    runner.action_runtime_lock = threading.RLock()
+    runner.field_reference_controller = Mock()
+    getattr(runner.field_reference_controller, controller_method).return_value = {"ok": True}
+    monkeypatch.setattr("app.system_runner.time.time", lambda: 123.0)
+    args = ("test_orch",) if wrapper.endswith("start") else ()
+    assert getattr(runner, wrapper)(*args) == {"ok": True}
+    getattr(runner.field_reference_controller, controller_method).assert_called_once()

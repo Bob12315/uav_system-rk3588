@@ -35,8 +35,8 @@ class FieldReferenceService:
     internal state only — it does **not** read from the flight controller,
     Web UI, LinkManager, or MAVLink.
 
-    Centerline-only: the only way to populate the reference is via
-    ``apply_profile_binding`` with a centerline ``BindResult``.
+    References can be populated by legacy centerline binding or by a validated
+    runtime GPS binding candidate.
     """
 
     def __init__(self, reference: FieldReference | None = None) -> None:
@@ -142,7 +142,7 @@ class FieldReferenceService:
             return {"ok": False, "error": "profile_name must be a non-empty string"}
 
         ts = timestamp if timestamp is not None else candidate.completed_at_s
-        if not (isinstance(ts, (int, float)) and not isinstance(ts, bool) and __import__('math').isfinite(float(ts))):
+        if not (isinstance(ts, (int, float)) and not isinstance(ts, bool) and math.isfinite(float(ts))):
             return {"ok": False, "error": f"timestamp must be finite, got {ts!r}"}
 
         # ── write ──────────────────────────────────────────────────
@@ -176,7 +176,6 @@ class FieldReferenceService:
         return list(validate_runtime_field_binding_candidate(candidate))
 
     # ------------------------------------------------------------------
-    # lifecycle    # ------------------------------------------------------------------
     # lifecycle
     # ------------------------------------------------------------------
 

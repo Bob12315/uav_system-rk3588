@@ -617,6 +617,23 @@ class TestMaxSeenSourceTime:
         s.observe_snapshot(snap, observed_at_s=1000.3)  # duplicate
         assert s.status(now_s=1000.4).last_rejection_reason == reason
 
+    def test_one_bad_gps_does_not_poison_a_later_valid_candidate(self):
+        s = RuntimeFieldBindingSampler(_profile())
+        s.start(started_at_s=1000.0)
+        bad = _valid_snapshot(1999.0)
+        bad["global_position_valid"] = False
+        rejected = s.observe_snapshot(bad, observed_at_s=1000.0)
+        assert rejected.state == "sampling"
+        assert rejected.rejected_samples == 1
+        for i in range(20):
+            s.observe_snapshot(
+                _valid_snapshot(2000.0 + i * 0.1),
+                observed_at_s=1000.1 + i * 0.24,
+            )
+        candidate = s.finalize(completed_at_s=1005.0)
+        assert candidate.sample_count == 20
+        assert candidate.rejected_sample_count == 1
+
 
 # =========================================================================
 # P. Non-Mapping snapshot

@@ -3,9 +3,9 @@ from __future__ import annotations
 import math
 import os
 import time as _time
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
-from app.field_profile import FieldProfileDiagnostics
+from app.field_profile import FieldProfile, FieldProfileDiagnostics
 from app.field_profile_service import BindResult, FieldProfileService
 from app.field_reference import _gps_distance_m
 from app.field_reference_service import FieldReferenceService
@@ -17,9 +17,8 @@ class FieldReferenceController:
     """Thin controller for the /api/field-reference/* and /api/field-profiles/*
     endpoints.
 
-    Centerline-only: profile bind-current is the sole way to populate the
-    field reference.  Legacy marker/set/confirm/manual-heading methods are
-    removed.
+    Supports legacy centerline binding and the explicit runtime GPS sampling
+    lifecycle. Legacy marker/set/confirm/manual-heading methods are removed.
     """
 
     # Absolute profile directories resolved from repo root.
@@ -80,21 +79,26 @@ class FieldReferenceController:
             "warnings": [],
         }
 
-        # synced-to-legacy-runtime check
         fr["is_ready"] = self._svc.reference.is_ready()
         fr["is_ready_for_field_to_local"] = self._svc.reference.is_ready_for_field_to_local()
         fr["is_ready_for_field_to_gps"] = self._svc.reference.is_ready_for_field_to_gps()
         fr["is_frozen"] = self._svc.reference.is_frozen
         fr["runtime_binding"] = self._runtime_binding.status()
-        fr["synced_to_runtime"] = self._is_field_reference_synced(
-            status, self._builder
-        )
-
-        fr["active_source"] = (
-            "field_profile_centerline"
-            if status["is_confirmed"]
-            else "none"
-        )
+        fr["forward_marker_lat"] = status.get("forward_marker_lat")
+        fr["forward_marker_lon"] = status.get("forward_marker_lon")
+        if status.get("origin_source") == "runtime_current_gps":
+            fr["active_source"] = "runtime_origin_forward_marker"
+            fr["synced_to_runtime"] = self._runtime_binding.synced_to_runtime(
+                status, require_frozen=True
+            )
+        elif status.get("is_confirmed"):
+            fr["active_source"] = "field_profile_centerline"
+            fr["synced_to_runtime"] = self._is_field_reference_synced(
+                status, self._builder
+            )
+        else:
+            fr["active_source"] = "none"
+            fr["synced_to_runtime"] = False
 
         # profile binding info
         if self._active_profile_id:
@@ -137,6 +141,7 @@ class FieldReferenceController:
     # ------------------------------------------------------------------
 
     def reset(self) -> dict[str, object]:
+        self._runtime_binding.cancel()
         result = self._svc.reset()
         self._builder.clear_field_heading()
         self._last_bind_result = None
@@ -146,6 +151,64 @@ class FieldReferenceController:
 
     def freeze(self) -> dict[str, object]:
         return self._svc.freeze()
+
+    def start_runtime_profile_sampling(
+        self,
+        profile_id: str,
+        *,
+        started_at_s: float,
+    ) -> dict[str, object]:
+        profile, errors = self._load_profile(profile_id)
+        if profile is None:
+            return {
+                "ok": False,
+                "state": self._runtime_binding.state,
+                "profile_id": profile_id,
+                "error": errors[0] if errors else f"profile not found: {profile_id}",
+                "errors": errors,
+            }
+        if profile.schema_version == 2:
+            return {
+                "ok": False,
+                "state": self._runtime_binding.state,
+                "profile_id": profile_id,
+                "error": "runtime GPS sampling explicitly rejects schema v2 profiles",
+            }
+        if profile.schema_version != 3:
+            return {
+                "ok": False,
+                "state": self._runtime_binding.state,
+                "profile_id": profile_id,
+                "error": f"runtime GPS sampling requires schema v3, got v{profile.schema_version}",
+            }
+        return self._runtime_binding.start(profile, started_at_s=started_at_s)
+
+    def observe_runtime_profile_sampling(
+        self,
+        snapshot: Mapping[str, object],
+        *,
+        observed_at_s: float,
+    ) -> dict[str, object]:
+        return self._runtime_binding.observe(
+            snapshot, observed_at_s=observed_at_s
+        )
+
+    def finalize_runtime_profile_binding(
+        self,
+        *,
+        completed_at_s: float,
+    ) -> dict[str, object]:
+        result = self._runtime_binding.finalize(completed_at_s=completed_at_s)
+        if result.get("ok") is True:
+            profile_id = result.get("profile_id")
+            if isinstance(profile_id, str):
+                self._active_profile_id = profile_id
+                self._last_bind_profile_id = profile_id
+            self._last_bind_result = None
+        return result
+
+    def cancel_runtime_profile_sampling(self) -> dict[str, object]:
+        return self._runtime_binding.cancel()
 
     # ------------------------------------------------------------------
     # profile binding (centerline only)
@@ -161,17 +224,7 @@ class FieldReferenceController:
         success.
         """
         # -- resolve profile ------------------------------------------------
-        profile = None
-        errors = []
-        for d in self._PROFILE_DIRS:
-            try:
-                profile = FieldProfileService.load_profile(profile_id, profile_dir=d)
-                break
-            except FileNotFoundError:
-                continue
-            except Exception as exc:
-                errors.append(str(exc))
-                continue
+        profile, errors = self._load_profile(profile_id)
 
         if profile is None:
             message = f"profile not found: {profile_id}"
@@ -261,6 +314,7 @@ class FieldReferenceController:
 
         # -- save old state for rollback -----------------------------------
         service_snapshot = self._svc.snapshot()
+        builder_snapshot = self._builder.snapshot_field_reference_state()
         saved_active_id = self._active_profile_id
 
         # -- apply to field reference --------------------------------------
@@ -275,6 +329,7 @@ class FieldReferenceController:
             )
         except Exception as exc:
             self._svc.restore(service_snapshot)
+            self._builder.restore_field_reference_state(builder_snapshot)
             self._active_profile_id = saved_active_id
             return self._bind_failure_response(
                 profile_id, f"apply profile binding failed: {exc}"
@@ -282,6 +337,7 @@ class FieldReferenceController:
 
         if not applied.get("ok"):
             self._svc.restore(service_snapshot)
+            self._builder.restore_field_reference_state(builder_snapshot)
             self._active_profile_id = saved_active_id
             error = str(applied.get("error") or "apply failed")
             return self._bind_failure_response(profile_id, error)
@@ -290,21 +346,6 @@ class FieldReferenceController:
         self._last_bind_profile_id = profile_id
 
         # -- sync to RuntimeContext ----------------------------------------
-        saved_rt = {
-            "field_heading_confirmed": self._builder.field_heading_confirmed,
-            "field_origin_confirmed": self._builder.field_origin_confirmed,
-            "field_heading_yaw_rad": self._builder.field_heading_yaw_rad,
-            "field_heading_source": self._builder.field_heading_source,
-            "field_heading_time": self._builder.field_heading_time,
-            "field_origin_local_x": self._builder.field_origin_local_x,
-            "field_origin_local_y": self._builder.field_origin_local_y,
-            "field_origin_local_z": self._builder.field_origin_local_z,
-            "field_origin_lat": self._builder.field_origin_lat,
-            "field_origin_lon": self._builder.field_origin_lon,
-            "field_origin_time": self._builder.field_origin_time,
-            "field_origin_confirmed": self._builder.field_origin_confirmed,
-        }
-
         ref = self._svc.reference
         source = f"field_profile:{profile.profile_id}"
         try:
@@ -325,17 +366,7 @@ class FieldReferenceController:
             # -- rollback --------------------------------------------------
             self._svc.restore(service_snapshot)
             self._active_profile_id = saved_active_id
-            self._builder.field_heading_confirmed = saved_rt["field_heading_confirmed"]
-            self._builder.field_origin_confirmed = saved_rt["field_origin_confirmed"]
-            self._builder.field_heading_yaw_rad = saved_rt["field_heading_yaw_rad"]
-            self._builder.field_heading_source = saved_rt["field_heading_source"]
-            self._builder.field_heading_time = saved_rt["field_heading_time"]
-            self._builder.field_origin_local_x = saved_rt["field_origin_local_x"]
-            self._builder.field_origin_local_y = saved_rt["field_origin_local_y"]
-            self._builder.field_origin_local_z = saved_rt["field_origin_local_z"]
-            self._builder.field_origin_lat = saved_rt["field_origin_lat"]
-            self._builder.field_origin_lon = saved_rt["field_origin_lon"]
-            self._builder.field_origin_time = saved_rt["field_origin_time"]
+            self._builder.restore_field_reference_state(builder_snapshot)
             return self._bind_failure_response(
                 profile_id,
                 "apply succeeded but failed to sync to runtime context",
@@ -374,6 +405,26 @@ class FieldReferenceController:
     # ------------------------------------------------------------------
     # internal
     # ------------------------------------------------------------------
+
+    def _load_profile(
+        self, profile_id: str
+    ) -> tuple[FieldProfile | None, list[str]]:
+        errors: list[str] = []
+        for directory in self._PROFILE_DIRS:
+            try:
+                return (
+                    FieldProfileService.load_profile(
+                        profile_id, profile_dir=directory
+                    ),
+                    errors,
+                )
+            except FileNotFoundError:
+                continue
+            except Exception as exc:
+                errors.append(str(exc))
+        if not errors:
+            errors.append(f"profile not found: {profile_id}")
+        return None, errors
 
     def _bind_failure_response(
         self,

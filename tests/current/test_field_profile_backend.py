@@ -195,6 +195,53 @@ def test_bind_current_syncs_runtime_context():
     assert FieldReferenceController._is_field_reference_synced(svc.status(), builder) is True
 
 
+def test_legacy_bind_sync_failure_restores_complete_runtime_gps_snapshot(
+    monkeypatch,
+):
+    profile = _make_profile()
+    drone = _drone_snapshot()
+    svc = FieldReferenceService()
+    builder = RuntimeContextBuilder()
+    builder.field_heading_yaw_rad = 0.25
+    builder.field_heading_time = 10.0
+    builder.field_heading_confirmed = True
+    builder.field_heading_source = "runtime_forward_marker"
+    builder.field_origin_lat = 34.0
+    builder.field_origin_lon = 108.0
+    builder.field_origin_time = 10.0
+    builder.field_origin_confirmed = False
+    builder.field_origin_gps_confirmed = True
+    builder.field_reference_mode = "runtime_origin_forward_marker"
+    builder.field_forward_marker_lat = 34.001
+    builder.field_forward_marker_lon = 108.0
+    builder.field_baseline_m = 111.0
+    builder.field_gps_sample_count = 20
+    builder.field_gps_rejected_sample_count = 2
+    builder.field_gps_duplicate_sample_count = 3
+    builder.field_gps_sample_duration_s = 5.0
+    builder.field_gps_horizontal_spread_m = 0.3
+    builder.field_gps_fix_type = 3
+    builder.field_gps_satellites = 12
+    builder.field_gps_eph = 1.0
+    builder.field_gps_epv = 1.5
+    builder.field_runtime_profile_id = "runtime-before-legacy"
+    before = builder.snapshot_field_reference_state()
+    controller = FieldReferenceController(svc, builder, lambda: drone)
+    monkeypatch.setattr(
+        controller, "_load_profile", lambda profile_id: (profile, [])
+    )
+
+    def corrupt_then_fail(**kwargs):
+        builder.clear_field_heading()
+        return False
+
+    monkeypatch.setattr(builder, "confirm_field_reference", corrupt_then_fail)
+    result = controller.bind_profile_current(profile.profile_id)
+    assert result["ok"] is False
+    assert builder.snapshot_field_reference_state() == before
+    assert svc.reference.is_confirmed is False
+
+
 # ---------------------------------------------------------------------------
 # origin_local is independent of current GPS
 # ---------------------------------------------------------------------------
