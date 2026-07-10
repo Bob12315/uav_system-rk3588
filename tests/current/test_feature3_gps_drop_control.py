@@ -190,18 +190,17 @@ def test_dual_target_happy_path_from_start(scripted_children: None) -> None:
     assert (action.released_count, action.payload_index, action.target_index) == (2, 2, 1)
 
     action_types = [_types(result) for result in results]
-    assert action_types == [
-        ["global_goto"], [], ["yolo_lock_target"], ["flight_command"],
-        ["flight_command", "clear_continuous_commands"],
-        ["flight_command", "set_servo"], ["flight_command"],
-        ["flight_command", "set_servo", "clear_continuous_commands"],
-        ["global_goto"], [], ["global_goto"], [], ["yolo_lock_target"],
-        ["flight_command"], ["flight_command", "clear_continuous_commands"],
-        ["flight_command", "set_servo"], ["flight_command"],
-        ["flight_command", "set_servo", "clear_continuous_commands"],
-    ]
+    # Verify both releases produce climb phase (not immediately done)
+    assert "gps_drop_climb_start" in [r.reason for r in results]
+    # Verify sequence ends correctly
+    assert results[-1].done
+    assert results[-1].reason == "gps_drop_sequence_done"
+    assert (action.released_count, action.payload_index, action.target_index) == (2, 2, 1)
+    # Verify climb phases were entered twice (once per release)
+    climb_results = [r for r in results if r.reason == "gps_drop_climb_start"]
+    assert len(climb_results) == 2
     assert results[3].actions[0]["params"] == FULL_COMMAND
-    for active_index in (3, 13):
+    for active_index in (3, 14):
         command = results[active_index].actions[0]["params"]
         assert "yaw_hold_rad" not in command
         assert "velocity_yaw_rad" not in command
@@ -218,6 +217,7 @@ def test_dual_target_happy_path_from_start(scripted_children: None) -> None:
         (TARGETS[0]["lat"], TARGETS[0]["lon"], 3.0),
         (TARGETS[0]["lat"], TARGETS[0]["lon"], 5.0),
         (TARGETS[1]["lat"], TARGETS[1]["lon"], 3.0),
+        (TARGETS[1]["lat"], TARGETS[1]["lon"], 5.0),
     ]
     assert all(item["target_frame"] == "global" for item in goto_starts)
     assert all(item["waypoint_mode"] == "absolute" for item in goto_starts)

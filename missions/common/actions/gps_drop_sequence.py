@@ -100,6 +100,7 @@ class GpsDropSequenceAction(ActionModule):
                 raise ValueError(f"{name} must be >= 1")
 
         self.goto_cfg = dict(data.get("goto") or {})
+        self.climb_cfg = dict(data.get("climb") or {})
         self.lock_cfg = dict(data.get("target_lock") or {})
         self.align_cfg = dict(data.get("align_descend") or {})
         self.align_cfg.setdefault("finish_policy", "require_alignment_or_timeout")
@@ -134,6 +135,7 @@ class GpsDropSequenceAction(ActionModule):
         self.sub_action: Any = None
         self._release_reason = ""
         self._failed_reason = ""
+        self._climb_is_terminal = False
 
         self.started = True
         self.stopped = False
@@ -352,28 +354,25 @@ class GpsDropSequenceAction(ActionModule):
 
         hold = result.actions or []
 
-        if self.payload_index < 2 and self.target_index + 1 < 2:
-            self.phase = "climb"
-            return ActionResult(
-                actions=[_zero_velocity_command()] + (hold or []) + [_clear_continuous_command("release_done")],
-                reason="gps_drop_climb_start", detail=self._detail(),
-            )
-        terminal_actions = (
-            [_zero_velocity_command()]
-            + hold
-            + [_clear_continuous_command("release_done")]
-        )
-        if not (
+        # Every release must climb. Determine if terminal (second) release.
+        is_terminal = (
             self.released_count == 2
             and self.payload_index == 2
             and self.target_index == 1
+        )
+        if not is_terminal and not (
+            self.released_count == 1
+            and self.payload_index == 1
+            and self.target_index == 0
         ):
-            return self._fail("incomplete_dual_target_drop", actions=terminal_actions)
-        self.phase = "done"
+            return self._fail("incomplete_dual_target_drop",
+                              actions=[_zero_velocity_command()] + (hold or []) + [_clear_continuous_command("release_done")])
+
+        self.phase = "climb"
+        self._climb_is_terminal = is_terminal
         return ActionResult(
-            actions=terminal_actions,
-            done=True, reason="gps_drop_sequence_done",
-            detail=self._detail(done=True),
+            actions=[_zero_velocity_command()] + (hold or []) + [_clear_continuous_command("release_done")],
+            reason="gps_drop_climb_start", detail=self._detail(),
         )
 
     def _update_climb(self, context: dict[str, Any]) -> ActionResult:
@@ -385,11 +384,16 @@ class GpsDropSequenceAction(ActionModule):
                 "altitude_m": self.climb_after_drop_m,
                 "target_frame": "global", "waypoint_mode": "absolute",
                 "yaw_mode": "hold", "frame": GLOBAL_RELATIVE_ALT_INT,
-                "tolerance_xy_m": 0.5, "tolerance_z_m": 0.5,
-                "min_hold_updates": 1, "key": f"gps_drop_climb_{self.target_index}",
-                "require_velocity_valid": self.goto_cfg.get("require_velocity_valid", False),
-                "max_horizontal_speed_mps": self.goto_cfg.get("max_horizontal_speed_mps", 0.15),
-                "max_vertical_speed_mps": self.goto_cfg.get("max_vertical_speed_mps", 0.10),
+                "tolerance_xy_m": self.climb_cfg.get("tolerance_xy_m", 0.5),
+                "tolerance_z_m": self.climb_cfg.get("tolerance_z_m", 0.5),
+                "min_hold_updates": self.climb_cfg.get("min_hold_updates", 1),
+                "key": f"gps_drop_climb_{self.target_index}",
+                "require_velocity_valid": self.climb_cfg.get("require_velocity_valid",
+                    self.goto_cfg.get("require_velocity_valid", False)),
+                "max_horizontal_speed_mps": self.climb_cfg.get("max_horizontal_speed_mps",
+                    self.goto_cfg.get("max_horizontal_speed_mps", 0.15)),
+                "max_vertical_speed_mps": self.climb_cfg.get("max_vertical_speed_mps",
+                    self.goto_cfg.get("max_vertical_speed_mps", 0.10)),
             })
             self.sub_action = ga
             self.update_count_at_phase = 0
@@ -403,6 +407,18 @@ class GpsDropSequenceAction(ActionModule):
                               actions=[_zero_velocity_command(), _clear_continuous_command("climb_fail")])
         if not result.done:
             return ActionResult(actions=result.actions, reason="gps_drop_climb", detail=self._detail())
+
+        # Climb complete: branch on terminal vs non-terminal
+        if getattr(self, "_climb_is_terminal", False):
+            self.phase = "done"
+            self.sub_action = None
+            self.update_count_at_phase = 0
+            return ActionResult(
+                actions=[_zero_velocity_command(), _clear_continuous_command("climb_done")],
+                done=True, reason="gps_drop_sequence_done",
+                detail=self._detail(done=True),
+            )
+
         self.target_index += 1
         self.phase = "goto"
         self.sub_action = None
@@ -436,7 +452,14 @@ class GpsDropSequenceAction(ActionModule):
             "payload_index": self.payload_index, "released_count": self.released_count,
             "target_count": len(self.targets), "payload_count": len(self.payloads),
             "release_reason": self._release_reason,
+            "climb_after_drop_m": self.climb_after_drop_m,
+            "climb_is_terminal": getattr(self, "_climb_is_terminal", False),
         }
+        if getattr(self, "_climb_is_terminal", False):
+            d["next_after_climb"] = "sequence_done"
+        elif self.phase == "climb":
+            d["next_after_climb"] = "next_target"
+
         if done: d["done"] = True
         if extra: d.update(extra)
         return d
