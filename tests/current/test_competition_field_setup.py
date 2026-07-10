@@ -76,7 +76,7 @@ def _sample_competition_baseline(distance_m):
         snapshot = dict(origin)
         snapshot["last_global_position_time"] = 2000.0 + index
         ctl.observe_runtime_profile_sampling(
-            snapshot, observed_at_s=1000.0 + index * 0.25
+            snapshot, observed_at_s=1000.0 + index * 0.6
         )
     return ctl
 
@@ -114,7 +114,7 @@ class TestTemplate:
     def test_template_sampling_policy_fixed(self):
         p = _read_template()
         assert p.runtime_origin_sampling.min_samples == 20
-        assert p.runtime_origin_sampling.sample_window_s == 5.0
+        assert p.runtime_origin_sampling.sample_window_s == 12.0
         assert p.runtime_origin_sampling.max_horizontal_spread_m == 1.0
         assert p.runtime_origin_sampling.estimator == "median"
 
@@ -283,7 +283,7 @@ class TestPreviewFinalize:
             sampler.observe_snapshot(s, observed_at_s=1000.0 + i * 0.2)
         state_before = sampler._state
         # Preview should not change state
-        candidate = sampler.preview_candidate(completed_at_s=1006.0)
+        candidate = sampler.preview_candidate(completed_at_s=1012.0)
         assert sampler._state == state_before
         assert sampler._candidate is None  # preview doesn't set _candidate
         assert candidate.origin_lat is not None
@@ -305,11 +305,11 @@ class TestPreviewFinalize:
                 "gps_epv": 2.0,
             }
             sampler.observe_snapshot(s, observed_at_s=2000.0 + i * 0.2)
-        preview = sampler.preview_candidate(completed_at_s=2006.0)
+        preview = sampler.preview_candidate(completed_at_s=2012.0)
         # Reset to re-run finalize from scratch
         sampler._candidate = None
         sampler._state = "sampling"
-        final = sampler.finalize(completed_at_s=2006.0)
+        final = sampler.finalize(completed_at_s=2012.0)
         assert preview.origin_lat == final.origin_lat
         assert preview.origin_lon == final.origin_lon
         assert preview.baseline_m == final.baseline_m
@@ -337,7 +337,7 @@ class TestPreviewFinalize:
         status = sampler.status(now_s=3006.0)
         assert status.can_finalize is False
         with pytest.raises(Exception):
-            sampler.preview_candidate(completed_at_s=3006.0)
+            sampler.preview_candidate(completed_at_s=3012.0)
 
     def test_spread_exceeds_can_finalize_false(self):
         from app.runtime_field_binding import RuntimeFieldBindingSampler
@@ -358,27 +358,27 @@ class TestPreviewFinalize:
             }
             sampler.observe_snapshot(s, observed_at_s=4000.0 + i * 0.2)
         with pytest.raises(Exception):
-            sampler.preview_candidate(completed_at_s=4006.0)
+            sampler.preview_candidate(completed_at_s=4012.0)
         assert sampler._state != "ready"
 
 
 class TestBaselineWarningLifecycle:
     def test_below_minimum_baseline_fails_and_cannot_finalize(self):
         ctl = _sample_competition_baseline(20.0)
-        status = ctl._runtime_binding.status(now_s=1005.0)
+        status = ctl._runtime_binding.status(now_s=1013.0)
         assert status["state"] == "sampling_failed"
         assert status["sampling"]["can_finalize"] is False
-        result = ctl.finalize_runtime_profile_binding(completed_at_s=1005.0)
+        result = ctl.finalize_runtime_profile_binding(completed_at_s=1012.0)
         assert result["ok"] is False
         assert result["state"] == "sampling_failed"
 
     def test_warning_baseline_survives_preview_and_finalize(self):
         ctl = _sample_competition_baseline(40.0)
-        status = ctl._runtime_binding.status(now_s=1005.0)
+        status = ctl._runtime_binding.status(now_s=1013.0)
         warnings = status["candidate_summary"]["warnings"]
         assert any("below warning threshold" in warning for warning in warnings)
 
-        result = ctl.finalize_runtime_profile_binding(completed_at_s=1005.0)
+        result = ctl.finalize_runtime_profile_binding(completed_at_s=1012.0)
 
         assert result["ok"] is True
         assert any("below warning threshold" in warning for warning in result["warnings"])
@@ -395,14 +395,14 @@ class TestBaselineWarningLifecycle:
             orchestrator._sampler, "preview_candidate", lambda **_kwargs: stripped
         )
 
-        orchestrator._try_preview(observed_at_s=1005.0)
+        orchestrator._try_preview(observed_at_s=1015.0)
 
-        warnings = orchestrator.status(now_s=1005.0)["candidate_summary"]["warnings"]
+        warnings = orchestrator.status(now_s=1013.0)["candidate_summary"]["warnings"]
         assert any("below warning threshold" in warning for warning in warnings)
 
     def test_baseline_at_warning_threshold_has_no_baseline_warning(self):
         ctl = _sample_competition_baseline(50.0)
-        status = ctl._runtime_binding.status(now_s=1005.0)
+        status = ctl._runtime_binding.status(now_s=1013.0)
         warnings = status["candidate_summary"]["warnings"]
         assert not any("below warning threshold" in warning for warning in warnings)
 

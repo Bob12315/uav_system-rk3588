@@ -38,11 +38,11 @@ window.UavFieldProfiles = (function () {
         var fg = data.field_geometry || {};
         setText("cfsLaneHalfWidth", (fg.lane_half_width_m || "--") + " m");
         setText("cfsDropRange",
-            (fg.drop_area_y_min_m != null ? fg.drop_area_y_min_m : "--") + " – " +
-            (fg.drop_area_y_max_m != null ? fg.drop_area_y_max_m : "--") + " m");
+            ((fg.drop_area_y_min_m != null ? fg.drop_area_y_min_m : fg.drop_area_y_min) || "--") + " \u2013 " +
+            ((fg.drop_area_y_max_m != null ? fg.drop_area_y_max_m : fg.drop_area_y_max) || "--") + " m");
         setText("cfsRecceRange",
-            (fg.recce_area_y_min_m != null ? fg.recce_area_y_min_m : "--") + " – " +
-            (fg.recce_area_y_max_m != null ? fg.recce_area_y_max_m : "--") + " m");
+            ((fg.recce_area_y_min_m != null ? fg.recce_area_y_min_m : fg.recce_area_y_min) || "--") + " \u2013 " +
+            ((fg.recce_area_y_max_m != null ? fg.recce_area_y_max_m : fg.recce_area_y_max) || "--") + " m");
         var ds = data.drop_scan || {};
         setText("cfsDropScanPoints",
             (ds.waypoints || []).map(function (w, i) {
