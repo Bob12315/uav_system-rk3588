@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import math
 import time as _time
 from dataclasses import dataclass, fields
 from typing import Any, Optional
 
 from .field_profile_service import BindResult
-from .runtime_field_binding import RuntimeFieldBindingCandidate
+from .runtime_field_binding import (
+    RuntimeFieldBindingCandidate,
+    validate_runtime_field_binding_candidate,
+)
 from .field_reference import (
     FieldReference,
     FieldReferenceError,
@@ -169,126 +173,10 @@ class FieldReferenceService:
 
     @staticmethod
     def _validate_runtime_candidate(candidate: object) -> list[str]:
-        m = __import__('math')
-        i = __import__('itertools')
-        errs: list[str] = []
-
-        from .runtime_field_binding import RuntimeFieldBindingCandidate as RC
-        from .runtime_field_geometry import RuntimeFieldGeometry
-        from .field_reference import (
-            HeadingSource, OriginSource, FieldReference,
-        )
-
-        if not isinstance(candidate, RC):
-            return [f"candidate must be RuntimeFieldBindingCandidate, got {type(candidate).__name__}"]
-
-        # fixed source values
-        if candidate.origin_source != OriginSource.RUNTIME_CURRENT_GPS.value:
-            errs.append(f"origin_source must be runtime_current_gps, got {candidate.origin_source!r}")
-        if candidate.heading_source != HeadingSource.RUNTIME_FORWARD_MARKER.value:
-            errs.append(f"heading_source must be runtime_forward_marker, got {candidate.heading_source!r}")
-        if candidate.field_reference_mode != "runtime_origin_forward_marker":
-            errs.append(f"field_reference_mode must be runtime_origin_forward_marker, got {candidate.field_reference_mode!r}")
-
-        for label in ("profile_id", "origin_source", "heading_source", "field_reference_mode"):
-            val = getattr(candidate, label, "")
-            if not isinstance(val, str) or not val.strip():
-                errs.append(f"{label} must be a non-empty string, got {val!r}")
-
-        # lat/lon
-        for name in ("origin_lat", "origin_lon", "forward_marker_lat", "forward_marker_lon"):
-            v = getattr(candidate, name)
-            if not (isinstance(v, (int, float)) and not isinstance(v, bool) and m.isfinite(float(v))):
-                errs.append(f"{name} must be a finite number, got {v!r}")
-                continue
-            fv = float(v)
-            if name.endswith("_lat") and (fv < -90.0 or fv > 90.0):
-                errs.append(f"{name} {fv} out of range [-90, 90]")
-            if name.endswith("_lon") and (fv < -180.0 or fv > 180.0):
-                errs.append(f"{name} {fv} out of range [-180, 180]")
-        if not errs:
-            if abs(m.cos(m.radians(float(candidate.origin_lat)))) < 1e-9:
-                errs.append("origin latitude too close to pole")
-
-        # heading
-        hdg = candidate.field_heading_yaw_rad
-        if not (isinstance(hdg, (int, float)) and not isinstance(hdg, bool) and m.isfinite(float(hdg))):
-            errs.append(f"field_heading_yaw_rad must be finite, got {hdg!r}")
-        else:
-            normalized = FieldReference._normalize_yaw(float(hdg))
-            if abs(float(hdg) - normalized) > 1e-10 and abs(float(hdg) - normalized) < 6.28:
-                pass  # close enough
-        hdg_deg = candidate.field_heading_deg
-        if not (isinstance(hdg_deg, (int, float)) and not isinstance(hdg_deg, bool) and m.isfinite(float(hdg_deg))):
-            errs.append(f"field_heading_deg must be finite, got {hdg_deg!r}")
-        else:
-            expected_deg = m.degrees(float(hdg)) if not errs else None
-            if expected_deg is not None and not m.isclose(float(hdg_deg), expected_deg, rel_tol=1e-9, abs_tol=1e-9):
-                errs.append(f"field_heading_deg {hdg_deg} inconsistent with yaw_rad {hdg}")
-
-        # baseline
-        bl = candidate.baseline_m
-        if not (isinstance(bl, (int, float)) and not isinstance(bl, bool) and m.isfinite(float(bl))) or float(bl) <= 0.0:
-            errs.append(f"baseline_m must be finite > 0, got {bl!r}")
-
-        # sample diagnostics
-        for int_fld in ("sample_count", "rejected_sample_count", "duplicate_sample_count"):
-            v = getattr(candidate, int_fld)
-            if not isinstance(v, int) or isinstance(v, bool) or v < 0:
-                errs.append(f"{int_fld} must be integer >= 0, got {v!r}")
-        if candidate.sample_count < 1:
-            errs.append(f"sample_count must be >= 1, got {candidate.sample_count}")
-
-        # timing
-        for fname in ("started_at_s", "completed_at_s", "sample_duration_s", "horizontal_spread_m"):
-            v = getattr(candidate, fname)
-            if not (isinstance(v, (int, float)) and not isinstance(v, bool) and m.isfinite(float(v))):
-                errs.append(f"{fname} must be finite, got {v!r}")
-        if not errs:
-            if float(candidate.completed_at_s) < float(candidate.started_at_s):
-                errs.append("completed_at_s < started_at_s")
-            if not m.isclose(float(candidate.sample_duration_s), float(candidate.completed_at_s) - float(candidate.started_at_s), rel_tol=1e-9, abs_tol=1e-9):
-                errs.append("sample_duration_s inconsistent with started/completed")
-
-        # GPS quality
-        for int_fld in ("gps_fix_type", "gps_satellites"):
-            v = getattr(candidate, int_fld)
-            if not isinstance(v, int) or isinstance(v, bool) or v < 0:
-                errs.append(f"{int_fld} must be integer >= 0, got {v!r}")
-        for f_fld in ("gps_eph", "gps_epv"):
-            v = getattr(candidate, f_fld)
-            if not (isinstance(v, (int, float)) and not isinstance(v, bool) and m.isfinite(float(v))) or float(v) < 0:
-                errs.append(f"{f_fld} must be finite >= 0, got {v!r}")
-
-        # geometry
-        g = candidate.geometry
-        if not isinstance(g, RuntimeFieldGeometry):
-            errs.append(f"geometry must be RuntimeFieldGeometry, got {type(g).__name__}")
-        else:
-            if g.profile_id != candidate.profile_id:
-                errs.append(f"geometry.profile_id {g.profile_id!r} != candidate.profile_id {candidate.profile_id!r}")
-            if not m.isclose(g.origin_lat, float(candidate.origin_lat), rel_tol=1e-12, abs_tol=1e-12):
-                errs.append(f"geometry.origin_lat {g.origin_lat} != candidate.origin_lat {candidate.origin_lat}")
-            if not m.isclose(g.origin_lon, float(candidate.origin_lon), rel_tol=1e-12, abs_tol=1e-12):
-                errs.append(f"geometry.origin_lon {g.origin_lon} != candidate.origin_lon {candidate.origin_lon}")
-            if not m.isclose(g.forward_marker_lat, float(candidate.forward_marker_lat), rel_tol=1e-12, abs_tol=1e-12):
-                errs.append(f"geometry forward marker lat mismatch")
-            if not m.isclose(g.forward_marker_lon, float(candidate.forward_marker_lon), rel_tol=1e-12, abs_tol=1e-12):
-                errs.append(f"geometry forward marker lon mismatch")
-            if not m.isclose(g.field_heading_yaw_rad, float(hdg), rel_tol=1e-12, abs_tol=1e-12):
-                errs.append(f"geometry heading mismatch")
-            if not m.isclose(g.baseline_m, float(bl), rel_tol=1e-12, abs_tol=1e-12):
-                errs.append(f"geometry baseline mismatch")
-
-        # warnings
-        if not isinstance(candidate.warnings, tuple):
-            errs.append("warnings must be a tuple")
-        elif candidate.warnings != g.warnings:
-            errs.append("candidate.warnings != geometry.warnings")
-
-        return errs
+        return list(validate_runtime_field_binding_candidate(candidate))
 
     # ------------------------------------------------------------------
+    # lifecycle    # ------------------------------------------------------------------
     # lifecycle
     # ------------------------------------------------------------------
 

@@ -7,6 +7,9 @@ from typing import Any, Mapping
 
 from .coordinate_transform import field_to_local_ned, local_ned_to_field
 from .field_reference import FieldReference
+from .runtime_field_binding import (
+    validate_runtime_field_binding_candidate,
+)
 
 
 def _is_finite_number(value: object) -> bool:
@@ -302,6 +305,30 @@ class RuntimeContextBuilder:
         self.field_origin_lon = self._float_or_none(origin_lon)
         self.field_origin_time = now
         self.field_origin_confirmed = True
+        # GPS-ready from legacy centerline
+        if self.field_origin_lat is not None and self.field_origin_lon is not None:
+            if (
+                _is_finite_number(self.field_origin_lat)
+                and _is_finite_number(self.field_origin_lon)
+                and -90.0 <= float(self.field_origin_lat) <= 90.0
+                and -180.0 <= float(self.field_origin_lon) <= 180.0
+                and abs(math.cos(math.radians(float(self.field_origin_lat)))) >= 1e-9
+            ):
+                self.field_origin_gps_confirmed = True
+        self.field_reference_mode = ""
+        self.field_forward_marker_lat = None
+        self.field_forward_marker_lon = None
+        self.field_baseline_m = None
+        self.field_gps_sample_count = None
+        self.field_gps_rejected_sample_count = None
+        self.field_gps_duplicate_sample_count = None
+        self.field_gps_sample_duration_s = None
+        self.field_gps_horizontal_spread_m = None
+        self.field_gps_fix_type = None
+        self.field_gps_satellites = None
+        self.field_gps_eph = None
+        self.field_gps_epv = None
+        self.field_runtime_profile_id = ""
         self.logger.info(
             "field reference synced yaw_rad=%s origin=(%s,%s,%s) gps=(%s,%s) source=%s",
             self.field_heading_yaw_rad,
@@ -311,91 +338,52 @@ class RuntimeContextBuilder:
         )
         return True
 
+
     def confirm_runtime_gps_reference(
         self,
         candidate: object,
         *,
         timestamp: float | None = None,
     ) -> bool:
-        """Write a runtime GPS binding candidate into the builder.
-
-        Sets field_origin_gps_confirmed=True, clears LOCAL origin.
-        Does NOT freeze.  Returns True on success.
-        """
-        from .runtime_field_binding import RuntimeFieldBindingCandidate as RC
-        from .field_reference import HeadingSource, OriginSource
-
-        if not isinstance(candidate, RC):
+        """Write a runtime GPS binding candidate using the shared validator."""
+        errs = validate_runtime_field_binding_candidate(candidate)
+        if errs:
             return False
-        if candidate.origin_source != OriginSource.RUNTIME_CURRENT_GPS.value:
+        c = candidate  # type: ignore[assignment]
+        ts = timestamp if timestamp is not None else float(c.completed_at_s)
+        if not _is_finite_number(ts) or ts < float(c.started_at_s):
             return False
-        if candidate.field_reference_mode != "runtime_origin_forward_marker":
-            return False
-
-        # validate lat/lon
-        for name in ("origin_lat", "origin_lon", "forward_marker_lat", "forward_marker_lon"):
-            v = getattr(candidate, name)
-            if not _is_finite_number(v):
-                return False
-            fv = float(v)
-            if name.endswith("_lat") and not -90.0 <= fv <= 90.0:
-                return False
-            if name.endswith("_lon") and not -180.0 <= fv <= 180.0:
-                return False
-        if abs(math.cos(math.radians(float(candidate.origin_lat)))) < 1e-9:
-            return False
-
-        hdg = candidate.field_heading_yaw_rad
-        if not _is_finite_number(hdg):
-            return False
-        bl = candidate.baseline_m
-        if not _is_finite_number(bl) or float(bl) <= 0.0:
-            return False
-
-        spread = candidate.horizontal_spread_m
-        if not _is_finite_number(spread) or float(spread) < 0.0:
-            return False
-
-        ts = timestamp if timestamp is not None else float(candidate.completed_at_s)
-        if not _is_finite_number(ts) or ts < float(candidate.started_at_s):
-            return False
-
-        normalized = self._normalize_yaw(float(hdg))
-
-        # atomic write
+        normalized = self._normalize_yaw(float(c.field_heading_yaw_rad))
         self.field_heading_yaw_rad = normalized
         self.field_heading_time = ts
         self.field_heading_confirmed = True
-        self.field_heading_source = candidate.heading_source
-
-        self.field_origin_lat = float(candidate.origin_lat)
-        self.field_origin_lon = float(candidate.origin_lon)
+        self.field_heading_source = c.heading_source
+        self.field_origin_lat = float(c.origin_lat)
+        self.field_origin_lon = float(c.origin_lon)
         self.field_origin_time = ts
         self.field_origin_gps_confirmed = True
-
         self.field_origin_local_x = None
         self.field_origin_local_y = None
         self.field_origin_local_z = None
         self.field_origin_confirmed = False
-
-        self.field_reference_mode = candidate.field_reference_mode
-        self.field_forward_marker_lat = float(candidate.forward_marker_lat)
-        self.field_forward_marker_lon = float(candidate.forward_marker_lon)
-        self.field_baseline_m = float(candidate.baseline_m)
-        self.field_runtime_profile_id = candidate.profile_id
-
-        self.field_gps_sample_count = candidate.sample_count
-        self.field_gps_rejected_sample_count = candidate.rejected_sample_count
-        self.field_gps_duplicate_sample_count = candidate.duplicate_sample_count
-        self.field_gps_sample_duration_s = float(candidate.sample_duration_s)
-        self.field_gps_horizontal_spread_m = float(candidate.horizontal_spread_m)
-        self.field_gps_fix_type = candidate.gps_fix_type
-        self.field_gps_satellites = candidate.gps_satellites
-        self.field_gps_eph = float(candidate.gps_eph)
-        self.field_gps_epv = float(candidate.gps_epv)
-
-        self.logger.info("runtime gps reference synced origin=(%s,%s) heading=%s baseline=%s",
-                         self.field_origin_lat, self.field_origin_lon, self.field_heading_yaw_rad, self.field_baseline_m)
+        self.field_reference_mode = c.field_reference_mode
+        self.field_forward_marker_lat = float(c.forward_marker_lat)
+        self.field_forward_marker_lon = float(c.forward_marker_lon)
+        self.field_baseline_m = float(c.baseline_m)
+        self.field_runtime_profile_id = c.profile_id
+        self.field_gps_sample_count = c.sample_count
+        self.field_gps_rejected_sample_count = c.rejected_sample_count
+        self.field_gps_duplicate_sample_count = c.duplicate_sample_count
+        self.field_gps_sample_duration_s = float(c.sample_duration_s)
+        self.field_gps_horizontal_spread_m = float(c.horizontal_spread_m)
+        self.field_gps_fix_type = c.gps_fix_type
+        self.field_gps_satellites = c.gps_satellites
+        self.field_gps_eph = float(c.gps_eph)
+        self.field_gps_epv = float(c.gps_epv)
+        self.logger.info(
+            "runtime gps reference synced origin=(%s,%s) heading=%s baseline=%s",
+            self.field_origin_lat, self.field_origin_lon,
+            self.field_heading_yaw_rad, self.field_baseline_m)
         return True
 
     def clear_field_heading(self) -> None:
@@ -450,12 +438,59 @@ class RuntimeContextBuilder:
         return {key: getattr(self, key) for key in self._FIELD_REFERENCE_KEYS}
 
     def restore_field_reference_state(self, snapshot: Mapping[str, object]) -> bool:
-        """Restore from a snapshot. Returns False if snapshot invalid."""
+        """Restore from a validated snapshot. Returns False if invalid."""
         if not isinstance(snapshot, Mapping):
             return False
         keys = self._FIELD_REFERENCE_KEYS
         if set(keys) != set(snapshot.keys()):
             return False
+        # Validate contents
+        for key in ("field_heading_confirmed", "field_origin_confirmed", "field_origin_gps_confirmed"):
+            if not isinstance(snapshot.get(key), bool):
+                return False
+        for key in ("field_heading_source", "field_reference_mode", "field_runtime_profile_id"):
+            if not isinstance(snapshot.get(key), str):
+                return False
+        for key in ("field_heading_yaw_rad", "field_heading_time",
+                     "field_origin_local_x", "field_origin_local_y", "field_origin_local_z",
+                     "field_origin_lat", "field_origin_lon", "field_origin_time",
+                     "field_forward_marker_lat", "field_forward_marker_lon", "field_baseline_m",
+                     "field_gps_sample_duration_s", "field_gps_horizontal_spread_m",
+                     "field_gps_eph", "field_gps_epv"):
+            v = snapshot.get(key)
+            if v is not None and not _is_finite_number(v):
+                return False
+        for key in ("field_gps_sample_count", "field_gps_rejected_sample_count", "field_gps_duplicate_sample_count",
+                     "field_gps_fix_type", "field_gps_satellites"):
+            v = snapshot.get(key)
+            if v is not None and not (isinstance(v, int) and not isinstance(v, bool) and v >= 0):
+                return False
+        for lat_key in ("field_origin_lat", "field_forward_marker_lat"):
+            v = snapshot.get(lat_key)
+            if v is not None and (float(v) < -90.0 or float(v) > 90.0):
+                return False
+        for lon_key in ("field_origin_lon", "field_forward_marker_lon"):
+            v = snapshot.get(lon_key)
+            if v is not None and (float(v) < -180.0 or float(v) > 180.0):
+                return False
+        if snapshot.get("field_baseline_m") is not None and float(snapshot["field_baseline_m"]) <= 0.0:
+            return False
+        if snapshot.get("field_origin_gps_confirmed") is True:
+            if not _is_finite_number(snapshot.get("field_origin_lat")) or not _is_finite_number(snapshot.get("field_origin_lon")):
+                return False
+        mode = snapshot.get("field_reference_mode", "")
+        if mode == "runtime_origin_forward_marker":
+            if not snapshot.get("field_origin_gps_confirmed"):
+                return False
+            if not _is_finite_number(snapshot.get("field_forward_marker_lat")):
+                return False
+            if not _is_finite_number(snapshot.get("field_baseline_m")) or float(snapshot["field_baseline_m"]) <= 0.0:
+                return False
+            if not snapshot.get("field_runtime_profile_id"):
+                return False
+        elif mode != "":
+            return False
+        # Atomic write
         for key in keys:
             setattr(self, key, snapshot[key])
         return True
