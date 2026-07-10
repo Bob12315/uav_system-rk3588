@@ -161,6 +161,24 @@ class RuntimeFieldTargetResolver:
     def profile_id(self) -> str:
         return self._profile_id
 
+    @staticmethod
+    def _parse_positive_altitude(value: object, name: str) -> float:
+        """Validate and return a positive finite altitude in metres."""
+        if value is None:
+            raise RuntimeFieldTargetError(f"{name} must be provided (got None)")
+        if isinstance(value, bool):
+            raise RuntimeFieldTargetError(f"{name} must be a number, not bool")
+        try:
+            f = float(value)
+        except (TypeError, ValueError):
+            raise RuntimeFieldTargetError(f"{name} must be a finite number, got {value!r}")
+        import math
+        if not math.isfinite(f):
+            raise RuntimeFieldTargetError(f"{name} must be finite, got {value!r}")
+        if f <= 0.0:
+            raise RuntimeFieldTargetError(f"{name} must be > 0, got {f}")
+        return f
+
     def home(self, altitude_m: float | None = None) -> GpsScanTarget:
         """Return HOME as a GLOBAL GPS target.
 
@@ -169,11 +187,7 @@ class RuntimeFieldTargetResolver:
         """
         self._require_ready()
         h = self._home
-        alt = altitude_m
-        if alt is None or alt <= 0.0:
-            raise RuntimeFieldTargetError(
-                "HOME altitude_m must be provided and > 0"
-            )
+        alt = self._parse_positive_altitude(altitude_m, "HOME altitude_m")
         return GpsScanTarget(
             name="HOME",
             lat=float(h["lat"]),
@@ -194,7 +208,12 @@ class RuntimeFieldTargetResolver:
         result: list[GpsScanTarget] = []
         for wp in self._scan_waypoints:
             name = str(wp.get("name", ""))
-            alt = overrides.get(name, float(wp.get("altitude_m", 0.0)))
+            if name in overrides:
+                alt = self._parse_positive_altitude(overrides[name], f"{name} altitude_m override")
+            else:
+                alt = float(wp.get("altitude_m", 0.0))
+                if alt <= 0.0:
+                    raise RuntimeFieldTargetError(f"{name} altitude_m must be > 0, got {alt}")
             result.append(GpsScanTarget(
                 name=name,
                 lat=float(wp["lat"]),
@@ -211,7 +230,12 @@ class RuntimeFieldTargetResolver:
             return self.home(altitude_m=altitude_m)
         for wp in self._scan_waypoints:
             if wp.get("name") == name:
-                alt = altitude_m if altitude_m is not None else float(wp.get("altitude_m", 0.0))
+                if altitude_m is not None:
+                    alt = self._parse_positive_altitude(altitude_m, f"{name} altitude_m override")
+                else:
+                    alt = float(wp.get("altitude_m", 0.0))
+                    if alt <= 0.0:
+                        raise RuntimeFieldTargetError(f"{name} altitude_m must be > 0, got {alt}")
                 return GpsScanTarget(
                     name=name,
                     lat=float(wp["lat"]),

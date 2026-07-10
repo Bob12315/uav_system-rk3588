@@ -250,13 +250,9 @@ class GpsMultiViewLocalizeAction(ActionModule):
         # ── capture-time: per-detection telemetry priority ───────────
         drone_snapshot = self._drone_snapshot(context)
         detections, image_width, image_height = self._detections(context)
-        if drone_snapshot is None:
-            self.phase = "failed"
-            self.failure_reason = "invalid_capture_telemetry"
-            return ActionResult(failed=True, reason="invalid_capture_telemetry",
-                                detail=self._detail())
 
         new_estimates: list[GpsRawEstimate] = []
+        any_telem_found = False
 
         for det in detections:
             try:
@@ -319,6 +315,14 @@ class GpsMultiViewLocalizeAction(ActionModule):
             "drone_snapshot": {k: v for k, v in (drone_snapshot or {}).items() if k != "source_waypoint"},
         })
 
+        # If no valid telemetry was available for any detection AND no estimates were produced
+        # (not from detection telemetry), fail
+        if not new_estimates and len(detections) > 0:
+            self.phase = "failed"
+            self.failure_reason = "invalid_capture_telemetry"
+            return ActionResult(failed=True, reason="invalid_capture_telemetry",
+                                detail=self._detail())
+
         self.capture_count += 1
         detail = self._detail(extra={
             "detections_count": len(detections),
@@ -333,6 +337,7 @@ class GpsMultiViewLocalizeAction(ActionModule):
             self.waypoint_index += 1
             self.phase = "goto"
             self.capture_count = 0
+            self.update_count_at_waypoint = 0
             self.goto_action = self._new_goto_action()
             return ActionResult(reason="gps_multi_view_next_waypoint", detail=self._detail())
 
@@ -381,9 +386,13 @@ class GpsMultiViewLocalizeAction(ActionModule):
         lat = drone.get("lat")
         lon = drone.get("lon")
         yaw = drone.get("yaw")
-        alt = drone.get("relative_altitude") or drone.get("relative_altitude_m")
+        alt = drone.get("relative_altitude")
         if alt is None:
-            alt = drone.get("altitude") or drone.get("altitude_m")
+            alt = drone.get("relative_altitude_m")
+        if alt is None:
+            alt = drone.get("altitude")
+        if alt is None:
+            alt = drone.get("altitude_m")
         if lat is None or lon is None or yaw is None or alt is None:
             return None
         try:
@@ -456,8 +465,13 @@ class GpsMultiViewLocalizeAction(ActionModule):
         """Try to extract drone_lat/lon/yaw/alt from a dict."""
         lat = d.get("drone_lat")
         lon = d.get("drone_lon")
-        yaw = d.get("drone_yaw_rad") or d.get("yaw_rad") or d.get("yaw")
-        alt = d.get("relative_altitude_m") or d.get("altitude_m") or d.get("relative_altitude") or d.get("altitude")
+        yaw = d.get("drone_yaw_rad")
+        if yaw is None: yaw = d.get("yaw_rad")
+        if yaw is None: yaw = d.get("yaw")
+        alt = d.get("relative_altitude_m")
+        if alt is None: alt = d.get("altitude_m")
+        if alt is None: alt = d.get("relative_altitude")
+        if alt is None: alt = d.get("altitude")
         if lat is None or lon is None or yaw is None or alt is None:
             return None
         try:
