@@ -107,9 +107,20 @@ window.UavFieldProfiles = (function () {
         setText("fpGpsQualityFixSats", "fix\u2265" + (gq.min_fix_type||"--") + " sats\u2265" + (gq.min_satellites||"--"));
         setText("fpGpsQualityEphEpv", "eph\u2264" + (gq.max_eph||"--") + " epv\u2264" + (gq.max_epv||"--"));
 
+        // Clear all schema-specific fields before rendering
+        setText("fpOriginLatLon", "--");
+        setText("fpOriginField", "--");
+        setText("fpClPoints", "--");
+        setText("fpClDetails", "--");
+        setText("fpV3Marker", "--");
+        setText("fpV3Scan", "--");
+        setText("fpV3Sampling", "--");
+        setText("fpV3Baseline", "--");
+        setText("fpV3Geometry", "--");
+
         if (sv === 2) {
             var anc = data.anchor || {};
-            setText("fpOriginLatLon", anc.lat != null ? anc.lat.toFixed(7) : "--");
+            setText("fpOriginLatLon", gps2(anc.lat, anc.lon));
             setText("fpOriginField", "(0,0) init");
             var cl = data.centerline_points || [];
             setText("fpClPoints", cl.length + " pts");
@@ -126,6 +137,8 @@ window.UavFieldProfiles = (function () {
             setText("fpV3Sampling", ros.min_samples + " samples " + ros.sample_window_s + "s window spread<" + ros.max_horizontal_spread_m + " " + ros.estimator);
             var bp = data.binding_policy || {};
             setText("fpV3Baseline", "min=" + (bp.min_baseline_m||"--") + "m warn=" + (bp.warn_baseline_below_m||"--") + "m");
+            var fg = data.field_geometry || {};
+            setText("fpV3Geometry", "lane=" + (fg.lane_half_width_m||"--") + "m drop_y=" + (fg.drop_area_y_min_m||"--") + "-" + (fg.drop_area_y_max_m||"--") + "m recce_y=" + (fg.recce_area_y_min_m||"--") + "-" + (fg.recce_area_y_max_m||"--") + "m");
             if (window.UavFieldMap && window.UavFieldMap.setProfilePreview) window.UavFieldMap.setProfilePreview(null);
             setText("fpHint", "\u52a8\u6001 GPS \u573a\u5730\u56fe\u5c06\u5728 runtime reference \u786e\u8ba4\u540e\u7531 Step 7 \u63a5\u5165\u3002");
         }
@@ -194,9 +207,8 @@ window.UavFieldProfiles = (function () {
         var isV3 = schema === 3;
         if (state === "idle") {
             allOff();
-            if (isV3) { if (startBtn) startBtn.disabled = false; if (bindBtn) bindBtn.disabled = true; }
-            else { if (bindBtn) bindBtn.disabled = false; if (startBtn) startBtn.disabled = true; }
-            if (freezeBtn) freezeBtn.disabled = !(fr.is_confirmed && !frozen);
+            if (isV3) { if (startBtn) startBtn.disabled = false; if (bindBtn) bindBtn.disabled = true; if (freezeBtn) freezeBtn.disabled = true; }
+            else { if (bindBtn) bindBtn.disabled = false; if (startBtn) startBtn.disabled = true; if (freezeBtn) freezeBtn.disabled = !(fr.is_confirmed && !frozen); }
             return;
         }
         if (state === "sampling") {
