@@ -29,6 +29,7 @@ from .field_reference import (
 from .runtime_field_geometry import (
     RuntimeFieldGeometry,
     RuntimeFieldGeometryError,
+    RuntimeFieldPoint,
     build_runtime_field_geometry,
 )
 
@@ -732,43 +733,154 @@ def validate_runtime_field_binding_candidate(
 
     # ── geometry ────────────────────────────────────────────────────
     g = getattr(c, "geometry", None)
+    g_ok = False
+    g_olat: float | None = None
+    g_olon: float | None = None
+    g_fm_lat: float | None = None
+    g_fm_lon: float | None = None
+
     if g is None or not isinstance(g, RuntimeFieldGeometry):
         errs.append(f"geometry must be RuntimeFieldGeometry, got {type(g).__name__}")
     else:
-        if g.profile_id != c.profile_id:
+        # profile_id
+        if not isinstance(g.profile_id, str) or not g.profile_id.strip():
+            errs.append(f"geometry.profile_id must be a non-empty string, got {g.profile_id!r}")
+        elif g.profile_id != c.profile_id:
             errs.append(f"geometry.profile_id {g.profile_id!r} != candidate.profile_id {c.profile_id!r}")
-        # check consistency only when candidate fields already parsed ok
-        if parsed_lat is not None and not _m.isclose(g.origin_lat, parsed_lat, rel_tol=1e-12, abs_tol=1e-12):
-            errs.append(f"geometry.origin_lat {g.origin_lat} != candidate.origin_lat {parsed_lat}")
-        if parsed_lon is not None and not _m.isclose(g.origin_lon, parsed_lon, rel_tol=1e-12, abs_tol=1e-12):
-            errs.append(f"geometry.origin_lon {g.origin_lon} != candidate.origin_lon {parsed_lon}")
-        if _is_finite_number(c.forward_marker_lat) and not _m.isclose(g.forward_marker_lat, float(c.forward_marker_lat), rel_tol=1e-12, abs_tol=1e-12):
-            errs.append("geometry forward_marker_lat mismatch")
-        if _is_finite_number(c.forward_marker_lon) and not _m.isclose(g.forward_marker_lon, float(c.forward_marker_lon), rel_tol=1e-12, abs_tol=1e-12):
-            errs.append("geometry forward_marker_lon mismatch")
-        if hdg_ok and not _m.isclose(float(g.field_heading_yaw_rad), float(hdg_rad), rel_tol=1e-12, abs_tol=1e-12):
-            errs.append("geometry field_heading_yaw_rad mismatch")
-        if hdg_ok and not _m.isclose(float(g.field_heading_deg), float(hdg_deg), rel_tol=1e-12, abs_tol=1e-12):
-            errs.append("geometry field_heading_deg mismatch")
-        if bl_ok and not _m.isclose(g.baseline_m, float(bl), rel_tol=1e-12, abs_tol=1e-12):
-            errs.append("geometry baseline_m mismatch")
-        # home
-        if parsed_lat is not None and not _m.isclose(g.home.lat, parsed_lat, rel_tol=1e-12, abs_tol=1e-12):
-            errs.append("geometry.home.lat != candidate origin")
-        if parsed_lon is not None and not _m.isclose(g.home.lon, parsed_lon, rel_tol=1e-12, abs_tol=1e-12):
-            errs.append("geometry.home.lon != candidate origin")
-        # forward_marker point
-        if _is_finite_number(c.forward_marker_lat) and not _m.isclose(g.forward_marker.lat, float(c.forward_marker_lat), rel_tol=1e-12, abs_tol=1e-12):
-            errs.append("geometry.forward_marker.lat != candidate forward_marker_lat")
-        if _is_finite_number(c.forward_marker_lon) and not _m.isclose(g.forward_marker.lon, float(c.forward_marker_lon), rel_tol=1e-12, abs_tol=1e-12):
-            errs.append("geometry.forward_marker.lon != candidate forward_marker_lon")
+
+        # scalar lat/lon validation
+        for name in ("origin_lat", "origin_lon", "forward_marker_lat", "forward_marker_lon"):
+            v = getattr(g, name)
+            if not _is_finite_number(v):
+                errs.append(f"geometry.{name} must be a finite number, got {v!r}")
+            else:
+                fv = float(v)
+                if name.endswith("_lat") and not -90.0 <= fv <= 90.0:
+                    errs.append(f"geometry.{name} {fv} out of range [-90, 90]")
+                if name.endswith("_lon") and not -180.0 <= fv <= 180.0:
+                    errs.append(f"geometry.{name} {fv} out of range [-180, 180]")
+                if name == "origin_lat":
+                    g_olat = fv
+                elif name == "origin_lon":
+                    g_olon = fv
+                elif name == "forward_marker_lat":
+                    g_fm_lat = fv
+                elif name == "forward_marker_lon":
+                    g_fm_lon = fv
+
+        # heading & baseline
+        for name in ("field_heading_yaw_rad", "field_heading_deg"):
+            v = getattr(g, name)
+            if not _is_finite_number(v):
+                errs.append(f"geometry.{name} must be finite, got {v!r}")
+        bl_v = getattr(g, "baseline_m")
+        g_bl: float | None = None
+        if not _is_finite_number(bl_v) or float(bl_v) <= 0.0:
+            errs.append(f"geometry.baseline_m must be finite > 0, got {bl_v!r}")
+        else:
+            g_bl = float(bl_v)
+
+        g_ok = not errs
+
+        # cross-checks with candidate (only when both sides valid)
+        if g_ok:
+            if parsed_lat is not None and g_olat is not None and not _m.isclose(g_olat, parsed_lat, rel_tol=1e-12, abs_tol=1e-12):
+                errs.append(f"geometry.origin_lat {g_olat} != candidate.origin_lat {parsed_lat}")
+            if parsed_lon is not None and g_olon is not None and not _m.isclose(g_olon, parsed_lon, rel_tol=1e-12, abs_tol=1e-12):
+                errs.append(f"geometry.origin_lon {g_olon} != candidate.origin_lon {parsed_lon}")
+            if g_fm_lat is not None and _is_finite_number(c.forward_marker_lat) and not _m.isclose(g_fm_lat, float(c.forward_marker_lat), rel_tol=1e-12, abs_tol=1e-12):
+                errs.append("geometry.forward_marker_lat mismatch")
+            if g_fm_lon is not None and _is_finite_number(c.forward_marker_lon) and not _m.isclose(g_fm_lon, float(c.forward_marker_lon), rel_tol=1e-12, abs_tol=1e-12):
+                errs.append("geometry.forward_marker_lon mismatch")
+            if hdg_ok and _is_finite_number(g.field_heading_yaw_rad) and not _m.isclose(float(g.field_heading_yaw_rad), float(hdg_rad), rel_tol=1e-12, abs_tol=1e-12):
+                errs.append("geometry field_heading_yaw_rad mismatch")
+            if hdg_ok and _is_finite_number(g.field_heading_deg) and not _m.isclose(float(g.field_heading_deg), float(hdg_deg), rel_tol=1e-12, abs_tol=1e-12):
+                errs.append("geometry field_heading_deg mismatch")
+            if bl_ok and g_bl is not None and not _m.isclose(g_bl, float(bl), rel_tol=1e-12, abs_tol=1e-12):
+                errs.append("geometry baseline_m mismatch")
+
+        # home point
+        home = getattr(g, "home", None)
+        if not isinstance(home, RuntimeFieldPoint):
+            errs.append(f"geometry.home must be RuntimeFieldPoint, got {type(home).__name__}")
+        else:
+            for name in ("lat", "lon"):
+                v = getattr(home, name)
+                if not _is_finite_number(v):
+                    errs.append(f"geometry.home.{name} must be finite, got {v!r}")
+            for name in ("field_x_m", "field_y_m", "altitude_m"):
+                v = getattr(home, name)
+                if not _is_finite_number(v):
+                    errs.append(f"geometry.home.{name} must be finite, got {v!r}")
+            if not errs:
+                if not _m.isclose(home.field_x_m, 0.0, rel_tol=0, abs_tol=1e-12):
+                    errs.append(f"geometry.home.field_x_m must be 0, got {home.field_x_m}")
+                if not _m.isclose(home.field_y_m, 0.0, rel_tol=0, abs_tol=1e-12):
+                    errs.append(f"geometry.home.field_y_m must be 0, got {home.field_y_m}")
+                if not _m.isclose(home.altitude_m, 0.0, rel_tol=0, abs_tol=1e-12):
+                    errs.append(f"geometry.home.altitude_m must be 0, got {home.altitude_m}")
+                if parsed_lat is not None and not _m.isclose(home.lat, parsed_lat, rel_tol=1e-12, abs_tol=1e-12):
+                    errs.append("geometry.home.lat != candidate origin")
+                if parsed_lon is not None and not _m.isclose(home.lon, parsed_lon, rel_tol=1e-12, abs_tol=1e-12):
+                    errs.append("geometry.home.lon != candidate origin")
+
+        # forward marker point
+        fwd = getattr(g, "forward_marker", None)
+        if not isinstance(fwd, RuntimeFieldPoint):
+            errs.append(f"geometry.forward_marker must be RuntimeFieldPoint, got {type(fwd).__name__}")
+        else:
+            for name in ("lat", "lon", "field_x_m", "field_y_m", "altitude_m"):
+                v = getattr(fwd, name)
+                if not _is_finite_number(v):
+                    errs.append(f"geometry.forward_marker.{name} must be finite, got {v!r}")
+            if not errs:
+                if not _m.isclose(fwd.field_x_m, 0.0, rel_tol=0, abs_tol=1e-12):
+                    errs.append(f"geometry.forward_marker.field_x_m must be 0")
+                if bl_ok and g_bl is not None and not _m.isclose(fwd.field_y_m, g_bl, rel_tol=1e-12, abs_tol=1e-12):
+                    errs.append(f"geometry.forward_marker.field_y_m must equal baseline_m")
+                if not _m.isclose(fwd.altitude_m, 0.0, rel_tol=0, abs_tol=1e-12):
+                    errs.append(f"geometry.forward_marker.altitude_m must be 0")
+                if _is_finite_number(c.forward_marker_lat) and not _m.isclose(fwd.lat, float(c.forward_marker_lat), rel_tol=1e-12, abs_tol=1e-12):
+                    errs.append("geometry.forward_marker.lat != candidate forward_marker_lat")
+                if _is_finite_number(c.forward_marker_lon) and not _m.isclose(fwd.lon, float(c.forward_marker_lon), rel_tol=1e-12, abs_tol=1e-12):
+                    errs.append("geometry.forward_marker.lon != candidate forward_marker_lon")
+
+        # point collections — minimal structure check
+        for attr in ("drop_scan_waypoints", "drop_area_corners", "recce_area_corners"):
+            coll = getattr(g, attr, None)
+            if not isinstance(coll, tuple):
+                errs.append(f"geometry.{attr} must be a tuple, got {type(coll).__name__}")
+            else:
+                for j, pt in enumerate(coll):
+                    if not isinstance(pt, RuntimeFieldPoint):
+                        errs.append(f"geometry.{attr}[{j}] must be RuntimeFieldPoint, got {type(pt).__name__}")
+                        break  # one error per collection is enough
+
+        # geometry warnings
+        gw = getattr(g, "warnings", None)
+        if not isinstance(gw, tuple):
+            errs.append(f"geometry.warnings must be a tuple, got {type(gw).__name__}")
+        else:
+            for j, item in enumerate(gw):
+                if not isinstance(item, str):
+                    errs.append(f"geometry.warnings[{j}] must be a string, got {type(item).__name__}")
+                    break
 
     # ── warnings ────────────────────────────────────────────────────
     w = getattr(c, "warnings", None)
+    cw_ok = False
     if not isinstance(w, tuple):
-        errs.append(f"warnings must be a tuple, got {type(w).__name__}")
-    elif g is not None and isinstance(g, RuntimeFieldGeometry):
-        if w != g.warnings:
+        errs.append(f"candidate.warnings must be a tuple, got {type(w).__name__}")
+    else:
+        cw_ok = True
+        for j, item in enumerate(w):
+            if not isinstance(item, str):
+                errs.append(f"candidate.warnings[{j}] must be a string, got {type(item).__name__}")
+                cw_ok = False
+                break
+    gw = getattr(getattr(c, "geometry", None), "warnings", None)
+    if cw_ok and isinstance(gw, tuple):
+        if w != gw:
             errs.append("candidate.warnings != geometry.warnings")
 
     return tuple(errs)
