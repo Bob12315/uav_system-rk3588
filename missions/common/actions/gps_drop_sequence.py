@@ -106,7 +106,6 @@ class GpsDropSequenceAction(ActionModule):
         self.released_count = 0
         self.update_count_at_phase = 0
         self.sub_action: Any = None
-        self._zero_sent = False
         self._release_reason = ""
         self._failed_reason = ""
 
@@ -284,25 +283,10 @@ class GpsDropSequenceAction(ActionModule):
                 detail=self._detail(),
             )
 
-        self._zero_sent = False
         self.phase = "zero"
         self.update_count_at_phase = 0
         self._release_reason = "aligned_release"
         return ActionResult(reason="gps_drop_align_done", detail=self._detail())
-
-    def _update_zero(self, context: dict[str, Any]) -> ActionResult:
-        if not self._zero_sent:
-            self._zero_sent = True
-            return ActionResult(
-                actions=[_zero_velocity_command(), _clear_continuous_command("4")],
-                reason="gps_drop_zero_before_release", detail=self._detail(),
-            )
-        self.phase = "release"
-        self.update_count_at_phase = 0
-        return ActionResult(
-            actions=[_zero_velocity_command()],
-            reason="gps_drop_release_start", detail=self._detail(),
-        )
 
     def _update_release(self, context: dict[str, Any]) -> ActionResult:
         if self.sub_action is None:
