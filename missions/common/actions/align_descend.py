@@ -496,13 +496,39 @@ class AlignDescendAction(ActionModule):
         elif target_ok:
             self.hold_updates = 0
 
+        # Strict mode: check finish_altitude BEFORE min_altitude
+        if self.finish_policy == "require_alignment_or_timeout" and self.finish_altitude_m is not None and altitude.value_m <= self.finish_altitude_m:
+            if target_ok and command_detail["aligned"] is True and self.hold_updates >= self.hold_updates_required:
+                self.done = True
+                detail = self._detail(
+                    command=self._command_with_yaw_hold(_inactive_command(), data),
+                    command_detail={**command_detail, "hold_reason": "aligned_at_finish_altitude"},
+                    height_m=altitude.value_m,
+                    altitude_source=altitude.source,
+                )
+                self.last_detail = detail
+                return ActionResult(actions=[], done=True, reason="aligned_at_finish_altitude", detail=detail)
+            # Not aligned yet — continue with vz=0, vx/vy still active
+            command, command_detail = compute_align_descend_command(
+                inputs, self.config, altitude_m=altitude.value_m,
+            )
+            if isinstance(command, dict):
+                command["vz_cmd"] = 0.0
+            detail = self._detail(
+                command=self._command_with_yaw_hold(command, data),
+                command_detail={**command_detail, "hold_reason": "aligning_at_finish_altitude"},
+                height_m=altitude.value_m,
+                altitude_source=altitude.source,
+            )
+            self.last_detail = detail
+            return ActionResult(actions=[], reason="aligning_at_finish_altitude", detail=detail)
+
         if altitude.value_m <= self.config.min_altitude_m:
             if self.finish_policy == "require_alignment_or_timeout":
                 # Strict: don't set done, continue with vz=0
                 command, command_detail = compute_align_descend_command(
                     inputs, self.config, altitude_m=altitude.value_m,
                 )
-                # Override vz to 0
                 if isinstance(command, dict):
                     command["vz_cmd"] = 0.0
                 detail = self._detail(
@@ -523,7 +549,7 @@ class AlignDescendAction(ActionModule):
             self.last_detail = detail
             return ActionResult(actions=[], done=True, reason="min_altitude_reached", detail=detail)
 
-        if self.finish_altitude_m is not None and altitude.value_m <= self.finish_altitude_m:
+        if self.finish_altitude_m is not None and altitude.value_m <= self.finish_altitude_m and self.finish_policy != "require_alignment_or_timeout":
             if (
                 self.finish_policy == "require_alignment_or_timeout"
                 and target_ok

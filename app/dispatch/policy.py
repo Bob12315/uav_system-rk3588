@@ -53,12 +53,12 @@ ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
         requires_send_commands=True,
     ),
     "global_goto": DispatchRule(
-        allowed_actions={"goto_waypoint", "multi_view_localize"},
+        allowed_actions={"goto_waypoint", "multi_view_localize", "gps_multi_view_localize", "gps_drop_sequence"},
         requires_send_actions=True,
         requires_send_commands=True,
     ),
     "flight_command": DispatchRule(
-        allowed_actions={"align_descend", "recon_inspect_target", "payload_release", "recon_descend_observe", "drop_sequence", "recon_sequence"},
+        allowed_actions={"align_descend", "recon_inspect_target", "payload_release", "recon_descend_observe", "drop_sequence", "recon_sequence", "gps_drop_sequence"},
         requires_send_actions=True,
         requires_send_commands=True,
         continuous=True,
@@ -72,7 +72,7 @@ ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
         once_respected=False,
     ),
     "set_servo": DispatchRule(
-        allowed_actions={"payload_release", "drop_sequence"},
+        allowed_actions={"payload_release", "drop_sequence", "gps_drop_sequence"},
         requires_send_actions=True,
         requires_send_commands=True,
     ),
@@ -102,13 +102,14 @@ ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
         requires_send_commands=True,
     ),
     "yolo_lock_target": DispatchRule(
-        allowed_actions={"target_lock", "recon_inspect_target", "drop_sequence", "recon_sequence"},
+        allowed_actions={"target_lock", "recon_inspect_target", "drop_sequence", "recon_sequence", "gps_target_lock", "gps_drop_sequence"},
         requires_send_actions=True,
         requires_send_commands=False,
     ),
     "clear_continuous_commands": DispatchRule(
-        allowed_actions={"drop_sequence", "recon_sequence", "recon_descend_observe"},
+        allowed_actions={"drop_sequence", "recon_sequence", "recon_descend_observe", "gps_drop_sequence"},
         requires_send_actions=True,
         requires_send_commands=True,
+        once_respected=False,
     ),
 }

@@ -115,7 +115,7 @@ class GpsDropSequenceAction(ActionModule):
         if not self.started: return ActionResult(failed=True, reason="action_not_started")
         if self.stopped:
             return ActionResult(
-                actions=[_zero_velocity_command(), _clear_continuous_command()],
+                actions=[_zero_velocity_command(), _clear_continuous_command("1")],
                 done=True, reason="stopped",
                 detail=self._detail(done=True))
 
@@ -245,9 +245,10 @@ class GpsDropSequenceAction(ActionModule):
         if not result.done and not result.failed and isinstance(command, dict):
             action = {
                 "action_type": "flight_command",
-                "params": {k: command.get(k, 0.0) for k in ("vx_cmd", "vy_cmd", "vz_cmd", "yaw_rate_cmd")},
+                "params": dict(command),
                 "once": False,
                 "key": "gps_drop_align",
+                "priority": 5,
             }
             return ActionResult(actions=[action], reason="gps_drop_align",
                                 detail=self._detail(extra={"align": result.detail}))
@@ -262,7 +263,7 @@ class GpsDropSequenceAction(ActionModule):
                 return ActionResult(reason="gps_drop_align_timeout_release", detail=self._detail())
             # Other failures: zero + clear, no release
             return ActionResult(
-                actions=[_zero_velocity_command(), _clear_continuous_command()],
+                actions=[_zero_velocity_command(), _clear_continuous_command("2")],
                 failed=True, reason=reason or "align_failed",
                 detail=self._detail(),
             )
@@ -273,7 +274,7 @@ class GpsDropSequenceAction(ActionModule):
         # Align done — only "aligned_at_finish_altitude" allows release
         if result.reason != "aligned_at_finish_altitude":
             return ActionResult(
-                actions=[_zero_velocity_command(), _clear_continuous_command()],
+                actions=[_zero_velocity_command(), _clear_continuous_command("3")],
                 failed=True, reason="align_unexpected_done",
                 detail=self._detail(),
             )
@@ -288,7 +289,7 @@ class GpsDropSequenceAction(ActionModule):
         if not self._zero_sent:
             self._zero_sent = True
             return ActionResult(
-                actions=[_zero_velocity_command(), _clear_continuous_command()],
+                actions=[_zero_velocity_command(), _clear_continuous_command("4")],
                 reason="gps_drop_zero_before_release", detail=self._detail(),
             )
         self.phase = "release"
@@ -319,7 +320,7 @@ class GpsDropSequenceAction(ActionModule):
 
         if not result.done:
             return ActionResult(
-                actions=result.actions + [_zero_velocity_command()],
+                actions=[_zero_velocity_command()] + result.actions,
                 reason="gps_drop_releasing", detail=self._detail(),
             )
 
@@ -331,15 +332,14 @@ class GpsDropSequenceAction(ActionModule):
         hold = result.actions or []
 
         if self.payload_index < 2 and self.target_index + 1 < 2:
-            self.target_index += 1
             self.phase = "climb"
             return ActionResult(
-                actions=hold + [_zero_velocity_command()],
+                actions=[_zero_velocity_command()] + hold,
                 reason="gps_drop_climb_start", detail=self._detail(),
             )
         self.phase = "done"
         return ActionResult(
-            actions=hold + [_zero_velocity_command(), _clear_continuous_command()],
+            actions=hold + [_zero_velocity_command(), _clear_continuous_command("5")],
             done=True, reason="gps_drop_sequence_done",
             detail=self._detail(done=True),
         )
@@ -362,6 +362,7 @@ class GpsDropSequenceAction(ActionModule):
         result = self.sub_action.update(context)
         if not result.done:
             return ActionResult(actions=result.actions, reason="gps_drop_climb", detail=self._detail())
+        self.target_index += 1
         self.phase = "goto"
         self.sub_action = None
         self.update_count_at_phase = 0
@@ -373,7 +374,7 @@ class GpsDropSequenceAction(ActionModule):
         self.phase = "failed"
         self._failed_reason = reason
         return ActionResult(
-            actions=[_zero_velocity_command(), _clear_continuous_command()],
+            actions=[_zero_velocity_command(), _clear_continuous_command("6")],
             failed=True, reason=reason,
             detail=self._detail(),
         )
@@ -392,9 +393,15 @@ class GpsDropSequenceAction(ActionModule):
 
 def _zero_velocity_command() -> dict[str, Any]:
     return {"action_type": "flight_command",
-            "params": {"vx": 0.0, "vy": 0.0, "vz": 0.0, "yaw_rate": 0.0}}
+            "params": {"type": "flight_command", "valid": True, "active": True,
+                       "enable_body": True,
+                       "vx_cmd": 0.0, "vy_cmd": 0.0, "vz_cmd": 0.0, "yaw_rate_cmd": 0.0,
+                       "priority": 3},
+            "once": False}
 
 
-def _clear_continuous_command() -> dict[str, Any]:
-    return {"action_type": "clear_continuous",
-            "params": {"send_stop_first": True}}
+def _clear_continuous_command(key_suffix: str = "") -> dict[str, Any]:
+    return {"action_type": "clear_continuous_commands",
+            "params": {"clear_pending_local_position": False, "send_stop_first": True},
+            "once": True,
+            "key": f"gps_drop_clear_{key_suffix}"}
