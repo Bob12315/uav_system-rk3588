@@ -96,6 +96,8 @@ class GpsDropSequenceAction(ActionModule):
         self.lock_cfg = dict(data.get("target_lock") or {})
         self.align_cfg = dict(data.get("align_descend") or {})
         self.align_cfg.setdefault("finish_policy", "require_alignment_or_timeout")
+        if "min_altitude_m" not in self.align_cfg:
+            self.align_cfg["min_altitude_m"] = self.finish_altitude_m
 
         # ── state ──
         self.phase = "goto"
@@ -135,8 +137,6 @@ class GpsDropSequenceAction(ActionModule):
             return self._update_lock(data)
         if self.phase == "align":
             return self._update_align(data)
-        if self.phase == "zero":
-            return self._update_zero(data)
         if self.phase == "release":
             return self._update_release(data)
         if self.phase == "climb":
@@ -205,21 +205,20 @@ class GpsDropSequenceAction(ActionModule):
         result = self.sub_action.update(context)
         if result.failed:
             self.sub_action = None
-            if self.target_index + 1 < len(self.targets):
-                self.target_index += 1
-                self.phase = "goto"
-                self.update_count_at_phase = 0
-                return ActionResult(reason="gps_drop_lock_failed_next_target", detail=self._detail())
-            return self._fail("no_lockable_drop_targets")
+            return self._fail("no_lockable_drop_targets",
+                              actions=[_zero_velocity_command(), _clear_continuous_command("lock_fail")])
 
         if not result.done:
             return ActionResult(actions=result.actions, reason="gps_drop_lock_searching",
-                                detail=self._detail())
-
+                                detail=self._detail(extra={"lock": result.detail}))
+        # Lock success: forward yolo_lock_target action
+        lock_actions = result.actions or []
         self.phase = "align"
         self.sub_action = None
         self.update_count_at_phase = 0
-        return ActionResult(reason="gps_drop_align_start", detail=self._detail())
+        return ActionResult(actions=lock_actions, reason="gps_drop_align_start",
+                            detail=self._detail(extra={"lock": result.detail}))
+
 
     def _update_align(self, context: dict[str, Any]) -> ActionResult:
         if self.sub_action is None:
@@ -232,11 +231,14 @@ class GpsDropSequenceAction(ActionModule):
             self.update_count_at_phase = 0
 
         if self.update_count_at_phase > self.align_descend_max_updates:
-            self._zero_sent = False
-            self.phase = "zero"
+            self.phase = "release"
+            self.sub_action = None
             self.update_count_at_phase = 0
             self._release_reason = "align_timeout_release"
-            return ActionResult(reason="gps_drop_align_timeout", detail=self._detail())
+            return ActionResult(
+                actions=[_zero_velocity_command(), _clear_continuous_command("timeout")],
+                reason="gps_drop_align_timeout_release", detail=self._detail(),
+            )
 
         result = self.sub_action.update(context)
         command = result.detail.get("command") if result.detail else None
@@ -256,11 +258,14 @@ class GpsDropSequenceAction(ActionModule):
         if result.failed:
             reason = result.reason
             if reason in ("align_descend_timeout",):
-                self._zero_sent = False
-                self.phase = "zero"
+                self.phase = "release"
+                self.sub_action = None
                 self.update_count_at_phase = 0
                 self._release_reason = "align_timeout_release"
-                return ActionResult(reason="gps_drop_align_timeout_release", detail=self._detail())
+                return ActionResult(
+                    actions=[_zero_velocity_command(), _clear_continuous_command("child_timeout")],
+                    reason="gps_drop_align_timeout_release", detail=self._detail(),
+                )
             # Other failures: zero + clear, no release
             return ActionResult(
                 actions=[_zero_velocity_command(), _clear_continuous_command("2")],
@@ -320,7 +325,7 @@ class GpsDropSequenceAction(ActionModule):
 
         if not result.done:
             return ActionResult(
-                actions=[_zero_velocity_command()] + result.actions,
+                actions=[_zero_velocity_command()] + (result.actions or []),
                 reason="gps_drop_releasing", detail=self._detail(),
             )
 
@@ -334,7 +339,7 @@ class GpsDropSequenceAction(ActionModule):
         if self.payload_index < 2 and self.target_index + 1 < 2:
             self.phase = "climb"
             return ActionResult(
-                actions=[_zero_velocity_command()] + hold,
+                actions=[_zero_velocity_command()] + (hold or []) + [_clear_continuous_command("release_done")],
                 reason="gps_drop_climb_start", detail=self._detail(),
             )
         self.phase = "done"
@@ -359,7 +364,13 @@ class GpsDropSequenceAction(ActionModule):
             self.sub_action = ga
             self.update_count_at_phase = 0
 
+        if self.update_count_at_phase > self.climb_max_updates:
+            return self._fail("climb_timeout",
+                              actions=[_zero_velocity_command(), _clear_continuous_command("climb_timeout")])
         result = self.sub_action.update(context)
+        if result.failed:
+            return self._fail("climb_failed",
+                              actions=[_zero_velocity_command(), _clear_continuous_command("climb_fail")])
         if not result.done:
             return ActionResult(actions=result.actions, reason="gps_drop_climb", detail=self._detail())
         self.target_index += 1
