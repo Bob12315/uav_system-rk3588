@@ -567,21 +567,79 @@ def action_lab_specs() -> list[dict[str, Any]]:
             "default_params": {
                 "targets": [],
                 "payloads": [],
-                "approach_altitude_m": 3.0,
-                "finish_altitude_m": 1.3,
+                "approach_altitude_m": 2.5,
+                "finish_altitude_m": 1.2,
                 "climb_after_drop_m": 2.5,
                 "climb_tolerance_z_m": 0.1,
                 "climb_max_updates": 100,
-                "goto_max_updates": 160,
-                "target_lock_max_updates": 40,
-                "align_descend_max_updates": 250,
+                "goto_max_updates": 200,
+                "target_lock_max_updates": 60,
+                "align_descend_max_updates": 160,
                 "release_wait_updates": 5,
+                "goto": {
+                    "tolerance_xy_m": 0.25,
+                    "tolerance_z_m": 0.3,
+                    "min_hold_updates": 3,
+                    "require_velocity_valid": True,
+                    "max_horizontal_speed_mps": 0.15,
+                    "max_vertical_speed_mps": 0.1
+                },
+                "target_lock": {
+                    "max_match_distance_m": 1.2,
+                    "min_confidence": 0.35,
+                    "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
+                    "detection_source": "scene",
+                    "camera": {
+                        "fov_x_deg": 51.3,
+                        "fov_y_deg": 39.6,
+                        "image_x_sign": 1.0,
+                        "image_y_sign": -1.0
+                    }
+                },
                 "align_descend": {
+                    "expected_dt_s": 0.1,
+                    "lost_timeout_updates": 10,
+                    "hold_updates_required": 1,
+                    "max_retries": 1,
+                    "max_updates": 160,
                     "finish_policy": "latched_center_alignment",
                     "finish_alignment_max_ex_cam": 0.20,
                     "finish_alignment_max_ey_cam": 0.20,
-                    "finish_alignment_hold_updates": 2
-                },
+                    "finish_alignment_hold_updates": 2,
+                    "config": {
+                        "kp_vx": 0.275,
+                        "kp_vy": 0.275,
+                        "max_vx_mps": 0.2,
+                        "max_vy_mps": 0.2,
+                        "height_gain_enabled": True,
+                        "height_gain_mode": "points",
+                        "height_scale_points": [
+                            {"altitude_m": 1.0, "scale": 0.3},
+                            {"altitude_m": 1.3, "scale": 0.25},
+                            {"altitude_m": 2.4, "scale": 0.55},
+                            {"altitude_m": 3.5, "scale": 0.55},
+                            {"altitude_m": 4.5, "scale": 0.55}
+                        ],
+                        "scale_max_velocity_with_height": True,
+                        "descend_speed_mps": 0.3,
+                        "slow_descend_speed_mps": 0.18,
+                        "max_ex_cam": 0.16,
+                        "max_ey_cam": 0.16,
+                        "slow_descend_max_ex_cam": 0.4,
+                        "slow_descend_max_ey_cam": 0.4,
+                        "deadband_ex_cam": 0.04,
+                        "deadband_ey_cam": 0.04,
+                        "min_altitude_m": 1.2,
+                        "require_target_locked": False,
+                        "payload_offset_enabled": True,
+                        "fov_x_deg": 85.0,
+                        "fov_y_deg": 69.0,
+                        "image_x_sign": 1.0,
+                        "image_y_sign": -1.0,
+                        "max_payload_offset_ex_cam": 0.8,
+                        "max_payload_offset_ey_cam": 0.8
+                    }
+                }
             },
         },
     ]

@@ -210,3 +210,52 @@ def test_recon_scan_local_position_dispatch_policy_enabled() -> None:
 
 def test_goto_waypoint_global_goto_dispatch_policy_enabled() -> None:
     assert "goto_waypoint" in ACTION_DISPATCH_POLICY["global_goto"].allowed_actions
+
+
+def test_action_lab_gps_drop_sequence_matches_v2_mission() -> None:
+    """Action Lab gps_drop_sequence defaults match v2 mission params (except targets/payloads)."""
+    import json
+    from pathlib import Path
+
+    v2 = json.loads(Path("config/action_missions/drop_two_targets_v2.json").read_text())
+    lab_spec = next(s for s in action_lab_specs() if s["name"] == "gps_drop_sequence")
+    lab = lab_spec["default_params"]
+    drop = next(s for s in v2["steps"] if s["name"] == "gps_drop_sequence")
+    mission = drop["params"]
+
+    # Top-level numeric / string params
+    for key in (
+        "approach_altitude_m", "finish_altitude_m",
+        "climb_after_drop_m", "climb_tolerance_z_m",
+        "climb_max_updates", "goto_max_updates",
+        "target_lock_max_updates", "align_descend_max_updates",
+        "release_wait_updates",
+    ):
+        assert lab[key] == mission[key], f"Mismatch on '{key}': lab={lab[key]}, mission={mission[key]}"
+
+    # goto block
+    for key in mission["goto"]:
+        assert lab["goto"][key] == mission["goto"][key], f"Mismatch on goto.{key}"
+
+    # target_lock block
+    for key in mission["target_lock"]:
+        assert lab["target_lock"][key] == mission["target_lock"][key], f"Mismatch on target_lock.{key}"
+
+    # align_descend block (top-level keys)
+    for key in (
+        "expected_dt_s", "lost_timeout_updates", "hold_updates_required",
+        "max_retries", "max_updates", "finish_policy",
+        "finish_alignment_max_ex_cam", "finish_alignment_max_ey_cam",
+        "finish_alignment_hold_updates",
+    ):
+        assert lab["align_descend"][key] == mission["align_descend"][key], f"Mismatch on align_descend.{key}"
+
+    # align_descend.config block
+    lab_cfg = lab["align_descend"]["config"]
+    mission_cfg = mission["align_descend"]["config"]
+    for key in mission_cfg:
+        assert lab_cfg[key] == mission_cfg[key], f"Mismatch on align_descend.config.{key}"
+
+    # targets and payloads remain empty in Action Lab (safety lock)
+    assert lab["targets"] == []
+    assert lab["payloads"] == []

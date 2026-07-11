@@ -1400,3 +1400,231 @@ def test_staged_descent_two_stages_min_speed_wins() -> None:
 def test_staged_descent_rejects_invalid_config(kwargs, error_match) -> None:
     with pytest.raises(ValueError, match=error_match):
         AlignDescendConfig(**kwargs)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# latched_center_alignment tests
+# ══════════════════════════════════════════════════════════════════════
+
+import math as _math
+from missions.common.actions import align_descend as _ad
+
+
+def _mk_cd(**overrides):
+    """Build a mock command_detail dict for compute_align_descend_command."""
+    d = {
+        "enabled": True,
+        "aligned": True,
+        "slow_descending": False,
+        "hold_reason": "",
+        "ex_cam": 0.0,
+        "ey_cam": 0.0,
+        "raw_ex_cam": 0.0,
+        "raw_ey_cam": 0.0,
+        "desired_ex_cam": 0.0,
+        "desired_ey_cam": 0.0,
+        "corrected_ex_cam": 0.0,
+        "corrected_ey_cam": 0.0,
+        "payload_offset_enabled": False,
+        "payload_offset_valid": False,
+        "height_gain_scale": 1.0,
+        "kp_vx_eff": 0.4,
+        "kp_vy_eff": 0.4,
+        "max_vx_eff": 0.4,
+        "max_vy_eff": 0.4,
+    }
+    d.update(overrides)
+    return d
+
+
+def _mk_lc_ctx(altitude=1.15, target_valid=True):
+    """Minimal context for latched_center_alignment tests."""
+    return {
+        "drone": {"relative_altitude": altitude},
+        "target_valid": target_valid,
+        "target_locked": True,
+        "control_allowed": True,
+    }
+
+
+def _start_lc_action(monkeypatch, command_detail_overrides=None, **start_overrides):
+    """Start AlignDescendAction with latched_center_alignment and patched compute."""
+    overrides = command_detail_overrides or {}
+    def _mock_compute(inputs, config, altitude_m=None):
+        cd = _mk_cd(**overrides)
+        # Derive 'enabled' from inputs to match real behaviour (target_ok gate)
+        cd["enabled"] = bool(inputs.get("target_valid") or inputs.get("vision_valid"))
+        return {}, cd
+    monkeypatch.setattr(_ad, "compute_align_descend_command", _mock_compute)
+    params = {
+        "config": {"require_target_locked": False},
+        "finish_policy": "latched_center_alignment",
+        "finish_altitude_m": 1.2,
+        "finish_alignment_max_ex_cam": 0.20,
+        "finish_alignment_max_ey_cam": 0.20,
+        "finish_alignment_hold_updates": 2,
+        "max_updates": 30,
+    }
+    params.update(start_overrides)
+    action = AlignDescendAction()
+    action.start(params)
+    return action
+
+
+def test_lc_target_invalid_clears_hold_count_and_no_done(monkeypatch) -> None:
+    """final_align with target_valid=False → hold_count=0, never done on centre."""
+    action = _start_lc_action(monkeypatch)
+    ctx = _mk_lc_ctx(altitude=1.15, target_valid=False)
+    r = action.update(ctx)
+    # After first update, final_align should be latched, hold_count stays 0
+    assert not r.done
+    assert action.finish_alignment_hold_count == 0
+    assert action.final_align_started is True
+    # A few more updates: still not done
+    for _ in range(3):
+        r = action.update(ctx)
+    assert not r.done
+    assert action.finish_alignment_hold_count == 0
+
+
+def test_lc_target_lost_timeout(monkeypatch) -> None:
+    """final_align with sustained target loss → target_lost_timeout failure."""
+    action = _start_lc_action(monkeypatch,
+                                  start_overrides={"lost_timeout_updates": 3, "max_retries": 0})
+    ctx = _mk_lc_ctx(altitude=1.15, target_valid=False)
+    for _ in range(20):
+        r = action.update(ctx)
+        if r.failed:
+            break
+    assert r.failed
+    assert r.reason == "target_lost_timeout"
+
+
+def test_lc_target_lost_once_resets_hold_count(monkeypatch) -> None:
+    """One frame of target loss resets hold_count to 0."""
+    action = _start_lc_action(monkeypatch,
+                                  start_overrides={"lost_timeout_updates": 99})
+    ctx_ok = _mk_lc_ctx(altitude=1.15, target_valid=True)
+    # One good update → hold_count=1 (not yet done, need 2)
+    action.update(ctx_ok)
+    assert action.final_align_started is True
+    assert action.finish_alignment_hold_count == 1
+    # One bad update → hold_count reset
+    ctx_bad = _mk_lc_ctx(altitude=1.15, target_valid=False)
+    action.update(ctx_bad)
+    assert action.finish_alignment_hold_count == 0
+
+
+def test_lc_target_recovered_needs_two_consecutive_again(monkeypatch) -> None:
+    """After target recovery, must accumulate 2 consecutive again to done."""
+    action = _start_lc_action(monkeypatch,
+                                  start_overrides={"lost_timeout_updates": 99})
+    ctx_ok = _mk_lc_ctx(altitude=1.15, target_valid=True)
+    ctx_bad = _mk_lc_ctx(altitude=1.15, target_valid=False)
+    action.update(ctx_ok)
+    assert action.finish_alignment_hold_count == 1
+    action.update(ctx_bad)
+    assert action.finish_alignment_hold_count == 0
+    for _ in range(4):
+        r = action.update(ctx_ok)
+        if r.done:
+            break
+    assert r.done
+    assert r.reason == "latched_center_aligned"
+
+
+def test_lc_corrected_nan_not_done(monkeypatch) -> None:
+    """corrected_ex_cam = NaN → in_center is False, never done."""
+    cd = _mk_cd(corrected_ex_cam=float("nan"), corrected_ey_cam=0.0)
+    action = _start_lc_action(monkeypatch, command_detail_overrides={
+        "corrected_ex_cam": float("nan"), "corrected_ey_cam": 0.0,
+    }, start_overrides={"max_updates": 10, "lost_timeout_updates": 99})
+    ctx = _mk_lc_ctx(altitude=1.15, target_valid=True)
+    for _ in range(10):
+        r = action.update(ctx)
+    assert not r.done
+    assert action.finish_alignment_hold_count == 0
+
+
+def test_lc_raw_irrelevant_only_corrected_matters(monkeypatch) -> None:
+    """raw ex/ey in centre but corrected ex/ey out → no done (no raw fallback)."""
+    action = _start_lc_action(monkeypatch, command_detail_overrides={
+        "ex_cam": 0.0, "ey_cam": 0.0,
+        "raw_ex_cam": 0.0, "raw_ey_cam": 0.0,
+        "corrected_ex_cam": 0.30, "corrected_ey_cam": 0.30,
+    }, start_overrides={"max_updates": 10, "lost_timeout_updates": 99})
+    ctx = _mk_lc_ctx(altitude=1.15, target_valid=True)
+    for _ in range(10):
+        r = action.update(ctx)
+    assert not r.done
+    assert action.finish_alignment_hold_count == 0
+
+
+def test_lc_corrected_in_center_two_consecutive_done(monkeypatch) -> None:
+    """corrected in centre + target_ok=True → 2 consecutive → done."""
+    action = _start_lc_action(monkeypatch, command_detail_overrides={
+        "corrected_ex_cam": 0.05, "corrected_ey_cam": -0.03,
+    })
+    ctx = _mk_lc_ctx(altitude=1.15, target_valid=True)
+    for _ in range(5):
+        r = action.update(ctx)
+        if r.done:
+            break
+    assert r.done
+    assert r.reason == "latched_center_aligned"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# latched_center_alignment parameter validation
+# ══════════════════════════════════════════════════════════════════════
+
+@pytest.mark.parametrize("bad_value,error_match", [
+    (float("nan"), "finish_alignment_max_ex_cam must be finite"),
+    (float("inf"), "finish_alignment_max_ex_cam must be finite"),
+    (-1.0, "finish_alignment_max_ex_cam must be finite"),
+    (0.0, "finish_alignment_max_ex_cam must be finite"),
+])
+def test_lc_rejects_invalid_max_ex_cam(bad_value, error_match) -> None:
+    with pytest.raises(ValueError, match=error_match):
+        AlignDescendAction().start({
+            "config": {"require_target_locked": False},
+            "finish_policy": "latched_center_alignment",
+            "finish_altitude_m": 1.2,
+            "finish_alignment_max_ex_cam": bad_value,
+            "finish_alignment_max_ey_cam": 0.20,
+            "finish_alignment_hold_updates": 2,
+        })
+
+
+@pytest.mark.parametrize("bad_value,error_match", [
+    (float("nan"), "finish_alignment_max_ey_cam must be finite"),
+    (float("inf"), "finish_alignment_max_ey_cam must be finite"),
+    (-1.0, "finish_alignment_max_ey_cam must be finite"),
+    (0.0, "finish_alignment_max_ey_cam must be finite"),
+])
+def test_lc_rejects_invalid_max_ey_cam(bad_value, error_match) -> None:
+    with pytest.raises(ValueError, match=error_match):
+        AlignDescendAction().start({
+            "config": {"require_target_locked": False},
+            "finish_policy": "latched_center_alignment",
+            "finish_altitude_m": 1.2,
+            "finish_alignment_max_ex_cam": 0.20,
+            "finish_alignment_max_ey_cam": bad_value,
+            "finish_alignment_hold_updates": 2,
+        })
+
+
+@pytest.mark.parametrize("bad_value,error_match", [
+    (0, "finish_alignment_hold_updates must be >= 1"),
+    (-1, "finish_alignment_hold_updates must be >= 1"),
+])
+def test_lc_rejects_invalid_hold_updates(bad_value, error_match) -> None:
+    with pytest.raises(ValueError, match=error_match):
+        AlignDescendAction().start({
+            "config": {"require_target_locked": False},
+            "finish_policy": "latched_center_alignment",
+            "finish_altitude_m": 1.2,
+            "finish_alignment_max_ex_cam": 0.20,
+            "finish_alignment_max_ey_cam": 0.20,
+            "finish_alignment_hold_updates": bad_value,
+        })

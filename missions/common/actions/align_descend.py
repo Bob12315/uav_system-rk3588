@@ -471,6 +471,15 @@ class AlignDescendAction(ActionModule):
         self.finish_alignment_max_ex_cam = float(data.get("finish_alignment_max_ex_cam", 0.20))
         self.finish_alignment_max_ey_cam = float(data.get("finish_alignment_max_ey_cam", 0.20))
         self.finish_alignment_hold_updates = int(data.get("finish_alignment_hold_updates", 2))
+
+        # Validate latched_center_alignment params
+        if not math.isfinite(self.finish_alignment_max_ex_cam) or self.finish_alignment_max_ex_cam <= 0.0:
+            raise ValueError("finish_alignment_max_ex_cam must be finite and > 0")
+        if not math.isfinite(self.finish_alignment_max_ey_cam) or self.finish_alignment_max_ey_cam <= 0.0:
+            raise ValueError("finish_alignment_max_ey_cam must be finite and > 0")
+        if self.finish_alignment_hold_updates < 1:
+            raise ValueError("finish_alignment_hold_updates must be >= 1")
+
         self.final_align_started = False
         self.finish_alignment_hold_count = 0
 
@@ -595,49 +604,47 @@ class AlignDescendAction(ActionModule):
                 # Continue vx/vy from visual error, but stop descent
                 if isinstance(command, dict):
                     command["vz_cmd"] = 0.0
-                # Use corrected (payload-offset-compensated) errors for centre check
-                corrected_ex = command_detail.get("corrected_ex_cam")
-                corrected_ey = command_detail.get("corrected_ey_cam")
-                if corrected_ex is not None and corrected_ey is not None:
+
+                if not target_ok:
+                    # Target invalid: clear hold count, do NOT complete.
+                    # Rely on existing lost_updates / retry / target_lost_timeout below.
+                    self.finish_alignment_hold_count = 0
+                else:
+                    # Target valid: check payload-offset-compensated errors ONLY
+                    corrected_ex = command_detail.get("corrected_ex_cam")
+                    corrected_ey = command_detail.get("corrected_ey_cam")
                     in_center = (
-                        abs(corrected_ex) <= self.finish_alignment_max_ex_cam
+                        corrected_ex is not None
+                        and corrected_ey is not None
+                        and math.isfinite(corrected_ex)
+                        and math.isfinite(corrected_ey)
+                        and abs(corrected_ex) <= self.finish_alignment_max_ex_cam
                         and abs(corrected_ey) <= self.finish_alignment_max_ey_cam
                     )
-                else:
-                    # Fallback to raw ex/ey if corrected not available
-                    raw_ex = command_detail.get("ex_cam")
-                    raw_ey = command_detail.get("ey_cam")
-                    if raw_ex is not None and raw_ey is not None:
-                        in_center = (
-                            abs(raw_ex) <= self.finish_alignment_max_ex_cam
-                            and abs(raw_ey) <= self.finish_alignment_max_ey_cam
-                        )
+
+                    if in_center:
+                        self.finish_alignment_hold_count += 1
                     else:
-                        in_center = False
+                        self.finish_alignment_hold_count = 0
 
-                if in_center:
-                    self.finish_alignment_hold_count += 1
-                else:
-                    self.finish_alignment_hold_count = 0
-
-                if self.finish_alignment_hold_count >= self.finish_alignment_hold_updates:
-                    self.done = True
-                    detail = self._detail(
-                        command=self._command_with_yaw_hold(_inactive_command(), data),
-                        command_detail={
-                            **command_detail,
-                            "hold_reason": "latched_center_aligned",
-                        },
-                        height_m=altitude.value_m,
-                        altitude_source=altitude.source,
-                    )
-                    self.last_detail = detail
-                    return ActionResult(
-                        actions=[],
-                        done=True,
-                        reason="latched_center_aligned",
-                        detail=detail,
-                    )
+                    if self.finish_alignment_hold_count >= self.finish_alignment_hold_updates:
+                        self.done = True
+                        detail = self._detail(
+                            command=self._command_with_yaw_hold(_inactive_command(), data),
+                            command_detail={
+                                **command_detail,
+                                "hold_reason": "latched_center_aligned",
+                            },
+                            height_m=altitude.value_m,
+                            altitude_source=altitude.source,
+                        )
+                        self.last_detail = detail
+                        return ActionResult(
+                            actions=[],
+                            done=True,
+                            reason="latched_center_aligned",
+                            detail=detail,
+                        )
 
                 detail = self._detail(
                     command=self._command_with_yaw_hold(command, data),
