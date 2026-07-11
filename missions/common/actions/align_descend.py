@@ -470,15 +470,20 @@ class AlignDescendAction(ActionModule):
         # ── latched_center_alignment params ──
         self.finish_alignment_max_ex_cam = float(data.get("finish_alignment_max_ex_cam", 0.20))
         self.finish_alignment_max_ey_cam = float(data.get("finish_alignment_max_ey_cam", 0.20))
-        self.finish_alignment_hold_updates = int(data.get("finish_alignment_hold_updates", 2))
+        raw_hold_updates = data.get("finish_alignment_hold_updates", 2)
+        if (
+            isinstance(raw_hold_updates, bool)
+            or not isinstance(raw_hold_updates, int)
+            or raw_hold_updates < 1
+        ):
+            raise ValueError("finish_alignment_hold_updates must be an integer >= 1")
+        self.finish_alignment_hold_updates = raw_hold_updates
 
         # Validate latched_center_alignment params
         if not math.isfinite(self.finish_alignment_max_ex_cam) or self.finish_alignment_max_ex_cam <= 0.0:
             raise ValueError("finish_alignment_max_ex_cam must be finite and > 0")
         if not math.isfinite(self.finish_alignment_max_ey_cam) or self.finish_alignment_max_ey_cam <= 0.0:
             raise ValueError("finish_alignment_max_ey_cam must be finite and > 0")
-        if self.finish_alignment_hold_updates < 1:
-            raise ValueError("finish_alignment_hold_updates must be >= 1")
 
         self.final_align_started = False
         self.finish_alignment_hold_count = 0

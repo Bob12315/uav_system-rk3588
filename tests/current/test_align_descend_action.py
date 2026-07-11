@@ -1615,8 +1615,13 @@ def test_lc_rejects_invalid_max_ey_cam(bad_value, error_match) -> None:
 
 
 @pytest.mark.parametrize("bad_value,error_match", [
-    (0, "finish_alignment_hold_updates must be >= 1"),
-    (-1, "finish_alignment_hold_updates must be >= 1"),
+    (0, "finish_alignment_hold_updates must be an integer >= 1"),
+    (-1, "finish_alignment_hold_updates must be an integer >= 1"),
+    (1.5, "finish_alignment_hold_updates must be an integer >= 1"),
+    (2.0, "finish_alignment_hold_updates must be an integer >= 1"),
+    (True, "finish_alignment_hold_updates must be an integer >= 1"),
+    (False, "finish_alignment_hold_updates must be an integer >= 1"),
+    ("2", "finish_alignment_hold_updates must be an integer >= 1"),
 ])
 def test_lc_rejects_invalid_hold_updates(bad_value, error_match) -> None:
     with pytest.raises(ValueError, match=error_match):
@@ -1628,3 +1633,18 @@ def test_lc_rejects_invalid_hold_updates(bad_value, error_match) -> None:
             "finish_alignment_max_ey_cam": 0.20,
             "finish_alignment_hold_updates": bad_value,
         })
+
+
+@pytest.mark.parametrize("good_value", [1, 2])
+def test_lc_accepts_valid_hold_updates(good_value) -> None:
+    """Valid int >= 1 is accepted without error."""
+    action = AlignDescendAction()
+    action.start({
+        "config": {"require_target_locked": False},
+        "finish_policy": "latched_center_alignment",
+        "finish_altitude_m": 1.2,
+        "finish_alignment_max_ex_cam": 0.20,
+        "finish_alignment_max_ey_cam": 0.20,
+        "finish_alignment_hold_updates": good_value,
+    })
+    assert action.finish_alignment_hold_updates == good_value
