@@ -57,3 +57,46 @@ def test_missing_local_height_stops_without_release(children):
 def test_rejects_nonlocal_source(source):
     with pytest.raises(ValueError, match="altitude_source"):
         GpsDropSequenceAction().start(params(align_descend={"config": {"altitude_source": source}}))
+
+
+# The V2 SITL harness imports these test doubles.  Keep its narrow statistics
+# fixture independent of the direct-flow assertions above.
+def _params(**more):
+    value = params()
+    value["payloads"] = [
+        {"payload_id": "p0", "servo_outputs": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}]},
+        {"payload_id": "p1", "servo_outputs": [{"channel": 9, "release_pwm": 1250, "hold_pwm": 1750}]},
+    ]
+    value.update(more)
+    return value
+FULL_COMMAND = {"type": "flight_command", "valid": True, "active": True,
+                "enable_body": True, "vx_cmd": 0.12, "vy_cmd": -0.08,
+                "vz_cmd": 0.18, "yaw_rate_cmd": 0.0, "priority": 7}
+class ScriptedGoto:
+    starts = []
+    @classmethod
+    def reset(cls): cls.starts = []
+    def start(self, p): self.p = p; self.calls = 0; type(self).starts.append(p)
+    def update(self, c):
+        self.calls += 1
+        return ActionResult(actions=[{"action_type": "global_goto", "params": {}, "once": False}]) if self.calls == 1 else ActionResult(done=True)
+class ScriptedLock:
+    starts = []
+    @classmethod
+    def reset(cls): cls.starts = []
+    def start(self, p): type(self).starts.append(p)
+    def update(self, c): return ActionResult(done=True)
+class ScriptedAlign:
+    starts = []
+    @classmethod
+    def reset(cls): cls.starts = []
+    def start(self, p): self.calls = 0; type(self).starts.append(p)
+    def update(self, c):
+        self.calls += 1
+        return ActionResult(detail={"command": dict(FULL_COMMAND)}) if self.calls == 1 else ActionResult(done=True, reason="aligned_at_finish_altitude", detail={})
+class ScriptedYaw:
+    @classmethod
+    def reset(cls): pass
+    def start(self, p): pass
+    def update(self, c): return ActionResult(done=True)
+def _drive_until_terminal(action): return drive(action)
