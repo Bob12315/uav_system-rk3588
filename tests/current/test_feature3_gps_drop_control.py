@@ -395,14 +395,36 @@ def test_target_unlocked_never_descends_or_releases(
 @pytest.mark.parametrize(
     "targets",
     [
-        [TARGETS[0], {**TARGETS[1], "target_id": "t0"}],
         [TARGETS[0], {**TARGETS[1], "lat": TARGETS[0]["lat"], "lon": TARGETS[0]["lon"]}],
-        [TARGETS[0], {**TARGETS[1], "target_id": ""}],
     ],
 )
 def test_start_rejects_non_distinct_targets(targets: list[dict[str, Any]]) -> None:
     with pytest.raises(ValueError):
         GpsDropSequenceAction().start(_params(targets=targets))
+
+
+def test_start_accepts_one_target() -> None:
+    """With a single valid GPS target, start succeeds in single_target_dual_release mode."""
+    action = GpsDropSequenceAction()
+    action.start(_params(targets=[TARGETS[0]]))
+    assert action.execution_mode == "single_target_dual_release"
+    assert len(action.targets) == 1
+    assert action.target_index == 0
+    assert action.payload_index == 0
+    assert action.released_count == 0
+
+
+def test_start_rejects_zero_targets() -> None:
+    """Zero valid GPS targets must raise ValueError."""
+    with pytest.raises(ValueError, match="targets must contain 1 or 2 entries"):
+        GpsDropSequenceAction().start(_params(targets=[]))
+    # Also test: all invalid targets (e.g., all valid=False)
+    invalid_two = [
+        {**TARGETS[0], "valid": False},
+        {**TARGETS[1], "valid": False},
+    ]
+    with pytest.raises(ValueError, match="at least 1 valid GPS target required"):
+        GpsDropSequenceAction().start(_params(targets=invalid_two))
 
 
 def _drive_until_terminal_with_context(
@@ -417,3 +439,272 @@ def _drive_until_terminal_with_context(
         if result.done or result.failed:
             return results
     raise AssertionError("sequence did not reach a terminal state")
+
+
+# ── single-target dual-release tests ──────────────────────────────────
+
+
+def test_single_target_dual_release_happy_path(scripted_children: None) -> None:
+    """Single target: goto→lock→align→dual release→done (no climb)."""
+    ScriptedAlign.reset(["aligned"])
+    action = GpsDropSequenceAction()
+    action.start(_params(targets=[TARGETS[0]]))
+    assert action.execution_mode == "single_target_dual_release"
+
+    results = _drive_until_terminal(action)
+
+    assert results[-1].done
+    assert results[-1].reason == "gps_drop_sequence_done"
+    assert action.released_count == 2
+    assert action.payload_index == 2
+    assert action.target_index == 0
+    assert action.execution_mode == "single_target_dual_release"
+
+    # Verify detail includes dual_release flag
+    assert results[-1].detail["dual_release"] is True
+    assert results[-1].detail["execution_mode"] == "single_target_dual_release"
+
+    # Verify only one goto (no second goto for second target, no climb goto)
+    goto_starts = ScriptedGoto.starts
+    assert len(goto_starts) == 1  # only one goto
+    assert goto_starts[0]["lat"] == TARGETS[0]["lat"]
+    assert goto_starts[0]["lon"] == TARGETS[0]["lon"]
+
+    # Verify only one lock
+    assert len(ScriptedLock.starts) == 1
+    assert ScriptedLock.starts[0]["target"]["id"] == "t0"
+
+    # Verify only one align
+    assert len(ScriptedAlign.starts) == 1
+
+    # No climb phase entered
+    climb_results = [r for r in results if r.reason == "gps_drop_climb_start"]
+    assert len(climb_results) == 0
+
+    # Verify dual release: both channels in same tick
+    release_results = [r for r in results if r.reason == "gps_drop_releasing"]
+    assert len(release_results) >= 2  # release tick + hold tick
+
+    # release tick has both set_servo
+    release_tick = release_results[0]
+    servos_release = [
+        a for a in release_tick.actions if a["action_type"] == "set_servo"
+    ]
+    assert len(servos_release) == 2
+    channels = sorted(a["params"]["channel"] for a in servos_release)
+    pwms_release = sorted(a["params"]["pwm"] for a in servos_release)
+    assert channels == [8, 9]
+    assert pwms_release == [1200, 1250]  # release PWMs from PAYLOADS
+
+    # hold tick has both set_servo (in terminal done result)
+    terminal = results[-1]
+    servos_hold = [
+        a for a in terminal.actions if a["action_type"] == "set_servo"
+    ]
+    assert len(servos_hold) == 2
+    channels_hold = sorted(a["params"]["channel"] for a in servos_hold)
+    pwms_hold = sorted(a["params"]["pwm"] for a in servos_hold)
+    assert channels_hold == [8, 9]
+    assert pwms_hold == [1700, 1750]  # hold PWMs from PAYLOADS
+
+
+def test_single_target_align_timeout_dual_release(
+    scripted_children: None,
+) -> None:
+    """Single target align timeout (child) → zero velocity → dual release."""
+    ScriptedAlign.reset(["child_timeout"])
+    action = GpsDropSequenceAction()
+    action.start(_params(targets=[TARGETS[0]]))
+    assert action.execution_mode == "single_target_dual_release"
+
+    results = _drive_until_terminal(action)
+    assert results[-1].done
+    assert results[-1].reason == "gps_drop_sequence_done"
+    assert action.released_count == 2
+    assert action.payload_index == 2
+
+    # Verify zero velocity + clear before release
+    timeout_transition = None
+    for r in results:
+        if r.reason == "gps_drop_align_timeout_release":
+            timeout_transition = r
+            break
+    assert timeout_transition is not None
+    types = _types(timeout_transition)
+    assert "flight_command" in types
+    assert "clear_continuous_commands" in types
+    assert timeout_transition.detail["release_reason"] == "align_timeout_release"
+
+    # Verify dual release happened
+    servos = []
+    for r in results:
+        for a in r.actions:
+            if a["action_type"] == "set_servo":
+                servos.append(a)
+    assert len(servos) == 4  # 2 release + 2 hold
+
+
+def test_single_target_sequence_align_timeout_dual_release(
+    scripted_children: None,
+) -> None:
+    """Single target parent align_descend_max_updates → dual release."""
+    ScriptedAlign.reset(["active_forever"])
+    action = GpsDropSequenceAction()
+    action.start(
+        _params(targets=[TARGETS[0]], align_descend_max_updates=1)
+    )
+    assert action.execution_mode == "single_target_dual_release"
+
+    results = _drive_until_terminal(action)
+    assert results[-1].done
+    assert results[-1].reason == "gps_drop_sequence_done"
+    assert action.released_count == 2
+
+    # Verify zero velocity + clear before release
+    timeout_transition = None
+    for r in results:
+        if r.reason == "gps_drop_align_timeout_release":
+            timeout_transition = r
+            break
+    assert timeout_transition is not None
+    types = _types(timeout_transition)
+    assert "clear_continuous_commands" in types
+
+
+def test_single_target_missing_altitude_no_release(
+    scripted_children: None,
+) -> None:
+    """Single target missing_altitude → failed, no servo release."""
+    ScriptedAlign.reset(["missing_altitude"])
+    action = GpsDropSequenceAction()
+    action.start(_params(targets=[TARGETS[0]]))
+    assert action.execution_mode == "single_target_dual_release"
+
+    results = _drive_until_terminal(action)
+    assert results[-1].failed
+    assert results[-1].reason == "missing_altitude"
+    assert action.released_count == 0
+
+    # No set_servo actions at all
+    servos = []
+    for r in results:
+        for a in r.actions:
+            if a["action_type"] == "set_servo":
+                servos.append(a)
+    assert len(servos) == 0
+
+
+def test_single_target_lost_timeout_no_release(
+    scripted_children: None,
+) -> None:
+    """Single target target_lost_timeout → failed, no servo release."""
+    ScriptedAlign.reset(["target_lost_timeout"])
+    action = GpsDropSequenceAction()
+    action.start(_params(targets=[TARGETS[0]]))
+    assert action.execution_mode == "single_target_dual_release"
+
+    results = _drive_until_terminal(action)
+    assert results[-1].failed
+    assert results[-1].reason == "target_lost_timeout"
+    assert action.released_count == 0
+
+    servos = []
+    for r in results:
+        for a in r.actions:
+            if a["action_type"] == "set_servo":
+                servos.append(a)
+    assert len(servos) == 0
+
+
+def test_single_target_detail_fields(scripted_children: None) -> None:
+    """Detail includes execution_mode, dual_release, and existing fields."""
+    ScriptedAlign.reset(["aligned"])
+    action = GpsDropSequenceAction()
+    action.start(_params(targets=[TARGETS[0]]))
+    results = _drive_until_terminal(action)
+
+    final_detail = results[-1].detail
+    assert final_detail["done"] is True
+    assert final_detail["execution_mode"] == "single_target_dual_release"
+    assert final_detail["dual_release"] is True
+    assert final_detail["target_count"] == 1
+    assert final_detail["payload_count"] == 2
+    assert final_detail["released_count"] == 2
+    assert final_detail["target_index"] == 0
+    assert final_detail["payload_index"] == 2
+    # Existing fields still present
+    assert "phase" in final_detail
+    assert "release_reason" in final_detail
+    assert "climb_after_drop_m" in final_detail
+
+
+def test_payload_release_multi_channel_regression(
+    scripted_children: None,
+) -> None:
+    """PayloadReleaseAction with multi-channel servo_outputs works correctly."""
+    ScriptedAlign.reset(["aligned"])
+    action = GpsDropSequenceAction()
+    action.start(_params(targets=[TARGETS[0]]))
+    results = _drive_until_terminal(action)
+
+    # Collect all set_servo actions
+    all_servos = []
+    for r in results:
+        for a in r.actions:
+            if a["action_type"] == "set_servo":
+                all_servos.append(a["params"])
+
+    # First two should be release (ch 8,9 with release PWMs)
+    assert len(all_servos) == 4
+    release_pwms = [s["pwm"] for s in all_servos[:2]]
+    hold_pwms = [s["pwm"] for s in all_servos[2:]]
+    assert sorted(release_pwms) == [1200, 1250]
+    assert sorted(hold_pwms) == [1700, 1750]
+
+
+def test_single_target_no_yaw_in_align_commands(
+    scripted_children: None,
+) -> None:
+    """V2 align commands must not contain yaw_hold_rad or velocity_yaw_rad."""
+    ScriptedAlign.reset(["aligned"])
+    action = GpsDropSequenceAction()
+    action.start(_params(targets=[TARGETS[0]]))
+    results = _drive_until_terminal(action)
+
+    for r in results:
+        for a in r.actions:
+            if a["action_type"] == "flight_command":
+                params_param = a["params"]
+                assert "yaw_hold_rad" not in params_param
+                assert "velocity_yaw_rad" not in params_param
+
+    # Also verify yaw_control_mode is ignore
+    assert ScriptedAlign.starts[0]["config"]["yaw_control_mode"] == "ignore"
+
+
+def test_dual_target_still_sequential(scripted_children: None) -> None:
+    """Two targets should still run dual_target_sequential with climb between."""
+    action = GpsDropSequenceAction()
+    action.start(_params(targets=TARGETS))
+    assert action.execution_mode == "dual_target_sequential"
+    assert action.target_index == 0
+
+    results = _drive_until_terminal(action)
+    assert results[-1].done
+    assert results[-1].reason == "gps_drop_sequence_done"
+    assert action.released_count == 2
+    assert action.payload_index == 2
+    assert action.target_index == 1
+
+    # Detail
+    assert results[-1].detail["dual_release"] is False
+    assert results[-1].detail["execution_mode"] == "dual_target_sequential"
+
+    # Both releases should have climb in between
+    climb_results = [r for r in results if r.reason == "gps_drop_climb_start"]
+    assert len(climb_results) == 2
+
+    # Two gotos (approach) + two climbs = 4 goto starts
+    assert len(ScriptedGoto.starts) == 4
+    assert len(ScriptedLock.starts) == 2
+    assert len(ScriptedAlign.starts) == 2

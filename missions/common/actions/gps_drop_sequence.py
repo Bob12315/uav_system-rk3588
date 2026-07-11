@@ -1,7 +1,7 @@
 """GPS-first drop sequence action (revised safety control).
 
 Feature 3.4 — GLOBAL goto → GPS lock → align-descend → release → climb.
-Requires exactly 2 targets and 2 payloads.
+Requires 1-2 targets and 2 payloads.
 """
 
 from __future__ import annotations
@@ -31,8 +31,8 @@ class GpsDropSequenceAction(ActionModule):
 
         # ── targets (exactly 2 valid GPS targets) ──
         raw_targets = data.get("targets", [])
-        if not isinstance(raw_targets, list) or len(raw_targets) != 2:
-            raise ValueError("targets must contain exactly 2 entries")
+        if not isinstance(raw_targets, list) or len(raw_targets) not in (1, 2):
+            raise ValueError("targets must contain 1 or 2 entries")
         self.targets: list[dict[str, Any]] = []
         seen_ids = set()
         for t in raw_targets:
@@ -62,9 +62,11 @@ class GpsDropSequenceAction(ActionModule):
                 "class_name": str(t.get("class_name", "")),
                 "target_id": tid,
             })
-        if len(self.targets) != 2:
-            raise ValueError("exactly 2 valid GPS targets required, got " + str(len(self.targets)))
-        if _same_gps_position(self.targets[0], self.targets[1]):
+        if len(self.targets) == 0:
+            raise ValueError("at least 1 valid GPS target required, got 0")
+        if len(self.targets) > 2:
+            raise ValueError("at most 2 valid GPS targets allowed, got " + str(len(self.targets)))
+        if len(self.targets) == 2 and _same_gps_position(self.targets[0], self.targets[1]):
             raise ValueError("GPS targets must have distinct positions")
 
         # ── payloads (exactly 2) ──
@@ -74,6 +76,12 @@ class GpsDropSequenceAction(ActionModule):
         self.payloads: list[dict[str, Any]] = []
         for p in raw_payloads:
             self.payloads.append(_validated_payload(p))
+
+        # ── execution mode ──
+        self.execution_mode = (
+            "single_target_dual_release" if len(self.targets) == 1
+            else "dual_target_sequential"
+        )
 
         # ── altitudes ──
         self.approach_altitude_m = float(data.get("approach_altitude_m", 3.0))
@@ -324,16 +332,30 @@ class GpsDropSequenceAction(ActionModule):
 
     def _update_release(self, context: dict[str, Any]) -> ActionResult:
         if self.sub_action is None:
-            payload = self.payloads[self.payload_index]
             t = self.targets[self.target_index]
-            pa = PayloadReleaseAction()
-            pa.start({
-                "servo_outputs": payload.get("servo_outputs", []),
-                "payload_id": str(payload.get("payload_id", f"payload_{self.payload_index}")),
-                "target_id": t["target_id"],
-                "release_wait_updates": self.release_wait_updates,
-                "priority": payload.get("priority", 5),
-            })
+            if self.execution_mode == "single_target_dual_release":
+                merged = _merge_servo_outputs(self.payloads[0], self.payloads[1])
+                pa = PayloadReleaseAction()
+                pa.start({
+                    "servo_outputs": merged,
+                    "payload_id": "payload_1_and_2",
+                    "target_id": t["target_id"],
+                    "release_wait_updates": self.release_wait_updates,
+                    "priority": max(
+                        self.payloads[0].get("priority", 5),
+                        self.payloads[1].get("priority", 5),
+                    ),
+                })
+            else:
+                payload = self.payloads[self.payload_index]
+                pa = PayloadReleaseAction()
+                pa.start({
+                    "servo_outputs": payload.get("servo_outputs", []),
+                    "payload_id": str(payload.get("payload_id", f"payload_{self.payload_index}")),
+                    "target_id": t["target_id"],
+                    "release_wait_updates": self.release_wait_updates,
+                    "priority": payload.get("priority", 5),
+                })
             self.sub_action = pa
             self.update_count_at_phase = 0
 
@@ -347,12 +369,25 @@ class GpsDropSequenceAction(ActionModule):
                 reason="gps_drop_releasing", detail=self._detail(),
             )
 
+        hold = result.actions or []
+
+        if self.execution_mode == "single_target_dual_release":
+            self.released_count = 2
+            self.payload_index = 2
+            self.sub_action = None
+            self.update_count_at_phase = 0
+            self.phase = "done"
+            return ActionResult(
+                actions=[_zero_velocity_command()] + (hold or []) + [_clear_continuous_command("release_done")],
+                done=True, reason="gps_drop_sequence_done",
+                detail=self._detail(done=True),
+            )
+
+        # ── dual_target_sequential ──
         self.released_count += 1
         self.payload_index += 1
         self.sub_action = None
         self.update_count_at_phase = 0
-
-        hold = result.actions or []
 
         # Every release must climb. Determine if terminal (second) release.
         is_terminal = (
@@ -454,6 +489,8 @@ class GpsDropSequenceAction(ActionModule):
             "release_reason": self._release_reason,
             "climb_after_drop_m": self.climb_after_drop_m,
             "climb_is_terminal": getattr(self, "_climb_is_terminal", False),
+            "execution_mode": getattr(self, "execution_mode", "dual_target_sequential"),
+            "dual_release": getattr(self, "execution_mode", "") == "single_target_dual_release",
         }
         if getattr(self, "_climb_is_terminal", False):
             d["next_after_climb"] = "sequence_done"
@@ -463,6 +500,28 @@ class GpsDropSequenceAction(ActionModule):
         if done: d["done"] = True
         if extra: d.update(extra)
         return d
+
+
+def _merge_servo_outputs(payload_a: dict[str, Any], payload_b: dict[str, Any]) -> list[dict[str, int]]:
+    """Merge servo_outputs from two payloads into one combined list.
+
+    Validates that both payloads have valid servo_outputs, channels do not
+    duplicate, and returns a new list without modifying the originals.
+    """
+    outputs_a = payload_a.get("servo_outputs", [])
+    outputs_b = payload_b.get("servo_outputs", [])
+    if not outputs_a or not outputs_b:
+        raise ValueError("both payloads must have valid servo_outputs for merge")
+
+    merged: list[dict[str, int]] = [dict(item) for item in outputs_a]
+    channels_seen: set[int] = {item["channel"] for item in outputs_a}
+    for item in outputs_b:
+        ch = item["channel"]
+        if ch in channels_seen:
+            raise ValueError(f"duplicate servo channel {ch} in merged payloads")
+        channels_seen.add(ch)
+        merged.append(dict(item))
+    return merged
 
 
 def _zero_velocity_command() -> dict[str, Any]:
