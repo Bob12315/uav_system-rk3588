@@ -234,13 +234,20 @@ def _assert_no_servo(results: list[ActionResult]) -> None:
             assert a.get("action_type") != "set_servo", f"unexpected set_servo in {r.reason}"
 
 
-def _servo_channels(results: list[ActionResult]) -> list[int]:
-    return sorted(
-        a["params"]["channel"]
-        for r in results
-        for a in r.actions
-        if a.get("action_type") == "set_servo"
-    )
+def _release_release_servo_channels(results: list[ActionResult]) -> list[int]:
+    """Return channels for release-PWM set_servo actions in order, excluding hold."""
+    channels: list[int] = []
+    for r in results:
+        for a in r.actions:
+            if a.get("action_type") != "set_servo":
+                continue
+            ch = int(a["params"]["channel"])
+            pwm = int(a["params"]["pwm"])
+            # Payload 1: channel 8 release=1750 hold=1250
+            # Payload 2: channel 9 release=1815 hold=1185
+            if (ch == 8 and pwm == 1750) or (ch == 9 and pwm == 1815):
+                channels.append(ch)
+    return channels
 
 
 @pytest.mark.parametrize("done,reason,expect_release", [
@@ -261,7 +268,7 @@ def test_align_outcome(v2_children: None, done: bool, reason: str, expect_releas
     if expect_release:
         assert results[-1].done, f"expected done for {reason}, got {results[-1].reason}"
         assert action.released_count in (1, 2)  # 1 for single, 2 for dual target with 2 payloads
-        assert 8 in _servo_channels(results)
+        assert 8 in _release_release_servo_channels(results)
     else:
         assert results[-1].failed, f"expected failed for {reason}, got {results[-1].reason}"
         assert action.released_count == 0
@@ -272,16 +279,45 @@ def test_align_outcome(v2_children: None, done: bool, reason: str, expect_releas
         assert "clear_continuous_commands" in types
 
 
-def test_outer_align_timeout_fails_no_release(v2_children: None) -> None:
+class HangingAlign:
+    """An AlignDescendAction that never completes — forces outer counter timeout."""
+    starts: list[dict[str, Any]] = []
+    @classmethod
+    def reset(cls) -> None:
+        cls.starts = []
+    def start(self, params: dict[str, Any]) -> None:
+        self.params = dict(params)
+        type(self).starts.append(self.params)
+    def update(self, context: dict[str, Any]) -> ActionResult:
+        return ActionResult(
+            done=False, failed=False, reason="aligning",
+            detail={"command": FULL_COMMAND},
+        )
+
+
+def test_outer_align_timeout_fails_no_release(monkeypatch: pytest.MonkeyPatch) -> None:
     """Outer update_count > align_descend_max_updates → fail, no release."""
-    ScriptedAlignV2.reset(done=False, reason="align_descend_timeout")
+    ScriptedGoto.reset()
+    ScriptedLock.reset()
+    ScriptedYaw.reset()
+    HangingAlign.reset()
+    monkeypatch.setattr(mod, "GotoWaypointAction", ScriptedGoto)
+    monkeypatch.setattr(mod, "GpsTargetLockAction", ScriptedLock)
+    monkeypatch.setattr(mod, "YawAlignAction", ScriptedYaw)
+    monkeypatch.setattr(mod, "AlignDescendAction", HangingAlign)
     action = GpsDropSequenceAction()
-    action.start(params(align_descend_max_updates=1, release_wait_updates=1))
-    results = _drive_to_terminal(action, limit=20)
+    action.start(params(align_descend_max_updates=3, release_wait_updates=1))
+    results = _drive_to_terminal(action, limit=30)
 
     assert results[-1].failed
+    assert results[-1].reason == "align_descend_timeout"
+    assert action.phase == "failed"
     assert action.released_count == 0
     _assert_no_servo(results)
+    # Verify zero+clear in final result
+    types = [a.get("action_type") for a in results[-1].actions]
+    assert "flight_command" in types
+    assert "clear_continuous_commands" in types
 
 
 def test_dual_target_first_release_then_second(v2_children: None) -> None:
@@ -294,7 +330,7 @@ def test_dual_target_first_release_then_second(v2_children: None) -> None:
     assert results[-1].done
     assert action.released_count == 2
     # Order: p1=channel 8, p2=channel 9
-    all_servos = _servo_channels(results)
+    all_servos = _release_release_servo_channels(results)
     assert 8 in all_servos
     assert 9 in all_servos
 
@@ -323,7 +359,7 @@ def test_single_target_dual_release_done(v2_children: None) -> None:
 
     assert results[-1].done
     assert action.released_count == 2
-    ch = _servo_channels(results)
+    ch = _release_release_servo_channels(results)
     assert 8 in ch and 9 in ch  # both channels present
 
 
