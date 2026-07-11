@@ -753,45 +753,6 @@ def test_duplicate_servo_channel_rejected_in_start() -> None:
         )
 
 
-def test_single_target_priority_uses_min() -> None:
-    """Joint release priority = min(p1, p2), lower is higher priority."""
-    payloads = [
-        {"payload_id": "p0", "payload_forward_m": -0.06, "payload_right_m": 0.0,
-         "servo_outputs": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}],
-         "priority": 2},
-        {"payload_id": "p1", "payload_forward_m": 0.06, "payload_right_m": 0.0,
-         "servo_outputs": [{"channel": 9, "release_pwm": 1250, "hold_pwm": 1750}],
-         "priority": 5},
-    ]
-    ScriptedAlign.reset(["aligned"])
-    import missions.common.actions.gps_drop_sequence as seq_mod
-    import missions.common.actions.payload_release as pr_mod
-
-    # Capture the started PayloadReleaseAction params
-    started_params: list[dict] = []
-    orig_start = pr_mod.PayloadReleaseAction.start
-    def _capture(self, params):
-        started_params.append(dict(params))
-        return orig_start(self, params)
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(pr_mod.PayloadReleaseAction, "start", _capture)
-    monkeypatch.setattr(seq_mod, "GotoWaypointAction", ScriptedGoto)
-    monkeypatch.setattr(seq_mod, "GpsTargetLockAction", ScriptedLock)
-    monkeypatch.setattr(seq_mod, "AlignDescendAction", ScriptedAlign)
-
-    action = GpsDropSequenceAction()
-    action.start(_params(targets=[TARGETS[0]], payloads=payloads))
-    _drive_until_terminal(action)
-
-    assert len(started_params) == 1
-    assert started_params[0]["priority"] == 2  # min(2, 5)
-
-    # release tick: check both servo keys use priority 2
-    results = _drive_until_terminal(action)
-    # Already driven; look through results for release tick
-    # Instead re-drive a fresh action
-
-
 def test_single_target_priority_min_servo_actions(
     scripted_children: None,
 ) -> None:
