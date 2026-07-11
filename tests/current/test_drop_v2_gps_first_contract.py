@@ -1,4 +1,4 @@
-"""Executable contracts for the GPS-first seven-step V2 drop mission."""
+"""Executable contracts for the GPS-first six-step V2 drop mission."""
 
 from __future__ import annotations
 
@@ -26,9 +26,9 @@ def test_drop_v2_base_and_sitl_are_identical() -> None:
     assert V2_PATH.read_bytes() == SITL_V2_PATH.read_bytes()
 
 
-def test_drop_v2_has_exact_seven_step_gps_first_order() -> None:
+def test_drop_v2_has_exact_six_step_gps_first_order() -> None:
     assert [step["name"] for step in _load(V2_PATH)["steps"]] == [
-        "takeoff", "yaw_align", "gps_multi_view_localize",
+        "takeoff", "gps_multi_view_localize",
         "select_drop_targets", "gps_drop_sequence", "goto_waypoint", "land",
     ]
 

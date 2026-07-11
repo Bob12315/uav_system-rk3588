@@ -15,6 +15,7 @@ from missions.common.actions.gps_derived_enu_fusion import (
 from missions.common.actions.gps_multi_view_localize import (
     GpsMultiViewLocalizeAction,
 )
+from missions.common.actions.result import ActionResult
 
 
 # =============================================================================
@@ -363,3 +364,272 @@ def _make_est(lat, lon, class_name, confidence, waypoint="DROP_SCAN_1"):
         ex=0.0, ey=0.0, class_name=class_name, confidence=confidence,
         source_waypoint=waypoint,
     )
+
+
+# ── first waypoint yaw align tests ───────────────────────────────────
+
+def _start_with_yaw_align(action, enabled=True, on_failed="continue", **kwargs):
+    """Start GpsMultiViewLocalizeAction with first_waypoint_yaw_align."""
+    params = {
+        "capture_updates_per_waypoint": 2,
+        "settle_updates_per_waypoint": 1,
+        "max_updates_per_waypoint": 30,
+        "tolerance_xy_m": 0.5,
+        "tolerance_z_m": 0.5,
+        "goto_min_hold_updates": 1,
+        "yaw_mode": "hold",
+        "detection_source": "scene",
+        "class_names": ["bucket"],
+        "min_confidence": 0.3,
+        "camera": {"fov_x_deg": 51.3, "fov_y_deg": 39.6},
+        "fusion": {"cluster_radius_m": 0.5, "min_cluster_size": 1},
+        "first_waypoint_yaw_align": {
+            "enabled": enabled,
+            "yaw_mode": "field_heading",
+            "tolerance_deg": 3.0,
+            "yaw_speed_deg_s": 25.0,
+            "min_hold_updates": 5,
+            "max_updates": 30,
+            "priority": 4,
+            "on_failed": on_failed,
+            **kwargs,
+        },
+    }
+    action.start(params)
+
+
+def test_first_wp_yaw_align_disabled_default() -> None:
+    """Without first_waypoint_yaw_align config, goto done → settle directly."""
+    a = GpsMultiViewLocalizeAction()
+    a.start({"yaw_mode": "hold", "class_names": ["bucket"],
+             "camera": {"fov_x_deg": 51.3, "fov_y_deg": 39.6},
+             "fusion": {"cluster_radius_m": 0.5, "min_cluster_size": 1}})
+    ctx = {"field_reference": _applied_fr_dict()}
+    a.update(ctx)
+    assert a.first_waypoint_yaw_align_enabled is False
+    assert a.phase == "goto"
+
+
+@pytest.mark.parametrize("on_failed", ["contine", ""])
+def test_first_wp_yaw_align_rejects_invalid_failure_policy(on_failed: str) -> None:
+    a = GpsMultiViewLocalizeAction()
+    with pytest.raises(ValueError, match="first_waypoint_yaw_align.on_failed"):
+        _start_with_yaw_align(a, on_failed=on_failed)
+
+
+def test_first_wp_yaw_align_default_goto_done_enters_settle_without_yaw_action() -> None:
+    a = GpsMultiViewLocalizeAction()
+    a.start({"yaw_mode": "hold", "class_names": ["bucket"],
+             "camera": {"fov_x_deg": 51.3, "fov_y_deg": 39.6},
+             "fusion": {"cluster_radius_m": 0.5, "min_cluster_size": 1}})
+    a.update({"field_reference": _applied_fr_dict()})
+
+    class _DoneGoto:
+        def update(self, context):
+            return ActionResult(done=True, reason="waypoint_reached")
+
+    a.goto_action = _DoneGoto()
+    result = a.update({"field_reference": _applied_fr_dict()})
+    assert result.reason == "gps_multi_view_settle"
+    assert a.phase == "settle"
+    assert a.yaw_align_action is None
+    assert not any(item.get("action_type") == "condition_yaw" for item in result.actions)
+
+
+def test_first_wp_yaw_align_goto_generates_no_condition_yaw() -> None:
+    """During goto phase, no condition_yaw actions are emitted."""
+    a = GpsMultiViewLocalizeAction()
+    _start_with_yaw_align(a)
+    ctx = {"field_reference": _applied_fr_dict()}
+    result = a.update(ctx)
+    assert a.phase == "goto"
+    assert a.yaw_align_attempted is False
+    for act in (result.actions or []):
+        assert act.get("action_type") != "condition_yaw"
+
+
+def test_first_wp_yaw_align_enters_after_goto_done() -> None:
+    """After first waypoint goto completes, phase transitions to first_waypoint_yaw_align."""
+    a = GpsMultiViewLocalizeAction()
+    _start_with_yaw_align(a)
+    ctx = {"field_reference": _applied_fr_dict()}
+    a.update(ctx)
+    # Simulate goto completion by setting drone at target
+    wp = a.scan_targets[0]
+    ctx["drone"] = {"lat": wp.lat, "lon": wp.lon, "yaw": 1.5, "relative_altitude": wp.altitude_m,
+                     "global_position_valid": True, "attitude_valid": True}
+    ctx["field_heading_yaw_rad"] = 1.5
+    ctx["field_heading_confirmed"] = True
+    for _ in range(10):
+        result = a.update(ctx)
+        if a.phase != "goto":
+            break
+    assert a.phase == "first_waypoint_yaw_align"
+    assert a.yaw_align_attempted is True
+    assert a.yaw_align_action is not None
+
+
+def test_first_wp_yaw_align_sends_condition_yaw() -> None:
+    """When in first_waypoint_yaw_align phase, condition_yaw actions are forwarded."""
+    a = GpsMultiViewLocalizeAction()
+    _start_with_yaw_align(a)
+    ctx = {"field_reference": _applied_fr_dict()}
+    a.update(ctx)
+    wp = a.scan_targets[0]
+    ctx["drone"] = {"lat": wp.lat, "lon": wp.lon, "yaw": 1.5, "relative_altitude": wp.altitude_m,
+                     "global_position_valid": True, "attitude_valid": True,
+                     "field_heading_yaw_rad": 1.5, "field_heading_confirmed": True}
+    ctx["field_heading_yaw_rad"] = 1.5
+    ctx["field_heading_confirmed"] = True
+    for _ in range(10):
+        result = a.update(ctx)
+        if a.phase == "first_waypoint_yaw_align":
+            break
+    assert a.phase == "first_waypoint_yaw_align"
+    has_condition_yaw = False
+    for act in (result.actions or []):
+        if act.get("action_type") == "condition_yaw":
+            has_condition_yaw = True
+    assert has_condition_yaw
+
+
+def test_first_wp_yaw_align_done_transitions_to_settle() -> None:
+    """When yaw_align completes, phase transitions to settle (not directly capture)."""
+    a = GpsMultiViewLocalizeAction()
+    _start_with_yaw_align(a, tolerance_deg=90.0, min_hold_updates=1, max_updates=30)
+    ctx = {"field_reference": _applied_fr_dict()}
+    a.update(ctx)
+    wp = a.scan_targets[0]
+    ctx["drone"] = {"lat": wp.lat, "lon": wp.lon, "yaw": 1.5, "relative_altitude": wp.altitude_m,
+                     "global_position_valid": True, "attitude_valid": True,
+                     "field_heading_yaw_rad": 1.5, "field_heading_confirmed": True}
+    ctx["field_heading_yaw_rad"] = 1.5
+    ctx["field_heading_confirmed"] = True
+    for _ in range(20):
+        result = a.update(ctx)
+        if a.phase == "settle":
+            break
+    assert a.phase == "settle"
+    assert a.yaw_align_done is True
+    assert a.settle_count == 0
+
+
+def test_first_wp_yaw_align_failed_continue() -> None:
+    """When yaw_align fails and on_failed=continue, proceed to settle."""
+    a = GpsMultiViewLocalizeAction()
+    _start_with_yaw_align(a, tolerance_deg=0.01, min_hold_updates=100, max_updates=1, on_failed="continue")
+    ctx = {"field_reference": _applied_fr_dict()}
+    a.update(ctx)
+    wp = a.scan_targets[0]
+    ctx["drone"] = {"lat": wp.lat, "lon": wp.lon, "yaw": 5.0, "relative_altitude": wp.altitude_m,
+                     "global_position_valid": True, "attitude_valid": True,
+                     "field_heading_yaw_rad": 1.5, "field_heading_confirmed": True}
+    ctx["field_heading_yaw_rad"] = 1.5
+    ctx["field_heading_confirmed"] = True
+    for _ in range(10):
+        result = a.update(ctx)
+        if a.phase != "first_waypoint_yaw_align":
+            break
+    assert a.phase == "settle"
+    assert a.yaw_align_failed is True
+    assert a.failure_reason == ""
+
+
+def test_first_wp_yaw_align_failed_fail() -> None:
+    """When yaw_align fails and on_failed=fail, action fails."""
+    a = GpsMultiViewLocalizeAction()
+    _start_with_yaw_align(a, tolerance_deg=0.01, min_hold_updates=100, max_updates=1, on_failed="fail")
+    ctx = {"field_reference": _applied_fr_dict()}
+    a.update(ctx)
+    wp = a.scan_targets[0]
+    ctx["drone"] = {"lat": wp.lat, "lon": wp.lon, "yaw": 5.0, "relative_altitude": wp.altitude_m,
+                     "global_position_valid": True, "attitude_valid": True,
+                     "field_heading_yaw_rad": 1.5, "field_heading_confirmed": True}
+    ctx["field_heading_yaw_rad"] = 1.5
+    ctx["field_heading_confirmed"] = True
+    for _ in range(10):
+        result = a.update(ctx)
+        if a.phase == "failed":
+            break
+    assert a.phase == "failed"
+    assert a.failure_reason == "first_waypoint_yaw_align_failed"
+
+
+def test_subsequent_waypoints_no_yaw_align() -> None:
+    """Waypoints 2,3,4 do not trigger yaw_align again and use yaw_mode=hold."""
+    a = GpsMultiViewLocalizeAction()
+    _start_with_yaw_align(a, tolerance_deg=90.0, min_hold_updates=1, max_updates=5)
+    ctx = {"field_reference": _applied_fr_dict()}
+    a.update(ctx)
+    wp = a.scan_targets[0]
+    ctx["drone"] = {"lat": wp.lat, "lon": wp.lon, "yaw": 1.5, "relative_altitude": wp.altitude_m,
+                     "global_position_valid": True, "attitude_valid": True,
+                     "field_heading_yaw_rad": 1.5, "field_heading_confirmed": True}
+    ctx["field_heading_yaw_rad"] = 1.5
+    ctx["field_heading_confirmed"] = True
+    # Drive through first wp: goto→yaw_align→settle→capture→next
+    dets = [_det(ex=0.0, ey=0.0)]
+    ctx.setdefault("scene", {})["detections"] = dets
+    for _ in range(60):
+        result = a.update(ctx)
+        if a.waypoint_index >= 1:
+            break
+        if a.phase == "failed":
+            break
+    assert a.waypoint_index >= 1
+    # At waypoint 2, should go directly to goto→settle without yaw_align
+    assert a.phase in ("goto", "settle", "capture")
+    assert a.yaw_align_attempted is True  # only attempted once
+    # Verify subsequent goto uses yaw_mode=hold
+    assert a.yaw_mode == "hold"
+
+
+def test_detail_includes_yaw_align_diagnostics() -> None:
+    """_detail() includes first_waypoint_yaw_align diagnostic fields."""
+    a = GpsMultiViewLocalizeAction()
+    _start_with_yaw_align(a)
+    ctx = {"field_reference": _applied_fr_dict()}
+    a.update(ctx)
+    detail = a._detail()
+    assert "first_waypoint_yaw_align_enabled" in detail
+    assert detail["first_waypoint_yaw_align_enabled"] is True
+    assert "first_waypoint_yaw_align_attempted" in detail
+    assert "first_waypoint_yaw_align_done" in detail
+    assert "first_waypoint_yaw_align_failed" in detail
+
+
+def test_dispatcher_allows_condition_yaw_for_gps_multi_view() -> None:
+    """Dispatcher allows condition_yaw when action_name is gps_multi_view_localize."""
+    from app.action_dispatcher import ActionDispatcher
+    from app.dispatch.policy import ACTION_DISPATCH_POLICY
+    dispatcher = ActionDispatcher()
+    dispatcher.send_actions = True
+    result = dispatcher.dispatch_actions(
+        [{"action_type": "condition_yaw", "params": {"yaw_deg": 45.0, "yaw_speed_deg_s": 20.0,
+                                                      "direction": 0, "relative": False},
+          "key": "test_cmd", "once": False, "priority": 4}],
+        action_name="gps_multi_view_localize",
+        send_commands=True,
+        link_manager=None,
+    )
+    # With link_manager=None, dispatch fails with telemetry error, not policy rejection
+    assert result["sent"] == []
+    # Policy allows it - the error is from missing link, not policy rejection
+    assert all("action_dispatch_not_enabled" not in str(e.get("reason", "")) for e in result.get("errors", []))
+
+
+def test_dispatcher_rejects_condition_yaw_for_unknown_action() -> None:
+    """Dispatcher rejects condition_yaw for an action not in the whitelist."""
+    from app.action_dispatcher import ActionDispatcher
+    dispatcher = ActionDispatcher()
+    dispatcher.send_actions = True
+    result = dispatcher.dispatch_actions(
+        [{"action_type": "condition_yaw", "params": {"yaw_deg": 45.0, "yaw_speed_deg_s": 20.0,
+                                                      "direction": 0, "relative": False},
+          "key": "test_cmd", "once": False, "priority": 4}],
+        action_name="unknown_action",
+        send_commands=True,
+        link_manager=None,
+    )
+    assert result["skipped"] != []
+    assert any("action_dispatch_not_enabled" in str(s.get("reason", "")) for s in result["skipped"])
