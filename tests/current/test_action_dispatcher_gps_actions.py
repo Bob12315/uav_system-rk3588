@@ -33,8 +33,9 @@ class FakeLinkManager:
         vx_forward_mps: float,
         vy_right_mps: float,
         vz_down_mps: float,
+        yaw_rate_rad_s: float | None = None,
     ) -> None:
-        self.calls.append(("send_body_velocity", vx_forward_mps, vy_right_mps, vz_down_mps))
+        self.calls.append(("send_body_velocity", vx_forward_mps, vy_right_mps, vz_down_mps, yaw_rate_rad_s))
 
     def send_velocity_command(
         self,
@@ -44,8 +45,9 @@ class FakeLinkManager:
         *,
         frame: int,
         yaw_rad: float | None = None,
+        yaw_rate_rad_s: float | None = None,
     ) -> None:
-        self.calls.append(("send_velocity_command", vx, vy, vz, frame, yaw_rad))
+        self.calls.append(("send_velocity_command", vx, vy, vz, frame, yaw_rad, yaw_rate_rad_s))
 
     def stop_body_velocity_and_clear(self) -> None:
         self.calls.append(("stop_body_velocity_and_clear",))
@@ -155,8 +157,8 @@ def test_gps_action_dispatcher_sends_all_eight_required_paths() -> None:
     assert link.calls == [
         ("global_goto", 34.0, 108.0, 5.0, 6, 4, None),
         ("global_goto", 34.0, 108.0, 5.0, 6, 4, None),
-        ("send_body_velocity", 0.2, -0.1, 0.15),
-        ("send_body_velocity", 0.0, 0.0, 0.0),
+        ("send_body_velocity", 0.2, -0.1, 0.15, None),
+        ("send_body_velocity", 0.0, 0.0, 0.0, None),
         ("stop_body_velocity_and_clear",),
         ("set_servo_output_pwm", 8, 1200, 5),
     ]
@@ -200,11 +202,20 @@ class _ImmediateLock:
         )
 
 
+class _ImmediateYawAlign:
+    def start(self, params: dict[str, Any]) -> None:
+        self.params = params
+
+    def update(self, context: dict[str, Any]) -> ActionResult:
+        return ActionResult(done=True, reason="yaw_aligned")
+
+
 def test_real_gps_sequence_align_dispatches_body_ned_without_local_conversion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(sequence_module, "GotoWaypointAction", _ImmediateGoto)
     monkeypatch.setattr(sequence_module, "GpsTargetLockAction", _ImmediateLock)
+    monkeypatch.setattr(sequence_module, "YawAlignAction", _ImmediateYawAlign)
     sequence = GpsDropSequenceAction()
     sequence.start(
         {
@@ -225,16 +236,20 @@ def test_real_gps_sequence_align_dispatches_body_ned_without_local_conversion(
         "control_allowed": True,
         "ex_cam": 0.03,
         "ey_cam": 0.04,
+        "local_altitude_m": 5.0,
+        "local_altitude_valid": True,
         "drone": {"relative_altitude": 5.0, "attitude_valid": True, "yaw": 0.9},
     }
 
-    sequence.update(context)  # goto -> lock
+    sequence.update(context)  # goto -> yaw_align
+    sequence.update(context)  # yaw_align -> lock
     sequence.update(context)  # lock -> align
     align_result = sequence.update(context)
     assert len(align_result.actions) == 1
     actual_action = align_result.actions[0]
     command = actual_action["params"]
     assert actual_action["action_type"] == "flight_command"
+    assert command["yaw_rate_rad_s"] == pytest.approx(0.0)
     assert "yaw_hold_rad" not in command
     assert "velocity_yaw_rad" not in command
     assert command["vx_cmd"] != 0.0
@@ -265,6 +280,92 @@ def test_real_gps_sequence_align_dispatches_body_ned_without_local_conversion(
             command["vx_cmd"],
             command["vy_cmd"],
             command["vz_cmd"],
+            0.0,
         )
     ]
     assert not any(call[0] == "send_velocity_command" for call in link.calls)
+
+
+def test_gps_sequence_invalid_target_stops_and_clears_with_zero_yaw_rate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sequence_module, "GotoWaypointAction", _ImmediateGoto)
+    monkeypatch.setattr(sequence_module, "GpsTargetLockAction", _ImmediateLock)
+    monkeypatch.setattr(sequence_module, "YawAlignAction", _ImmediateYawAlign)
+    sequence = GpsDropSequenceAction()
+    sequence.start(
+        {
+            "targets": [
+                {"valid": True, "target_id": "t0", "lat": 34.0, "lon": 108.0},
+                {"valid": True, "target_id": "t1", "lat": 34.001, "lon": 108.001},
+            ],
+            "payloads": [
+                {"payload_id": "p0", "servo_outputs": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}]},
+                {"payload_id": "p1", "servo_outputs": [{"channel": 9, "release_pwm": 1250, "hold_pwm": 1750}]},
+            ],
+        }
+    )
+    context = {"relative_altitude": 5.0, "target_valid": True, "target_locked": True,
+               "control_allowed": True, "ex_cam": 0.03, "ey_cam": 0.04,
+               "local_altitude_m": 5.0, "local_altitude_valid": True,
+               "drone": {"relative_altitude": 5.0}, "control_allowed": False}
+    sequence.update(context)
+    sequence.update(context)
+    sequence.update(context)
+    waiting = sequence.update(context)
+
+    assert waiting.reason == "gps_drop_align_inactive"
+    assert [action["action_type"] for action in waiting.actions] == [
+        "flight_command", "clear_continuous_commands"
+    ]
+    assert waiting.actions[0]["params"]["vx_cmd"] == pytest.approx(0.0)
+    assert waiting.actions[0]["params"]["vy_cmd"] == pytest.approx(0.0)
+    assert waiting.actions[0]["params"]["vz_cmd"] == pytest.approx(0.0)
+    assert waiting.actions[0]["params"]["yaw_rate_rad_s"] == pytest.approx(0.0)
+
+
+def test_gps_sequence_each_align_uses_zero_yaw_rate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sequence_module, "GotoWaypointAction", _ImmediateGoto)
+    monkeypatch.setattr(sequence_module, "GpsTargetLockAction", _ImmediateLock)
+    monkeypatch.setattr(sequence_module, "YawAlignAction", _ImmediateYawAlign)
+    sequence = GpsDropSequenceAction()
+    sequence.start(
+        {
+            "targets": [
+                {"valid": True, "target_id": "t0", "lat": 34.0, "lon": 108.0},
+                {"valid": True, "target_id": "t1", "lat": 34.001, "lon": 108.001},
+            ],
+            "payloads": [
+                {"payload_id": "p0", "servo_outputs": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}]},
+                {"payload_id": "p1", "servo_outputs": [{"channel": 9, "release_pwm": 1250, "hold_pwm": 1750}]},
+            ],
+        }
+    )
+    common = {"target_valid": True, "target_locked": True, "control_allowed": True,
+              "ex_cam": 0.0, "ey_cam": 0.0}
+    first_context = {**common, "relative_altitude": 5.0, "local_altitude_m": 5.0, "local_altitude_valid": True,
+                     "drone": {"relative_altitude": 5.0, "attitude_valid": True, "yaw": 1.2}}
+    finish_context = {**common, "relative_altitude": 1.3, "local_altitude_m": 1.3, "local_altitude_valid": True,
+                      "drone": {"relative_altitude": 1.3, "attitude_valid": True, "yaw": 1.2}}
+
+    sequence.update(first_context)
+    sequence.update(first_context)
+    sequence.update(first_context)
+    first = sequence.update(first_context)
+    assert first.actions[0]["params"]["yaw_rate_rad_s"] == pytest.approx(0.0)
+    for _ in range(3):
+        sequence.update(finish_context)
+
+    second_context = {**common, "relative_altitude": 5.0, "local_altitude_m": 5.0, "local_altitude_valid": True,
+                      "drone": {"relative_altitude": 5.0, "attitude_valid": True, "yaw": 0.7}}
+    for _ in range(20):
+        result = sequence.update(second_context)
+        if sequence.phase == "align" and sequence.target_index == 1 and result.actions:
+            command = result.actions[0].get("params", {})
+            if command.get("yaw_rate_rad_s") is not None:
+                assert command["yaw_rate_rad_s"] == pytest.approx(0.0)
+                assert "yaw_hold_rad" not in command
+                return
+    raise AssertionError("second AlignDescend did not start")

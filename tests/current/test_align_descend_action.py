@@ -36,6 +36,26 @@ def test_align_descend_config_defaults() -> None:
     assert config.yaw_control_mode == "hold"
 
 
+def test_local_ned_source_prefers_explicit_local_altitude_and_reports_diagnostics() -> None:
+    action = AlignDescendAction()
+    action.start({"config": {"altitude_source": "local_ned"}})
+    result = action.update(_active_context(
+        local_altitude_m=1.30, local_altitude_valid=True, relative_altitude=1.85,
+    ))
+    assert result.detail["current_altitude_m"] == pytest.approx(1.30)
+    assert result.detail["altitude_source"] == "local_position_ned_z"
+    assert result.detail["local_altitude_m"] == pytest.approx(1.30)
+    assert result.detail["relative_altitude_m"] == pytest.approx(1.85)
+    assert result.detail["altitude_difference_m"] == pytest.approx(0.55)
+
+
+def test_local_ned_source_never_falls_back_to_relative_altitude() -> None:
+    action = AlignDescendAction()
+    action.start({"config": {"altitude_source": "local_ned"}})
+    result = action.update(_active_context(relative_altitude=1.2))
+    assert result.failed and result.reason == "missing_local_ned_altitude"
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
@@ -661,6 +681,21 @@ def test_align_descend_keeps_initial_yaw_hold_across_updates() -> None:
 
     assert result.detail["yaw_hold_rad"] == pytest.approx(1.25)
     assert result.detail["command"]["yaw_hold_rad"] == pytest.approx(1.25)
+
+
+def test_hold_zero_rate_never_captures_or_emits_yaw() -> None:
+    action = AlignDescendAction()
+    action.start({"config": {"yaw_control_mode": "hold_zero_rate"}})
+    result = action.update(
+        _active_context(
+            field_heading_yaw_rad=-1.0,
+            arm_heading_yaw_rad=2.0,
+            vehicle={"attitude_valid": True, "yaw": 3.13},
+        )
+    )
+    assert result.detail["yaw_hold_rad"] is None
+    assert "yaw_hold_rad" not in result.detail["command"]
+    assert result.detail["command"]["yaw_rate_rad_s"] == pytest.approx(0.0)
 
 
 def test_above_finish_altitude_allows_descent_when_aligned() -> None:

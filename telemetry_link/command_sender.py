@@ -362,11 +362,14 @@ class CommandSender(threading.Thread):
             self.logger.warning("failed to send gimbal rate command: %s", exc)
 
     def _send_velocity(self, master, command: ControlCommand) -> None:
-        type_mask = (
-            self._velocity_only_type_mask()
-            if command.yaw is None
-            else self._velocity_with_yaw_type_mask()
-        )
+        if command.yaw is not None and command.yaw_rate is not None:
+            raise ValueError("velocity command cannot specify both yaw and yaw_rate")
+        if command.yaw is not None:
+            type_mask = self._velocity_with_yaw_type_mask()
+        elif command.yaw_rate is not None:
+            type_mask = self._velocity_yaw_rate_type_mask()
+        else:
+            type_mask = self._velocity_only_type_mask()
         self.logger.debug(
             "send velocity setpoint frame=%s vx=%.3f vy=%.3f vz=%.3f yaw=%s yaw_rate=%.3f type_mask=%s",
             command.frame,
@@ -393,7 +396,7 @@ class CommandSender(threading.Thread):
             0.0,
             0.0,
             0.0 if command.yaw is None else command.yaw,
-            command.yaw_rate,
+            0.0 if command.yaw_rate is None else command.yaw_rate,
         )
 
     def _velocity_yaw_rate_type_mask(self) -> int:

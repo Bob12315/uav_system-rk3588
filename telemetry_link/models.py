@@ -64,7 +64,7 @@ class DroneState:
     yaw: float = 0.0
     roll_rate: float = 0.0
     pitch_rate: float = 0.0
-    yaw_rate: float = 0.0
+    yaw_rate: float | None = None
     vx: float = 0.0
     vy: float = 0.0
     vz: float = 0.0
@@ -120,7 +120,7 @@ class ControlCommand:
     vy: float = 0.0
     vz: float = 0.0
     yaw: float | None = None
-    yaw_rate: float = 0.0
+    yaw_rate: float | None = None
     timestamp: float = 0.0
     frame: int = 1
     clear_after_send: bool = False

@@ -286,9 +286,11 @@ def test_return_home_failure_jumps_to_land() -> None:
 
 def test_sitl_harness_gps_drop_action_frame_pwm_statistics(monkeypatch: pytest.MonkeyPatch) -> None:
     feature3.ScriptedGoto.reset()
+    feature3.ScriptedYaw.reset()
     feature3.ScriptedLock.reset()
     feature3.ScriptedAlign.reset()
     monkeypatch.setattr(sequence_module, "GotoWaypointAction", feature3.ScriptedGoto)
+    monkeypatch.setattr(sequence_module, "YawAlignAction", feature3.ScriptedYaw)
     monkeypatch.setattr(sequence_module, "GpsTargetLockAction", feature3.ScriptedLock)
     monkeypatch.setattr(sequence_module, "AlignDescendAction", feature3.ScriptedAlign)
     action = GpsDropSequenceAction()

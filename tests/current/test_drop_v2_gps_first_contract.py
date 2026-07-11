@@ -62,7 +62,7 @@ def test_drop_v2_align_payload_and_velocity_safety_contract() -> None:
     params = drop["params"]
     align = params["align_descend"]
     assert align["finish_policy"] == "require_alignment_or_timeout"
-    assert align["config"]["yaw_control_mode"] == "ignore"
+    assert align["config"]["yaw_control_mode"] == "hold_zero_rate"
     assert align["config"]["require_target_locked"] is True
     assert align["config"]["payload_offset_enabled"] is True
     assert [payload["payload_forward_m"] for payload in params["payloads"]] == [-0.06, 0.06]
