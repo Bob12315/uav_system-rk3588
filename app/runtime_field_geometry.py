@@ -75,6 +75,7 @@ class RuntimeFieldGeometry:
     forward_marker: RuntimeFieldPoint
 
     drop_scan_waypoints: Tuple[RuntimeFieldPoint, ...]
+    recon_scan_waypoints: Tuple[RuntimeFieldPoint, ...]
     drop_area_corners: Tuple[RuntimeFieldPoint, ...]
     recce_area_corners: Tuple[RuntimeFieldPoint, ...]
 
@@ -175,6 +176,7 @@ def build_runtime_field_geometry(
             fg.recce_area_y_min, fg.recce_area_y_max,
             origin_lat, origin_lon, heading_rad,
         )
+        recon_scan_points = _build_recon_scan_points(recce_corners, scan_points)
     except FieldReferenceError as exc:
         raise RuntimeFieldGeometryError(
             f"runtime FIELD→GPS projection failed: {exc}"
@@ -192,6 +194,7 @@ def build_runtime_field_geometry(
         home=home,
         forward_marker=fwd,
         drop_scan_waypoints=tuple(scan_points),
+        recon_scan_waypoints=tuple(recon_scan_points),
         drop_area_corners=tuple(drop_corners),
         recce_area_corners=tuple(recce_corners),
         warnings=tuple(warnings),
@@ -200,6 +203,7 @@ def build_runtime_field_geometry(
         geometry.home,
         geometry.forward_marker,
         *geometry.drop_scan_waypoints,
+        *geometry.recon_scan_waypoints,
         *geometry.drop_area_corners,
         *geometry.recce_area_corners,
     ):
@@ -354,3 +358,24 @@ def _build_area_corners(
             )
         )
     return points
+
+
+def _build_recon_scan_points(
+    recce_corners: list[RuntimeFieldPoint], drop_scan_points: list[RuntimeFieldPoint],
+) -> list[RuntimeFieldPoint]:
+    """Turn the profile's existing recon rectangle into four GLOBAL scan points.
+
+    The scan altitude deliberately follows the established drop scan profile;
+    only the FIELD region and waypoint names differ.
+    """
+    return [
+        RuntimeFieldPoint(
+            name=f"RECON_SCAN_{index + 1}",
+            field_x_m=corner.field_x_m,
+            field_y_m=corner.field_y_m,
+            altitude_m=drop_scan_points[index].altitude_m,
+            lat=corner.lat,
+            lon=corner.lon,
+        )
+        for index, corner in enumerate(recce_corners)
+    ]

@@ -729,6 +729,9 @@ def _geometry_payload(geometry: RuntimeFieldGeometry) -> dict[str, object]:
         "drop_scan_waypoints": [
             _point_payload(point) for point in geometry.drop_scan_waypoints
         ],
+        "recon_scan_waypoints": [
+            _point_payload(point) for point in geometry.recon_scan_waypoints
+        ],
         "drop_area_corners": [
             _point_payload(point) for point in geometry.drop_area_corners
         ],

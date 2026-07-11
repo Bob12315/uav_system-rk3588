@@ -801,6 +801,10 @@ def _validate_geometry(
         errs, "geometry.drop_scan_waypoints", g.drop_scan_waypoints,
         tuple(f"DROP_SCAN_{index}" for index in range(1, 5)),
     )
+    recon_scan_ok = _validate_point_collection(
+        errs, "geometry.recon_scan_waypoints", g.recon_scan_waypoints,
+        tuple(f"RECON_SCAN_{index}" for index in range(1, 5)),
+    )
     drop_ok = _validate_point_collection(
         errs, "geometry.drop_area_corners", g.drop_area_corners,
         ("D1", "D2", "D3", "D4"), zero_altitude=True,
@@ -830,6 +834,8 @@ def _validate_geometry(
             points.append(("geometry.forward_marker", g.forward_marker))
         if scan_ok:
             points.extend((f"geometry.drop_scan_waypoints[{i}]", p) for i, p in enumerate(g.drop_scan_waypoints))
+        if recon_scan_ok:
+            points.extend((f"geometry.recon_scan_waypoints[{i}]", p) for i, p in enumerate(g.recon_scan_waypoints))
         if drop_ok:
             points.extend((f"geometry.drop_area_corners[{i}]", p) for i, p in enumerate(g.drop_area_corners))
         if recce_ok:

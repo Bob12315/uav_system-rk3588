@@ -43,6 +43,37 @@ def _applied_fr_dict():
     }
 
 
+def _with_recon_scans(fr):
+    geometry = fr["runtime_binding"]["geometry"]
+    geometry["recon_scan_waypoints"] = [
+        {"name": f"RECON_SCAN_{i}", "lat": 34.001 + i * 0.00001,
+         "lon": 108.001 + i * 0.00001, "altitude_m": 5.0,
+         "field_x_m": float(i), "field_y_m": 50.0 + i}
+        for i in range(1, 5)
+    ]
+    return fr
+
+
+def test_scan_group_defaults_to_drop_and_recon_uses_runtime_geometry():
+    default = GpsMultiViewLocalizeAction()
+    default.start({})
+    recon = GpsMultiViewLocalizeAction()
+    recon.start({"scan_waypoint_group": "recon"})
+    drop_context = _mk_ctx()
+    drop_context["field_reference"] = _applied_fr_dict()
+    recon_context = _mk_ctx()
+    recon_context["field_reference"] = _with_recon_scans(_applied_fr_dict())
+    default.update(drop_context)
+    recon.update(recon_context)
+    assert [point.name for point in default.scan_targets] == [f"DROP_SCAN_{i}" for i in range(1, 5)]
+    assert [point.name for point in recon.scan_targets] == [f"RECON_SCAN_{i}" for i in range(1, 5)]
+
+
+def test_invalid_scan_group_is_rejected_at_start():
+    with pytest.raises(ValueError, match="scan_waypoint_group"):
+        GpsMultiViewLocalizeAction().start({"scan_waypoint_group": "invalid"})
+
+
 def _mk_ctx(lat=34.0, lon=108.0, yaw=0.0, alt=5.0, dets=None, **kw):
     ctx = {
         "drone": {"lat": lat, "lon": lon, "yaw": yaw, "relative_altitude": alt, "global_position_valid": True},

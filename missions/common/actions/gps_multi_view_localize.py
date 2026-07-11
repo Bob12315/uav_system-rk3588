@@ -65,6 +65,9 @@ class GpsMultiViewLocalizeAction(ActionModule):
             [str(n) for n in data["class_names"]] if data.get("class_names") else None
         )
         self._params_min_confidence: float = float(data.get("min_confidence", 0.35))
+        self.scan_waypoint_group = str(data.get("scan_waypoint_group", "drop")).strip().lower()
+        if self.scan_waypoint_group not in {"drop", "recon"}:
+            raise ValueError("scan_waypoint_group must be 'drop' or 'recon'")
 
         # Optional scan altitude override
         scan_alt = data.get("scan_altitude_m")
@@ -208,14 +211,9 @@ class GpsMultiViewLocalizeAction(ActionModule):
         # Scan targets with optional altitude override
         altitude_overrides: dict[str, float] | None = None
         if self._scan_altitude_m is not None:
-            altitude_overrides = {
-                "DROP_SCAN_1": self._scan_altitude_m,
-                "DROP_SCAN_2": self._scan_altitude_m,
-                "DROP_SCAN_3": self._scan_altitude_m,
-                "DROP_SCAN_4": self._scan_altitude_m,
-            }
+            altitude_overrides = {f"{self.scan_waypoint_group.upper()}_SCAN_{i}": self._scan_altitude_m for i in range(1, 5)}
         self.scan_targets = list(self.resolver.scan_waypoints(
-            altitude_overrides=altitude_overrides
+            altitude_overrides=altitude_overrides, group=self.scan_waypoint_group
         ))
 
         # Projector
@@ -341,7 +339,7 @@ class GpsMultiViewLocalizeAction(ActionModule):
                     track_id=_opt_int(det.get("track_id")),
                     frame_id=_opt_int(det.get("frame_id")),
                     timestamp=_opt_float(det.get("timestamp")),
-                    source_waypoint=f"DROP_SCAN_{self.waypoint_index + 1}",
+                    source_waypoint=self.scan_targets[self.waypoint_index].name,
                 )
                 new_estimates.append(est)
             except (GpsProjectionError, ValueError, TypeError):
@@ -593,6 +591,7 @@ class GpsMultiViewLocalizeAction(ActionModule):
             "phase": self.phase,
             "waypoint_index": self.waypoint_index,
             "waypoint_count": len(self.scan_targets),
+            "scan_waypoint_group": self.scan_waypoint_group,
             "capture_count": self.capture_count,
             "captures_count": len(self.captures),
             "raw_estimates_count": len(self.raw_estimates),
