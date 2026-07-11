@@ -214,7 +214,7 @@
             "fov_y_deg": 39.6,
             "image_x_sign": 1.0,
             "image_y_sign": -1.0,
-            "yaw_control_mode": "hold_entry_attitude",
+            "yaw_control_mode": "hold_zero_rate",
             "payload_offset_enabled": true,
             "slow_descend_max_ex_cam": 0.4,
             "slow_descend_max_ey_cam": 0.4,

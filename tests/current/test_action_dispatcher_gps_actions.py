@@ -33,9 +33,9 @@ class FakeLinkManager:
         vx_forward_mps: float,
         vy_right_mps: float,
         vz_down_mps: float,
-        yaw_rad: float | None = None,
+        yaw_rate_rad_s: float | None = None,
     ) -> None:
-        self.calls.append(("send_body_velocity", vx_forward_mps, vy_right_mps, vz_down_mps, yaw_rad))
+        self.calls.append(("send_body_velocity", vx_forward_mps, vy_right_mps, vz_down_mps, yaw_rate_rad_s))
 
     def send_velocity_command(
         self,
@@ -45,8 +45,9 @@ class FakeLinkManager:
         *,
         frame: int,
         yaw_rad: float | None = None,
+        yaw_rate_rad_s: float | None = None,
     ) -> None:
-        self.calls.append(("send_velocity_command", vx, vy, vz, frame, yaw_rad))
+        self.calls.append(("send_velocity_command", vx, vy, vz, frame, yaw_rad, yaw_rate_rad_s))
 
     def stop_body_velocity_and_clear(self) -> None:
         self.calls.append(("stop_body_velocity_and_clear",))
@@ -236,9 +237,9 @@ def test_real_gps_sequence_align_dispatches_body_ned_without_local_conversion(
     actual_action = align_result.actions[0]
     command = actual_action["params"]
     assert actual_action["action_type"] == "flight_command"
-    assert command["yaw_hold_rad"] == pytest.approx(0.9)
-    assert command["velocity_yaw_rad"] == pytest.approx(0.9)
-    assert command["preserve_body_frame"] is True
+    assert command["yaw_rate_rad_s"] == pytest.approx(0.0)
+    assert "yaw_hold_rad" not in command
+    assert "velocity_yaw_rad" not in command
     assert command["vx_cmd"] != 0.0
     assert command["vy_cmd"] != 0.0
     assert command["vz_cmd"] != 0.0
@@ -267,13 +268,13 @@ def test_real_gps_sequence_align_dispatches_body_ned_without_local_conversion(
             command["vx_cmd"],
             command["vy_cmd"],
             command["vz_cmd"],
-            command["yaw_hold_rad"],
+            0.0,
         )
     ]
     assert not any(call[0] == "send_velocity_command" for call in link.calls)
 
 
-def test_gps_sequence_waiting_for_entry_attitude_stops_and_clears(
+def test_gps_sequence_invalid_target_stops_and_clears_with_zero_yaw_rate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(sequence_module, "GotoWaypointAction", _ImmediateGoto)
@@ -293,21 +294,22 @@ def test_gps_sequence_waiting_for_entry_attitude_stops_and_clears(
     )
     context = {"relative_altitude": 5.0, "target_valid": True, "target_locked": True,
                "control_allowed": True, "ex_cam": 0.03, "ey_cam": 0.04,
-               "drone": {"relative_altitude": 5.0, "attitude_valid": False, "yaw": 0.9}}
+               "drone": {"relative_altitude": 5.0}, "control_allowed": False}
     sequence.update(context)
     sequence.update(context)
     waiting = sequence.update(context)
 
-    assert waiting.reason == "gps_drop_waiting_for_entry_attitude_yaw"
+    assert waiting.reason == "gps_drop_align_inactive"
     assert [action["action_type"] for action in waiting.actions] == [
         "flight_command", "clear_continuous_commands"
     ]
     assert waiting.actions[0]["params"]["vx_cmd"] == pytest.approx(0.0)
     assert waiting.actions[0]["params"]["vy_cmd"] == pytest.approx(0.0)
     assert waiting.actions[0]["params"]["vz_cmd"] == pytest.approx(0.0)
+    assert waiting.actions[0]["params"]["yaw_rate_rad_s"] == pytest.approx(0.0)
 
 
-def test_gps_sequence_second_align_captures_a_new_entry_yaw(
+def test_gps_sequence_each_align_uses_zero_yaw_rate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(sequence_module, "GotoWaypointAction", _ImmediateGoto)
@@ -335,7 +337,7 @@ def test_gps_sequence_second_align_captures_a_new_entry_yaw(
     sequence.update(first_context)
     sequence.update(first_context)
     first = sequence.update(first_context)
-    assert first.actions[0]["params"]["yaw_hold_rad"] == pytest.approx(1.2)
+    assert first.actions[0]["params"]["yaw_rate_rad_s"] == pytest.approx(0.0)
     for _ in range(3):
         sequence.update(finish_context)
 
@@ -345,7 +347,8 @@ def test_gps_sequence_second_align_captures_a_new_entry_yaw(
         result = sequence.update(second_context)
         if sequence.phase == "align" and sequence.target_index == 1 and result.actions:
             command = result.actions[0].get("params", {})
-            if command.get("yaw_hold_rad") is not None:
-                assert command["yaw_hold_rad"] == pytest.approx(0.7)
+            if command.get("yaw_rate_rad_s") is not None:
+                assert command["yaw_rate_rad_s"] == pytest.approx(0.0)
+                assert "yaw_hold_rad" not in command
                 return
     raise AssertionError("second AlignDescend did not start")

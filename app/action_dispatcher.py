@@ -412,9 +412,9 @@ class ActionDispatcher:
         vy = float(command.get("vy_body_mps", command.get("vy_cmd", 0.0)))
         vz = float(command.get("vz_body_mps", command.get("vz_cmd", 0.0)))
         yaw_rate = float(command.get("yaw_rate_cmd", 0.0))
+        yaw_rate_rad_s = self._optional_float(command.get("yaw_rate_rad_s"))
         yaw_hold_rad = self._optional_float(command.get("yaw_hold_rad"))
         velocity_yaw_rad = self._optional_float(command.get("velocity_yaw_rad"))
-        preserve_body_frame = bool(command.get("preserve_body_frame", False))
         priority = int(action.get("priority", command.get("priority", 5)))
         send_vx = vx if active else 0.0
         send_vy = vy if active else 0.0
@@ -439,6 +439,10 @@ class ActionDispatcher:
             if velocity_yaw_rad is None:
                 velocity_yaw_rad = yaw_hold_rad
             detail["velocity_yaw_rad"] = velocity_yaw_rad
+        if yaw_rate_rad_s is not None:
+            detail["yaw"] = "ignored"
+            detail["yaw_rate_rad_s"] = yaw_rate_rad_s
+            detail["yaw_rate_valid"] = True
         if not valid:
             return {
                 "status": "skipped",
@@ -447,15 +451,19 @@ class ActionDispatcher:
             }
 
         frame = BODY_NED
-        if yaw_hold_rad is not None and preserve_body_frame:
-            # BODY_NED velocity + absolute yaw — do not convert to LOCAL_NED
+        if yaw_rate_rad_s is not None:
+            if yaw_hold_rad is not None:
+                return {
+                    "status": "skipped",
+                    "reason": "flight_command_yaw_and_yaw_rate_conflict",
+                    "detail": detail,
+                }
             wrapper = getattr(link_manager, "send_body_velocity", None)
             if callable(wrapper):
-                yaw_supported = self._callable_accepts_keyword(wrapper, "yaw_rad")
                 self._logger.info(
-                    "action_lab dispatch preserve_body_frame vx_forward_mps=%.3f vy_right_mps=%.3f vz_down_mps=%.3f yaw_hold_rad=%s frame=BODY_NED key=%s active=%s",
+                    "action_lab dispatch body_velocity vx_forward_mps=%.3f vy_right_mps=%.3f vz_down_mps=%.3f frame=BODY_NED yaw=ignored yaw_rate_rad_s=%.3f yaw_rate_valid=true key=%s active=%s",
                     send_vx, send_vy, send_vz,
-                    self._format_log_float(yaw_hold_rad),
+                    yaw_rate_rad_s,
                     action.get("key"),
                     active,
                 )
@@ -463,9 +471,8 @@ class ActionDispatcher:
                     "vx_forward_mps": send_vx,
                     "vy_right_mps": send_vy,
                     "vz_down_mps": send_vz,
+                    "yaw_rate_rad_s": yaw_rate_rad_s,
                 }
-                if yaw_supported:
-                    kwargs["yaw_rad"] = yaw_hold_rad
                 wrapper(**kwargs)
             else:
                 sender = getattr(link_manager, "send_velocity_command", None) if link_manager is not None else None
@@ -475,12 +482,14 @@ class ActionDispatcher:
                         "reason": "flight_command_dispatch_not_available",
                         "detail": detail,
                     }
-                if self._callable_accepts_keyword(sender, "yaw_rad"):
-                    sender(send_vx, send_vy, send_vz, frame=frame, yaw_rad=yaw_hold_rad)
-                else:
-                    sender(send_vx, send_vy, send_vz, frame=frame)
+                if not self._callable_accepts_keyword(sender, "yaw_rate_rad_s"):
+                    return {
+                        "status": "skipped",
+                        "reason": "flight_command_yaw_rate_dispatch_not_available",
+                        "detail": detail,
+                    }
+                sender(send_vx, send_vy, send_vz, frame=frame, yaw_rate_rad_s=yaw_rate_rad_s)
             detail["frame"] = frame
-            detail["preserve_body_frame"] = True
             return {"status": "sent", "detail": detail}
         if yaw_hold_rad is not None:
             sender = getattr(link_manager, "send_velocity_command", None) if link_manager is not None else None

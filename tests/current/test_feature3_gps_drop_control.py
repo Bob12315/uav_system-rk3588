@@ -228,7 +228,7 @@ def test_dual_target_happy_path_from_start(scripted_children: None) -> None:
     assert [item["target"]["id"] for item in ScriptedLock.starts] == ["t0", "t1"]
     for align_start in ScriptedAlign.starts:
         assert align_start["finish_policy"] == "require_alignment_or_timeout"
-        assert align_start["config"]["yaw_control_mode"] == "hold_entry_attitude"
+        assert align_start["config"]["yaw_control_mode"] == "hold_zero_rate"
         assert align_start["config"]["require_target_locked"] is True
     assert [item["config"]["payload_forward_m"] for item in ScriptedAlign.starts] == [-0.06, 0.06]
     assert [item["config"]["payload_right_m"] for item in ScriptedAlign.starts] == [0.0, 0.0]
@@ -316,7 +316,7 @@ def test_strict_min_altitude_is_nested_and_rejects_above_finish(scripted_childre
     action.start(_params())
     assert action.align_cfg["finish_policy"] == "require_alignment_or_timeout"
     assert action.align_cfg["config"]["min_altitude_m"] == 1.3
-    assert action.align_cfg["config"]["yaw_control_mode"] == "hold_entry_attitude"
+    assert action.align_cfg["config"]["yaw_control_mode"] == "hold_zero_rate"
     assert action.align_cfg["config"]["require_target_locked"] is True
 
     with pytest.raises(ValueError, match="min_altitude_m must be <= finish_altitude_m"):
@@ -694,7 +694,7 @@ def test_single_target_no_yaw_in_align_commands(
                 assert "yaw_hold_rad" not in params_param
                 assert "velocity_yaw_rad" not in params_param
 
-    assert ScriptedAlign.starts[0]["config"]["yaw_control_mode"] == "hold_entry_attitude"
+    assert ScriptedAlign.starts[0]["config"]["yaw_control_mode"] == "hold_zero_rate"
 
 
 def test_dual_target_still_sequential(scripted_children: None) -> None:

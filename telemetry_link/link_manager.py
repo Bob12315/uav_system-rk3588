@@ -653,6 +653,7 @@ class LinkManager:
         vz: float,
         frame: int = 1,
         yaw_rad: float | None = None,
+        yaw_rate_rad_s: float | None = None,
     ) -> None:
         self.submit_control_command(
             ControlCommand(
@@ -661,6 +662,7 @@ class LinkManager:
                 vy=vy,
                 vz=vz,
                 yaw=yaw_rad,
+                yaw_rate=yaw_rate_rad_s,
                 timestamp=time.time(),
                 frame=frame,
             )
@@ -752,21 +754,21 @@ class LinkManager:
         vx_forward_mps: float,
         vy_right_mps: float,
         vz_down_mps: float,
-        yaw_rad: float | None = None,
+        yaw_rate_rad_s: float | None = None,
     ) -> None:
         """Velocity command in BODY_NED (body-fixed) frame.
 
         vx_forward_mps – forward velocity (m/s)
         vy_right_mps   – right velocity (m/s)
         vz_down_mps    – down velocity (m/s)
-        yaw_rad        – optional absolute yaw target to hold
+        yaw_rate_rad_s – optional yaw-rate target in rad/s
         """
         self.send_velocity_command(
             vx=vx_forward_mps,
             vy=vy_right_mps,
             vz=vz_down_mps,
             frame=BODY_NED,
-            yaw_rad=yaw_rad,
+            yaw_rate_rad_s=yaw_rate_rad_s,
         )
         return
 

@@ -126,7 +126,7 @@ class GpsDropSequenceAction(ActionModule):
             )
         align_config = dict(self.align_cfg.get("config") or {})
         align_config.setdefault("min_altitude_m", self.finish_altitude_m)
-        align_config.setdefault("yaw_control_mode", "hold_entry_attitude")
+        align_config.setdefault("yaw_control_mode", "hold_zero_rate")
         align_config.setdefault("require_target_locked", True)
         min_altitude_m = float(align_config["min_altitude_m"])
         if not math.isfinite(min_altitude_m) or min_altitude_m <= 0.0:
@@ -135,8 +135,8 @@ class GpsDropSequenceAction(ActionModule):
             raise ValueError(
                 "align_descend.config.min_altitude_m must be <= finish_altitude_m"
             )
-        if align_config["yaw_control_mode"] != "hold_entry_attitude":
-            raise ValueError("GPS drop align yaw_control_mode must be 'hold_entry_attitude'")
+        if align_config["yaw_control_mode"] != "hold_zero_rate":
+            raise ValueError("GPS drop align yaw_control_mode must be 'hold_zero_rate'")
         if align_config["require_target_locked"] is not True:
             raise ValueError("GPS drop align require_target_locked must be true")
         align_config["min_altitude_m"] = min_altitude_m
@@ -294,17 +294,15 @@ class GpsDropSequenceAction(ActionModule):
         result = self.sub_action.update(context)
         command = result.detail.get("command") if result.detail else None
 
-        # An entry-attitude hold must not inherit a prior latest-only BODY_NED
-        # setpoint while it waits for a valid attitude sample.  An inactive
-        # command alone is skipped by the dispatcher, so explicitly replace
-        # and clear any previously queued continuous command.
-        if result.reason == "waiting_for_entry_attitude_yaw":
+        if (
+            not result.done
+            and not result.failed
+            and isinstance(command, dict)
+            and (not bool(command.get("valid", False)) or not bool(command.get("active", False)))
+        ):
             return ActionResult(
-                actions=[
-                    _zero_velocity_command(),
-                    _clear_continuous_command("waiting_for_entry_attitude_yaw"),
-                ],
-                reason="gps_drop_waiting_for_entry_attitude_yaw",
+                actions=[_zero_velocity_command(), _clear_continuous_command("align_inactive")],
+                reason="gps_drop_align_inactive",
                 detail=self._detail(extra={"align": result.detail}),
             )
 
@@ -551,6 +549,7 @@ def _zero_velocity_command() -> dict[str, Any]:
             "params": {"type": "flight_command", "valid": True, "active": True,
                        "enable_body": True,
                        "vx_cmd": 0.0, "vy_cmd": 0.0, "vz_cmd": 0.0, "yaw_rate_cmd": 0.0,
+                       "yaw_rate_rad_s": 0.0,
                        "priority": 3},
             "once": False}
 
