@@ -48,6 +48,7 @@ class AlignDescendConfig:
     unaligned_descend_speed_mps: float = 0.0
     # Hold preserves legacy yaw behavior; ignore emits pure BODY_NED velocity.
     yaw_control_mode: str = "hold"
+    altitude_source: str = "auto"
 
     def __post_init__(self) -> None:
         for name in ("kp_vx", "kp_vy"):
@@ -152,6 +153,8 @@ class AlignDescendConfig:
             raise ValueError("unaligned_descend_speed_mps must be <= descend_speed_mps")
         if self.yaw_control_mode not in ("hold", "ignore", "hold_zero_rate"):
             raise ValueError("yaw_control_mode must be 'hold', 'ignore', or 'hold_zero_rate'")
+        if self.altitude_source not in ("auto", "relative_altitude", "local_ned"):
+            raise ValueError("altitude_source must be 'auto', 'relative_altitude', or 'local_ned'")
 
 
 @dataclass(frozen=True, slots=True)
@@ -448,13 +451,13 @@ class AlignDescendAction(ActionModule):
         altitude = self._current_altitude(data)
         if altitude is None:
             self.failed = True
-            self.failure_reason = "missing_altitude"
-            detail = self._failed_detail("missing_altitude", height_m=None, altitude_source="")
+            self.failure_reason = "missing_local_ned_altitude" if self.config.altitude_source == "local_ned" else "missing_altitude"
+            detail = self._failed_detail(self.failure_reason, height_m=None, altitude_source="")
             self.last_detail = detail
             return ActionResult(
                 actions=[],
                 failed=True,
-                reason="missing_altitude",
+                reason=self.failure_reason,
                 detail=detail,
             )
 
@@ -736,6 +739,13 @@ class AlignDescendAction(ActionModule):
         return None if altitude is None else altitude.value_m
 
     def _current_altitude(self, context: dict[str, Any]) -> _AltitudeSample | None:
+        if self.config.altitude_source == "local_ned":
+            return self._local_ned_altitude(context)
+        if self.config.altitude_source == "relative_altitude":
+            return self._relative_altitude(context)
+        return self._auto_altitude(context)
+
+    def _auto_altitude(self, context: dict[str, Any]) -> _AltitudeSample | None:
         for name in ("relative_altitude", "relative_altitude_m"):
             value = self._float_from(context, name)
             if value is not None:
@@ -785,6 +795,36 @@ class AlignDescendAction(ActionModule):
             return _AltitudeSample(max(0.0, value), "altitude")
         return None
 
+    def _relative_altitude(self, context: dict[str, Any]) -> _AltitudeSample | None:
+        for source, prefix in ((context, ""), (context.get("drone"), "drone."), (context.get("vehicle"), "vehicle.")):
+            if not isinstance(source, dict):
+                continue
+            for name in ("relative_altitude", "relative_altitude_m"):
+                value = self._float_from(source, name)
+                if value is not None:
+                    return _AltitudeSample(max(0.0, value), f"{prefix}{name}")
+        return None
+
+    def _local_ned_altitude(self, context: dict[str, Any]) -> _AltitudeSample | None:
+        value = self._float_from(context, "local_altitude_m")
+        if bool(context.get("local_altitude_valid")) and value is not None and value >= 0.0:
+            return _AltitudeSample(value, "local_position_ned_z")
+        if bool(context.get("local_position_valid")):
+            altitude = self._negative_local_z(context, "local_z")
+            if altitude is not None:
+                return altitude
+        local_position = context.get("local_position")
+        if isinstance(local_position, dict) and bool(context.get("local_position_valid")):
+            altitude = self._negative_local_z(local_position, "local_position.z")
+            if altitude is not None:
+                return altitude
+        drone = context.get("drone")
+        if isinstance(drone, dict) and bool(drone.get("local_position_valid")):
+            altitude = self._negative_local_z(drone, "drone.local_z")
+            if altitude is not None:
+                return altitude
+        return None
+
     def _negative_local_z(self, source: dict[str, Any], source_name: str) -> _AltitudeSample | None:
         local_z = self._float_from(source, "local_z")
         if local_z is None:
@@ -807,6 +847,8 @@ class AlignDescendAction(ActionModule):
             and height_m <= self.finish_altitude_m
         )
         latest_context = self.latest_context
+        local_altitude = self._local_ned_altitude(latest_context)
+        relative_altitude = self._relative_altitude(latest_context)
         return {
             "command": command,
             "enabled": bool(command_detail.get("enabled", False)),
@@ -818,6 +860,11 @@ class AlignDescendAction(ActionModule):
             "finish_altitude_m": self.finish_altitude_m,
             "min_altitude_m": self.config.min_altitude_m,
             "altitude_source": altitude_source,
+            "altitude_source_requested": self.config.altitude_source,
+            "local_altitude_m": None if local_altitude is None else local_altitude.value_m,
+            "relative_altitude_m": None if relative_altitude is None else relative_altitude.value_m,
+            "altitude_difference_m": None if local_altitude is None or relative_altitude is None else relative_altitude.value_m - local_altitude.value_m,
+            "local_altitude_valid": local_altitude is not None,
             "ex_cam": command_detail.get("ex_cam"),
             "ey_cam": command_detail.get("ey_cam"),
             "raw_ex_cam": command_detail.get("raw_ex_cam"),

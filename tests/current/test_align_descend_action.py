@@ -36,6 +36,26 @@ def test_align_descend_config_defaults() -> None:
     assert config.yaw_control_mode == "hold"
 
 
+def test_local_ned_source_prefers_explicit_local_altitude_and_reports_diagnostics() -> None:
+    action = AlignDescendAction()
+    action.start({"config": {"altitude_source": "local_ned"}})
+    result = action.update(_active_context(
+        local_altitude_m=1.30, local_altitude_valid=True, relative_altitude=1.85,
+    ))
+    assert result.detail["current_altitude_m"] == pytest.approx(1.30)
+    assert result.detail["altitude_source"] == "local_position_ned_z"
+    assert result.detail["local_altitude_m"] == pytest.approx(1.30)
+    assert result.detail["relative_altitude_m"] == pytest.approx(1.85)
+    assert result.detail["altitude_difference_m"] == pytest.approx(0.55)
+
+
+def test_local_ned_source_never_falls_back_to_relative_altitude() -> None:
+    action = AlignDescendAction()
+    action.start({"config": {"altitude_source": "local_ned"}})
+    result = action.update(_active_context(relative_altitude=1.2))
+    assert result.failed and result.reason == "missing_local_ned_altitude"
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [

@@ -248,6 +248,19 @@ def test_field_position_from_valid_drone():
     assert result["confirmed"] is True
 
 
+def test_action_context_keeps_local_and_relative_altitudes_independent():
+    builder = _builder()
+    context = builder.build_action_context({"drone": {
+        "local_z": -1.35,
+        "local_position_valid": True,
+        "relative_altitude": 1.90,
+    }})
+    assert context["local_altitude_m"] == pytest.approx(1.35)
+    assert context["local_altitude_valid"] is True
+    assert context["local_altitude_source"] == "local_position_ned_z"
+    assert context["relative_altitude"] == pytest.approx(1.90)
+
+
 def test_field_position_from_invalid_drone():
     b = _builder()
     _confirm(b)

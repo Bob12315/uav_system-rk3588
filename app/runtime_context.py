@@ -182,6 +182,12 @@ class RuntimeContextBuilder:
 
             if "relative_altitude" in drone:
                 context["relative_altitude"] = drone.get("relative_altitude")
+            local_z = self._float_or_none(drone.get("local_z"))
+            local_altitude_valid = bool(drone.get("local_position_valid") is True and local_z is not None and local_z <= 0.0)
+            context["local_altitude_valid"] = local_altitude_valid
+            if local_altitude_valid:
+                context["local_altitude_m"] = max(0.0, -local_z)
+                context["local_altitude_source"] = "local_position_ned_z"
 
         return self.json_safe(context)
 
