@@ -18,9 +18,10 @@ from .gps_target_lock import GpsTargetLockAction
 from .align_descend import AlignDescendAction
 from .payload_release import PayloadReleaseAction
 from .result import ActionResult
+from .gps_target_sequence_core import GpsTargetSequenceCore
 
 
-class GpsDropSequenceAction(ActionModule):
+class GpsDropSequenceAction(GpsTargetSequenceCore, ActionModule):
     """GPS-first dual-target drop sequence with strict safety rules."""
 
     def __init__(self) -> None:
@@ -526,27 +527,7 @@ class GpsDropSequenceAction(ActionModule):
 
     def _current_altitude_m(self, context: dict[str, Any]) -> float | None:
         """Extract current altitude from context (compatible with AlignDescend)."""
-        drone = context.get("drone", {})
-        if isinstance(drone, dict):
-            for name in ("relative_altitude", "relative_altitude_m"):
-                v = drone.get(name)
-                if v is not None:
-                    try:
-                        f = float(v)
-                        if math.isfinite(f) and f >= 0.0:
-                            return f
-                    except (TypeError, ValueError):
-                        continue
-        for name in ("relative_altitude", "relative_altitude_m", "altitude_m"):
-            v = context.get(name)
-            if v is not None:
-                try:
-                    f = float(v)
-                    if math.isfinite(f) and f >= 0.0:
-                        return f
-                except (TypeError, ValueError):
-                    continue
-        return None
+        return self.current_altitude_m(context)
 
     # ── helpers ─────────────────────────────────────────────────────
 
@@ -606,20 +587,14 @@ def _merge_servo_outputs(payload_a: dict[str, Any], payload_b: dict[str, Any]) -
 
 
 def _zero_velocity_command() -> dict[str, Any]:
-    return {"action_type": "flight_command",
-            "params": {"type": "flight_command", "valid": True, "active": True,
-                       "enable_body": True,
-                       "vx_cmd": 0.0, "vy_cmd": 0.0, "vz_cmd": 0.0, "yaw_rate_cmd": 0.0,
-                       "yaw_rate_rad_s": 0.0,
-                       "priority": 3},
-            "once": False}
+    return GpsTargetSequenceCore.zero_velocity_command()
 
 
 def _clear_continuous_command(key_suffix: str = "") -> dict[str, Any]:
-    return {"action_type": "clear_continuous_commands",
-            "params": {"clear_pending_local_position": False, "send_stop_first": True},
-            "once": True,
-            "key": f"gps_drop_clear_{key_suffix}"}
+    # Preserve the externally asserted drop command key while sharing payload.
+    action = GpsTargetSequenceCore.clear_continuous_command(key_suffix)
+    action["key"] = f"gps_drop_clear_{key_suffix}"
+    return action
 
 
 def _same_gps_position(first: dict[str, Any], second: dict[str, Any]) -> bool:
