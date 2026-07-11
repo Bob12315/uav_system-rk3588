@@ -163,6 +163,14 @@ class AlignDescendConfig:
             for i, stage in enumerate(self.descent_speed_stages):
                 if not isinstance(stage, dict):
                     raise ValueError(f"descent_speed_stages[{i}] must be a dict")
+                if isinstance(stage.get("max_altitude_m"), bool):
+                    raise ValueError(
+                        f"descent_speed_stages[{i}].max_altitude_m must not be boolean"
+                    )
+                if isinstance(stage.get("max_descend_speed_mps"), bool):
+                    raise ValueError(
+                        f"descent_speed_stages[{i}].max_descend_speed_mps must not be boolean"
+                    )
                 alt = float(stage.get("max_altitude_m", float("nan")))
                 spd = float(stage.get("max_descend_speed_mps", float("nan")))
                 if not math.isfinite(alt) or alt <= 0.0:

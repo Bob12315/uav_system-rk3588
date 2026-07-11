@@ -1392,6 +1392,8 @@ def test_staged_descent_two_stages_min_speed_wins() -> None:
     ({"descent_speed_stages": [{"max_altitude_m": 1.5, "max_descend_speed_mps": -0.1}]}, "must be finite and >= 0"),
     ({"descent_speed_stages": [{"max_altitude_m": float("nan"), "max_descend_speed_mps": 0.1}]}, "must be finite"),
     ({"descent_speed_stages": [{"max_altitude_m": 1.5, "max_descend_speed_mps": float("inf")}]}, "must be finite"),
+    ({"descent_speed_stages": [{"max_altitude_m": True, "max_descend_speed_mps": 0.1}]}, "must not be boolean"),
+    ({"descent_speed_stages": [{"max_altitude_m": 1.5, "max_descend_speed_mps": False}]}, "must not be boolean"),
     ({"descent_speed_stages": [{}]}, "must be finite"),  # missing keys → nan
     ({"descent_speed_stages": [1, 2, 3]}, "must be a dict"),
 ])
