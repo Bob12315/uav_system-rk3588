@@ -315,7 +315,7 @@ class GpsDropSequenceAction(ActionModule):
                 detail=self._detail(extra={"align": result.detail}),
             )
 
-        # Active BODY_NED command forwarding
+        # Forward the active align-descend flight command.
         if not result.done and not result.failed and isinstance(command, dict):
             action = {
                 "action_type": "flight_command",

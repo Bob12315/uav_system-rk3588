@@ -210,7 +210,7 @@ class _ImmediateYawAlign:
         return ActionResult(done=True, reason="yaw_aligned")
 
 
-def test_real_gps_sequence_align_dispatches_body_ned_without_local_conversion(
+def test_real_gps_sequence_align_matches_v1_yaw_hold_local_ned_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(sequence_module, "GotoWaypointAction", _ImmediateGoto)
