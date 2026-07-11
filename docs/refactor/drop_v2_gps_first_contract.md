@@ -25,7 +25,7 @@ extensions to shared components (`missions/common/actions/`,
 8. Select two drop targets from fusion results only.
 9. GLOBAL GPS fly-to above each target and stabilise (velocity + position hold).
 10. image_center lock on the target.
-11. BODY_NED alignment descent (no yaw hold, no LOCAL_NED).
+11. BODY_NED alignment descent with entry-attitude yaw hold (hold_entry_attitude); capture real attitude yaw once at align entry; send fixed absolute yaw alongside BODY_NED velocity; no LOCAL_NED conversion.
 12. Drop on alignment success; zero + drop on timeout.
 13. GLOBAL GPS return to dynamic origin A.
 ```
@@ -255,12 +255,12 @@ and return-to-home may use different tolerances, but still use GLOBAL GPS.
 ### AlignDescend Contract
 
 - `require_target_locked = true`
-- `yaw_control_mode = ignore` — no yaw hold.
-- Output frame: `BODY_NED`.
-- Do NOT attach `yaw_hold_rad` to the command.
-- All paths (target invalid, retry, done, failed) must use consistent BODY_NED
-  command semantics.
+- `yaw_control_mode = hold_entry_attitude` — capture real attitude yaw once at entry, hold fixed absolute yaw throughout descent.
+- Output frame: `BODY_NED` with `preserve_body_frame = true`.
+- Attach `yaw_hold_rad` (fixed entry yaw) and `yaw_hold_source = "entry_attitude"` to every speed command.
+- Do NOT use `field_heading_yaw_rad` or `arm_heading_yaw_rad`.
 - Do NOT convert to `LOCAL_NED` in the dispatcher.
+- All paths (target invalid, retry, done, failed) must use consistent BODY_NED command semantics.
 
 ## 8. Payload Release Contract
 

@@ -126,7 +126,7 @@ class GpsDropSequenceAction(ActionModule):
             )
         align_config = dict(self.align_cfg.get("config") or {})
         align_config.setdefault("min_altitude_m", self.finish_altitude_m)
-        align_config.setdefault("yaw_control_mode", "ignore")
+        align_config.setdefault("yaw_control_mode", "hold_entry_attitude")
         align_config.setdefault("require_target_locked", True)
         min_altitude_m = float(align_config["min_altitude_m"])
         if not math.isfinite(min_altitude_m) or min_altitude_m <= 0.0:
@@ -135,8 +135,8 @@ class GpsDropSequenceAction(ActionModule):
             raise ValueError(
                 "align_descend.config.min_altitude_m must be <= finish_altitude_m"
             )
-        if align_config["yaw_control_mode"] != "ignore":
-            raise ValueError("GPS drop align yaw_control_mode must be 'ignore'")
+        if align_config["yaw_control_mode"] != "hold_entry_attitude":
+            raise ValueError("GPS drop align yaw_control_mode must be 'hold_entry_attitude'")
         if align_config["require_target_locked"] is not True:
             raise ValueError("GPS drop align require_target_locked must be true")
         align_config["min_altitude_m"] = min_altitude_m

@@ -414,6 +414,7 @@ class ActionDispatcher:
         yaw_rate = float(command.get("yaw_rate_cmd", 0.0))
         yaw_hold_rad = self._optional_float(command.get("yaw_hold_rad"))
         velocity_yaw_rad = self._optional_float(command.get("velocity_yaw_rad"))
+        preserve_body_frame = bool(command.get("preserve_body_frame", False))
         priority = int(action.get("priority", command.get("priority", 5)))
         send_vx = vx if active else 0.0
         send_vy = vy if active else 0.0
@@ -446,6 +447,41 @@ class ActionDispatcher:
             }
 
         frame = BODY_NED
+        if yaw_hold_rad is not None and preserve_body_frame:
+            # BODY_NED velocity + absolute yaw — do not convert to LOCAL_NED
+            wrapper = getattr(link_manager, "send_body_velocity", None)
+            if callable(wrapper):
+                yaw_supported = self._callable_accepts_keyword(wrapper, "yaw_rad")
+                self._logger.info(
+                    "action_lab dispatch preserve_body_frame vx_forward_mps=%.3f vy_right_mps=%.3f vz_down_mps=%.3f yaw_hold_rad=%s frame=BODY_NED key=%s active=%s",
+                    send_vx, send_vy, send_vz,
+                    self._format_log_float(yaw_hold_rad),
+                    action.get("key"),
+                    active,
+                )
+                kwargs: dict[str, object] = {
+                    "vx_forward_mps": send_vx,
+                    "vy_right_mps": send_vy,
+                    "vz_down_mps": send_vz,
+                }
+                if yaw_supported:
+                    kwargs["yaw_rad"] = yaw_hold_rad
+                wrapper(**kwargs)
+            else:
+                sender = getattr(link_manager, "send_velocity_command", None) if link_manager is not None else None
+                if not callable(sender):
+                    return {
+                        "status": "skipped",
+                        "reason": "flight_command_dispatch_not_available",
+                        "detail": detail,
+                    }
+                if self._callable_accepts_keyword(sender, "yaw_rad"):
+                    sender(send_vx, send_vy, send_vz, frame=frame, yaw_rad=yaw_hold_rad)
+                else:
+                    sender(send_vx, send_vy, send_vz, frame=frame)
+            detail["frame"] = frame
+            detail["preserve_body_frame"] = True
+            return {"status": "sent", "detail": detail}
         if yaw_hold_rad is not None:
             sender = getattr(link_manager, "send_velocity_command", None) if link_manager is not None else None
             if not callable(sender):

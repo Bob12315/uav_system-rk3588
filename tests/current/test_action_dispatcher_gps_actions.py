@@ -33,8 +33,9 @@ class FakeLinkManager:
         vx_forward_mps: float,
         vy_right_mps: float,
         vz_down_mps: float,
+        yaw_rad: float | None = None,
     ) -> None:
-        self.calls.append(("send_body_velocity", vx_forward_mps, vy_right_mps, vz_down_mps))
+        self.calls.append(("send_body_velocity", vx_forward_mps, vy_right_mps, vz_down_mps, yaw_rad))
 
     def send_velocity_command(
         self,
@@ -155,8 +156,8 @@ def test_gps_action_dispatcher_sends_all_eight_required_paths() -> None:
     assert link.calls == [
         ("global_goto", 34.0, 108.0, 5.0, 6, 4, None),
         ("global_goto", 34.0, 108.0, 5.0, 6, 4, None),
-        ("send_body_velocity", 0.2, -0.1, 0.15),
-        ("send_body_velocity", 0.0, 0.0, 0.0),
+        ("send_body_velocity", 0.2, -0.1, 0.15, None),
+        ("send_body_velocity", 0.0, 0.0, 0.0, None),
         ("stop_body_velocity_and_clear",),
         ("set_servo_output_pwm", 8, 1200, 5),
     ]
@@ -235,8 +236,9 @@ def test_real_gps_sequence_align_dispatches_body_ned_without_local_conversion(
     actual_action = align_result.actions[0]
     command = actual_action["params"]
     assert actual_action["action_type"] == "flight_command"
-    assert "yaw_hold_rad" not in command
-    assert "velocity_yaw_rad" not in command
+    assert command["yaw_hold_rad"] == pytest.approx(0.9)
+    assert command["velocity_yaw_rad"] == pytest.approx(0.9)
+    assert command["preserve_body_frame"] is True
     assert command["vx_cmd"] != 0.0
     assert command["vy_cmd"] != 0.0
     assert command["vz_cmd"] != 0.0
@@ -265,6 +267,7 @@ def test_real_gps_sequence_align_dispatches_body_ned_without_local_conversion(
             command["vx_cmd"],
             command["vy_cmd"],
             command["vz_cmd"],
+            command["yaw_hold_rad"],
         )
     ]
     assert not any(call[0] == "send_velocity_command" for call in link.calls)

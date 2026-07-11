@@ -150,8 +150,8 @@ class AlignDescendConfig:
             and float(self.unaligned_descend_speed_mps) > float(self.descend_speed_mps)
         ):
             raise ValueError("unaligned_descend_speed_mps must be <= descend_speed_mps")
-        if self.yaw_control_mode not in ("hold", "ignore"):
-            raise ValueError("yaw_control_mode must be 'hold' or 'ignore'")
+        if self.yaw_control_mode not in ("hold", "ignore", "hold_entry_attitude"):
+            raise ValueError("yaw_control_mode must be 'hold', 'ignore', or 'hold_entry_attitude'")
 
 
 @dataclass(frozen=True, slots=True)
@@ -444,6 +444,19 @@ class AlignDescendAction(ActionModule):
         data = context or {}
         self.latest_context = data
         self._ensure_yaw_hold(data)
+        if self.config.yaw_control_mode == "hold_entry_attitude" and self.yaw_hold_rad is None:
+            command = _inactive_command()
+            command["vx_cmd"] = 0.0
+            command["vy_cmd"] = 0.0
+            command["vz_cmd"] = 0.0
+            command["enable_body"] = False
+            detail = self._detail(
+                command=command,
+                command_detail={"enabled": False, "aligned": False, "hold_reason": "waiting_for_entry_attitude_yaw"},
+                height_m=None,
+            )
+            self.last_detail = detail
+            return ActionResult(actions=[], reason="waiting_for_entry_attitude_yaw", detail=detail)
         inputs = self._inputs(data)
         altitude = self._current_altitude(data)
         if altitude is None:
@@ -643,6 +656,12 @@ class AlignDescendAction(ActionModule):
             return
         if self.yaw_hold_rad is not None:
             return
+        if self.config.yaw_control_mode == "hold_entry_attitude":
+            yaw = self._current_valid_attitude_yaw_rad(context)
+            if yaw is not None:
+                self.yaw_hold_rad = yaw
+                self.yaw_hold_source = "entry_attitude"
+            return
         yaw, source = self._current_yaw_rad(context)
         self.yaw_hold_rad = yaw
         self.yaw_hold_source = source
@@ -652,6 +671,18 @@ class AlignDescendAction(ActionModule):
             result = dict(command)
             result.pop("yaw_hold_rad", None)
             result.pop("velocity_yaw_rad", None)
+            result.pop("preserve_body_frame", None)
+            return result
+        if self.config.yaw_control_mode == "hold_entry_attitude":
+            result = dict(command)
+            if self.yaw_hold_rad is not None:
+                result["yaw_hold_rad"] = self.yaw_hold_rad
+                result["yaw_hold_source"] = self.yaw_hold_source
+                result["preserve_body_frame"] = True
+                if context is not None:
+                    velocity_yaw_rad = self._current_valid_attitude_yaw_rad(context)
+                    if velocity_yaw_rad is not None:
+                        result["velocity_yaw_rad"] = velocity_yaw_rad
             return result
         if self.yaw_hold_rad is None:
             return command
