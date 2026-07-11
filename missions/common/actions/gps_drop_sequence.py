@@ -443,10 +443,6 @@ class GpsDropSequenceAction(ActionModule):
             self.sub_action = ga
             self.update_count_at_phase = 0
 
-        if self.update_count_at_phase > self.climb_max_updates:
-            return self._fail("climb_timeout",
-                              actions=[_zero_velocity_command(), _clear_continuous_command("climb_timeout")])
-
         # Check altitude first — already at height? complete immediately
         current_alt = self._current_altitude_m(context)
         if (
@@ -474,6 +470,12 @@ class GpsDropSequenceAction(ActionModule):
                 actions=[_zero_velocity_command(), _clear_continuous_command("climb_done")],
                 done=True, reason="gps_drop_sequence_done", detail=self._detail(done=True),
             )
+
+        # A valid altitude sample wins the timeout boundary above.  Only fail a
+        # climb that is still below the one-way altitude gate.
+        if self.update_count_at_phase > self.climb_max_updates:
+            return self._fail("climb_timeout",
+                              actions=[_zero_velocity_command(), _clear_continuous_command("climb_timeout")])
 
         # Forward the goto command but use our own altitude-only completion check
         result = self.sub_action.update(context)

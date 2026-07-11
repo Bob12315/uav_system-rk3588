@@ -570,6 +570,31 @@ def test_climb_already_at_height_completes_immediately(monkeypatch) -> None:
     assert results[-1].done
 
 
+def test_climb_altitude_gate_wins_timeout_boundary() -> None:
+    """A fresh altitude sample at the threshold must not lose to timeout."""
+    class MustNotUpdateGoto:
+        def update(self, context):  # pragma: no cover - assertion is the test
+            raise AssertionError("height gate must complete before updating goto")
+
+    action = GpsDropSequenceAction()
+    action.start(params(climb_after_drop_m=2.5, climb_tolerance_z_m=0.1,
+                        climb_max_updates=1))
+    action.phase = "climb"
+    action.released_count = 2
+    action.payload_index = 2
+    action.target_index = 1
+    action._climb_target_lat = TARGETS[1]["lat"]
+    action._climb_target_lon = TARGETS[1]["lon"]
+    action.sub_action = MustNotUpdateGoto()
+    action.update_count_at_phase = 1
+
+    result = action.update({"drone": {"relative_altitude": 2.4}})
+
+    assert result.done
+    assert result.reason == "gps_drop_sequence_done"
+    assert action.phase == "done"
+
+
 def test_single_target_climb_fail_no_done(monkeypatch) -> None:
     """Single target dual release: climb fail → sequence fails, no duplicate release."""
     ScriptedLockV2.reset()
