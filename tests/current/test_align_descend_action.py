@@ -31,7 +31,7 @@ def _active_context(**overrides):
 
 def test_align_descend_config_defaults() -> None:
     config = AlignDescendConfig()
-    assert config.kp_vx == pytest.approx(0.8)
+    assert config.kp_vx == pytest.approx(0.4)
     assert config.descend_speed_mps == pytest.approx(0.2)
     assert config.yaw_control_mode == "hold"
 
@@ -108,8 +108,8 @@ def test_helper_maps_camera_error_to_body_velocity_with_signs() -> None:
     )
 
     assert detail["enabled"] is True
-    assert command["vx_cmd"] == pytest.approx(-0.16)
-    assert command["vy_cmd"] == pytest.approx(0.08)
+    assert command["vx_cmd"] == pytest.approx(-0.08)
+    assert command["vy_cmd"] == pytest.approx(0.04)
     assert command["vz_cmd"] == pytest.approx(0.0)
 
 
@@ -120,11 +120,11 @@ def test_height_gain_disabled_by_default_keeps_existing_behavior() -> None:
         altitude_m=3.0,
     )
 
-    assert command["vx_cmd"] == pytest.approx(-0.16)
-    assert command["vy_cmd"] == pytest.approx(0.08)
+    assert command["vx_cmd"] == pytest.approx(-0.08)
+    assert command["vy_cmd"] == pytest.approx(0.04)
     assert detail["height_gain_scale"] == pytest.approx(1.0)
-    assert detail["kp_vx_eff"] == pytest.approx(0.8)
-    assert detail["kp_vy_eff"] == pytest.approx(0.8)
+    assert detail["kp_vx_eff"] == pytest.approx(0.4)
+    assert detail["kp_vy_eff"] == pytest.approx(0.4)
     assert detail["max_vx_eff"] == pytest.approx(0.4)
     assert detail["max_vy_eff"] == pytest.approx(0.4)
 
@@ -169,8 +169,8 @@ def test_height_gain_restores_original_kp_at_low_altitude() -> None:
     )
 
     assert detail["height_gain_scale"] == pytest.approx(1.0)
-    assert command["vx_cmd"] == pytest.approx(-0.16)
-    assert command["vy_cmd"] == pytest.approx(0.08)
+    assert command["vx_cmd"] == pytest.approx(-0.08)
+    assert command["vy_cmd"] == pytest.approx(0.04)
 
 
 def test_height_gain_interpolates_linearly_between_altitudes() -> None:
@@ -843,8 +843,8 @@ def test_payload_offset_disabled_preserves_old_behavior() -> None:
     )
 
     # same control as before
-    assert command["vx_cmd"] == pytest.approx(-0.16)
-    assert command["vy_cmd"] == pytest.approx(0.08)
+    assert command["vx_cmd"] == pytest.approx(-0.08)
+    assert command["vy_cmd"] == pytest.approx(0.04)
     # desired is zero
     assert detail["desired_ex_cam"] == pytest.approx(0.0)
     assert detail["desired_ey_cam"] == pytest.approx(0.0)

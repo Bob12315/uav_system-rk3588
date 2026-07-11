@@ -154,8 +154,8 @@ def test_align_descend_spec_defaults_to_low_altitude_descent_profile() -> None:
 
     assert params["expected_dt_s"] == 0.1
     assert params["finish_altitude_m"] == 1.3
-    assert config["kp_vx"] == 0.55
-    assert config["kp_vy"] == 0.55
+    assert config["kp_vx"] == 0.275
+    assert config["kp_vy"] == 0.275
     assert params["max_updates"] == 160
     assert config["max_vx_mps"] == 0.20
     assert config["max_vy_mps"] == 0.20

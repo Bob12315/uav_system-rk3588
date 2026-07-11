@@ -183,8 +183,8 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "max_updates": 160,
                 "finish_altitude_m": 1.3,
                 "config": {
-                    "kp_vx": 0.55,
-                    "kp_vy": 0.55,
+                    "kp_vx": 0.275,
+                    "kp_vy": 0.275,
                     "max_vx_mps": 0.20,
                     "max_vy_mps": 0.20,
                     "height_gain_enabled": True,
@@ -423,8 +423,8 @@ def action_lab_specs() -> list[dict[str, Any]]:
                     "config": {
                         "descent_gate_policy": "allow_unaligned",
                         "unaligned_descend_speed_mps": 0.06,
-                        "kp_vx": 0.35,
-                        "kp_vy": 0.35,
+                        "kp_vx": 0.175,
+                        "kp_vy": 0.175,
                         "max_vx_mps": 0.12,
                         "max_vy_mps": 0.12,
                         "descend_speed_mps": 0.16,

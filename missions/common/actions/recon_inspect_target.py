@@ -279,7 +279,7 @@ class ReconInspectTargetAction(ActionModule):
     def _merge_align_params(self, override: dict[str, Any]) -> dict[str, Any]:
         defaults = {"expected_dt_s": 0.1, "lost_timeout_updates": 8, "hold_updates_required": 1,
                     "max_retries": 1, "max_updates": 160, "finish_altitude_m": self.align_finish_altitude_m,
-                    "config": {"kp_vx": 0.45, "kp_vy": 0.45, "max_vx_mps": 0.16, "max_vy_mps": 0.16,
+                    "config": {"kp_vx": 0.225, "kp_vy": 0.225, "max_vx_mps": 0.16, "max_vy_mps": 0.16,
                     "height_gain_enabled": True, "height_gain_mode": "points",
                     "height_scale_points": [{"altitude_m": 1.2, "scale": 0.20}, {"altitude_m": 1.3, "scale": 0.25},
                     {"altitude_m": 2.4, "scale": 0.55}, {"altitude_m": 3.5, "scale": 0.55}, {"altitude_m": 4.5, "scale": 0.55}],

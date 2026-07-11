@@ -10,8 +10,8 @@ from .result import ActionResult
 
 @dataclass(frozen=True)
 class AlignDescendConfig:
-    kp_vx: float = 0.8
-    kp_vy: float = 0.8
+    kp_vx: float = 0.4
+    kp_vy: float = 0.4
     max_vx_mps: float = 0.4
     max_vy_mps: float = 0.4
     descend_speed_mps: float = 0.2

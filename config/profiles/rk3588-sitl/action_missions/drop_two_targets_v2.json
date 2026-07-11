@@ -198,8 +198,8 @@
           "config": {
             "min_altitude_m": 1.3,
             "require_target_locked": true,
-            "kp_vx": 0.55,
-            "kp_vy": 0.55,
+            "kp_vx": 0.275,
+            "kp_vy": 0.275,
             "max_vx_mps": 0.2,
             "max_vy_mps": 0.2,
             "descend_speed_mps": 0.3,
