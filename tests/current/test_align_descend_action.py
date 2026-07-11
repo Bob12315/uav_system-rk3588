@@ -1648,3 +1648,109 @@ def test_lc_accepts_valid_hold_updates(good_value) -> None:
         "finish_alignment_hold_updates": good_value,
     })
     assert action.finish_alignment_hold_updates == good_value
+
+
+# ══════════════════════════════════════════════════════════════════════
+# NaN / inf visual error rejection (real compute_align_descend_command)
+# ══════════════════════════════════════════════════════════════════════
+
+import math as _math2
+from missions.common.actions.align_descend import (
+    compute_align_descend_command,
+    AlignDescendConfig,
+)
+
+@pytest.mark.parametrize("bad_value,label", [
+    (float("nan"), "NaN"),
+    (float("inf"), "+inf"),
+    (float("-inf"), "-inf"),
+])
+def test_nan_inf_ex_cam_disabled(bad_value, label) -> None:
+    """ex_cam=NaN/inf → enabled=False, vx/vy/vz=0."""
+    config = AlignDescendConfig()
+    inputs = {"target_valid": True, "target_locked": True,
+              "control_allowed": True, "ex_cam": bad_value, "ey_cam": 0.02}
+    command, detail = compute_align_descend_command(inputs, config)
+    assert detail["enabled"] is False, f"ex_cam={label}: expected enabled=False"
+    assert detail["hold_reason"] == "invalid_error"
+    assert command["vx_cmd"] == 0.0
+    assert command["vy_cmd"] == 0.0
+    assert command["vz_cmd"] == 0.0
+    assert _math2.isfinite(command["vx_cmd"])
+    assert _math2.isfinite(command["vy_cmd"])
+    assert _math2.isfinite(command["vz_cmd"])
+
+
+@pytest.mark.parametrize("bad_value,label", [
+    (float("nan"), "NaN"),
+    (float("inf"), "+inf"),
+    (float("-inf"), "-inf"),
+])
+def test_nan_inf_ey_cam_disabled(bad_value, label) -> None:
+    """ey_cam=NaN/inf → enabled=False, vx/vy/vz=0."""
+    config = AlignDescendConfig()
+    inputs = {"target_valid": True, "target_locked": True,
+              "control_allowed": True, "ex_cam": 0.02, "ey_cam": bad_value}
+    command, detail = compute_align_descend_command(inputs, config)
+    assert detail["enabled"] is False
+    assert detail["hold_reason"] == "invalid_error"
+    assert command["vx_cmd"] == 0.0
+    assert command["vy_cmd"] == 0.0
+    assert command["vz_cmd"] == 0.0
+
+
+def test_real_action_nan_error_clears_hold_count_and_no_done(monkeypatch) -> None:
+    """Real AlignDescendAction with NaN ex_cam → target_ok=False, hold_count=0, never done."""
+    action = AlignDescendAction()
+    action.start({
+        "config": {"require_target_locked": False},
+        "finish_policy": "latched_center_alignment",
+        "finish_altitude_m": 1.2,
+        "finish_alignment_max_ex_cam": 0.20,
+        "finish_alignment_max_ey_cam": 0.20,
+        "finish_alignment_hold_updates": 2,
+        "max_updates": 10,
+        "lost_timeout_updates": 99,
+    })
+    ctx = {
+        "drone": {"relative_altitude": 1.15},
+        "target_valid": True,
+        "target_locked": True,
+        "control_allowed": True,
+        "ex_cam": float("nan"),
+        "ey_cam": 0.02,
+    }
+    for _ in range(10):
+        r = action.update(ctx)
+    assert not r.done
+    assert action.finish_alignment_hold_count == 0
+
+
+def test_real_action_nan_error_continuous_triggers_target_lost_timeout() -> None:
+    """Continuous NaN ex_cam → lost_updates accumulate → target_lost_timeout."""
+    action = AlignDescendAction()
+    action.start({
+        "config": {"require_target_locked": False},
+        "finish_policy": "latched_center_alignment",
+        "finish_altitude_m": 1.2,
+        "lost_timeout_updates": 3,
+        "max_retries": 0,
+        "max_updates": 20,
+        "finish_alignment_max_ex_cam": 0.20,
+        "finish_alignment_max_ey_cam": 0.20,
+        "finish_alignment_hold_updates": 2,
+    })
+    ctx = {
+        "drone": {"relative_altitude": 1.15},
+        "target_valid": True,
+        "target_locked": True,
+        "control_allowed": True,
+        "ex_cam": float("nan"),
+        "ey_cam": 0.02,
+    }
+    for _ in range(20):
+        r = action.update(ctx)
+        if r.failed:
+            break
+    assert r.failed
+    assert r.reason == "target_lost_timeout"

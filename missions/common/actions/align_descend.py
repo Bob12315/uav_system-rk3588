@@ -328,6 +328,9 @@ def compute_align_descend_command(
             ey_cam = float(inputs["ey_cam"])
         except (KeyError, TypeError, ValueError):
             reason = "missing_error"
+        else:
+            if not math.isfinite(ex_cam) or not math.isfinite(ey_cam):
+                reason = "invalid_error"
 
     enabled = reason == ""
     aligned = False

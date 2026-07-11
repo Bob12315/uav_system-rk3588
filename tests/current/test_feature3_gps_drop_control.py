@@ -471,3 +471,123 @@ def _params(**more: Any) -> dict[str, Any]:
 def _drive_until_terminal(action):
     """SITL harness compatible driver."""
     return drive(action)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# climb goto failure tests
+# ══════════════════════════════════════════════════════════════════════
+
+class FailingGoto:
+    """GotoWaypointAction that always fails."""
+    starts: list[dict[str, Any]] = []
+    @classmethod
+    def reset(cls): cls.starts = []
+    def start(self, p): self.p = p; type(self).starts.append(p)
+    def update(self, c): return ActionResult(failed=True, reason="goto_failed")
+
+
+def test_climb_goto_failed_immediate_fail(monkeypatch) -> None:
+    """Climb goto fails → immediate climb_goto_failed, no wait for timeout."""
+    ScriptedGotoV2.reset()
+    ScriptedLockV2.reset()
+    ScriptedAlignV2.reset(done=True, reason="aligned_at_finish_altitude")
+    monkeypatch.setattr(mod, "GotoWaypointAction", FailingGoto)
+    monkeypatch.setattr(mod, "GpsTargetLockAction", ScriptedLockV2)
+    monkeypatch.setattr(mod, "AlignDescendAction", ScriptedAlignV2)
+    action = GpsDropSequenceAction()
+    action.start(params(climb_max_updates=999))
+    results = _drive_to_terminal(action, limit=40)
+    # Should fail before timeout — first goto for approach also fails
+    assert results[-1].failed
+    assert "goto" in results[-1].reason
+
+
+class FailOnClimbGoto:
+    """GotoWaypointAction that fails only for climb gotos."""
+    starts: list[dict[str, Any]] = []
+    @classmethod
+    def reset(cls): cls.starts = []
+    def start(self, p): self.p = p; type(self).starts.append(p)
+    def update(self, c):
+        key = self.p.get("key", "")
+        if "climb" in key:
+            return ActionResult(failed=True, reason="goto_failed")
+        return ActionResult(done=True)
+
+
+def test_climb_goto_failed_no_next_target(monkeypatch) -> None:
+    """First target climb fails → sequence fails, no second target."""
+    ScriptedLockV2.reset()
+    ScriptedAlignV2.reset(done=True, reason="aligned_at_finish_altitude")
+    FailOnClimbGoto.reset()
+    monkeypatch.setattr(mod, "GotoWaypointAction", FailOnClimbGoto)
+    monkeypatch.setattr(mod, "GpsTargetLockAction", ScriptedLockV2)
+    monkeypatch.setattr(mod, "AlignDescendAction", ScriptedAlignV2)
+    action = GpsDropSequenceAction()
+    action.start(params(climb_max_updates=999, release_wait_updates=1))
+    # Drive with low altitude so climb goto actually runs
+    results = []
+    alt = 1.0  # below climb threshold
+    for _ in range(40):
+        r = action.update({"drone": {"relative_altitude": alt, "lat": 34.1, "lon": 108.1, "yaw": 1.5}})
+        results.append(r)
+        if r.failed or r.done:
+            break
+    assert results[-1].failed
+    assert results[-1].reason == "climb_goto_failed"
+    # Should not have advanced to target 1
+    assert action.target_index == 0
+    assert action.released_count in (0, 1)
+
+
+def test_climb_already_at_height_completes_immediately(monkeypatch) -> None:
+    """Already at climb height → complete without waiting for goto."""
+    ScriptedLockV2.reset()
+    ScriptedAlignV2.reset(done=True, reason="aligned_at_finish_altitude")
+    class HangOnlyClimbGoto:
+        """Succeed for approach goto, hang for climb goto."""
+        starts = []
+        def start(self, p): self.p = p; type(self).starts.append(p)
+        def update(self, c):
+            key = self.p.get("key", "")
+            if "climb" in key:
+                return ActionResult(done=False, actions=[])
+            return ActionResult(done=True)
+    HangOnlyClimbGoto.starts = []
+    monkeypatch.setattr(mod, "GotoWaypointAction", HangOnlyClimbGoto)
+    monkeypatch.setattr(mod, "GpsTargetLockAction", ScriptedLockV2)
+    monkeypatch.setattr(mod, "AlignDescendAction", ScriptedAlignV2)
+    action = GpsDropSequenceAction()
+    action.start(params(climb_max_updates=999, release_wait_updates=1,
+                         climb_after_drop_m=2.5, climb_tolerance_z_m=0.1))
+    # Drive with high altitude so climb completes immediately (altitude-first check)
+    results = []
+    for _ in range(40):
+        r = action.update({"drone": {"relative_altitude": 3.0, "lat": 34.1, "lon": 108.1, "yaw": 1.5}})
+        results.append(r)
+        if r.done or r.failed:
+            break
+    assert results[-1].done
+
+
+def test_single_target_climb_fail_no_done(monkeypatch) -> None:
+    """Single target dual release: climb fail → sequence fails, no duplicate release."""
+    ScriptedLockV2.reset()
+    ScriptedAlignV2.reset(done=True, reason="aligned_at_finish_altitude")
+    FailOnClimbGoto.reset()
+    monkeypatch.setattr(mod, "GotoWaypointAction", FailOnClimbGoto)
+    monkeypatch.setattr(mod, "GpsTargetLockAction", ScriptedLockV2)
+    monkeypatch.setattr(mod, "AlignDescendAction", ScriptedAlignV2)
+    action = GpsDropSequenceAction()
+    action.start(params(
+        targets=[TARGETS[0]], release_wait_updates=1, climb_max_updates=999,
+    ))
+    results = []
+    alt = 1.0
+    for _ in range(40):
+        r = action.update({"drone": {"relative_altitude": alt, "lat": 34.1, "lon": 108.1, "yaw": 1.5}})
+        results.append(r)
+        if r.failed or r.done:
+            break
+    assert results[-1].failed
+    assert not results[-1].done

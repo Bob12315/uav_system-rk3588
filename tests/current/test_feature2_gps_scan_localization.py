@@ -514,3 +514,116 @@ def test_dispatcher_rejects_condition_yaw_for_unknown_action() -> None:
     )
     assert result["skipped"] != []
     assert any("action_dispatch_not_enabled" in str(s.get("reason", "")) for s in result["skipped"])
+
+
+# ══════════════════════════════════════════════════════════════════════
+# scan_altitude_m strict validation
+# ══════════════════════════════════════════════════════════════════════
+
+@pytest.mark.parametrize("bad_value", [True, False, "4.5", float("nan"), float("inf"), float("-inf"), 0, -1])
+def test_scan_altitude_m_rejects_invalid(bad_value) -> None:
+    """scan_altitude_m rejects bool, string, NaN, inf, zero, negative."""
+    a = GpsMultiViewLocalizeAction()
+    with pytest.raises(ValueError, match="scan_altitude_m must be a finite number"):
+        a.start({"scan_altitude_m": bad_value, "yaw_mode": "field_heading",
+                 "class_names": ["bucket"],
+                 "camera": {"fov_x_deg": 51.3, "fov_y_deg": 39.6},
+                 "fusion": {"cluster_radius_m": 0.5, "min_cluster_size": 1}})
+
+
+@pytest.mark.parametrize("good_value", [4, 4.5])
+def test_scan_altitude_m_accepts_valid(good_value) -> None:
+    """scan_altitude_m accepts int and float."""
+    a = GpsMultiViewLocalizeAction()
+    a.start({"scan_altitude_m": good_value, "yaw_mode": "field_heading",
+             "class_names": ["bucket"],
+             "camera": {"fov_x_deg": 51.3, "fov_y_deg": 39.6},
+             "fusion": {"cluster_radius_m": 0.5, "min_cluster_size": 1}})
+    assert a._scan_altitude_m == float(good_value)
+
+
+def test_scan_altitude_m_none_uses_field_geometry() -> None:
+    """scan_altitude_m=None → no override, uses field geometry."""
+    a = GpsMultiViewLocalizeAction()
+    a.start({"scan_altitude_m": None, "yaw_mode": "field_heading",
+             "class_names": ["bucket"],
+             "camera": {"fov_x_deg": 51.3, "fov_y_deg": 39.6},
+             "fusion": {"cluster_radius_m": 0.5, "min_cluster_size": 1}})
+    assert a._scan_altitude_m is None
+
+
+def test_scan_altitude_m_missing_uses_field_geometry() -> None:
+    """scan_altitude_m not provided → no override."""
+    a = GpsMultiViewLocalizeAction()
+    a.start({"yaw_mode": "field_heading", "class_names": ["bucket"],
+             "camera": {"fov_x_deg": 51.3, "fov_y_deg": 39.6},
+             "fusion": {"cluster_radius_m": 0.5, "min_cluster_size": 1}})
+    assert a._scan_altitude_m is None
+
+
+# ══════════════════════════════════════════════════════════════════════
+# confidence safe parsing
+# ══════════════════════════════════════════════════════════════════════
+
+def test_invalid_confidence_rejected_not_exception() -> None:
+    """Non-numeric confidence → rejected as invalid_confidence, no exception."""
+    a = GpsMultiViewLocalizeAction()
+    a.start({"class_names": ["bucket"], "min_confidence": 0.3,
+              "settle_updates_per_waypoint": 0, "capture_updates_per_waypoint": 1,
+              "goto_min_hold_updates": 1, "tolerance_xy_m": 100.0,
+              "max_updates_per_waypoint": 200})
+    ctx = _mk_ctx(dets=[_det("bucket", confidence="bad", ex=0.0, ey=0.0, conf=0.9)])
+    ctx["field_reference"] = _applied_fr_dict()
+    # Should not raise
+    _drive_to_capture(a, ctx)
+    a.update(ctx)
+    assert a.rejected_by_reason.get("invalid_confidence", 0) >= 1
+
+
+def test_nan_confidence_rejected() -> None:
+    """NaN confidence → rejected as invalid_confidence."""
+    a = GpsMultiViewLocalizeAction()
+    a.start({"class_names": ["bucket"], "min_confidence": 0.3,
+              "settle_updates_per_waypoint": 0, "capture_updates_per_waypoint": 1,
+              "goto_min_hold_updates": 1, "tolerance_xy_m": 100.0,
+              "max_updates_per_waypoint": 200})
+    import math
+    ctx = _mk_ctx(dets=[_det("bucket", confidence=float("nan"), ex=0.0, ey=0.0, conf=0.9)])
+    ctx["field_reference"] = _applied_fr_dict()
+    _drive_to_capture(a, ctx)
+    a.update(ctx)
+    assert a.rejected_by_reason.get("invalid_confidence", 0) >= 1
+
+
+def test_mixed_valid_and_invalid_confidence() -> None:
+    """One invalid confidence + one valid → invalid rejected, valid passes."""
+    a = GpsMultiViewLocalizeAction()
+    a.start({"class_names": ["bucket"], "min_confidence": 0.3,
+              "settle_updates_per_waypoint": 0, "capture_updates_per_waypoint": 1,
+              "goto_min_hold_updates": 1, "tolerance_xy_m": 100.0,
+              "max_updates_per_waypoint": 200})
+    ctx = _mk_ctx(dets=[
+        _det("bucket", confidence="bad", ex=0.0, ey=0.0, conf=0.9),
+        _det("bucket", confidence=0.9, ex=0.01, ey=0.01, conf=0.9),
+    ])
+    ctx["field_reference"] = _applied_fr_dict()
+    _drive_to_capture(a, ctx)
+    a.update(ctx)
+    assert a.rejected_by_reason.get("invalid_confidence", 0) >= 1
+    # Should still have captured something from the valid detection
+    assert len(a.raw_estimates) >= 1
+
+
+def test_inf_confidence_not_passes_filter() -> None:
+    """inf confidence → rejected as invalid_confidence, not passed through filter."""
+    a = GpsMultiViewLocalizeAction()
+    a.start({"class_names": ["bucket"], "min_confidence": 0.3,
+              "settle_updates_per_waypoint": 0, "capture_updates_per_waypoint": 1,
+              "goto_min_hold_updates": 1, "tolerance_xy_m": 100.0,
+              "max_updates_per_waypoint": 200})
+    import math
+    ctx = _mk_ctx(dets=[_det("bucket", confidence=float("inf"), ex=0.0, ey=0.0, conf=0.9)])
+    ctx["field_reference"] = _applied_fr_dict()
+    _drive_to_capture(a, ctx)
+    a.update(ctx)
+    assert a.rejected_by_reason.get("invalid_confidence", 0) >= 1

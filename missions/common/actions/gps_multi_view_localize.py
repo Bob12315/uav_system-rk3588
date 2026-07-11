@@ -68,13 +68,19 @@ class GpsMultiViewLocalizeAction(ActionModule):
 
         # Optional scan altitude override
         scan_alt = data.get("scan_altitude_m")
-        self._scan_altitude_m: float | None = (
-            float(scan_alt) if scan_alt is not None else None
-        )
-        if self._scan_altitude_m is not None:
+        if scan_alt is None:
+            self._scan_altitude_m = None
+        else:
+            if (
+                isinstance(scan_alt, bool)
+                or not isinstance(scan_alt, (int, float))
+            ):
+                raise ValueError("scan_altitude_m must be a finite number > 0")
+            parsed = float(scan_alt)
             import math
-            if not math.isfinite(self._scan_altitude_m) or self._scan_altitude_m <= 0.0:
-                raise ValueError("scan_altitude_m must be finite and > 0")
+            if not math.isfinite(parsed) or parsed <= 0.0:
+                raise ValueError("scan_altitude_m must be a finite number > 0")
+            self._scan_altitude_m = parsed
 
         cam_raw = dict(data.get("camera") or {})
         cam_raw.setdefault("fov_x_deg", 51.3)
@@ -269,6 +275,7 @@ class GpsMultiViewLocalizeAction(ActionModule):
         return ActionResult(reason="gps_multi_view_settle", detail=self._detail())
 
     def _update_capture(self, context: dict[str, Any]) -> ActionResult:
+        import math
         # ── capture-time: per-detection telemetry with drone fallback ──
         drone_snapshot = self._drone_snapshot(context)
 
@@ -284,7 +291,15 @@ class GpsMultiViewLocalizeAction(ActionModule):
             if target_classes is not None and cls not in target_classes:
                 self._inc_reject("class_filtered")
                 continue
-            conf = float(d.get("confidence", 0))
+            raw_conf = d.get("confidence", 0)
+            try:
+                conf = float(raw_conf)
+            except (TypeError, ValueError):
+                self._inc_reject("invalid_confidence")
+                continue
+            if not math.isfinite(conf):
+                self._inc_reject("invalid_confidence")
+                continue
             if conf < min_conf:
                 self._inc_reject("confidence_filtered")
                 continue
@@ -304,7 +319,15 @@ class GpsMultiViewLocalizeAction(ActionModule):
                 continue
 
             class_name = str(det.get("class_name", ""))
-            conf = float(det.get("confidence", 0))
+            raw_conf2 = det.get("confidence", 0)
+            try:
+                conf = float(raw_conf2)
+            except (TypeError, ValueError):
+                self._inc_reject("invalid_confidence")
+                continue
+            if not math.isfinite(conf):
+                self._inc_reject("invalid_confidence")
+                continue
 
             try:
                 est = self.projector.project(

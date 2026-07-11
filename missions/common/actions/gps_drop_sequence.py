@@ -447,10 +447,42 @@ class GpsDropSequenceAction(ActionModule):
             return self._fail("climb_timeout",
                               actions=[_zero_velocity_command(), _clear_continuous_command("climb_timeout")])
 
+        # Check altitude first — already at height? complete immediately
+        current_alt = self._current_altitude_m(context)
+        if (
+            current_alt is not None
+            and current_alt >= self.climb_after_drop_m - self.climb_tolerance_z_m
+        ):
+            self.sub_action = None
+            self.update_count_at_phase = 0
+            if self.execution_mode == "single_target_dual_release":
+                self.phase = "done"
+                return ActionResult(
+                    actions=[_zero_velocity_command(), _clear_continuous_command("climb_done")],
+                    done=True, reason="gps_drop_sequence_done", detail=self._detail(done=True),
+                )
+            if self.target_index == 0 and self.released_count == 1:
+                self.target_index = 1
+                self.payload_index = 1
+                self.phase = "goto"
+                return ActionResult(
+                    actions=[_zero_velocity_command(), _clear_continuous_command("climb_done")],
+                    reason="gps_drop_next", detail=self._detail(),
+                )
+            self.phase = "done"
+            return ActionResult(
+                actions=[_zero_velocity_command(), _clear_continuous_command("climb_done")],
+                done=True, reason="gps_drop_sequence_done", detail=self._detail(done=True),
+            )
+
         # Forward the goto command but use our own altitude-only completion check
         result = self.sub_action.update(context)
 
-        # Check altitude ourselves (one-way: altitude >= target - tolerance)
+        if result.failed:
+            return self._fail("climb_goto_failed",
+                              actions=[_zero_velocity_command(), _clear_continuous_command("climb_fail")])
+
+        # Check altitude again after goto update
         current_alt = self._current_altitude_m(context)
         climb_done = (
             current_alt is not None
