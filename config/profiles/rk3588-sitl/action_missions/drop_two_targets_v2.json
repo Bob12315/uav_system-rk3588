@@ -202,8 +202,8 @@
             "kp_vy": 0.275,
             "max_vx_mps": 0.2,
             "max_vy_mps": 0.2,
-            "descend_speed_mps": 0.3,
-            "slow_descend_speed_mps": 0.18,
+            "descend_speed_mps": 0.20,
+            "slow_descend_speed_mps": 0.10,
             "max_ex_cam": 0.2,
             "max_ey_cam": 0.2,
             "deadband_ex_cam": 0.04,
@@ -214,6 +214,11 @@
             "image_y_sign": -1.0,
             "yaw_control_mode": "hold_zero_rate",
             "altitude_source": "local_ned",
+            "descent_speed_stages": [
+              { "max_altitude_m": 1.80, "max_descend_speed_mps": 0.10 },
+              { "max_altitude_m": 1.50, "max_descend_speed_mps": 0.05 },
+              { "max_altitude_m": 1.35, "max_descend_speed_mps": 0.02 }
+            ],
             "payload_offset_enabled": true,
             "slow_descend_max_ex_cam": 0.45,
             "slow_descend_max_ey_cam": 0.45,
