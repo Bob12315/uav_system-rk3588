@@ -608,11 +608,33 @@ class SystemRunner:
                 enriched.append(item)
                 continue
             copy = dict(item)
+
+            # P1: already has valid field coordinates — keep as-is
+            fx = self._float_or_none(copy.get("field_x"))
+            fy = self._float_or_none(copy.get("field_y"))
+            if fx is not None and fy is not None:
+                enriched.append(copy)
+                continue
+
+            # P2: GPS-first object — convert lat/lon → FIELD via runtime GPS reference
+            lat = self._float_or_none(copy.get("lat"))
+            lon = self._float_or_none(copy.get("lon"))
+            if lat is not None and lon is not None and self.runtime_context_builder.field_gps_transform_ready():
+                converted = self.runtime_context_builder.gps_to_field_xy(lat, lon)
+                if converted is not None:
+                    copy["field_x"], copy["field_y"] = converted
+                    copy["field_coordinate_source"] = "runtime_gps"
+                    enriched.append(copy)
+                    continue
+
+            # P3: legacy LOCAL_NED → FIELD fallback
             converted = self.runtime_context_builder.local_to_field_xy(
                 copy.get("local_x", copy.get("x")), copy.get("local_y", copy.get("y"))
             )
             if converted is not None:
                 copy["field_x"], copy["field_y"] = converted
+                copy["field_coordinate_source"] = "local_field_reference"
+
             enriched.append(copy)
         return enriched
 
@@ -666,9 +688,9 @@ class SystemRunner:
         return True
 
     def _maybe_save_localization_result(self) -> None:
-        """If multi_view_localize just completed (Action Lab path), persist its result."""
+        """If multi_view_localize or gps_multi_view_localize just completed (Action Lab path), persist its result."""
         name = getattr(self.action_runtime, "action_name", None) if self.action_runtime else None
-        if name != "multi_view_localize":
+        if name not in {"multi_view_localize", "gps_multi_view_localize"}:
             return
         last = getattr(self.action_runtime, "last_result", None)
         if last is None:
@@ -683,7 +705,7 @@ class SystemRunner:
             detail = detail.__dict__
         else:
             detail = {}
-        self._save_localization_from_detail(detail)
+        self._save_localization_from_detail(detail, source=name)
 
     def _maybe_save_localization_from_mission(self) -> None:
         """Check mission blackboard for localized_objects saved by a completed multi_view step."""
@@ -695,7 +717,17 @@ class SystemRunner:
             return
         for _key, value in list(getattr(bb, "data", {}).items()):
             if isinstance(value, dict) and isinstance(value.get("localized_objects"), list):
-                self._save_localization_from_detail(value, source="multi_view_localize")
+                # Detect GPS fusion results: coordinate_frame=GLOBAL or objects have lat/lon
+                source = "multi_view_localize"
+                if value.get("coordinate_frame") == "GLOBAL":
+                    source = "gps_multi_view_localize"
+                else:
+                    objects = value.get("localized_objects")
+                    if isinstance(objects, list) and objects:
+                        first = objects[0]
+                        if isinstance(first, dict) and ("lat" in first or "lon" in first):
+                            source = "gps_multi_view_localize"
+                self._save_localization_from_detail(value, source=source)
                 return  # save only the first valid result
 
     def _ensure_drop_workflow(self) -> dict[str, object]:

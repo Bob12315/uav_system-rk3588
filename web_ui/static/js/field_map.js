@@ -760,7 +760,7 @@ function drawLocalizationTargets(ctx, model) {
     if (tx === null || ty === null) return;
     const [x, y] = worldToCanvas(tx, ty, model.rect);
     const id = target.id ?? target.target_id ?? index;
-    const count = target.count ?? target.seen_count ?? 0;
+    const count = target.sample_count ?? target.count ?? target.seen_count ?? 0;
     const selected = isSelectedDropTarget(target, model.dropTargetsSelected);
     var wfTargets = model.workflowTargets || [];
     var wfTarget = null;
@@ -799,6 +799,7 @@ function drawLocalizationTargets(ctx, model) {
       color: labelColor,
     });
     var meta = `x=${num(tx, 2)} y=${num(ty, 2)} n=${count}`;
+    if (target.raw_count != null) meta += ` raw=${target.raw_count}`;
     if (target.confidence != null) meta += ` conf=${num(target.confidence, 2)}`;
     drawFieldLabel(ctx, meta, x + 10, y + 5, {
       align: "left",

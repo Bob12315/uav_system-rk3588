@@ -144,12 +144,13 @@ def test_field_map_drone_uses_field_x_directly():
     assert "x: fieldX" in js
 
 
-def test_index_field_map_asset_gps_field_position_version():
-    """index.html 使用 uav-gps-field-position 新缓存版本。"""
+def test_index_field_map_asset_gps_fused_targets_version():
+    """index.html 使用 gps-fused-targets 新缓存版本。"""
     html = _read_html()
     assert "uav-x-mirror-20260710-1" not in html
     assert "uav-x-unmirror-20260711-1" not in html
-    assert "uav-gps-field-position-20260711-1" in html
+    assert "uav-gps-field-position-20260711-1" not in html
+    assert "gps-fused-targets-20260711-1" in html
 
 
 def test_field_map_gps_ready_blocks_local_fallback():
@@ -158,3 +159,13 @@ def test_field_map_gps_ready_blocks_local_fallback():
     assert "gpsFieldReady" in js
     assert "is_ready_for_field_to_gps" in js
     assert "!gpsFieldReady" in js
+
+
+def test_field_map_fusion_uses_sample_count():
+    """融合目标计数优先使用 sample_count。"""
+    js = _read_js("web_ui/static/js/field_map.js")
+    assert "sample_count" in js
+    assert "raw_count" in js
+    # pointX/pointY chain does NOT use east_m/north_m
+    assert "east_m" not in js
+    assert "north_m" not in js
