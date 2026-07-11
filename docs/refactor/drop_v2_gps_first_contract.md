@@ -23,10 +23,10 @@ extensions to shared components (`missions/common/actions/`,
 6. Capture-instant GPS / yaw / altitude / ex / ey → single-frame target GPS.
 7. GPS-derived ENU clustering / fusion.
 8. Select two drop targets from fusion results only.
-9. GLOBAL GPS fly-to above each target and stabilise (velocity + position hold).
-10. image_center lock on the target.
-11. BODY_NED alignment descent with an explicit zero yaw-rate target (hold_zero_rate); yaw is ignored and no BODY-frame absolute yaw is sent.
-12. Drop on alignment success; zero + drop on timeout.
+9. GLOBAL GPS fly-to above each target at 2.5 m and stabilise (velocity + position hold).
+10. Align yaw to the FIELD heading, then image_center lock on the target.
+11. BODY_NED alignment descent uses `-LOCAL_POSITION_NED.z` with an explicit zero yaw-rate target (hold_zero_rate); yaw is ignored and no BODY-frame absolute yaw is sent.
+12. Drop on alignment success; zero + drop on timeout. After target 1, directly fly GLOBAL GPS to target 2 at 2.5 m; there is no independent climb phase.
 13. GLOBAL GPS return to dynamic origin A.
 ```
 
@@ -36,7 +36,6 @@ V2 mission decisions MUST NOT depend on:
 
 - `drone.local_x`
 - `drone.local_y`
-- `drone.local_z`
 - `LOCAL_POSITION` waypoints
 - `LOCAL_NED` visual descent velocity
 - Pre-surveyed field origin GPS (hardcoded in config)
@@ -46,7 +45,8 @@ V2 mission decisions MUST NOT depend on:
 ## 4. Allowed Dependencies
 
 - GLOBAL GPS waypoints (`MAV_FRAME_GLOBAL_RELATIVE_ALT_INT`)
-- `relative_altitude` (from telemetry)
+- `GLOBAL_POSITION_INT.relative_alt` for GLOBAL navigation altitude
+- `-LOCAL_POSITION_NED.z` for alignment descent and finish height
 - Actual attitude yaw (from telemetry, attitude_valid=true)
 - GPS-derived ENU metric coordinates (for clustering only)
 - BODY_NED visual velocity commands
