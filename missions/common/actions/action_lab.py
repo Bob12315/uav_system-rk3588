@@ -7,6 +7,7 @@ from .build_recon_report import BuildReconReportAction
 from .gps_multi_view_localize import GpsMultiViewLocalizeAction
 from .gps_target_lock import GpsTargetLockAction
 from .gps_drop_sequence import GpsDropSequenceAction
+from .gps_recon_sequence import GpsReconSequenceAction
 from .goto_waypoint import GotoWaypointAction
 from .land import LandAction
 from .multi_view_localize import MultiViewLocalizeAction
@@ -55,6 +56,7 @@ def create_action_lab_registry() -> ActionRegistry:
     registry.register("gps_multi_view_localize", GpsMultiViewLocalizeAction)
     registry.register("gps_target_lock", GpsTargetLockAction)
     registry.register("gps_drop_sequence", GpsDropSequenceAction)
+    registry.register("gps_recon_sequence", GpsReconSequenceAction)
     return registry
 
 
