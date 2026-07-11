@@ -97,7 +97,7 @@ ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
         requires_send_commands=True,
     ),
     "condition_yaw": DispatchRule(
-        allowed_actions={"yaw_align"},
+        allowed_actions={"yaw_align", "gps_multi_view_localize"},
         requires_send_actions=True,
         requires_send_commands=True,
     ),

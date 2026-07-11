@@ -375,7 +375,7 @@ def test_drop_two_targets_v2_uses_gps_first_composite_runtime() -> None:
     data = _template(DROP_V2_TEMPLATE_PATH)
     names = [step["name"] for step in data["steps"]]
     assert names == [
-        "takeoff", "yaw_align", "gps_multi_view_localize",
+        "takeoff", "gps_multi_view_localize",
         "select_drop_targets", "gps_drop_sequence", "goto_waypoint", "land",
     ]
     by_name = {step["name"]: step for step in data["steps"]}

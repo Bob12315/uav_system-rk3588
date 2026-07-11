@@ -22,22 +22,6 @@
       }
     },
     {
-      "name": "yaw_align",
-      "label": "yaw_align_before_scan",
-      "params": {
-        "yaw_mode": "field_heading",
-        "tolerance_deg": 3.0,
-        "yaw_speed_deg_s": 25.0,
-        "min_hold_updates": 5,
-        "max_updates": 120,
-        "priority": 4
-      },
-      "on_failed": {
-        "action": "continue",
-        "max_attempts": 1
-      }
-    },
-    {
       "name": "gps_multi_view_localize",
       "label": "drop_gps_multi_view_scan",
       "save_as": "drop_scan",
@@ -74,7 +58,17 @@
           "min_cluster_size": 2,
           "center_weight_power": 1.0
         },
-        "priority": 5
+        "priority": 5,
+        "first_waypoint_yaw_align": {
+          "enabled": true,
+          "yaw_mode": "field_heading",
+          "tolerance_deg": 3.0,
+          "yaw_speed_deg_s": 25.0,
+          "min_hold_updates": 5,
+          "max_updates": 120,
+          "priority": 4,
+          "on_failed": "continue"
+        }
       }
     },
     {
@@ -202,8 +196,8 @@
             "kp_vy": 0.275,
             "max_vx_mps": 0.2,
             "max_vy_mps": 0.2,
-            "descend_speed_mps": 0.20,
-            "slow_descend_speed_mps": 0.10,
+            "descend_speed_mps": 0.2,
+            "slow_descend_speed_mps": 0.1,
             "max_ex_cam": 0.2,
             "max_ey_cam": 0.2,
             "deadband_ex_cam": 0.04,
@@ -215,9 +209,18 @@
             "yaw_control_mode": "hold_zero_rate",
             "altitude_source": "local_ned",
             "descent_speed_stages": [
-              { "max_altitude_m": 1.80, "max_descend_speed_mps": 0.10 },
-              { "max_altitude_m": 1.50, "max_descend_speed_mps": 0.05 },
-              { "max_altitude_m": 1.35, "max_descend_speed_mps": 0.02 }
+              {
+                "max_altitude_m": 1.8,
+                "max_descend_speed_mps": 0.1
+              },
+              {
+                "max_altitude_m": 1.5,
+                "max_descend_speed_mps": 0.05
+              },
+              {
+                "max_altitude_m": 1.35,
+                "max_descend_speed_mps": 0.02
+              }
             ],
             "payload_offset_enabled": true,
             "slow_descend_max_ex_cam": 0.45,
