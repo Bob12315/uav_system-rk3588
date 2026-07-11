@@ -5,7 +5,7 @@ import math
 import time
 from typing import Any, Mapping
 
-from .coordinate_transform import field_to_local_ned, local_ned_to_field
+from .coordinate_transform import field_to_local_ned, gps_to_field_from_origin, local_ned_to_field
 from .field_reference import FieldReference, WGS84_POLE_COS_EPS
 from .runtime_field_binding import (
     validate_runtime_field_binding_candidate,
@@ -247,6 +247,30 @@ class RuntimeContextBuilder:
         result = local_ned_to_field(lx, ly, z_down_m=0.0, reference=ref)
         return (result.field_x_m, result.field_y_m)
 
+    def gps_to_field_xy(self, lat: object, lon: object) -> tuple[float, float] | None:
+        """Convert drone GPS lat/lon to FIELD x/y using runtime GPS reference.
+
+        Returns None when the GPS transform is not ready or inputs are invalid.
+        """
+        if not self.field_gps_transform_ready():
+            return None
+        la = self._float_or_none(lat)
+        lo = self._float_or_none(lon)
+        if la is None or lo is None:
+            return None
+        try:
+            result = gps_to_field_from_origin(
+                la,
+                lo,
+                altitude_m=0.0,
+                origin_lat=float(self.field_origin_lat),
+                origin_lon=float(self.field_origin_lon),
+                field_heading_yaw_rad=float(self.field_heading_yaw_rad),
+            )
+        except Exception:
+            return None
+        return (result.field_x_m, result.field_y_m)
+
     def field_to_local_xy(self, field_x: object, field_y: object) -> tuple[float, float] | None:
         ref = self._build_field_reference_from_runtime_state()
         if ref is None:
@@ -259,7 +283,29 @@ class RuntimeContextBuilder:
         return (result.north_m, result.east_m)
 
     def field_position_from_drone(self, drone: object) -> dict[str, object] | None:
-        if not isinstance(drone, dict) or not bool(drone.get("local_position_valid", False)):
+        if not isinstance(drone, dict):
+            return None
+
+        # ── Priority 1: GPS → FIELD (runtime GPS reference) ──
+        if self.field_gps_transform_ready() and bool(drone.get("global_position_valid", False)):
+            gps_converted = self.gps_to_field_xy(drone.get("lat"), drone.get("lon"))
+            if gps_converted is not None:
+                field_x, field_y = gps_converted
+                return {
+                    "x": field_x,
+                    "y": field_y,
+                    "z": self._float_or_none(drone.get("local_z")),
+                    "lat": self._float_or_none(drone.get("lat")),
+                    "lon": self._float_or_none(drone.get("lon")),
+                    "local_x": self._float_or_none(drone.get("local_x")),
+                    "local_y": self._float_or_none(drone.get("local_y")),
+                    "local_z": self._float_or_none(drone.get("local_z")),
+                    "source": "runtime_gps",
+                    "confirmed": True,
+                }
+
+        # ── Priority 2: LOCAL_NED → FIELD (legacy field reference) ──
+        if not bool(drone.get("local_position_valid", False)):
             return None
         converted = self.local_to_field_xy(drone.get("local_x"), drone.get("local_y"))
         if converted is None:
@@ -272,7 +318,7 @@ class RuntimeContextBuilder:
             "local_x": self._float_or_none(drone.get("local_x")),
             "local_y": self._float_or_none(drone.get("local_y")),
             "local_z": self._float_or_none(drone.get("local_z")),
-            "source": "field_heading",
+            "source": "local_field_reference",
             "confirmed": True,
         }
 

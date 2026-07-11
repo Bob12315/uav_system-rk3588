@@ -303,3 +303,156 @@ def test_gps_to_local_ned_missing_local_origin_raises():
     # origin_local_n_m / origin_local_e_m not set
     with pytest.raises(FieldReferenceError, match="missing GPS or LOCAL origin"):
         gps_to_local_ned(lat=30.0, lon=120.0, altitude_m=5.0, reference=ref)
+
+
+# ---------------------------------------------------------------------------
+# gps_to_field_from_origin
+# ---------------------------------------------------------------------------
+
+
+def test_gps_to_field_origin_to_origin():
+    """GPS at origin → field (0, 0)."""
+    from app.coordinate_transform import gps_to_field_from_origin
+    result = gps_to_field_from_origin(
+        lat=30.0, lon=120.0, altitude_m=5.0,
+        origin_lat=30.0, origin_lon=120.0,
+        field_heading_yaw_rad=0.0,
+    )
+    assert result.field_x_m == pytest.approx(0.0, abs=1e-6)
+    assert result.field_y_m == pytest.approx(0.0, abs=1e-6)
+    assert result.altitude_m == 5.0
+
+
+def test_gps_to_field_east_is_field_x_right_heading_north():
+    """Heading=0 (FIELD +Y = north): GPS east of origin → field_x positive (right)."""
+    from app.coordinate_transform import gps_to_field_from_origin
+    # At lat=30, dlon=0.0001 ≈ 9.6m east
+    result = gps_to_field_from_origin(
+        lat=30.0, lon=120.0 + 0.0001, altitude_m=0.0,
+        origin_lat=30.0, origin_lon=120.0,
+        field_heading_yaw_rad=0.0,
+    )
+    assert result.field_x_m > 0  # east = right
+    assert result.field_x_m == pytest.approx(9.6, abs=0.5)
+    assert result.field_y_m == pytest.approx(0.0, abs=0.02)
+
+
+def test_gps_to_field_west_is_field_x_negative_heading_north():
+    """Heading=0: GPS west of origin → field_x negative (left)."""
+    from app.coordinate_transform import gps_to_field_from_origin
+    result = gps_to_field_from_origin(
+        lat=30.0, lon=120.0 - 0.0001, altitude_m=0.0,
+        origin_lat=30.0, origin_lon=120.0,
+        field_heading_yaw_rad=0.0,
+    )
+    assert result.field_x_m < 0  # west = left
+
+
+def test_gps_to_field_north_is_field_y_forward_heading_north():
+    """Heading=0: GPS north of origin → field_y positive (forward)."""
+    from app.coordinate_transform import gps_to_field_from_origin
+    result = gps_to_field_from_origin(
+        lat=30.0 + 0.0001, lon=120.0, altitude_m=0.0,
+        origin_lat=30.0, origin_lon=120.0,
+        field_heading_yaw_rad=0.0,
+    )
+    assert result.field_y_m > 0  # north = forward
+
+
+def test_gps_to_field_south_is_field_x_right_heading_east():
+    """Heading=π/2 (FIELD +Y = east): GPS south of origin → field_x positive (right)."""
+    from app.coordinate_transform import gps_to_field_from_origin
+    result = gps_to_field_from_origin(
+        lat=30.0 - 0.0001, lon=120.0, altitude_m=0.0,
+        origin_lat=30.0, origin_lon=120.0,
+        field_heading_yaw_rad=math.pi / 2,
+    )
+    # South = -north in ENU. With heading east, right = -north = south
+    assert result.field_x_m > 0
+
+
+def test_gps_to_field_roundtrip_with_field_to_gps():
+    """Round-trip: field→GPS→field recovers original field x,y."""
+    from app.coordinate_transform import gps_to_field_from_origin
+
+    origin_lat, origin_lon = 30.0, 120.0
+    heading = math.radians(53.0)
+
+    test_points = [
+        (-2.0, 31.25),
+        (2.0, 31.25),
+        (2.0, 33.75),
+        (-2.0, 33.75),
+    ]
+
+    for fx, fy in test_points:
+        gps = field_to_gps_from_origin(
+            fx, fy, altitude_m=0.0,
+            origin_lat=origin_lat, origin_lon=origin_lon,
+            field_heading_yaw_rad=heading,
+        )
+        back = gps_to_field_from_origin(
+            gps.lat, gps.lon, altitude_m=0.0,
+            origin_lat=origin_lat, origin_lon=origin_lon,
+            field_heading_yaw_rad=heading,
+        )
+        assert back.field_x_m == pytest.approx(fx, abs=0.02)
+        assert back.field_y_m == pytest.approx(fy, abs=0.02)
+
+
+def test_gps_to_field_rejects_non_finite():
+    """Non-finite inputs raise FieldReferenceError."""
+    from app.coordinate_transform import gps_to_field_from_origin
+    with pytest.raises(FieldReferenceError, match="finite"):
+        gps_to_field_from_origin(
+            float("nan"), 120.0, 0.0,
+            origin_lat=30.0, origin_lon=120.0,
+            field_heading_yaw_rad=0.0,
+        )
+
+
+def test_gps_to_field_rejects_bad_lat():
+    """Lat out of range raises FieldReferenceError."""
+    from app.coordinate_transform import gps_to_field_from_origin
+    with pytest.raises(FieldReferenceError):
+        gps_to_field_from_origin(
+            100.0, 120.0, 0.0,
+            origin_lat=30.0, origin_lon=120.0,
+            field_heading_yaw_rad=0.0,
+        )
+
+
+def test_gps_to_field_rejects_bad_lon():
+    """Lon out of range raises FieldReferenceError."""
+    from app.coordinate_transform import gps_to_field_from_origin
+    with pytest.raises(FieldReferenceError):
+        gps_to_field_from_origin(
+            30.0, 200.0, 0.0,
+            origin_lat=30.0, origin_lon=120.0,
+            field_heading_yaw_rad=0.0,
+        )
+
+
+def test_gps_to_field_rejects_bool():
+    """Bool input raises FieldReferenceError."""
+    from app.coordinate_transform import gps_to_field_from_origin
+    with pytest.raises(FieldReferenceError, match="finite"):
+        gps_to_field_from_origin(
+            True, 120.0, 0.0,  # type: ignore[arg-type]
+            origin_lat=30.0, origin_lon=120.0,
+            field_heading_yaw_rad=0.0,
+        )
+
+
+def test_gps_to_field_crosses_dateline():
+    """GPS across dateline still produces correct field coords via gps_enu_deltas."""
+    from app.coordinate_transform import gps_to_field_from_origin
+    result = gps_to_field_from_origin(
+        lat=0.0, lon=-179.99, altitude_m=0.0,
+        origin_lat=0.0, origin_lon=179.99,
+        field_heading_yaw_rad=0.0,
+    )
+    # gps_enu_deltas uses shortest_longitude_delta_deg, so -179.99 to 179.99
+    # is a short eastward delta (~0.02 deg ≈ +2224 m east)
+    assert result.field_x_m > 0  # east of origin with heading=0 → field_x positive
+    assert result.field_y_m == pytest.approx(0.0, abs=0.02)

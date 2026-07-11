@@ -136,16 +136,25 @@ def test_field_map_x_mirrored_inverse_removed():
     assert "x: (originX - screenX) / view.scale" not in js
 
 
-def test_field_map_drone_x_mirrored():
-    """field_map.js fieldMapModel does not mirror drone x (removed display_x_mirrored)."""
+def test_field_map_drone_uses_field_x_directly():
+    """field_map.js fieldMapModel uses x: fieldX directly (no sign flip)."""
     js = _read_js("web_ui/static/js/field_map.js")
     assert "x: -fieldX" not in js
     assert "display_x_mirrored" not in js
     assert "x: fieldX" in js
 
 
-def test_index_field_map_asset_no_mirror_cache():
-    """index.html 不再使用 uav-x-mirror 旧缓存版本，使用 unmirror 新版本。"""
+def test_index_field_map_asset_gps_field_position_version():
+    """index.html 使用 uav-gps-field-position 新缓存版本。"""
     html = _read_html()
     assert "uav-x-mirror-20260710-1" not in html
-    assert "uav-x-unmirror-20260711-1" in html
+    assert "uav-x-unmirror-20260711-1" not in html
+    assert "uav-gps-field-position-20260711-1" in html
+
+
+def test_field_map_gps_ready_blocks_local_fallback():
+    """GPS field reference ready 时禁止原始 LOCAL_NED 兜底。"""
+    js = _read_js("web_ui/static/js/field_map.js")
+    assert "gpsFieldReady" in js
+    assert "is_ready_for_field_to_gps" in js
+    assert "!gpsFieldReady" in js

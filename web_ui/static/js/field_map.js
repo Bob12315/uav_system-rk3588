@@ -330,11 +330,16 @@ function fieldMapModel(next) {
   } : null;
   const missionPosition = detail.mission_position || null;
   const drone = next.drone || {};
-  const dronePosition = fieldPosition || missionPosition || (
-    drone.local_position_valid
-      ? {x: Number(drone.local_x), y: Number(drone.local_y), z: Number(drone.local_z), fallback: true}
-      : null
-  );
+
+  // GPS field reference ready → forbid raw LOCAL_NED fallback
+  const fieldReference = next.field_reference || {};
+  const gpsFieldReady = Boolean(fieldReference.is_ready_for_field_to_gps);
+
+  const localFallback = !gpsFieldReady && drone.local_position_valid
+    ? {x: Number(drone.local_x), y: Number(drone.local_y), z: Number(drone.local_z), fallback: true}
+    : null;
+
+  const dronePosition = fieldPosition || missionPosition || localFallback;
   const dropTargets = Array.isArray(detail.drop_targets) ? detail.drop_targets : [];
   const recceTargets = Array.isArray(detail.recce_targets) ? detail.recce_targets : [];
   const recceResults = Array.isArray(detail.recce_results) ? detail.recce_results : [];

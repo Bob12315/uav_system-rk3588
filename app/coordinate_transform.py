@@ -219,6 +219,66 @@ def field_to_gps_from_origin(
     return GpsPoint(lat=lat, lon=lon, alt_m=altitude_m)
 
 
+def gps_to_field_from_origin(
+    lat: float,
+    lon: float,
+    altitude_m: float,
+    *,
+    origin_lat: float,
+    origin_lon: float,
+    field_heading_yaw_rad: float,
+) -> FieldPoint:
+    """Convert GPS lat/lon to FIELD coordinates given explicit origin and heading.
+
+    Pure function — does not read ``FieldReference`` or any global state.
+
+    Parameters must be finite numbers (not None, bool, str, NaN, Inf).
+    *origin_lat* ∈ [-90, 90], *origin_lon* ∈ [-180, 180].
+    *lat* ∈ [-90, 90], *lon* ∈ [-180, 180].
+    Raises :exc:`FieldReferenceError` on invalid input.
+    """
+    for name, val in (
+        ("lat", lat),
+        ("lon", lon),
+        ("altitude_m", altitude_m),
+        ("origin_lat", origin_lat),
+        ("origin_lon", origin_lon),
+        ("field_heading_yaw_rad", field_heading_yaw_rad),
+    ):
+        if not (isinstance(val, (int, float)) and not isinstance(val, bool) and math.isfinite(float(val))):
+            raise FieldReferenceError(f"{name} must be a finite number, got {val!r}")
+
+    if origin_lat < -90.0 or origin_lat > 90.0:
+        raise FieldReferenceError(f"origin_lat {origin_lat} out of range [-90, 90]")
+    if origin_lon < -180.0 or origin_lon > 180.0:
+        raise FieldReferenceError(f"origin_lon {origin_lon} out of range [-180, 180]")
+    if lat < -90.0 or lat > 90.0:
+        raise FieldReferenceError(f"lat {lat} out of range [-90, 90]")
+    if lon < -180.0 or lon > 180.0:
+        raise FieldReferenceError(f"lon {lon} out of range [-180, 180]")
+
+    try:
+        origin_lat, origin_lon = validate_wgs84_lat_lon(origin_lat, origin_lon, reject_pole=True)
+        lat, lon = validate_wgs84_lat_lon(lat, lon, reject_pole=True)
+    except FieldReferenceError as exc:
+        raise FieldReferenceError(f"invalid lat/lon: {exc}") from exc
+
+    d_north, d_east = gps_enu_deltas(origin_lat, origin_lon, lat, lon)
+
+    cos_h = math.cos(field_heading_yaw_rad)
+    sin_h = math.sin(field_heading_yaw_rad)
+
+    # Inverse of the FIELD → ENU rotation in field_to_gps_from_origin():
+    #   d_north = field_y * cos_h - field_x * sin_h
+    #   d_east  = field_y * sin_h + field_x * cos_h
+    #   => field_y =  d_north * cos_h + d_east * sin_h
+    #      field_x = -d_north * sin_h + d_east * cos_h
+    field_y = d_north * cos_h + d_east * sin_h
+    field_x = -d_north * sin_h + d_east * cos_h
+
+    return FieldPoint(field_x_m=field_x, field_y_m=field_y, altitude_m=altitude_m)
+
+
 def gps_to_local_ned(
     lat: float,
     lon: float,
