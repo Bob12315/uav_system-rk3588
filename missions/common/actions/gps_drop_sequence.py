@@ -1,6 +1,6 @@
 """GPS-first drop sequence action (revised safety control).
 
-Feature 3.4 — GLOBAL goto → yaw align → GPS lock → align-descend → release.
+Feature 3.4 — GLOBAL goto → GPS lock → align-descend → release → climb.
 Requires 1-2 targets and 2 payloads.
 """
 
@@ -17,7 +17,6 @@ from .goto_waypoint import GotoWaypointAction
 from .gps_target_lock import GpsTargetLockAction
 from .align_descend import AlignDescendAction
 from .payload_release import PayloadReleaseAction
-from .yaw_align import YawAlignAction
 from .result import ActionResult
 
 
@@ -100,22 +99,30 @@ class GpsDropSequenceAction(ActionModule):
             if not math.isfinite(val) or val <= 0.0:
                 raise ValueError(f"{name} must be finite and > 0, got {val}")
 
+        # ── climb params ──
+        self.climb_after_drop_m = float(data.get("climb_after_drop_m", 2.5))
+        self.climb_tolerance_z_m = float(data.get("climb_tolerance_z_m", 0.1))
+        self.climb_max_updates = int(data.get("climb_max_updates", 100))
+        for name, val in (("climb_after_drop_m", self.climb_after_drop_m),
+                          ("climb_tolerance_z_m", self.climb_tolerance_z_m)):
+            if not math.isfinite(val) or val <= 0.0:
+                raise ValueError(f"{name} must be finite and > 0, got {val}")
+        if self.climb_max_updates < 1:
+            raise ValueError("climb_max_updates must be >= 1")
+
         # ── limits ──
         self.goto_max_updates = int(data.get("goto_max_updates", 160))
         self.target_lock_max_updates = int(data.get("target_lock_max_updates", 40))
         self.align_descend_max_updates = int(data.get("align_descend_max_updates", 250))
-        self.yaw_align_max_updates = int(data.get("yaw_align_max_updates", 80))
         self.release_wait_updates = int(data.get("release_wait_updates", 5))
         for name, val in (("goto_max_updates", self.goto_max_updates),
                           ("target_lock_max_updates", self.target_lock_max_updates),
                           ("align_descend_max_updates", self.align_descend_max_updates),
-                          ("yaw_align_max_updates", self.yaw_align_max_updates),
                           ("release_wait_updates", self.release_wait_updates)):
             if val < 1:
                 raise ValueError(f"{name} must be >= 1")
 
         self.goto_cfg = dict(data.get("goto") or {})
-        self.yaw_align_cfg = dict(data.get("yaw_align") or {})
         self.lock_cfg = dict(data.get("target_lock") or {})
         self.align_cfg = dict(data.get("align_descend") or {})
         # finish_policy: allow default (legacy), consistent with v1
@@ -128,7 +135,6 @@ class GpsDropSequenceAction(ActionModule):
             raise ValueError(
                 "align_descend.config.min_altitude_m must be <= finish_altitude_m"
             )
-        # yaw_control_mode / altitude_source / require_target_locked: use config defaults (v1-compatible)
         align_config["min_altitude_m"] = min_altitude_m
         self.align_cfg["config"] = align_config
 
@@ -141,6 +147,8 @@ class GpsDropSequenceAction(ActionModule):
         self.sub_action: Any = None
         self._release_reason = ""
         self._failed_reason = ""
+        self._climb_target_lat: float | None = None
+        self._climb_target_lon: float | None = None
 
         self.started = True
         self.stopped = False
@@ -165,14 +173,14 @@ class GpsDropSequenceAction(ActionModule):
 
         if self.phase == "goto":
             return self._update_goto(data)
-        if self.phase == "yaw_align":
-            return self._update_yaw_align(data)
         if self.phase == "lock":
             return self._update_lock(data)
         if self.phase == "align":
             return self._update_align(data)
         if self.phase == "release":
             return self._update_release(data)
+        if self.phase == "climb":
+            return self._update_climb(data)
         return ActionResult(failed=True, reason="invalid_phase")
 
     def stop(self) -> None:
@@ -184,12 +192,17 @@ class GpsDropSequenceAction(ActionModule):
         self.released_count = 0; self.sub_action = None
         self.started = False; self.stopped = False
         self.dual_release_servo_outputs: list[dict[str, int]] = []
+        self._climb_target_lat = None
+        self._climb_target_lon = None
 
     # ── phases ───────────────────────────────────────────────────────
 
     def _update_goto(self, context: dict[str, Any]) -> ActionResult:
         if self.sub_action is None:
             t = self.targets[self.target_index]
+            # Save GPS position for later climb
+            self._climb_target_lat = t["lat"]
+            self._climb_target_lon = t["lon"]
             ga = GotoWaypointAction()
             ga.start({
                 "lat": t["lat"], "lon": t["lon"],
@@ -216,34 +229,11 @@ class GpsDropSequenceAction(ActionModule):
         if not result.done:
             return ActionResult(actions=result.actions, reason="gps_drop_goto", detail=self._detail())
 
-        self.phase = "yaw_align"
+        # Goto done → lock directly (yaw is field_heading from goto itself)
+        self.phase = "lock"
         self.sub_action = None
         self.update_count_at_phase = 0
-        return ActionResult(reason="gps_drop_yaw_align_start", detail=self._detail())
-
-    def _update_yaw_align(self, context: dict[str, Any]) -> ActionResult:
-        if self.sub_action is None:
-            action = YawAlignAction()
-            action.start({
-                "yaw_mode": self.yaw_align_cfg.get("yaw_mode", "field_heading"),
-                "tolerance_deg": self.yaw_align_cfg.get("tolerance_deg", 4.0),
-                "yaw_speed_deg_s": self.yaw_align_cfg.get("yaw_speed_deg_s", 25.0),
-                "min_hold_updates": self.yaw_align_cfg.get("min_hold_updates", 3),
-                "max_updates": self.yaw_align_cfg.get("max_updates", self.yaw_align_max_updates),
-                "priority": self.yaw_align_cfg.get("priority", 4),
-                "key": f"gps_drop_yaw_align_{self.target_index}",
-            })
-            self.sub_action = action
-            self.update_count_at_phase = 0
-        if self.update_count_at_phase > self.yaw_align_max_updates:
-            return self._fail("yaw_align_timeout")
-        result = self.sub_action.update(context)
-        if result.failed:
-            return self._fail(result.reason or "yaw_align_failed")
-        if not result.done:
-            return ActionResult(actions=result.actions, reason="gps_drop_yaw_align", detail=self._detail(extra={"yaw_align": result.detail}))
-        self.phase = "lock"; self.sub_action = None; self.update_count_at_phase = 0
-        return ActionResult(reason="gps_drop_lock_start", detail=self._detail(extra={"yaw_align": result.detail}))
+        return ActionResult(reason="gps_drop_lock_start", detail=self._detail())
 
     def _update_lock(self, context: dict[str, Any]) -> ActionResult:
         if self.sub_action is None:
@@ -393,10 +383,10 @@ class GpsDropSequenceAction(ActionModule):
             self.payload_index = 2
             self.sub_action = None
             self.update_count_at_phase = 0
-            self.phase = "done"
+            self.phase = "climb"
             return ActionResult(
                 actions=[_zero_velocity_command()] + (hold or []) + [_clear_continuous_command("release_done")],
-                done=True, reason="gps_drop_sequence_done", detail=self._detail(done=True),
+                reason="gps_drop_climb_start", detail=self._detail(done=False),
             )
 
         # ── dual_target_sequential ──
@@ -415,17 +405,114 @@ class GpsDropSequenceAction(ActionModule):
                               actions=[_zero_velocity_command()] + (hold or []) + [_clear_continuous_command("release_done")])
 
         if is_terminal:
-            self.phase = "done"
+            self.phase = "climb"
             return ActionResult(
                 actions=[_zero_velocity_command()] + (hold or []) + [_clear_continuous_command("release_done")],
-                done=True, reason="gps_drop_sequence_done", detail=self._detail(done=True),
+                reason="gps_drop_climb_start", detail=self._detail(done=False),
             )
-        self.target_index += 1
-        self.phase = "goto"
+        # First target done: climb before next target
+        self.phase = "climb"
+        self.target_index += 1  # advance for climb goto to use next target's position? No: climb uses current target GPS
+        # Actually, we need to climb at current target, then goto next. Let's revert target_index advance.
+        self.target_index -= 1  # stay on current target for climb
         return ActionResult(
             actions=[_zero_velocity_command()] + (hold or []) + [_clear_continuous_command("release_done")],
-            reason="gps_drop_next", detail=self._detail(),
+            reason="gps_drop_climb_start", detail=self._detail(),
         )
+
+    def _update_climb(self, context: dict[str, Any]) -> ActionResult:
+        if self.sub_action is None:
+            # Send GLOBAL goto to same GPS position with climb altitude
+            lat = self._climb_target_lat
+            lon = self._climb_target_lon
+            if lat is None or lon is None:
+                return self._fail("climb_no_target_position",
+                                  actions=[_zero_velocity_command(), _clear_continuous_command("climb_fail")])
+            ga = GotoWaypointAction()
+            ga.start({
+                "lat": lat, "lon": lon,
+                "altitude_m": self.climb_after_drop_m,
+                "target_frame": "global", "waypoint_mode": "absolute",
+                "yaw_mode": "field_heading", "frame": GLOBAL_RELATIVE_ALT_INT,
+                "tolerance_xy_m": 99.0,  # effectively ignore horizontal
+                "tolerance_z_m": self.climb_tolerance_z_m,
+                "min_hold_updates": 1,
+                "require_velocity_valid": False,
+                "key": f"gps_drop_climb_{self.target_index}",
+            })
+            self.sub_action = ga
+            self.update_count_at_phase = 0
+
+        if self.update_count_at_phase > self.climb_max_updates:
+            return self._fail("climb_timeout",
+                              actions=[_zero_velocity_command(), _clear_continuous_command("climb_timeout")])
+
+        # Forward the goto command but use our own altitude-only completion check
+        result = self.sub_action.update(context)
+
+        # Check altitude ourselves (one-way: altitude >= target - tolerance)
+        current_alt = self._current_altitude_m(context)
+        climb_done = (
+            current_alt is not None
+            and current_alt >= self.climb_after_drop_m - self.climb_tolerance_z_m
+        )
+
+        if climb_done:
+            self.sub_action = None
+            self.update_count_at_phase = 0
+            # Determine next step
+            if self.execution_mode == "single_target_dual_release":
+                self.phase = "done"
+                return ActionResult(
+                    actions=[_zero_velocity_command(), _clear_continuous_command("climb_done")],
+                    done=True, reason="gps_drop_sequence_done", detail=self._detail(done=True),
+                )
+            # dual_target_sequential
+            if self.target_index == 0 and self.released_count == 1:
+                # First target climb done → goto second target
+                self.target_index = 1
+                self.payload_index = 1
+                self.phase = "goto"
+                return ActionResult(
+                    actions=[_zero_velocity_command(), _clear_continuous_command("climb_done")],
+                    reason="gps_drop_next", detail=self._detail(),
+                )
+            # Second target climb done → sequence done
+            self.phase = "done"
+            return ActionResult(
+                actions=[_zero_velocity_command(), _clear_continuous_command("climb_done")],
+                done=True, reason="gps_drop_sequence_done", detail=self._detail(done=True),
+            )
+
+        # Still climbing: forward goto actions
+        return ActionResult(
+            actions=result.actions,
+            reason="gps_drop_climb", detail=self._detail(extra={"altitude_m": current_alt}),
+        )
+
+    def _current_altitude_m(self, context: dict[str, Any]) -> float | None:
+        """Extract current altitude from context (compatible with AlignDescend)."""
+        drone = context.get("drone", {})
+        if isinstance(drone, dict):
+            for name in ("relative_altitude", "relative_altitude_m"):
+                v = drone.get(name)
+                if v is not None:
+                    try:
+                        f = float(v)
+                        if math.isfinite(f) and f >= 0.0:
+                            return f
+                    except (TypeError, ValueError):
+                        continue
+        for name in ("relative_altitude", "relative_altitude_m", "altitude_m"):
+            v = context.get(name)
+            if v is not None:
+                try:
+                    f = float(v)
+                    if math.isfinite(f) and f >= 0.0:
+                        return f
+                except (TypeError, ValueError):
+                    continue
+        return None
 
     # ── helpers ─────────────────────────────────────────────────────
 

@@ -215,7 +215,7 @@ def test_real_gps_sequence_align_matches_v1_yaw_hold_local_ned_dispatch(
 ) -> None:
     monkeypatch.setattr(sequence_module, "GotoWaypointAction", _ImmediateGoto)
     monkeypatch.setattr(sequence_module, "GpsTargetLockAction", _ImmediateLock)
-    monkeypatch.setattr(sequence_module, "YawAlignAction", _ImmediateYawAlign)
+    # yaw_align no longer part of gps_drop_sequence
     sequence = GpsDropSequenceAction()
     sequence.start(
         {
@@ -288,7 +288,7 @@ def test_gps_sequence_invalid_target_stops_and_clears_with_zero_yaw_rate(
 ) -> None:
     monkeypatch.setattr(sequence_module, "GotoWaypointAction", _ImmediateGoto)
     monkeypatch.setattr(sequence_module, "GpsTargetLockAction", _ImmediateLock)
-    monkeypatch.setattr(sequence_module, "YawAlignAction", _ImmediateYawAlign)
+    # yaw_align no longer part of gps_drop_sequence
     sequence = GpsDropSequenceAction()
     sequence.start(
         {
@@ -325,7 +325,7 @@ def test_gps_sequence_align_default_yaw_hold(monkeypatch: pytest.MonkeyPatch) ->
     """With default hold yaw mode, align commands include yaw_hold_rad from attitude."""
     monkeypatch.setattr(sequence_module, "GotoWaypointAction", _ImmediateGoto)
     monkeypatch.setattr(sequence_module, "GpsTargetLockAction", _ImmediateLock)
-    monkeypatch.setattr(sequence_module, "YawAlignAction", _ImmediateYawAlign)
+    # yaw_align no longer part of gps_drop_sequence
     sequence = GpsDropSequenceAction()
     sequence.start({
         "targets": [{"valid": True, "target_id": "t0", "lat": 34.0, "lon": 108.0}],

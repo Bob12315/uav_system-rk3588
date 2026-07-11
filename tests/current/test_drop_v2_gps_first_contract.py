@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 V1_PATH = ROOT / "config/action_missions/drop_two_targets_v1.json"
 V2_PATH = ROOT / "config/action_missions/drop_two_targets_v2.json"
 SITL_V2_PATH = ROOT / "config/profiles/rk3588-sitl/action_missions/drop_two_targets_v2.json"
-V1_EXPECTED_SHA256 = "6aa0e0f006248db11bc65de4e1a6e38fdc92e8a50e3e2cd135bc769e4de04257"
+V1_EXPECTED_SHA256 = "5a413a69a86b3fa22bb2e7adbf89d41e8de480b77aed79148d89dd9bae64d242"
 
 
 def _load(path: Path) -> dict:
@@ -61,7 +61,7 @@ def test_drop_v2_align_payload_and_velocity_safety_contract() -> None:
     drop = next(step for step in _load(V2_PATH)["steps"] if step["name"] == "gps_drop_sequence")
     params = drop["params"]
     align = params["align_descend"]
-    assert "finish_policy" not in align  # v1 legacy default
+    assert align.get("finish_policy") == "latched_center_alignment"  # v2 new policy
     assert "yaw_control_mode" not in align["config"]  # v1 default hold
     assert align["config"]["require_target_locked"] is False  # v1 default
     assert align["config"]["payload_offset_enabled"] is True

@@ -21,7 +21,6 @@ from app.runtime_field_target_resolver import (
 
 from .base import ActionModule
 from .goto_waypoint import GotoWaypointAction
-from .yaw_align import YawAlignAction
 from .gps_target_projection import (
     GpsProjectionCamera,
     GpsProjectionError,
@@ -67,6 +66,16 @@ class GpsMultiViewLocalizeAction(ActionModule):
         )
         self._params_min_confidence: float = float(data.get("min_confidence", 0.35))
 
+        # Optional scan altitude override
+        scan_alt = data.get("scan_altitude_m")
+        self._scan_altitude_m: float | None = (
+            float(scan_alt) if scan_alt is not None else None
+        )
+        if self._scan_altitude_m is not None:
+            import math
+            if not math.isfinite(self._scan_altitude_m) or self._scan_altitude_m <= 0.0:
+                raise ValueError("scan_altitude_m must be finite and > 0")
+
         cam_raw = dict(data.get("camera") or {})
         cam_raw.setdefault("fov_x_deg", 51.3)
         cam_raw.setdefault("fov_y_deg", 39.6)
@@ -79,16 +88,6 @@ class GpsMultiViewLocalizeAction(ActionModule):
         })
 
         self.yaw_mode = str(data.get("yaw_mode", "hold")).strip().lower()
-
-        # first waypoint yaw align config
-        fwya = dict(data.get("first_waypoint_yaw_align") or {})
-        self.first_waypoint_yaw_align_enabled = bool(fwya.get("enabled", False))
-        self.first_waypoint_yaw_align_config = dict(fwya)
-        self.first_waypoint_yaw_align_on_failed = str(fwya.get("on_failed", "continue")).strip().lower()
-        if self.first_waypoint_yaw_align_on_failed not in {"continue", "fail"}:
-            raise ValueError(
-                "first_waypoint_yaw_align.on_failed must be 'continue' or 'fail'"
-            )
 
         # Deferred init
         self._initialized = False
@@ -109,12 +108,6 @@ class GpsMultiViewLocalizeAction(ActionModule):
         self.captures: list[dict[str, Any]] = []
         self.failure_reason = ""
         self.goto_action: GotoWaypointAction | None = None
-        self.yaw_align_action: YawAlignAction | None = None
-        self.yaw_align_attempted = False
-        self.yaw_align_done = False
-        self.yaw_align_failed = False
-        self.yaw_align_failure_reason = ""
-        self.yaw_align_detail: dict[str, Any] = {}
         self.run_id = str(uuid.uuid4())[:8]
         self.rejected_by_reason: dict[str, int] = {}
 
@@ -134,8 +127,7 @@ class GpsMultiViewLocalizeAction(ActionModule):
                                 detail=self._detail())
 
         # Shared timeout: covers goto + settle + capture per waypoint.
-        # first_waypoint_yaw_align uses YawAlignAction's own max_updates.
-        if self.phase not in ("init", "first_waypoint_yaw_align"):
+        if self.phase not in ("init",):
             self.update_count_at_waypoint += 1
             if self.update_count_at_waypoint > self._params_max_updates:
                 self.phase = "failed"
@@ -148,8 +140,6 @@ class GpsMultiViewLocalizeAction(ActionModule):
             return self._update_init(data)
         if self.phase == "goto":
             return self._update_goto(data)
-        if self.phase == "first_waypoint_yaw_align":
-            return self._update_first_waypoint_yaw_align(data)
         if self.phase == "settle":
             return self._update_settle()
         if self.phase == "capture":
@@ -160,8 +150,6 @@ class GpsMultiViewLocalizeAction(ActionModule):
         self.stopped = True
         if self.goto_action is not None:
             self.goto_action.stop()
-        if self.yaw_align_action is not None:
-            self.yaw_align_action.stop()
 
     def reset(self) -> None:
         self._initialized = False
@@ -172,21 +160,13 @@ class GpsMultiViewLocalizeAction(ActionModule):
         self.waypoint_index = 0
         self.phase = "idle"
         self.goto_action = None
-        self.yaw_align_action = None
-        self.yaw_align_attempted = False
-        self.yaw_align_done = False
-        self.yaw_align_failed = False
-        self.yaw_align_failure_reason = ""
-        self.yaw_align_detail = {}
-        self.first_waypoint_yaw_align_enabled = False
-        self.first_waypoint_yaw_align_config = {}
-        self.first_waypoint_yaw_align_on_failed = "continue"
         self.raw_estimates = []
         self.fused_objects = []
         self.captures = []
         self.rejected_by_reason = {}
         self.failure_reason = ""
         self.run_id = ""
+        self._scan_altitude_m = None
         self.started = False
         self.stopped = False
 
@@ -219,8 +199,18 @@ class GpsMultiViewLocalizeAction(ActionModule):
                 self.failure_reason = f"profile_id mismatch: params={self._params_profile_id} runtime={self.resolver.profile_id}"
                 return ActionResult(failed=True, reason="profile_id_mismatch")
 
-        # Scan targets
-        self.scan_targets = list(self.resolver.scan_waypoints())
+        # Scan targets with optional altitude override
+        altitude_overrides: dict[str, float] | None = None
+        if self._scan_altitude_m is not None:
+            altitude_overrides = {
+                "DROP_SCAN_1": self._scan_altitude_m,
+                "DROP_SCAN_2": self._scan_altitude_m,
+                "DROP_SCAN_3": self._scan_altitude_m,
+                "DROP_SCAN_4": self._scan_altitude_m,
+            }
+        self.scan_targets = list(self.resolver.scan_waypoints(
+            altitude_overrides=altitude_overrides
+        ))
 
         # Projector
         self.projector = GpsTargetProjector(self.camera)
@@ -265,52 +255,7 @@ class GpsMultiViewLocalizeAction(ActionModule):
         if not result.done:
             return ActionResult(actions=result.actions, reason="gps_multi_view_goto", detail=self._detail(extra={"goto": result.detail}))
 
-        # First waypoint yaw align before settle
-        if (self.waypoint_index == 0
-                and self.first_waypoint_yaw_align_enabled
-                and not self.yaw_align_attempted):
-            self.phase = "first_waypoint_yaw_align"
-            self.yaw_align_attempted = True
-            self.yaw_align_done = False
-            self.yaw_align_failed = False
-            self.yaw_align_failure_reason = ""
-            self.yaw_align_detail = {}
-            self.yaw_align_action = YawAlignAction()
-            self.yaw_align_action.start({
-                "yaw_mode": self.first_waypoint_yaw_align_config.get("yaw_mode", "field_heading"),
-                "tolerance_deg": float(self.first_waypoint_yaw_align_config.get("tolerance_deg", 3.0)),
-                "yaw_speed_deg_s": float(self.first_waypoint_yaw_align_config.get("yaw_speed_deg_s", 25.0)),
-                "min_hold_updates": int(self.first_waypoint_yaw_align_config.get("min_hold_updates", 5)),
-                "max_updates": int(self.first_waypoint_yaw_align_config.get("max_updates", 120)),
-                "priority": int(self.first_waypoint_yaw_align_config.get("priority", 4)),
-                "key": "gps_scan_yaw_align",
-            })
-            return self._update_first_waypoint_yaw_align(context)
-        self.phase = "settle"
-        self.settle_count = 0
-        return ActionResult(reason="gps_multi_view_settle", detail=self._detail())
-
-    def _update_first_waypoint_yaw_align(self, context: dict[str, Any]) -> ActionResult:
-        if self.yaw_align_action is None:
-            self.phase = "settle"
-            self.settle_count = 0
-            return ActionResult(reason="gps_multi_view_settle", detail=self._detail())
-        result = self.yaw_align_action.update(context)
-        self.yaw_align_detail = dict(result.detail) if result.detail else {}
-        if result.failed:
-            self.yaw_align_failed = True
-            self.yaw_align_failure_reason = result.reason or "yaw_align_failed"
-            if self.first_waypoint_yaw_align_on_failed == "continue":
-                self.phase = "settle"
-                self.settle_count = 0
-                return ActionResult(reason="gps_multi_view_settle", detail=self._detail())
-            self.phase = "failed"
-            self.failure_reason = "first_waypoint_yaw_align_failed"
-            return ActionResult(failed=True, reason="first_waypoint_yaw_align_failed", detail=self._detail())
-        if not result.done:
-            return ActionResult(actions=result.actions, reason="gps_multi_view_yaw_align",
-                                detail=self._detail(extra={"yaw_align": result.detail}))
-        self.yaw_align_done = True
+        # Goto done → settle directly (yaw is handled by field_heading goto)
         self.phase = "settle"
         self.settle_count = 0
         return ActionResult(reason="gps_multi_view_settle", detail=self._detail())
@@ -324,47 +269,44 @@ class GpsMultiViewLocalizeAction(ActionModule):
         return ActionResult(reason="gps_multi_view_settle", detail=self._detail())
 
     def _update_capture(self, context: dict[str, Any]) -> ActionResult:
-        # ── capture-time: per-detection telemetry priority ───────────
+        # ── capture-time: per-detection telemetry with drone fallback ──
         drone_snapshot = self._drone_snapshot(context)
-        detections, image_width, image_height = self._detections(context)
 
+        detections, img_w, img_h = self._detections(context)
+
+        # ── filter: class + confidence ──
+        target_classes = set(self._params_class_names) if self._params_class_names else None
+        min_conf = self._params_min_confidence
+
+        keep = []
+        for d in detections:
+            cls = str(d.get("class_name", ""))
+            if target_classes is not None and cls not in target_classes:
+                self._inc_reject("class_filtered")
+                continue
+            conf = float(d.get("confidence", 0))
+            if conf < min_conf:
+                self._inc_reject("confidence_filtered")
+                continue
+            keep.append(d)
+
+        # ── GPS projection ──
         new_estimates: list[GpsRawEstimate] = []
+        for det in keep:
+            ex, ey = self._detection_ex_ey(det, img_w, img_h)
+            if ex is None or ey is None:
+                self._inc_reject("missing_ex_ey")
+                continue
 
-        for det in detections:
+            telem = self._resolve_detection_telemetry(det, context, drone_snapshot)
+            if telem is None:
+                self._inc_reject("invalid_detection_capture_telemetry")
+                continue
+
+            class_name = str(det.get("class_name", ""))
+            conf = float(det.get("confidence", 0))
+
             try:
-                # Class filter
-                class_name = str(det.get("class_name") or "")
-                if self._params_class_names and class_name not in self._params_class_names:
-                    self._inc_reject("class_not_allowed")
-                    continue
-
-                # Confidence filter
-                conf = det.get("confidence")
-                if conf is not None:
-                    try:
-                        cf = float(conf)
-                    except (TypeError, ValueError):
-                        self._inc_reject("invalid_confidence")
-                        continue
-                    if cf < self._params_min_confidence:
-                        self._inc_reject("low_confidence")
-                        continue
-
-                # Extract ex/ey
-                ex, ey = self._detection_ex_ey(det, image_width, image_height)
-                if ex is None:
-                    self._inc_reject("missing_ex_ey")
-                    continue
-
-                # ── per-detection telemetry resolution ─────────────
-                # Priority: 1) detection.capture_telemetry  2) detection.source
-                #           3) scene.capture_telemetry      4) drone snapshot
-                telem = self._resolve_detection_telemetry(det, context, drone_snapshot)
-                if telem is None:
-                    self._inc_reject("invalid_detection_capture_telemetry")
-                    continue
-
-                # GPS project
                 est = self.projector.project(
                     drone_lat=telem["drone_lat"],
                     drone_lon=telem["drone_lon"],
@@ -392,9 +334,6 @@ class GpsMultiViewLocalizeAction(ActionModule):
         })
 
         # invalid_capture_telemetry: ONLY when truly no telemetry source exists.
-        # Class/confidence/ex-ey filtering is NOT a telemetry failure.
-        # Check: drone_snapshot is None AND no detection has capture_telemetry/source
-        # AND scene has no capture_telemetry AND we have detections.
         _no_telem_at_all = (drone_snapshot is None)
         if _no_telem_at_all and len(detections) > 0:
             # Double-check: any detection has its own telemetry?
@@ -672,12 +611,6 @@ class GpsMultiViewLocalizeAction(ActionModule):
                 for e in self.raw_estimates
             ]
             detail["captures"] = self.captures
-        detail["first_waypoint_yaw_align_enabled"] = getattr(self, "first_waypoint_yaw_align_enabled", False)
-        detail["first_waypoint_yaw_align_attempted"] = getattr(self, "yaw_align_attempted", False)
-        detail["first_waypoint_yaw_align_done"] = getattr(self, "yaw_align_done", False)
-        detail["first_waypoint_yaw_align_failed"] = getattr(self, "yaw_align_failed", False)
-        detail["first_waypoint_yaw_align_failure_reason"] = getattr(self, "yaw_align_failure_reason", "")
-        detail["first_waypoint_yaw_align_detail"] = dict(getattr(self, "yaw_align_detail", {}))
         if extra:
             detail.update(extra)
         return detail

@@ -464,8 +464,16 @@ class AlignDescendAction(ActionModule):
         if self.finish_altitude_m is not None and self.finish_altitude_m < self.config.min_altitude_m:
             self.finish_altitude_m = self.config.min_altitude_m
         self.finish_policy = str(data.get("finish_policy", "legacy")).strip().lower()
-        if self.finish_policy not in ("legacy", "require_alignment_or_timeout"):
-            raise ValueError("finish_policy must be 'legacy' or 'require_alignment_or_timeout'")
+        if self.finish_policy not in ("legacy", "require_alignment_or_timeout", "latched_center_alignment"):
+            raise ValueError("finish_policy must be 'legacy', 'require_alignment_or_timeout', or 'latched_center_alignment'")
+
+        # ── latched_center_alignment params ──
+        self.finish_alignment_max_ex_cam = float(data.get("finish_alignment_max_ex_cam", 0.20))
+        self.finish_alignment_max_ey_cam = float(data.get("finish_alignment_max_ey_cam", 0.20))
+        self.finish_alignment_hold_updates = int(data.get("finish_alignment_hold_updates", 2))
+        self.final_align_started = False
+        self.finish_alignment_hold_count = 0
+
         self.yaw_hold_rad = None
         self.yaw_hold_source = None
         self.started = True
@@ -576,6 +584,76 @@ class AlignDescendAction(ActionModule):
             self.hold_updates += 1
         elif target_ok:
             self.hold_updates = 0
+
+        # ── latched_center_alignment policy ──────────────────────────
+        if self.finish_policy == "latched_center_alignment" and self.finish_altitude_m is not None:
+            if not self.final_align_started and altitude.value_m <= self.finish_altitude_m:
+                self.final_align_started = True
+                self.finish_alignment_hold_count = 0
+
+            if self.final_align_started:
+                # Continue vx/vy from visual error, but stop descent
+                if isinstance(command, dict):
+                    command["vz_cmd"] = 0.0
+                # Use corrected (payload-offset-compensated) errors for centre check
+                corrected_ex = command_detail.get("corrected_ex_cam")
+                corrected_ey = command_detail.get("corrected_ey_cam")
+                if corrected_ex is not None and corrected_ey is not None:
+                    in_center = (
+                        abs(corrected_ex) <= self.finish_alignment_max_ex_cam
+                        and abs(corrected_ey) <= self.finish_alignment_max_ey_cam
+                    )
+                else:
+                    # Fallback to raw ex/ey if corrected not available
+                    raw_ex = command_detail.get("ex_cam")
+                    raw_ey = command_detail.get("ey_cam")
+                    if raw_ex is not None and raw_ey is not None:
+                        in_center = (
+                            abs(raw_ex) <= self.finish_alignment_max_ex_cam
+                            and abs(raw_ey) <= self.finish_alignment_max_ey_cam
+                        )
+                    else:
+                        in_center = False
+
+                if in_center:
+                    self.finish_alignment_hold_count += 1
+                else:
+                    self.finish_alignment_hold_count = 0
+
+                if self.finish_alignment_hold_count >= self.finish_alignment_hold_updates:
+                    self.done = True
+                    detail = self._detail(
+                        command=self._command_with_yaw_hold(_inactive_command(), data),
+                        command_detail={
+                            **command_detail,
+                            "hold_reason": "latched_center_aligned",
+                        },
+                        height_m=altitude.value_m,
+                        altitude_source=altitude.source,
+                    )
+                    self.last_detail = detail
+                    return ActionResult(
+                        actions=[],
+                        done=True,
+                        reason="latched_center_aligned",
+                        detail=detail,
+                    )
+
+                detail = self._detail(
+                    command=self._command_with_yaw_hold(command, data),
+                    command_detail={
+                        **command_detail,
+                        "hold_reason": "aligning_at_finish_altitude",
+                    },
+                    height_m=altitude.value_m,
+                    altitude_source=altitude.source,
+                )
+                self.last_detail = detail
+                return ActionResult(
+                    actions=[],
+                    reason="aligning_at_finish_altitude",
+                    detail=detail,
+                )
 
         # Strict mode: check finish_altitude BEFORE min_altitude
         if self.finish_policy == "require_alignment_or_timeout" and self.finish_altitude_m is not None and altitude.value_m <= self.finish_altitude_m:
@@ -708,6 +786,8 @@ class AlignDescendAction(ActionModule):
         self.hold_updates = 0
         self.retries = 0
         self.failure_reason = ""
+        self.final_align_started = False
+        self.finish_alignment_hold_count = 0
         self.yaw_hold_rad: float | None = None
         self.yaw_hold_source: str | None = None
         self.latest_context: dict[str, Any] = {}
@@ -968,6 +1048,9 @@ class AlignDescendAction(ActionModule):
             "hold_updates": int(self.hold_updates),
             "retries": int(self.retries),
             "update_count": int(self.update_count),
+            "finish_policy": self.finish_policy,
+            "final_align_started": getattr(self, "final_align_started", False),
+            "finish_alignment_hold_count": getattr(self, "finish_alignment_hold_count", 0),
         }
 
     def _failed_detail(
