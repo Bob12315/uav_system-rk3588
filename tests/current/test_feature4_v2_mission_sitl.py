@@ -234,7 +234,7 @@ def test_v2_mission_orchestrator_happy_timeline_and_blackboard() -> None:
     assert status.done is True
     assert status.reason == "mission_done"
     assert runtime.timeline == [
-        "takeoff", "yaw_align", "gps_multi_view_localize", "select_drop_targets",
+        "takeoff", "gps_multi_view_localize", "select_drop_targets",
         "gps_drop_sequence", "goto_waypoint", "land",
     ]
     assert sorted(orchestrator.blackboard.data) == ["drop_scan", "drop_sequence", "drop_targets"]
@@ -254,7 +254,7 @@ def test_scan_second_failure_jumps_to_return_home() -> None:
     _, status = _run_orchestrator(runtime)
     assert status.done is True
     assert runtime.timeline == [
-        "takeoff", "yaw_align", "gps_multi_view_localize",
+        "takeoff", "gps_multi_view_localize",
         "gps_multi_view_localize", "goto_waypoint", "land",
     ]
 

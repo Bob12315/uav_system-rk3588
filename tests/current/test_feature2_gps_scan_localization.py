@@ -15,6 +15,7 @@ from missions.common.actions.gps_derived_enu_fusion import (
 from missions.common.actions.gps_multi_view_localize import (
     GpsMultiViewLocalizeAction,
 )
+from missions.common.actions.result import ActionResult
 
 
 # =============================================================================
@@ -407,6 +408,32 @@ def test_first_wp_yaw_align_disabled_default() -> None:
     a.update(ctx)
     assert a.first_waypoint_yaw_align_enabled is False
     assert a.phase == "goto"
+
+
+@pytest.mark.parametrize("on_failed", ["contine", ""])
+def test_first_wp_yaw_align_rejects_invalid_failure_policy(on_failed: str) -> None:
+    a = GpsMultiViewLocalizeAction()
+    with pytest.raises(ValueError, match="first_waypoint_yaw_align.on_failed"):
+        _start_with_yaw_align(a, on_failed=on_failed)
+
+
+def test_first_wp_yaw_align_default_goto_done_enters_settle_without_yaw_action() -> None:
+    a = GpsMultiViewLocalizeAction()
+    a.start({"yaw_mode": "hold", "class_names": ["bucket"],
+             "camera": {"fov_x_deg": 51.3, "fov_y_deg": 39.6},
+             "fusion": {"cluster_radius_m": 0.5, "min_cluster_size": 1}})
+    a.update({"field_reference": _applied_fr_dict()})
+
+    class _DoneGoto:
+        def update(self, context):
+            return ActionResult(done=True, reason="waypoint_reached")
+
+    a.goto_action = _DoneGoto()
+    result = a.update({"field_reference": _applied_fr_dict()})
+    assert result.reason == "gps_multi_view_settle"
+    assert a.phase == "settle"
+    assert a.yaw_align_action is None
+    assert not any(item.get("action_type") == "condition_yaw" for item in result.actions)
 
 
 def test_first_wp_yaw_align_goto_generates_no_condition_yaw() -> None:

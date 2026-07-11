@@ -85,6 +85,10 @@ class GpsMultiViewLocalizeAction(ActionModule):
         self.first_waypoint_yaw_align_enabled = bool(fwya.get("enabled", False))
         self.first_waypoint_yaw_align_config = dict(fwya)
         self.first_waypoint_yaw_align_on_failed = str(fwya.get("on_failed", "continue")).strip().lower()
+        if self.first_waypoint_yaw_align_on_failed not in {"continue", "fail"}:
+            raise ValueError(
+                "first_waypoint_yaw_align.on_failed must be 'continue' or 'fail'"
+            )
 
         # Deferred init
         self._initialized = False
