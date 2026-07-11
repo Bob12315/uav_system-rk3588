@@ -83,6 +83,14 @@ class GpsDropSequenceAction(ActionModule):
             else "dual_target_sequential"
         )
 
+        # ── pre-validate merged servo outputs for dual release ──
+        if self.execution_mode == "single_target_dual_release":
+            self.dual_release_servo_outputs = _merge_servo_outputs(
+                self.payloads[0], self.payloads[1]
+            )
+        else:
+            self.dual_release_servo_outputs = []
+
         # ── altitudes ──
         self.approach_altitude_m = float(data.get("approach_altitude_m", 3.0))
         self.finish_altitude_m = float(data.get("finish_altitude_m", 1.3))
@@ -186,6 +194,7 @@ class GpsDropSequenceAction(ActionModule):
         self.phase = "idle"; self.target_index = 0; self.payload_index = 0
         self.released_count = 0; self.sub_action = None
         self.started = False; self.stopped = False
+        self.dual_release_servo_outputs: list[dict[str, int]] = []
 
     # ── phases ───────────────────────────────────────────────────────
 
@@ -334,14 +343,13 @@ class GpsDropSequenceAction(ActionModule):
         if self.sub_action is None:
             t = self.targets[self.target_index]
             if self.execution_mode == "single_target_dual_release":
-                merged = _merge_servo_outputs(self.payloads[0], self.payloads[1])
                 pa = PayloadReleaseAction()
                 pa.start({
-                    "servo_outputs": merged,
+                    "servo_outputs": self.dual_release_servo_outputs,
                     "payload_id": "payload_1_and_2",
                     "target_id": t["target_id"],
                     "release_wait_updates": self.release_wait_updates,
-                    "priority": max(
+                    "priority": min(
                         self.payloads[0].get("priority", 5),
                         self.payloads[1].get("priority", 5),
                     ),
@@ -376,11 +384,11 @@ class GpsDropSequenceAction(ActionModule):
             self.payload_index = 2
             self.sub_action = None
             self.update_count_at_phase = 0
-            self.phase = "done"
+            self.phase = "climb"
+            self._climb_is_terminal = True
             return ActionResult(
                 actions=[_zero_velocity_command()] + (hold or []) + [_clear_continuous_command("release_done")],
-                done=True, reason="gps_drop_sequence_done",
-                detail=self._detail(done=True),
+                reason="gps_drop_climb_start", detail=self._detail(),
             )
 
         # ── dual_target_sequential ──
