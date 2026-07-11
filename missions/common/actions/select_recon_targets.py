@@ -37,6 +37,9 @@ class SelectReconTargetsAction(ActionModule):
         if not isinstance(objects, list):
             raise ValueError("objects must be a list")
         self.target_count = int(data.get("target_count", 5))
+        self.coordinate_mode = str(data.get("coordinate_mode", "local"))
+        if self.coordinate_mode not in ("local", "gps_enu"):
+            raise ValueError("coordinate_mode must be 'local' or 'gps_enu'")
         self.min_seen_count = int(data.get("min_seen_count", 1))
         self.min_raw_count = int(data.get("min_raw_count", 0))
         self.min_weight = float(data.get("min_weight", 0.0))
@@ -144,6 +147,7 @@ class SelectReconTargetsAction(ActionModule):
         self.class_names = set(DEFAULT_CLASSES)
         self.zone_center = (0.0, 0.0)
         self.zone_center_mode = "local"
+        self.coordinate_mode = "local"
         self._effective_zone_center = (0.0, 0.0)
         self.started = False
         self.stopped = False
@@ -158,8 +162,14 @@ class SelectReconTargetsAction(ActionModule):
         if class_name not in self.class_names:
             return None, {**base, "reason": "unknown_class"}
         try:
-            x = float(item["local_x"] if "local_x" in item else item["x"])
-            y = float(item["local_y"] if "local_y" in item else item["y"])
+            if self.coordinate_mode == "gps_enu":
+                x = float(item.get("east_m", item.get("enu_east_m")))
+                y = float(item.get("north_m", item.get("enu_north_m")))
+                lat, lon = float(item["lat"]), float(item["lon"])
+                if not (-90 <= lat <= 90 and -180 <= lon <= 180): raise ValueError
+            else:
+                x = float(item["local_x"] if "local_x" in item else item["x"])
+                y = float(item["local_y"] if "local_y" in item else item["y"])
         except (KeyError, TypeError, ValueError):
             return None, {**base, "reason": "missing_xy"}
         if not math.isfinite(x) or not math.isfinite(y):
@@ -179,7 +189,7 @@ class SelectReconTargetsAction(ActionModule):
     def _detail(self, selected: list[_Candidate], rejected: list[dict[str, Any]], candidate_count: int) -> dict[str, Any]:
         targets = []
         for rank, candidate in enumerate(selected, 1):
-            targets.append({
+            targets.append({**candidate.original,
                 "id": candidate.object_id, "class_name": candidate.class_name,
                 "local_x": candidate.x, "local_y": candidate.y, "x": candidate.x, "y": candidate.y,
                 "seen_count": candidate.seen_count, "raw_count": candidate.raw_count,
@@ -190,7 +200,7 @@ class SelectReconTargetsAction(ActionModule):
         for slot_index in range(self.target_count):
             if slot_index < len(selected):
                 c = selected[slot_index]
-                target_slots.append({
+                target_slots.append({**c.original,
                     "valid": True,
                     "id": c.object_id,
                     "class_name": c.class_name,
@@ -218,7 +228,7 @@ class SelectReconTargetsAction(ActionModule):
                     "rank": slot_index + 1,
                     "status": "missing",
                 })
-        return {"selected_targets": targets, "selected_count": len(targets),
+        return {"selected_targets": targets, "selected_count": len(targets), "coordinate_mode": self.coordinate_mode,
                 "target_slots": target_slots, "target_count": self.target_count,
                 "candidate_count": candidate_count, "allow_fewer": self.allow_fewer,
                 "rejected_objects": rejected}
