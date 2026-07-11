@@ -202,7 +202,7 @@ class ControlledMissionRuntime:
             self.last_result = action.update({}).to_dict()
             return {}
         elif name == "gps_drop_sequence":
-            assert len(self.current_params["targets"]) == 2
+            assert len(self.current_params["targets"]) in (1, 2)
             assert len(self.current_params["payloads"]) == 2
             detail = {"released_count": 2}
         else:
@@ -259,12 +259,13 @@ def test_scan_second_failure_jumps_to_return_home() -> None:
     ]
 
 
-def test_select_insufficient_targets_jumps_to_return_home() -> None:
+def test_select_insufficient_targets_no_longer_jumps_to_return_home() -> None:
+    """With allow_fewer=true, 1 target now runs gps_drop_sequence instead of jumping."""
     runtime = ControlledMissionRuntime(scan_count=1)
     _, status = _run_orchestrator(runtime)
     assert status.done is True
     assert runtime.timeline[-2:] == ["goto_waypoint", "land"]
-    assert "gps_drop_sequence" not in runtime.timeline
+    assert "gps_drop_sequence" in runtime.timeline
 
 
 @pytest.mark.parametrize("reason", ["no_lockable_drop_targets", "target_lost_timeout"])

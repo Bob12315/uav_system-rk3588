@@ -90,7 +90,7 @@
         "objects": "$drop_scan.localized_objects",
         "coordinate_mode": "gps_enu",
         "target_count": 2,
-        "allow_fewer": false,
+        "allow_fewer": true,
         "score_table": {
           "bucket_1": 500,
           "bucket_2": 300,
