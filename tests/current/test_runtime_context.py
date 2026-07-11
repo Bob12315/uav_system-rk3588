@@ -244,7 +244,7 @@ def test_field_position_from_valid_drone():
     assert result["x"] == pytest.approx(10.0)
     assert result["y"] == pytest.approx(0.0)
     assert result["z"] == pytest.approx(-3.0)
-    assert result["source"] == "field_heading"
+    assert result["source"] == "local_field_reference"
     assert result["confirmed"] is True
 
 

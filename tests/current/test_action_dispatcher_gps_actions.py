@@ -202,11 +202,20 @@ class _ImmediateLock:
         )
 
 
+class _ImmediateYawAlign:
+    def start(self, params: dict[str, Any]) -> None:
+        self.params = params
+
+    def update(self, context: dict[str, Any]) -> ActionResult:
+        return ActionResult(done=True, reason="yaw_aligned")
+
+
 def test_real_gps_sequence_align_dispatches_body_ned_without_local_conversion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(sequence_module, "GotoWaypointAction", _ImmediateGoto)
     monkeypatch.setattr(sequence_module, "GpsTargetLockAction", _ImmediateLock)
+    monkeypatch.setattr(sequence_module, "YawAlignAction", _ImmediateYawAlign)
     sequence = GpsDropSequenceAction()
     sequence.start(
         {
@@ -227,10 +236,13 @@ def test_real_gps_sequence_align_dispatches_body_ned_without_local_conversion(
         "control_allowed": True,
         "ex_cam": 0.03,
         "ey_cam": 0.04,
+        "local_altitude_m": 5.0,
+        "local_altitude_valid": True,
         "drone": {"relative_altitude": 5.0, "attitude_valid": True, "yaw": 0.9},
     }
 
-    sequence.update(context)  # goto -> lock
+    sequence.update(context)  # goto -> yaw_align
+    sequence.update(context)  # yaw_align -> lock
     sequence.update(context)  # lock -> align
     align_result = sequence.update(context)
     assert len(align_result.actions) == 1
@@ -279,6 +291,7 @@ def test_gps_sequence_invalid_target_stops_and_clears_with_zero_yaw_rate(
 ) -> None:
     monkeypatch.setattr(sequence_module, "GotoWaypointAction", _ImmediateGoto)
     monkeypatch.setattr(sequence_module, "GpsTargetLockAction", _ImmediateLock)
+    monkeypatch.setattr(sequence_module, "YawAlignAction", _ImmediateYawAlign)
     sequence = GpsDropSequenceAction()
     sequence.start(
         {
@@ -294,7 +307,9 @@ def test_gps_sequence_invalid_target_stops_and_clears_with_zero_yaw_rate(
     )
     context = {"relative_altitude": 5.0, "target_valid": True, "target_locked": True,
                "control_allowed": True, "ex_cam": 0.03, "ey_cam": 0.04,
+               "local_altitude_m": 5.0, "local_altitude_valid": True,
                "drone": {"relative_altitude": 5.0}, "control_allowed": False}
+    sequence.update(context)
     sequence.update(context)
     sequence.update(context)
     waiting = sequence.update(context)
@@ -314,6 +329,7 @@ def test_gps_sequence_each_align_uses_zero_yaw_rate(
 ) -> None:
     monkeypatch.setattr(sequence_module, "GotoWaypointAction", _ImmediateGoto)
     monkeypatch.setattr(sequence_module, "GpsTargetLockAction", _ImmediateLock)
+    monkeypatch.setattr(sequence_module, "YawAlignAction", _ImmediateYawAlign)
     sequence = GpsDropSequenceAction()
     sequence.start(
         {
@@ -329,11 +345,12 @@ def test_gps_sequence_each_align_uses_zero_yaw_rate(
     )
     common = {"target_valid": True, "target_locked": True, "control_allowed": True,
               "ex_cam": 0.0, "ey_cam": 0.0}
-    first_context = {**common, "relative_altitude": 5.0,
+    first_context = {**common, "relative_altitude": 5.0, "local_altitude_m": 5.0, "local_altitude_valid": True,
                      "drone": {"relative_altitude": 5.0, "attitude_valid": True, "yaw": 1.2}}
-    finish_context = {**common, "relative_altitude": 1.3,
+    finish_context = {**common, "relative_altitude": 1.3, "local_altitude_m": 1.3, "local_altitude_valid": True,
                       "drone": {"relative_altitude": 1.3, "attitude_valid": True, "yaw": 1.2}}
 
+    sequence.update(first_context)
     sequence.update(first_context)
     sequence.update(first_context)
     first = sequence.update(first_context)
@@ -341,7 +358,7 @@ def test_gps_sequence_each_align_uses_zero_yaw_rate(
     for _ in range(3):
         sequence.update(finish_context)
 
-    second_context = {**common, "relative_altitude": 5.0,
+    second_context = {**common, "relative_altitude": 5.0, "local_altitude_m": 5.0, "local_altitude_valid": True,
                       "drone": {"relative_altitude": 5.0, "attitude_valid": True, "yaw": 0.7}}
     for _ in range(20):
         result = sequence.update(second_context)
