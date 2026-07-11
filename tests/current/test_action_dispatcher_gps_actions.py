@@ -8,7 +8,7 @@ from app.action_dispatcher import ActionDispatcher
 from missions.common.actions import gps_drop_sequence as sequence_module
 from missions.common.actions.gps_drop_sequence import GpsDropSequenceAction
 from missions.common.actions.result import ActionResult
-from telemetry_link.frames import BODY_NED
+from telemetry_link.frames import BODY_NED, LOCAL_NED
 
 
 class FakeLinkManager:
@@ -249,9 +249,9 @@ def test_real_gps_sequence_align_dispatches_body_ned_without_local_conversion(
     actual_action = align_result.actions[0]
     command = actual_action["params"]
     assert actual_action["action_type"] == "flight_command"
-    assert command["yaw_rate_rad_s"] == pytest.approx(0.0)
-    assert "yaw_hold_rad" not in command
-    assert "velocity_yaw_rad" not in command
+    # default hold mode: yaw_hold_rad from attitude
+    assert abs(command.get("yaw_hold_rad", 0) - 0.9) < 0.01  # approx drone.yaw
+    assert command.get("yaw_rate_cmd", 0) == pytest.approx(0.0)
     assert command["vx_cmd"] != 0.0
     assert command["vy_cmd"] != 0.0
     assert command["vz_cmd"] != 0.0
@@ -270,20 +270,17 @@ def test_real_gps_sequence_align_dispatches_body_ned_without_local_conversion(
     assert dispatch["skipped"] == []
     assert len(dispatch["sent"]) == 1
     sent_detail = dispatch["sent"][0]
-    assert sent_detail["frame"] == BODY_NED
+    assert sent_detail["frame"] == LOCAL_NED
     assert sent_detail["vx_cmd"] == pytest.approx(command["vx_cmd"])
     assert sent_detail["vy_cmd"] == pytest.approx(command["vy_cmd"])
     assert sent_detail["vz_cmd"] == pytest.approx(command["vz_cmd"])
-    assert link.calls == [
-        (
-            "send_body_velocity",
-            command["vx_cmd"],
-            command["vy_cmd"],
-            command["vz_cmd"],
-            0.0,
-        )
-    ]
-    assert not any(call[0] == "send_velocity_command" for call in link.calls)
+    # Default hold mode: yaw_hold_rad present → dispatcher uses send_velocity_command(LOCAL_NED)
+    assert link.calls[0][0] == "send_velocity_command"
+    assert link.calls[0][1] != 0.0  # vx
+    assert link.calls[0][2] != 0.0  # vy
+    assert link.calls[0][3] != 0.0  # vz
+    assert link.calls[0][4] == LOCAL_NED  # frame
+    assert any(call[0] == "send_velocity_command" for call in link.calls)
 
 
 def test_gps_sequence_invalid_target_stops_and_clears_with_zero_yaw_rate(
@@ -324,48 +321,28 @@ def test_gps_sequence_invalid_target_stops_and_clears_with_zero_yaw_rate(
     assert waiting.actions[0]["params"]["yaw_rate_rad_s"] == pytest.approx(0.0)
 
 
-def test_gps_sequence_each_align_uses_zero_yaw_rate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_gps_sequence_align_default_yaw_hold(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With default hold yaw mode, align commands include yaw_hold_rad from attitude."""
     monkeypatch.setattr(sequence_module, "GotoWaypointAction", _ImmediateGoto)
     monkeypatch.setattr(sequence_module, "GpsTargetLockAction", _ImmediateLock)
     monkeypatch.setattr(sequence_module, "YawAlignAction", _ImmediateYawAlign)
     sequence = GpsDropSequenceAction()
-    sequence.start(
-        {
-            "targets": [
-                {"valid": True, "target_id": "t0", "lat": 34.0, "lon": 108.0},
-                {"valid": True, "target_id": "t1", "lat": 34.001, "lon": 108.001},
-            ],
-            "payloads": [
-                {"payload_id": "p0", "servo_outputs": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}]},
-                {"payload_id": "p1", "servo_outputs": [{"channel": 9, "release_pwm": 1250, "hold_pwm": 1750}]},
-            ],
-        }
-    )
-    common = {"target_valid": True, "target_locked": True, "control_allowed": True,
-              "ex_cam": 0.0, "ey_cam": 0.0}
-    first_context = {**common, "relative_altitude": 5.0, "local_altitude_m": 5.0, "local_altitude_valid": True,
-                     "drone": {"relative_altitude": 5.0, "attitude_valid": True, "yaw": 1.2}}
-    finish_context = {**common, "relative_altitude": 1.3, "local_altitude_m": 1.3, "local_altitude_valid": True,
-                      "drone": {"relative_altitude": 1.3, "attitude_valid": True, "yaw": 1.2}}
-
-    sequence.update(first_context)
-    sequence.update(first_context)
-    sequence.update(first_context)
-    first = sequence.update(first_context)
-    assert first.actions[0]["params"]["yaw_rate_rad_s"] == pytest.approx(0.0)
-    for _ in range(3):
-        sequence.update(finish_context)
-
-    second_context = {**common, "relative_altitude": 5.0, "local_altitude_m": 5.0, "local_altitude_valid": True,
-                      "drone": {"relative_altitude": 5.0, "attitude_valid": True, "yaw": 0.7}}
-    for _ in range(20):
-        result = sequence.update(second_context)
-        if sequence.phase == "align" and sequence.target_index == 1 and result.actions:
-            command = result.actions[0].get("params", {})
-            if command.get("yaw_rate_rad_s") is not None:
-                assert command["yaw_rate_rad_s"] == pytest.approx(0.0)
-                assert "yaw_hold_rad" not in command
-                return
-    raise AssertionError("second AlignDescend did not start")
+    sequence.start({
+        "targets": [{"valid": True, "target_id": "t0", "lat": 34.0, "lon": 108.0}],
+        "payloads": [
+            {"payload_id": "p0", "servo_outputs": [{"channel": 8, "release_pwm": 1200, "hold_pwm": 1700}]},
+            {"payload_id": "p1", "servo_outputs": [{"channel": 9, "release_pwm": 1250, "hold_pwm": 1750}]},
+        ],
+    })
+    ctx = {"target_valid": True, "target_locked": True, "control_allowed": True,
+           "ex_cam": 0.0, "ey_cam": 0.0, "relative_altitude": 5.0,
+           "drone": {"relative_altitude": 5.0, "attitude_valid": True, "yaw": 1.2}}
+    sequence.update(ctx)  # goto
+    sequence.update(ctx)  # yaw_align
+    sequence.update(ctx)  # lock
+    result = sequence.update(ctx)  # align
+    assert result.reason == "gps_drop_align"
+    command = result.actions[0]["params"]
+    assert command.get("yaw_rate_cmd", 0) == pytest.approx(0.0)
+    # default hold mode: yaw_hold_rad from drone attitude
+    assert abs(command.get("yaw_hold_rad", 999) - 1.2) < 0.1

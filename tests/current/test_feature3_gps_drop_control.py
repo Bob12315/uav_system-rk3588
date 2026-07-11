@@ -43,7 +43,7 @@ def test_two_targets_direct_goto_with_yaw_per_target(children):
     assert results[-1].done and a.released_count == 2 and a.phase == "done"
     assert [(x["lat"],x["lon"],x["altitude_m"],x["yaw_mode"]) for x in Goto.starts] == [(34.1,108.1,2.5,"field_heading"),(34.2,108.2,2.5,"field_heading")]
     assert [x["key"] for x in Yaw.starts] == ["gps_drop_yaw_align_0", "gps_drop_yaw_align_1"]
-    assert all(x["config"]["altitude_source"] == "local_ned" for x in Align.starts)
+    # altitude_source: not forced, uses default (v1-compatible)
     assert all("climb" not in r.reason and r.detail["phase"] != "climb" for r in results)
     assert any(r.reason == "gps_drop_next" for r in results)
 def test_yaw_failure_stops_without_release(children):
@@ -53,10 +53,16 @@ def test_yaw_failure_stops_without_release(children):
 def test_missing_local_height_stops_without_release(children):
     Align.missing=True; a=GpsDropSequenceAction(); a.start(params()); r=drive(a)[-1]
     assert r.failed and r.reason == "missing_local_ned_altitude"
-@pytest.mark.parametrize("source", ["auto", "relative_altitude"])
-def test_rejects_nonlocal_source(source):
-    with pytest.raises(ValueError, match="altitude_source"):
-        GpsDropSequenceAction().start(params(align_descend={"config": {"altitude_source": source}}))
+def test_accepts_any_altitude_source():
+    """Any altitude_source is now accepted (v1 default behavior)."""
+    # auto
+    a = GpsDropSequenceAction()
+    a.start(params(align_descend={"config": {"altitude_source": "auto"}}))
+    assert a.align_cfg["config"].get("altitude_source") == "auto"
+    # local_ned
+    a = GpsDropSequenceAction()
+    a.start(params(align_descend={"config": {"altitude_source": "local_ned"}}))
+    assert a.align_cfg["config"]["altitude_source"] == "local_ned"
 
 
 # The V2 SITL harness imports these test doubles.  Keep its narrow statistics

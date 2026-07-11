@@ -61,9 +61,9 @@ def test_drop_v2_align_payload_and_velocity_safety_contract() -> None:
     drop = next(step for step in _load(V2_PATH)["steps"] if step["name"] == "gps_drop_sequence")
     params = drop["params"]
     align = params["align_descend"]
-    assert align["finish_policy"] == "require_alignment_or_timeout"
-    assert align["config"]["yaw_control_mode"] == "hold_zero_rate"
-    assert align["config"]["require_target_locked"] is True
+    assert "finish_policy" not in align  # v1 legacy default
+    assert "yaw_control_mode" not in align["config"]  # v1 default hold
+    assert align["config"]["require_target_locked"] is False  # v1 default
     assert align["config"]["payload_offset_enabled"] is True
     assert [payload["payload_forward_m"] for payload in params["payloads"]] == [-0.06, 0.06]
     assert [payload["payload_right_m"] for payload in params["payloads"]] == [0.0, 0.0]

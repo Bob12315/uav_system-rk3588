@@ -118,16 +118,9 @@ class GpsDropSequenceAction(ActionModule):
         self.yaw_align_cfg = dict(data.get("yaw_align") or {})
         self.lock_cfg = dict(data.get("target_lock") or {})
         self.align_cfg = dict(data.get("align_descend") or {})
-        self.align_cfg.setdefault("finish_policy", "require_alignment_or_timeout")
-        if self.align_cfg["finish_policy"] != "require_alignment_or_timeout":
-            raise ValueError(
-                "GPS drop align finish_policy must be 'require_alignment_or_timeout'"
-            )
+        # finish_policy: allow default (legacy), consistent with v1
         align_config = dict(self.align_cfg.get("config") or {})
         align_config.setdefault("min_altitude_m", self.finish_altitude_m)
-        align_config.setdefault("yaw_control_mode", "hold_zero_rate")
-        align_config.setdefault("altitude_source", "local_ned")
-        align_config.setdefault("require_target_locked", True)
         min_altitude_m = float(align_config["min_altitude_m"])
         if not math.isfinite(min_altitude_m) or min_altitude_m <= 0.0:
             raise ValueError("align_descend.config.min_altitude_m must be finite and > 0")
@@ -135,12 +128,7 @@ class GpsDropSequenceAction(ActionModule):
             raise ValueError(
                 "align_descend.config.min_altitude_m must be <= finish_altitude_m"
             )
-        if align_config["yaw_control_mode"] != "hold_zero_rate":
-            raise ValueError("GPS drop align yaw_control_mode must be 'hold_zero_rate'")
-        if align_config["require_target_locked"] is not True:
-            raise ValueError("GPS drop align require_target_locked must be true")
-        if align_config["altitude_source"] != "local_ned":
-            raise ValueError("GPS drop align altitude_source must be 'local_ned'")
+        # yaw_control_mode / altitude_source / require_target_locked: use config defaults (v1-compatible)
         align_config["min_altitude_m"] = min_altitude_m
         self.align_cfg["config"] = align_config
 
@@ -307,13 +295,9 @@ class GpsDropSequenceAction(ActionModule):
             self.update_count_at_phase = 0
 
         if self.update_count_at_phase > self.align_descend_max_updates:
-            self.phase = "release"
-            self.sub_action = None
-            self.update_count_at_phase = 0
-            self._release_reason = "align_timeout_release"
-            return ActionResult(
+            return self._fail(
+                "align_descend_timeout",
                 actions=[_zero_velocity_command(), _clear_continuous_command("timeout")],
-                reason="gps_drop_align_timeout_release", detail=self._detail(),
             )
 
         result = self.sub_action.update(context)
@@ -344,33 +328,21 @@ class GpsDropSequenceAction(ActionModule):
                                 detail=self._detail(extra={"align": result.detail}))
 
         if result.failed:
-            reason = result.reason
-            if reason in ("align_descend_timeout",):
-                self.phase = "release"
-                self.sub_action = None
-                self.update_count_at_phase = 0
-                self._release_reason = "align_timeout_release"
-                return ActionResult(
-                    actions=[_zero_velocity_command(), _clear_continuous_command("child_timeout")],
-                    reason="gps_drop_align_timeout_release", detail=self._detail(),
-                )
-            # Other failures: zero + clear, no release
+            reason = result.reason or "align_failed"
             return self._fail(
-                reason or "align_failed",
+                reason,
                 actions=[_zero_velocity_command(), _clear_continuous_command("align_fail")],
             )
 
         if not result.done:
             return ActionResult(reason="gps_drop_align", detail=self._detail())
 
-        # Align done — only "aligned_at_finish_altitude" allows release
-        if result.reason != "aligned_at_finish_altitude":
-            return self._fail("align_unexpected_done")
+        # Align done — accept any done reason (v1-compatible)
 
         self.phase = "release"
         self.sub_action = None
         self.update_count_at_phase = 0
-        self._release_reason = "aligned_release"
+        self._release_reason = "align_done_release"
         return ActionResult(
             actions=[_zero_velocity_command(), _clear_continuous_command("aligned")],
             reason="gps_drop_release_start", detail=self._detail(),
