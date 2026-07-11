@@ -142,3 +142,10 @@ def test_field_map_drone_x_mirrored():
     assert "x: -fieldX" not in js
     assert "display_x_mirrored" not in js
     assert "x: fieldX" in js
+
+
+def test_index_field_map_asset_no_mirror_cache():
+    """index.html 不再使用 uav-x-mirror 旧缓存版本，使用 unmirror 新版本。"""
+    html = _read_html()
+    assert "uav-x-mirror-20260710-1" not in html
+    assert "uav-x-unmirror-20260711-1" in html
