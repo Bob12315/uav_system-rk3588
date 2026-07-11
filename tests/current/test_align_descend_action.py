@@ -1249,3 +1249,154 @@ def test_allow_unaligned_aligned_still_uses_full_descend() -> None:
     assert detail["aligned"] is True
     assert detail["hold_reason"] == "descending"
     assert command["vz_cmd"] == pytest.approx(0.3)
+
+
+# ── staged descent speed tests ────────────────────────────────────────
+
+def _staged_config(**stages):
+    """Helper to create a config with descent_speed_stages."""
+    params = {
+        "descend_speed_mps": 0.20,
+        "slow_descend_speed_mps": 0.10,
+        "descent_speed_stages": [
+            {"max_altitude_m": 1.80, "max_descend_speed_mps": 0.10},
+            {"max_altitude_m": 1.50, "max_descend_speed_mps": 0.05},
+            {"max_altitude_m": 1.35, "max_descend_speed_mps": 0.02},
+        ],
+        "max_ex_cam": 0.2,
+        "max_ey_cam": 0.2,
+    }
+    for k, v in stages.items():
+        if k == "stages":
+            params["descent_speed_stages"] = v
+        else:
+            params[k] = v
+    return AlignDescendConfig(**params)
+
+
+def test_staged_descent_high_altitude_no_cap() -> None:
+    """At 2.0m, fully aligned → vz=0.20, stage_active=false."""
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.02, ey_cam=0.02),
+        _staged_config(),
+        altitude_m=2.0,
+    )
+    assert detail["aligned"] is True
+    assert command["vz_cmd"] == pytest.approx(0.20)
+    assert detail["descent_speed_stage_active"] is False
+    assert detail["descent_speed_before_stage_mps"] == pytest.approx(0.20)
+    assert detail["descent_speed_after_stage_mps"] == pytest.approx(0.20)
+
+
+def test_staged_descent_first_stage_cap() -> None:
+    """At 1.70m, fully aligned → vz=0.10, active stage=1.80."""
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.02, ey_cam=0.02),
+        _staged_config(),
+        altitude_m=1.70,
+    )
+    assert detail["aligned"] is True
+    assert command["vz_cmd"] == pytest.approx(0.10)
+    assert detail["descent_speed_stage_active"] is True
+    assert detail["descent_speed_stage_max_altitude_m"] == pytest.approx(1.80)
+    assert detail["descent_speed_cap_mps"] == pytest.approx(0.10)
+
+
+def test_staged_descent_second_stage_cap() -> None:
+    """At 1.45m, fully aligned → vz=0.05, active stage=1.50."""
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.02, ey_cam=0.02),
+        _staged_config(),
+        altitude_m=1.45,
+    )
+    assert detail["aligned"] is True
+    assert command["vz_cmd"] == pytest.approx(0.05)
+    assert detail["descent_speed_stage_active"] is True
+    assert detail["descent_speed_stage_max_altitude_m"] == pytest.approx(1.50)
+    assert detail["descent_speed_cap_mps"] == pytest.approx(0.05)
+
+
+def test_staged_descent_final_stage_cap() -> None:
+    """At 1.33m, fully aligned, above finish → vz=0.02, active stage=1.35."""
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.02, ey_cam=0.02),
+        _staged_config(),
+        altitude_m=1.33,
+    )
+    assert detail["aligned"] is True
+    assert command["vz_cmd"] == pytest.approx(0.02)
+    assert detail["descent_speed_stage_active"] is True
+    assert detail["descent_speed_stage_max_altitude_m"] == pytest.approx(1.35)
+    assert detail["descent_speed_cap_mps"] == pytest.approx(0.02)
+
+
+def test_staged_descent_not_aligned_no_cap_when_vz_zero() -> None:
+    """When not aligned (vz=0), stages must not force descent."""
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.5, ey_cam=0.5),
+        _staged_config(),
+        altitude_m=1.45,
+    )
+    assert detail["aligned"] is False
+    assert command["vz_cmd"] == pytest.approx(0.0)
+    assert detail["descent_speed_stage_active"] is False
+
+
+def test_staged_descent_slow_descend_branch() -> None:
+    """Slow-descend vz=0.10 at 1.45m → capped to 0.05."""
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.30, ey_cam=0.30),
+        _staged_config(
+            descend_speed_mps=0.20,
+            slow_descend_speed_mps=0.10,
+            slow_descend_max_ex_cam=0.45,
+            slow_descend_max_ey_cam=0.45,
+        ),
+        altitude_m=1.45,
+    )
+    assert detail["aligned"] is False
+    assert detail["slow_descending"] is True
+    assert command["vz_cmd"] == pytest.approx(0.05)
+    assert detail["descent_speed_stage_active"] is True
+
+
+def test_staged_descent_default_no_stages_unchanged() -> None:
+    """Without descent_speed_stages, existing behavior is unchanged."""
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.02, ey_cam=0.02),
+        AlignDescendConfig(descend_speed_mps=0.20, max_ex_cam=0.2, max_ey_cam=0.2),
+        altitude_m=1.45,
+    )
+    assert detail["aligned"] is True
+    assert command["vz_cmd"] == pytest.approx(0.20)
+    assert detail["descent_speed_stage_active"] is False
+
+
+def test_staged_descent_two_stages_min_speed_wins() -> None:
+    """When two stages apply at same height, the smaller cap wins."""
+    command, detail = compute_align_descend_command(
+        _valid_inputs(ex_cam=0.02, ey_cam=0.02),
+        _staged_config(stages=[
+            {"max_altitude_m": 1.80, "max_descend_speed_mps": 0.10},
+            {"max_altitude_m": 1.60, "max_descend_speed_mps": 0.03},
+        ]),
+        altitude_m=1.50,
+    )
+    assert command["vz_cmd"] == pytest.approx(0.03)
+    assert detail["descent_speed_cap_mps"] == pytest.approx(0.03)
+
+
+@pytest.mark.parametrize("kwargs,error_match", [
+    ({"descent_speed_stages": "not_a_list"}, "must be a list"),
+    ({"descent_speed_stages": [{"max_altitude_m": -1.0, "max_descend_speed_mps": 0.1}]}, "must be finite and > 0"),
+    ({"descent_speed_stages": [{"max_altitude_m": 1.5, "max_descend_speed_mps": -0.1}]}, "must be finite and >= 0"),
+    ({"descent_speed_stages": [{"max_altitude_m": float("nan"), "max_descend_speed_mps": 0.1}]}, "must be finite"),
+    ({"descent_speed_stages": [{"max_altitude_m": 1.5, "max_descend_speed_mps": float("inf")}]}, "must be finite"),
+    ({"descent_speed_stages": [{"max_altitude_m": True, "max_descend_speed_mps": 0.1}]}, "must not be boolean"),
+    ({"descent_speed_stages": [{"max_altitude_m": 1.5, "max_descend_speed_mps": False}]}, "must not be boolean"),
+    ({"descent_speed_stages": [{}]}, "must be finite"),  # missing keys → nan
+    ({"descent_speed_stages": [1, 2, 3]}, "must be a dict"),
+])
+def test_staged_descent_rejects_invalid_config(kwargs, error_match) -> None:
+    with pytest.raises(ValueError, match=error_match):
+        AlignDescendConfig(**kwargs)

@@ -49,6 +49,7 @@ class AlignDescendConfig:
     # Hold preserves legacy yaw behavior; ignore emits pure BODY_NED velocity.
     yaw_control_mode: str = "hold"
     altitude_source: str = "auto"
+    descent_speed_stages: list[dict[str, float]] | None = None
 
     def __post_init__(self) -> None:
         for name in ("kp_vx", "kp_vy"):
@@ -155,6 +156,27 @@ class AlignDescendConfig:
             raise ValueError("yaw_control_mode must be 'hold', 'ignore', or 'hold_zero_rate'")
         if self.altitude_source not in ("auto", "relative_altitude", "local_ned"):
             raise ValueError("altitude_source must be 'auto', 'relative_altitude', or 'local_ned'")
+        # descent speed stages validation
+        if self.descent_speed_stages is not None:
+            if not isinstance(self.descent_speed_stages, list):
+                raise ValueError("descent_speed_stages must be a list or None")
+            for i, stage in enumerate(self.descent_speed_stages):
+                if not isinstance(stage, dict):
+                    raise ValueError(f"descent_speed_stages[{i}] must be a dict")
+                if isinstance(stage.get("max_altitude_m"), bool):
+                    raise ValueError(
+                        f"descent_speed_stages[{i}].max_altitude_m must not be boolean"
+                    )
+                if isinstance(stage.get("max_descend_speed_mps"), bool):
+                    raise ValueError(
+                        f"descent_speed_stages[{i}].max_descend_speed_mps must not be boolean"
+                    )
+                alt = float(stage.get("max_altitude_m", float("nan")))
+                spd = float(stage.get("max_descend_speed_mps", float("nan")))
+                if not math.isfinite(alt) or alt <= 0.0:
+                    raise ValueError(f"descent_speed_stages[{i}].max_altitude_m must be finite and > 0, got {alt}")
+                if not math.isfinite(spd) or spd < 0.0:
+                    raise ValueError(f"descent_speed_stages[{i}].max_descend_speed_mps must be finite and >= 0, got {spd}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +250,49 @@ def _payload_offset_to_error_setpoint(
         "desired_ey_cam": desired_ey,
         "offset_altitude_m": alt,
     }
+
+
+def _apply_descent_speed_stages(
+    vz: float,
+    altitude_m: float | None,
+    config: AlignDescendConfig,
+) -> dict | None:
+    """Apply staged descent speed caps. Only limits vz > 0 (downward).
+    Returns None when no stage is active (vz unchanged)."""
+    if vz <= 0.0 or altitude_m is None:
+        return None
+    stages = config.descent_speed_stages
+    if stages is None:
+        return None
+    try:
+        height = float(altitude_m)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(height):
+        return None
+    cap = float("inf")
+    active_max_altitude_m = None
+    for stage in stages:
+        try:
+            max_alt = float(stage["max_altitude_m"])
+            max_spd = float(stage["max_descend_speed_mps"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if height <= max_alt and max_spd < cap:
+            cap = max_spd
+            active_max_altitude_m = max_alt
+    if not math.isfinite(cap) or cap >= vz:
+        return None
+    capped_vz = min(vz, cap)
+    return {
+        "vz_cmd": capped_vz,
+        "descent_speed_before_stage_mps": vz,
+        "descent_speed_cap_mps": cap,
+        "descent_speed_after_stage_mps": capped_vz,
+        "descent_speed_stage_max_altitude_m": active_max_altitude_m,
+        "descent_speed_stage_active": True,
+    }
+
 
 
 def compute_align_descend_command(
@@ -315,6 +380,10 @@ def compute_align_descend_command(
         vz=vz,
         enabled=enabled,
     )
+    # apply staged descent speed caps (only limits vz > 0)
+    stage_detail = _apply_descent_speed_stages(vz, altitude_m, config)
+    if stage_detail is not None:
+        command["vz_cmd"] = stage_detail["vz_cmd"]
     detail = {
         "enabled": enabled,
         "aligned": aligned,
@@ -337,6 +406,11 @@ def compute_align_descend_command(
         "kp_vy_eff": kp_vy_eff,
         "max_vx_eff": max_vx_eff,
         "max_vy_eff": max_vy_eff,
+        "descent_speed_before_stage_mps": stage_detail["descent_speed_before_stage_mps"] if stage_detail is not None else (vz if vz > 0 else 0.0),
+        "descent_speed_cap_mps": stage_detail["descent_speed_cap_mps"] if stage_detail is not None else None,
+        "descent_speed_after_stage_mps": stage_detail["descent_speed_after_stage_mps"] if stage_detail is not None else vz,
+        "descent_speed_stage_max_altitude_m": stage_detail["descent_speed_stage_max_altitude_m"] if stage_detail is not None else None,
+        "descent_speed_stage_active": stage_detail["descent_speed_stage_active"] if stage_detail is not None else False,
         **offset_detail,
     }
     return command, detail
