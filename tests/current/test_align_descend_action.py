@@ -663,6 +663,55 @@ def test_align_descend_keeps_initial_yaw_hold_across_updates() -> None:
     assert result.detail["command"]["yaw_hold_rad"] == pytest.approx(1.25)
 
 
+def test_entry_attitude_yaw_uses_only_valid_drone_or_vehicle_attitude() -> None:
+    action = AlignDescendAction()
+    action.start({"config": {"yaw_control_mode": "hold_entry_attitude"}})
+
+    waiting = action.update(
+        _active_context(
+            field_heading_yaw_rad=-1.0,
+            arm_heading_yaw_rad=2.0,
+            drone={"relative_altitude": 5.0, "attitude_valid": False, "yaw": 0.3},
+        )
+    )
+    assert waiting.reason == "waiting_for_entry_attitude_yaw"
+    assert waiting.detail["command"]["vx_cmd"] == pytest.approx(0.0)
+    assert waiting.detail["command"]["vy_cmd"] == pytest.approx(0.0)
+    assert waiting.detail["command"]["vz_cmd"] == pytest.approx(0.0)
+
+    captured = action.update(
+        _active_context(
+            field_heading_yaw_rad=-1.0,
+            arm_heading_yaw_rad=2.0,
+            vehicle={"attitude_valid": True, "yaw": 3.13},
+        )
+    )
+    assert captured.detail["command"]["yaw_hold_rad"] == pytest.approx(3.13)
+    assert captured.detail["command"]["yaw_hold_source"] == "entry_attitude"
+
+    frozen = action.update(
+        _active_context(
+            vehicle={"attitude_valid": True, "yaw": -3.13},
+            target_valid=False,
+            vision_valid=False,
+        )
+    )
+    assert frozen.detail["yaw_hold_rad"] == pytest.approx(3.13)
+
+
+def test_entry_attitude_yaw_is_new_for_each_align_instance() -> None:
+    first = AlignDescendAction()
+    first.start({"config": {"yaw_control_mode": "hold_entry_attitude"}})
+    first.update(_active_context(drone={"relative_altitude": 5.0, "attitude_valid": True, "yaw": 1.2}))
+    assert first.yaw_hold_rad == pytest.approx(1.2)
+    first.reset()
+
+    second = AlignDescendAction()
+    second.start({"config": {"yaw_control_mode": "hold_entry_attitude"}})
+    result = second.update(_active_context(drone={"relative_altitude": 5.0, "attitude_valid": True, "yaw": 0.7}))
+    assert result.detail["command"]["yaw_hold_rad"] == pytest.approx(0.7)
+
+
 def test_above_finish_altitude_allows_descent_when_aligned() -> None:
     action = AlignDescendAction()
     action.start({"finish_altitude_m": 3.0, "config": {"min_altitude_m": 2.5}})

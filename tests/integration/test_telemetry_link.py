@@ -541,6 +541,45 @@ def test_command_sender_velocity_with_yaw_holds_yaw_axis() -> None:
     assert call[14] == pytest.approx(1.25)
 
 
+def test_command_sender_body_velocity_with_yaw_uses_velocity_only_body_ned_mask() -> None:
+    sender, client = _sender_with_fake_client()
+    sender._send_velocity(
+        client.master,
+        ControlCommand(
+            command_type=ControlType.VELOCITY,
+            vx=0.2,
+            vy=-0.1,
+            vz=0.15,
+            yaw=3.13,
+            yaw_rate=0.4,
+            frame=8,
+        ),
+    )
+
+    call = client.master.mav.local_position_calls[-1]
+    type_mask = call[4]
+    assert call[3] == 8
+    for bit in (
+        mavutil.mavlink.POSITION_TARGET_TYPEMASK_X_IGNORE,
+        mavutil.mavlink.POSITION_TARGET_TYPEMASK_Y_IGNORE,
+        mavutil.mavlink.POSITION_TARGET_TYPEMASK_Z_IGNORE,
+        mavutil.mavlink.POSITION_TARGET_TYPEMASK_AX_IGNORE,
+        mavutil.mavlink.POSITION_TARGET_TYPEMASK_AY_IGNORE,
+        mavutil.mavlink.POSITION_TARGET_TYPEMASK_AZ_IGNORE,
+        mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE,
+    ):
+        assert type_mask & bit
+    for bit in (
+        mavutil.mavlink.POSITION_TARGET_TYPEMASK_VX_IGNORE,
+        mavutil.mavlink.POSITION_TARGET_TYPEMASK_VY_IGNORE,
+        mavutil.mavlink.POSITION_TARGET_TYPEMASK_VZ_IGNORE,
+        mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE,
+    ):
+        assert not type_mask & bit
+    assert call[8:11] == pytest.approx((0.2, -0.1, 0.15))
+    assert call[14] == pytest.approx(3.13)
+
+
 def test_command_sender_explicit_yaw_rate_keeps_yaw_rate_enabled() -> None:
     sender, client = _sender_with_fake_client()
 

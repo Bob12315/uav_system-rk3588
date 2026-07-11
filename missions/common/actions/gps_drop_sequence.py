@@ -294,6 +294,20 @@ class GpsDropSequenceAction(ActionModule):
         result = self.sub_action.update(context)
         command = result.detail.get("command") if result.detail else None
 
+        # An entry-attitude hold must not inherit a prior latest-only BODY_NED
+        # setpoint while it waits for a valid attitude sample.  An inactive
+        # command alone is skipped by the dispatcher, so explicitly replace
+        # and clear any previously queued continuous command.
+        if result.reason == "waiting_for_entry_attitude_yaw":
+            return ActionResult(
+                actions=[
+                    _zero_velocity_command(),
+                    _clear_continuous_command("waiting_for_entry_attitude_yaw"),
+                ],
+                reason="gps_drop_waiting_for_entry_attitude_yaw",
+                detail=self._detail(extra={"align": result.detail}),
+            )
+
         # Active BODY_NED command forwarding
         if not result.done and not result.failed and isinstance(command, dict):
             action = {
