@@ -17,7 +17,7 @@ def _read_js(path: str):
 def test_index_contains_only_v2_template_buttons():
     html = _read_html()
     assert 'data-action-mission-template="drop_two_targets_v2"' in html
-    assert 'data-action-mission-template="recon_inspect_5_targets_stepwise_v2"' in html
+    assert 'data-action-mission-template="recon_gps_v2"' in html
     assert 'data-action-mission-template="rescue_2026_full_auto_v2"' in html
     assert 'data-action-mission-template="drop_two_targets_v1"' not in html
     assert 'data-action-mission-template="recon_inspect_5_targets_stepwise_v1"' not in html
