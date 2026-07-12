@@ -34,7 +34,12 @@ class GpsTargetSequenceCore:
         sources = [drone] if isinstance(drone, dict) else []
         sources.append(context)
         for source in sources:
-            for name in ("relative_altitude", "relative_altitude_m", "altitude_m"):
+            # Keep da05c0f's exact source order.  In particular,
+            # drone.altitude_m was never an accepted climb gate source.
+            names = ("relative_altitude", "relative_altitude_m") if source is drone else (
+                "relative_altitude", "relative_altitude_m", "altitude_m"
+            )
+            for name in names:
                 try:
                     value = float(source[name])
                     if math.isfinite(value) and value >= 0.0:

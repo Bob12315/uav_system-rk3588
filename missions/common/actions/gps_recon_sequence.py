@@ -13,6 +13,7 @@ from .gps_target_lock import GpsTargetLockAction
 from .gps_target_sequence_core import GpsTargetSequenceCore
 from .goto_waypoint import GotoWaypointAction
 from .result import ActionResult
+from .recon_observation_accumulator import ReconObservationAccumulator
 
 
 class GpsReconSequenceAction(GpsTargetSequenceCore, ActionModule):
@@ -34,7 +35,7 @@ class GpsReconSequenceAction(GpsTargetSequenceCore, ActionModule):
         self.approach_altitude_m=float(data.get("approach_altitude_m", 2.5)); self.finish_altitude_m=float(data.get("finish_altitude_m",1.2))
         self.climb_after_observe_m=float(data.get("climb_after_observe_m", data.get("climb_after_drop_m",2.5))); self.climb_tolerance_z_m=float(data.get("climb_tolerance_z_m",.1))
         self.goto_max_updates=int(data.get("goto_max_updates",200)); self.target_lock_max_updates=int(data.get("target_lock_max_updates",60)); self.align_descend_max_updates=int(data.get("align_descend_max_updates",160)); self.climb_max_updates=int(data.get("climb_max_updates",100))
-        self.goto_cfg=dict(data.get("goto") or {}); self.lock_cfg=dict(data.get("target_lock") or {}); self.align_cfg=dict(data.get("align_descend") or {})
+        self.goto_cfg=dict(data.get("goto") or {}); self.lock_cfg=dict(data.get("target_lock") or {}); self.align_cfg=dict(data.get("align_descend") or {}); self.observation_cfg=dict(data.get("observation") or {})
         self.phase="goto"; self.target_index=0; self.sub_action=None; self.phase_updates=0; self.observations=[]; self.failure_reason=""; self.started=True; self.stopped=False
 
     def update(self, context: dict[str, Any] | None = None) -> ActionResult:
@@ -65,19 +66,16 @@ class GpsReconSequenceAction(GpsTargetSequenceCore, ActionModule):
         return self._transition("align","gps_recon_align_start",r.actions) if r.done else ActionResult(actions=r.actions,reason="gps_recon_lock_searching",detail=self._detail())
     def _update_align(self, ctx):
         if self.sub_action is None:
-            p=copy.deepcopy(self.align_cfg); cfg=dict(p.get("config") or {}); cfg["payload_offset_enabled"]=False; cfg["payload_forward_m"]=0.; cfg["payload_right_m"]=0.; p["config"]=cfg; p["finish_altitude_m"]=self.finish_altitude_m; self.sub_action=AlignDescendAction(); self.sub_action.start(p); self.phase_updates=0
+            p=copy.deepcopy(self.align_cfg); cfg=dict(p.get("config") or {}); cfg["payload_offset_enabled"]=False; cfg["payload_forward_m"]=0.; cfg["payload_right_m"]=0.; p["config"]=cfg; p["finish_altitude_m"]=self.finish_altitude_m; self.sub_action=AlignDescendAction(); self.sub_action.start(p); self.observer=ReconObservationAccumulator(); self.observer.start_target(self.targets[self.target_index], self.target_index, self.observation_cfg); self.phase_updates=0
         if self.phase_updates > self.align_descend_max_updates: return self._fail("align_descend_timeout")
         r=self.sub_action.update(ctx); command=(r.detail or {}).get("command")
         if r.failed: return self._fail(r.reason or "align_failed")
-        self._observe(ctx)
-        if r.done: return self._transition("climb","gps_recon_climb_start",[self.zero_velocity_command(),self.clear_continuous_command("observed")])
+        self.observer.sample((r.detail or {}).get("height_m"), ctx)
+        if r.done:
+            self._last_observation=self.observer.finalize(r.reason, r.detail)
+            return self._transition("climb","gps_recon_climb_start",[self.zero_velocity_command(),self.clear_continuous_command("observed")])
         if isinstance(command,dict) and command.get("valid") and command.get("active"): return ActionResult(actions=[{"action_type":"flight_command","params":dict(command),"once":False,"key":"gps_recon_align","priority":5}],reason="gps_recon_align",detail=self._detail())
         return ActionResult(actions=[self.zero_velocity_command(),self.clear_continuous_command("align_inactive")],reason="gps_recon_align_inactive",detail=self._detail())
-    def _observe(self, ctx):
-        dets=((ctx.get("scene") or {}).get("detections") or []) if isinstance(ctx.get("scene"),dict) else []
-        best=max((d for d in dets if isinstance(d,dict)),key=lambda d:float(d.get("confidence",0) or 0),default=None)
-        if best is not None: self._last_observation={"status":"confirmed","hazard_label":str(best.get("class_name") or best.get("label") or ""),"confidence_max":float(best.get("confidence",0) or 0),"confidence_mean":float(best.get("confidence",0) or 0),"observation_count":1,"reason":"observed"}
-        elif not hasattr(self,"_last_observation"): self._last_observation={"status":"blank","hazard_label":"","confidence_max":0.,"confidence_mean":0.,"observation_count":0,"reason":"no_reliable_hazard"}
     def _update_climb(self, ctx):
         if self.sub_action is None: self.sub_action=self._goto(self.climb_after_observe_m,f"gps_recon_climb_{self.target_index}"); self.phase_updates=0
         altitude=self.current_altitude_m(ctx)
