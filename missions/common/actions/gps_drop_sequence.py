@@ -157,7 +157,8 @@ class GpsDropSequenceAction(GpsTargetSequenceCore, ActionModule):
 
 
     def _sequence_reason(self,event):
-        return {'goto':'gps_drop_goto','lock':'gps_drop_lock_searching','lock_start':'gps_drop_align_start','align':'gps_drop_align','align_inactive':'gps_drop_align_inactive','operation_start':'gps_drop_release_start','climb_start':'gps_drop_climb_start','climb':'gps_drop_climb','next':'gps_drop_next','done':'gps_drop_sequence_done','goto_timeout':'goto_timeout','goto_failed':'goto_failed','lock_failed':'no_lockable_drop_targets','align_timeout':'align_descend_timeout','operation_failed':'payload_release_failed','climb_timeout':'climb_timeout','climb_failed':'climb_goto_failed'}.get(event,event)
+        return {'goto':'gps_drop_goto','lock':'gps_drop_lock_searching','lock_start':'gps_drop_lock_start','align_start':'gps_drop_align_start','align':'gps_drop_align','align_inactive':'gps_drop_align_inactive','operation_start':'gps_drop_release_start','climb_start':'gps_drop_climb_start','climb':'gps_drop_climb','next':'gps_drop_next','done':'gps_drop_sequence_done','goto_timeout':'goto_timeout','goto_failed':'goto_failed','lock_failed':'no_lockable_drop_targets','align_timeout':'align_descend_timeout','operation_failed':'payload_release_failed','climb_timeout':'climb_timeout','climb_failed':'climb_goto_failed'}.get(event,event)
+    def _sequence_namespace(self): return 'gps_drop'
     def _sequence_detail(self,done=False,extra=None):
         d={'phase':'release' if self.phase=='operation' else self.phase,'target_index':self.target_index,'payload_index':self.payload_index,'released_count':self.released_count,'target_count':len(self.targets),'payload_count':len(self.payloads),'release_reason':getattr(self,'_release_reason',''),'execution_mode':self.execution_mode,'dual_release':self.execution_mode=='single_target_dual_release'}; d.update(extra or {});
         if done:d['done']=True
@@ -203,14 +204,12 @@ def _merge_servo_outputs(payload_a: dict[str, Any], payload_b: dict[str, Any]) -
 
 
 def _zero_velocity_command() -> dict[str, Any]:
-    return GpsTargetSequenceCore.zero_velocity_command()
+    return {'action_type':'flight_command','params':{'type':'flight_command','valid':True,'active':True,'enable_body':True,'vx_cmd':0.0,'vy_cmd':0.0,'vz_cmd':0.0,'yaw_rate_cmd':0.0,'yaw_rate_rad_s':0.0,'priority':3},'once':False}
 
 
 def _clear_continuous_command(key_suffix: str = "") -> dict[str, Any]:
     # Preserve the externally asserted drop command key while sharing payload.
-    action = GpsTargetSequenceCore.clear_continuous_command(key_suffix)
-    action["key"] = f"gps_drop_clear_{key_suffix}"
-    return action
+    return {'action_type':'clear_continuous_commands','params':{'clear_pending_local_position':False,'send_stop_first':True},'once':True,'key':f'gps_drop_clear_{key_suffix}'}
 
 
 def _same_gps_position(first: dict[str, Any], second: dict[str, Any]) -> bool:

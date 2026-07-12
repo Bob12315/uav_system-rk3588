@@ -40,6 +40,7 @@ class GpsReconSequenceAction(GpsTargetSequenceCore, ActionModule):
         self.phase="goto"; self.target_index=0; self.sub_action=None; self.update_count_at_phase=0; self.observations=[]; self._failed_reason=""; self.started=True; self.stopped=False; self.phase_history=["goto"]
 
     def _sequence_reason(self,event): return {'goto':'gps_recon_goto','lock':'gps_recon_lock_searching','lock_start':'gps_recon_align_start','align':'gps_recon_align','align_inactive':'gps_recon_align_inactive','operation_start':'gps_recon_operation_start','climb_start':'gps_recon_climb_start','climb':'gps_recon_climb','next':'gps_recon_next','done':'gps_recon_sequence_done','lock_failed':'no_lockable_recon_targets','align_timeout':'align_descend_timeout','climb_failed':'climb_goto_failed'}.get(event,event)
+    def _sequence_namespace(self): return 'gps_recon'
     def _sequence_detail(self,done=False,extra=None):
         d={'phase':self.phase,'target_index':self.target_index,'target_count':len(self.targets),'observations':list(self.observations)}; d.update(extra or {});
         if done:d['done']=True
@@ -51,5 +52,5 @@ class GpsReconSequenceAction(GpsTargetSequenceCore, ActionModule):
     def _on_align_sample(self,target,ctx,result): self.observer.sample((result.detail or {}).get('height_m'),ctx) if hasattr(self,'observer') else None
     def _start_operation(self,target): pass
     def _update_operation_hook(self,ctx):
-        item=self.observer.finalize('align_done',{}); self.observations.append(item); return ActionResult(done=True,reason='gps_recon_operation_done',detail=self._sequence_detail())
+        item=self.observer.finalize(self._last_align_reason,self._last_align_detail); self.observations.append(item); return ActionResult(done=True,reason='gps_recon_operation_done',detail=self._sequence_detail())
     def _operation_complete(self,target): pass
