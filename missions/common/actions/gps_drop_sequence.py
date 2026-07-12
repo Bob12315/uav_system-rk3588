@@ -117,6 +117,7 @@ class GpsDropSequenceAction(GpsTargetSequenceCore, ActionModule):
         self.target_lock_max_updates = int(data.get("target_lock_max_updates", 40))
         self.align_descend_max_updates = int(data.get("align_descend_max_updates", 250))
         self.release_wait_updates = int(data.get("release_wait_updates", 5))
+        self.release_wait_s = self._optional_positive_seconds(data.get("release_wait_s"))
         for name, val in (("goto_max_updates", self.goto_max_updates),
                           ("target_lock_max_updates", self.target_lock_max_updates),
                           ("align_descend_max_updates", self.align_descend_max_updates),
@@ -198,9 +199,19 @@ class GpsDropSequenceAction(GpsTargetSequenceCore, ActionModule):
                           detail=detail)
     def _start_operation(self,target):
         self.sub_action=self._operation_action_factory();
-        if self.execution_mode=='single_target_dual_release': self.sub_action.start({'servo_outputs':self.dual_release_servo_outputs,'payload_id':'payload_1_and_2','target_id':target['target_id'],'release_wait_updates':self.release_wait_updates,'priority':min(self.payloads[0].get('priority',5),self.payloads[1].get('priority',5))})
+        common = {'release_wait_updates': self.release_wait_updates, 'priority': min(self.payloads[0].get('priority',5),self.payloads[1].get('priority',5)) if self.execution_mode=='single_target_dual_release' else self.payloads[self.payload_index].get('priority',5)}
+        if self.release_wait_s is not None: common['release_wait_s'] = self.release_wait_s
+        if self.execution_mode=='single_target_dual_release': self.sub_action.start({'servo_outputs':self.dual_release_servo_outputs,'payload_id':'payload_1_and_2','target_id':target['target_id'], **common})
         else:
-            p=self.payloads[self.payload_index]; self.sub_action.start({'servo_outputs':p['servo_outputs'],'payload_id':p['payload_id'],'target_id':target['target_id'],'release_wait_updates':self.release_wait_updates,'priority':p.get('priority',5)})
+            p=self.payloads[self.payload_index]; self.sub_action.start({'servo_outputs':p['servo_outputs'],'payload_id':p['payload_id'],'target_id':target['target_id'], **common})
+
+    @staticmethod
+    def _optional_positive_seconds(raw: Any) -> float | None:
+        if raw is None: return None
+        try: value = float(raw)
+        except (TypeError, ValueError) as exc: raise ValueError("release_wait_s must be finite and > 0") from exc
+        if not math.isfinite(value) or value <= 0: raise ValueError("release_wait_s must be finite and > 0")
+        return value
     def _update_operation_hook(self,ctx):
         r=self.sub_action.update(ctx)
         if r.failed:return r

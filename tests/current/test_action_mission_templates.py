@@ -621,15 +621,15 @@ def test_recon_scan_v2_retries_then_returns_home() -> None:
     assert policy["target"] == "return_home_gps"
 
 
-def test_recon_sequence_v2_target_lock_camera() -> None:
-    """rescue_2026_full_auto_v2: recon_sequence target_lock has camera 85/69/1/-1."""
+def test_recon_sequence_v2_is_gps_hover_only() -> None:
+    """rescue_2026_full_auto_v2 recon uses only stable GPS goto plus timed observation."""
     data = _template(FULL_V2_TEMPLATE_PATH)
     by_label = {step.get("label", ""): step for step in data["steps"]}
-    camera = by_label["gps_recon_sequence"]["params"]["target_lock"]["camera"]
-    assert camera["fov_x_deg"] == 68.15
-    assert camera["fov_y_deg"] == 54.3
-    assert camera["image_x_sign"] == 1.0
-    assert camera["image_y_sign"] == -1.0
+    params = by_label["gps_recon_sequence"]["params"]
+    assert params["approach_altitude_m"] == 2.5
+    assert params["observe_duration_s"] == 2.0
+    for name in ("target_lock", "align_descend", "finish_altitude_m", "climb_after_drop_m"):
+        assert name not in params
 
 
 def test_select_recon_targets_v2_zone_center_mode_field() -> None:

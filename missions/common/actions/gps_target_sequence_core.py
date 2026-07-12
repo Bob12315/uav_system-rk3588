@@ -27,7 +27,7 @@ class GpsTargetSequenceCore:
         r=self.sub_action.update(ctx)
         if r.failed:return self._fail('goto_failed')
         if not r.done:return ActionResult(actions=r.actions,reason=self._sequence_reason('goto'),detail=self._sequence_detail())
-        return self._transition('lock','lock_start',r.actions)
+        return self._transition_after_goto(t, ctx, r.actions)
     def _update_lock(self,ctx):
         t=self.targets[self.target_index]
         if self.sub_action is None:
@@ -61,7 +61,7 @@ class GpsTargetSequenceCore:
         r=self._update_operation_hook(ctx)
         if r.failed:return self._fail('operation_failed',self._ensure_stop_actions(r.actions or [],'failed'))
         if not r.done:return r
-        self._operation_complete(self.targets[self.target_index]); return self._transition('climb','climb_start',r.actions)
+        self._operation_complete(self.targets[self.target_index]); return self._transition_after_operation(self.targets[self.target_index], ctx, r.actions)
     def _update_climb(self,ctx):
         t=self.targets[self.target_index]
         if self.sub_action is None:
@@ -82,6 +82,10 @@ class GpsTargetSequenceCore:
     def _on_align_failure(self,event,target,ctx,result):
         """Hook called before _fail on align timeout/failure. Return an ActionResult to override the default _fail behaviour; return None to proceed with the normal _fail path."""
         return None
+    def _transition_after_goto(self, target, ctx, actions):
+        return self._transition('lock', 'lock_start', actions)
+    def _transition_after_operation(self, target, ctx, actions):
+        return self._transition('climb', 'climb_start', actions)
     def _current_altitude_m(self,c):
         d=c.get('drone',{});
         for src,names in ((d,('relative_altitude','relative_altitude_m')),(c,('relative_altitude','relative_altitude_m','altitude_m'))):

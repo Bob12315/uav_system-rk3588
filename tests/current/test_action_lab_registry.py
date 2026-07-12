@@ -232,7 +232,7 @@ def test_action_lab_gps_drop_sequence_matches_v2_mission() -> None:
         "climb_after_drop_m", "climb_tolerance_z_m",
         "climb_max_updates", "goto_max_updates",
         "target_lock_max_updates", "align_descend_max_updates",
-        "release_wait_updates",
+        "release_wait_s", "release_wait_updates",
     ):
         assert lab[key] == mission[key], f"Mismatch on '{key}': lab={lab[key]}, mission={mission[key]}"
 

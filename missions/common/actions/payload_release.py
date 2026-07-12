@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+import time
 from typing import Any
 
 from .base import ActionModule
@@ -23,6 +25,7 @@ class PayloadReleaseAction(ActionModule):
         self.release_wait_updates = int(data.get("release_wait_updates", 5))
         if self.release_wait_updates < 1:
             raise ValueError("release_wait_updates must be at least 1")
+        self.release_wait_s = self._optional_positive_seconds(data, "release_wait_s")
         self.priority = int(data.get("priority", 3))
         self.key = str(data.get("key") or f"payload_release_{self.payload_id}_{self.target_id}")
         self.release_time = data.get("release_time")
@@ -49,6 +52,7 @@ class PayloadReleaseAction(ActionModule):
             if self.release_time is None:
                 self.release_time = self._release_time_from_context(context or {})
             self.release_sent = True
+            self.release_started_monotonic_s = time.monotonic()
             self.state = "wait"
             self.wait_updates = 0
             detail = self._detail(context)
@@ -60,11 +64,18 @@ class PayloadReleaseAction(ActionModule):
             )
 
         if self.state == "wait":
-            self.wait_updates += 1
-            if self.wait_updates < self.release_wait_updates:
-                detail = self._detail(context)
-                self.last_detail = detail
-                return ActionResult(actions=[], reason="release_waiting", detail=detail)
+            if self.release_wait_s is not None:
+                elapsed_s = time.monotonic() - self.release_started_monotonic_s
+                if elapsed_s < self.release_wait_s:
+                    detail = self._detail(context)
+                    self.last_detail = detail
+                    return ActionResult(actions=[], reason="release_waiting", detail=detail)
+            else:
+                self.wait_updates += 1
+                if self.wait_updates < self.release_wait_updates:
+                    detail = self._detail(context)
+                    self.last_detail = detail
+                    return ActionResult(actions=[], reason="release_waiting", detail=detail)
 
             self.hold_sent = True
             self.state = "done"
@@ -95,6 +106,8 @@ class PayloadReleaseAction(ActionModule):
         self.target_id: str | int = ""
         self.release_time: float | str | None = None
         self.release_wait_updates = 5
+        self.release_wait_s: float | None = None
+        self.release_started_monotonic_s: float | None = None
         self.priority = 3
         self.key = ""
         self.wait_updates = 0
@@ -136,6 +149,12 @@ class PayloadReleaseAction(ActionModule):
             "hold_sent": bool(self.hold_sent),
             "wait_updates": int(self.wait_updates),
             "release_wait_updates": int(self.release_wait_updates),
+            "wait_mode": "seconds" if self.release_wait_s is not None else "updates",
+            "release_wait_s": self.release_wait_s,
+            "release_elapsed_s": (
+                time.monotonic() - self.release_started_monotonic_s
+                if self.release_started_monotonic_s is not None else None
+            ),
             # Keep refreshing a valid zero-velocity setpoint while the servo
             # release/hold sequence runs. This replaces the preceding
             # align_descend setpoint without adding a separate hover delay.
@@ -266,6 +285,18 @@ class PayloadReleaseAction(ActionModule):
         value = params[name]
         if isinstance(value, str) and value.strip() == "":
             raise ValueError(f"{name} is required")
+        return value
+
+    @staticmethod
+    def _optional_positive_seconds(params: dict[str, Any], name: str) -> float | None:
+        if name not in params or params[name] is None:
+            return None
+        try:
+            value = float(params[name])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be a finite float > 0") from exc
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f"{name} must be a finite float > 0")
         return value
 
     @staticmethod

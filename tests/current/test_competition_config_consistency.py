@@ -48,7 +48,7 @@ def test_action_lab_defaults_match_v2_drop() -> None:
     # Compare top-level numeric/string params
     for key in ("approach_altitude_m", "finish_altitude_m", "climb_after_drop_m",
                 "climb_tolerance_z_m", "climb_max_updates", "goto_max_updates",
-                "target_lock_max_updates", "align_descend_max_updates", "release_wait_updates"):
+                "target_lock_max_updates", "align_descend_max_updates", "release_wait_s", "release_wait_updates"):
         assert lab_defaults[key] == v2_drop["params"][key], f"Mismatch: {key}"
 
     assert lab_defaults["goto"] == v2_drop["params"]["goto"]

@@ -239,6 +239,7 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 ],
                 "payload_id": "payload_1",
                 "target_id": "target_debug",
+                "release_wait_s": 1.0,
                 "release_wait_updates": 5,
                 "priority": 3,
                 "key": "payload_release_ch8_debug",
@@ -579,6 +580,7 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "goto_max_updates": 200,
                 "target_lock_max_updates": 8,
                 "align_descend_max_updates": 35,
+                "release_wait_s": 1.0,
                 "release_wait_updates": 5,
                 "goto": {
                     "tolerance_xy_m": 0.25,

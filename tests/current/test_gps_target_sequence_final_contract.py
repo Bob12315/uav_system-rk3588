@@ -9,8 +9,8 @@ class _Core(GpsTargetSequenceCore):
 
 def test_recon_transition_reason_contract() -> None:
     action = GpsReconSequenceAction()
-    assert action._sequence_reason("lock_start") == "gps_recon_lock_start"
-    assert action._sequence_reason("align_start") == "gps_recon_align_start"
+    assert action._sequence_reason("operation_start") == "gps_recon_observe_start"
+    assert action._sequence_reason("done") == "gps_recon_sequence_done"
 
 
 def test_stop_detection_requires_full_zero_command_and_namespace_clear() -> None:

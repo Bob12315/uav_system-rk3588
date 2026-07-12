@@ -139,18 +139,16 @@ def test_deadband_006_008():
                 assert c["deadband_ey_cam"] == 0.08, f"{path} deadband_ey"
 
 
-def test_recon_alignment_unchanged():
-    """Recon alignment params unchanged (Kp, deadband, scale)."""
+def test_recon_is_gps_hover_without_alignment_params():
+    """Recon v2 intentionally has no visual lock/alignment/descent settings."""
     data = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
     for step in data["steps"]:
         if step["name"] == "gps_recon_sequence":
-            c = step["params"]["align_descend"]["config"]
-            assert c["kp_vx"] == 0.275
-            assert c["kp_vy"] == 0.275
-            assert c["deadband_ex_cam"] == 0.04
-            assert c["deadband_ey_cam"] == 0.04
-            # finish_policy at align_descend level, not config level
-            assert step["params"]["align_descend"].get("finish_policy") == "latched_center_alignment"
+            params = step["params"]
+            assert params["approach_altitude_m"] == 2.5
+            assert params["observe_duration_s"] == 2.0
+            assert "target_lock" not in params
+            assert "align_descend" not in params
 
 
 def test_v1_unchanged():

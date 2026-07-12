@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from missions.common.actions import payload_release as payload_release_module
 from app.action_dispatcher import ActionDispatcher
 from missions.common.actions.payload_release import PayloadReleaseAction
 
@@ -88,6 +89,31 @@ def test_single_servo_output_8_release_action() -> None:
     assert result.actions[0]["once"] is True
     assert result.actions[0]["key"].endswith("_release_servo8")
     assert result.detail["release_time"] == pytest.approx(12.5)
+
+
+def test_release_wait_seconds_uses_monotonic_and_overrides_update_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = [10.0]
+    monkeypatch.setattr(payload_release_module.time, "monotonic", lambda: now[0])
+    action = PayloadReleaseAction()
+    action.start(_params(release_wait_s=1.0, release_wait_updates=1))
+    release = action.update({})
+    assert len(release.actions) == 1
+    assert release.detail["wait_mode"] == "seconds"
+    now[0] = 10.99
+    waiting = action.update({})
+    assert not waiting.done and waiting.actions == []
+    assert waiting.detail["release_elapsed_s"] == pytest.approx(.99)
+    now[0] = 11.0
+    held = action.update({})
+    assert held.done and len(held.actions) == 1
+    assert held.actions[0]["params"]["pwm"] == 1700
+    assert action.update({}).actions == []
+
+
+@pytest.mark.parametrize("release_wait_s", [0, -1, float("inf"), "not-a-number"])
+def test_release_wait_seconds_must_be_positive_and_finite(release_wait_s) -> None:
+    with pytest.raises(ValueError, match="release_wait_s"):
+        PayloadReleaseAction().start(_params(release_wait_s=release_wait_s))
 
 
 def test_single_servo_output_9_release_action() -> None:

@@ -142,6 +142,7 @@
         "goto_max_updates": 200,
         "target_lock_max_updates": 8,
         "align_descend_max_updates": 35,
+        "release_wait_s": 1.0,
         "release_wait_updates": 5,
         "goto": {
           "tolerance_xy_m": 0.25,

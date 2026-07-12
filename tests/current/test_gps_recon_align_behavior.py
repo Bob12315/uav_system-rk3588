@@ -1,118 +1,61 @@
-"""Tests verifying GpsReconSequenceAction is unaffected by drop-only changes."""
+"""GPS recon observes from a continuously refreshed GLOBAL hover setpoint."""
 from __future__ import annotations
 
-import pytest
 from missions.common.actions import gps_recon_sequence as mod
 from missions.common.actions.gps_recon_sequence import GpsReconSequenceAction
 from missions.common.actions.result import ActionResult
 
 
-class Recorder:
-    """Record all sub-action starts and updates."""
+class ScriptedGoto:
     starts: list[dict] = []
-    @classmethod
-    def reset(cls): cls.starts = []
+    def start(self, params): self.params = params; type(self).starts.append(params)
+    def update(self, context):
+        # Arrival goto completes once; hover has an intentionally unreachable hold count.
+        if self.params["key"].startswith("gps_recon_goto"):
+            return ActionResult(done=True)
+        return ActionResult(actions=[{"action_type": "global_goto", "params": {"lat": self.params["lat"], "lon": self.params["lon"], "alt": self.params["altitude_m"]}}])
 
 
-class ReconScriptedGoto(Recorder):
-    def start(self, p):
-        self.p = p
-        type(self).starts.append(p)
-    def update(self, c):
-        return ActionResult(done=True)
+def _params(targets):
+    return {"targets": targets, "approach_altitude_m": 2.5, "observe_duration_s": 2.0, "goto_max_updates": 20,
+            "goto": {"tolerance_xy_m": .25, "tolerance_z_m": .15, "min_hold_updates": 3, "require_velocity_valid": True,
+                     "max_horizontal_speed_mps": .15, "max_vertical_speed_mps": .1},
+            "observation": {"record_start_altitude_m": 3., "finish_altitude_m": 2., "min_seen_frames": 1}}
 
 
-class ReconScriptedLock(Recorder):
-    def start(self, p):
-        type(self).starts.append(p)
-    def update(self, c):
-        return ActionResult(done=True)
-
-
-class ReconScriptedAlign(Recorder):
-    """Returns a programmed result (done/failed)."""
-    _done: bool = True
-    _reason: str = "aligned_at_finish_altitude"
-
-    @classmethod
-    def reset(cls, done: bool = True, reason: str = "aligned_at_finish_altitude"):
-        cls.starts = []
-        cls._done = done
-        cls._reason = reason
-
-    def start(self, p):
-        self.p = p
-        type(self).starts.append(p)
-
-    def update(self, c):
-        if type(self)._done:
-            return ActionResult(done=True, reason=type(self)._reason, detail={"command": {}})
-        else:
-            return ActionResult(failed=True, reason=type(self)._reason, detail={"command": {}})
-
-
-@pytest.fixture
-def recon_children(monkeypatch: pytest.MonkeyPatch):
-    ReconScriptedGoto.reset()
-    ReconScriptedLock.reset()
-    ReconScriptedAlign.reset(done=True)
-    monkeypatch.setattr(mod, "GotoWaypointAction", ReconScriptedGoto)
-    monkeypatch.setattr(mod, "GpsTargetLockAction", ReconScriptedLock)
-    monkeypatch.setattr(mod, "AlignDescendAction", ReconScriptedAlign)
-
-
-TARGETS = [
-    {"valid": True, "lat": 34.1, "lon": 108.1, "class_name": "bucket", "target_id": "r1"},
-    {"valid": True, "lat": 34.2, "lon": 108.2, "class_name": "bucket", "target_id": "r2"},
-]
-
-
-def _params(**more):
-    p = {
-        "targets": TARGETS,
-        "approach_altitude_m": 2.0,
-        "finish_altitude_m": 2.2,
-        "climb_after_drop_m": 2.0,
-        "climb_tolerance_z_m": 0.2,
-        "climb_max_updates": 10,
-        "goto_max_updates": 3,
-        "target_lock_max_updates": 3,
-        "align_descend_max_updates": 3,
-    }
-    p.update(more)
-    return p
-
-
-def _drive_recon(action, limit=40):
-    results = []
-    alt = 5.0
-    for _ in range(limit):
-        r = action.update({"drone": {"relative_altitude": alt, "lat": 34.1, "lon": 108.1, "yaw": 1.5}})
-        results.append(r)
-        if r.done or r.failed:
-            return results
-        if r.detail.get("phase") == "climb":
-            alt = 3.0
-    raise AssertionError("recon sequence did not terminate")
-
-
-def test_recon_align_failure_still_fails(recon_children):
-    """Recon sequence: align failure still fails (does NOT force release)."""
-    ReconScriptedAlign.reset(done=False, reason="target_lost_timeout")
+def test_recon_goto_then_two_second_global_hover(monkeypatch):
+    now = [100.0]
+    monkeypatch.setattr(mod, "GotoWaypointAction", ScriptedGoto)
+    monkeypatch.setattr(mod.time, "monotonic", lambda: now[0])
     action = GpsReconSequenceAction()
-    action.start(_params(align_descend_max_updates=10))
-    results = _drive_recon(action, limit=80)
+    action.start(_params([{"lat": 34.1, "lon": 108.1, "target_id": "r1"}]))
+    action.update({})  # goto -> operation
+    started = action.update({"drone": {"relative_altitude": 2.5}})
+    assert started.reason == "gps_recon_observing"
+    assert started.actions[0]["action_type"] == "global_goto"
+    assert started.detail["hover_target_altitude_m"] == 2.5
+    now[0] = 101.99
+    assert not action.update({"drone": {"relative_altitude": 2.5}}).done
+    now[0] = 102.0
+    done = action.update({"drone": {"relative_altitude": 2.5}})
+    assert done.done and len(action.observations) == 1
+    assert any(item["action_type"] == "clear_continuous_commands" for item in done.actions)
+    assert action.phase_history == ["goto", "operation"]
 
-    assert results[-1].failed, f"recon should fail on align failure, got {results[-1].reason}"
-    assert action.phase == "failed"
 
-
-def test_recon_align_timeout_still_fails(recon_children):
-    """Recon sequence: outer align timeout still fails (does NOT force release)."""
-    ReconScriptedAlign.reset(done=False, reason="align_descend_timeout")
+def test_recon_visits_only_valid_targets_and_empty_targets_succeed(monkeypatch):
+    now = [0.0]
+    monkeypatch.setattr(mod, "GotoWaypointAction", ScriptedGoto)
+    monkeypatch.setattr(mod.time, "monotonic", lambda: now[0])
+    empty = GpsReconSequenceAction(); empty.start(_params([]))
+    assert empty.update({}).done and empty.observations == []
     action = GpsReconSequenceAction()
-    action.start(_params(align_descend_max_updates=10))
-    results = _drive_recon(action, limit=80)
-
-    assert results[-1].failed, f"recon should fail on align timeout, got {results[-1].reason}"
-    assert action.phase == "failed"
+    targets = [{"lat": 34 + i / 100, "lon": 108 + i / 100, "target_id": str(i)} for i in range(5)]
+    action.start(_params(targets))
+    for _ in range(5):
+        action.update({})
+        action.update({"drone": {"relative_altitude": 2.5}})
+        now[0] += 2.0
+        result = action.update({"drone": {"relative_altitude": 2.5}})
+    assert result.done and len(action.observations) == 5
+    assert action.phase_history == ["goto", "operation"] * 5

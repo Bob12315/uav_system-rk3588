@@ -50,14 +50,9 @@
       "save_as": "recon_sequence",
       "params": {
         "targets": "$recon_targets.selected_targets",
-        "approach_altitude_m": 2.0,
-        "finish_altitude_m": 2.2,
-        "climb_after_drop_m": 2.0,
-        "climb_tolerance_z_m": 0.2,
-        "climb_max_updates": 100,
+        "approach_altitude_m": 2.5,
+        "observe_duration_s": 2.0,
         "goto_max_updates": 200,
-        "target_lock_max_updates": 60,
-        "align_descend_max_updates": 160,
         "goto": {
           "tolerance_xy_m": 0.25,
           "tolerance_z_m": 0.15,
@@ -66,32 +61,9 @@
           "max_horizontal_speed_mps": 0.15,
           "max_vertical_speed_mps": 0.1
         },
-        "target_lock": {
-          "max_match_distance_m": 1.2,
-          "min_confidence": 0.35,
-          "detection_source": "scene"
-        },
-        "align_descend": {
-          "expected_dt_s": 0.1,
-          "lost_timeout_updates": 10,
-          "max_updates": 160,
-          "config": {
-            "kp_vx": 0.275,
-            "kp_vy": 0.275,
-            "max_vx_mps": 0.2,
-            "max_vy_mps": 0.2,
-            "payload_offset_enabled": false,
-            "min_altitude_m": 1.7
-          },
-          "finish_policy": "latched_center_alignment",
-          "finish_alignment_max_ex_cam": 0.2,
-          "finish_alignment_max_ey_cam": 0.2,
-          "finish_alignment_hold_updates": 1,
-          "finish_altitude_m": 2.2
-        },
         "observation": {
-          "record_start_altitude_m": 2.3,
-          "finish_altitude_m": 1.7,
+          "record_start_altitude_m": 3.0,
+          "finish_altitude_m": 2.0,
           "sign_class_names": [
             "danger_1",
             "danger_2",
