@@ -85,7 +85,7 @@ class GpsTargetSequenceCore:
         return None
     def _stop_actions(self,key): return [self._zero_velocity_command(),self._clear_continuous_command(key)]
     def _ensure_stop_actions(self,actions,key):
-        items=list(actions); has_zero=any(a.get('action_type')=='flight_command' and all(a.get('params',{}).get(k)==0.0 for k in ('vx_cmd','vy_cmd','vz_cmd')) for a in items if isinstance(a,dict)); has_clear=any(isinstance(a,dict) and a.get('action_type')=='clear_continuous_commands' for a in items)
+        items=list(actions); has_zero=any(isinstance(a,dict) and a.get('action_type')=='flight_command' and all(a.get('params',{}).get(k) == v for k,v in {'valid':True,'active':True,'enable_body':True,'vx_cmd':0.0,'vy_cmd':0.0,'vz_cmd':0.0,'yaw_rate_cmd':0.0,'yaw_rate_rad_s':0.0}.items()) for a in items); has_clear=any(isinstance(a,dict) and a.get('action_type')=='clear_continuous_commands' and a.get('params',{}).get('send_stop_first') is True and str(a.get('key','')).startswith(f'{self._sequence_namespace()}_clear_') for a in items)
         if not has_zero: items.insert(0,self._zero_velocity_command())
         if not has_clear: items.append(self._clear_continuous_command(key))
         return items
