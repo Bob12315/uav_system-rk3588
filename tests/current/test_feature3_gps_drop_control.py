@@ -169,12 +169,14 @@ def test_v2_align_config_matches_v1_except_payload_offset() -> None:
     assert v2_cfg["unaligned_descend_speed_mps"] == 0.08
 
     # Competition-intentionally-divergent keys (v1->v2 changed values)
+    # height_scale_points and deadband are also auto-excluded from the dict comparison
     v2_changed_keys = {
         "max_ex_cam": 0.22,
         "max_ey_cam": 0.22,
         "slow_descend_max_ex_cam": 0.55,
         "slow_descend_max_ey_cam": 0.55,
     }
+    v2_changed_list_keys = {"height_scale_points", "deadband_ex_cam", "deadband_ey_cam"}
     for k, expected in v2_changed_keys.items():
         assert v2_cfg[k] == expected, f"v2 {k} should be {expected}"
 
@@ -187,20 +189,20 @@ def test_v2_align_config_matches_v1_except_payload_offset() -> None:
     v2_ref.pop("payload_right_m", None)
 
     for k in v1_ref:
-        if k in v2_only_keys or k in v2_changed_keys:
+        if k in v2_only_keys or k in v2_changed_keys or k in v2_changed_list_keys:
             continue
         assert v2_ref.get(k) == v1_ref[k], f"Mismatch on key '{k}': v1={v1_ref[k]}, v2={v2_ref.get(k)}"
 
     for k in v2_ref:
-        if k in v2_only_keys or k in v2_changed_keys:
+        if k in v2_only_keys or k in v2_changed_keys or k in v2_changed_list_keys:
             continue
         assert k in v1_ref, f"Extra key in v2: '{k}'"
 
     assert v2_align["expected_dt_s"] == v1_aligns[0]["params"]["expected_dt_s"]
-    assert v2_align["max_updates"] == 200  # competition override
+    assert v2_align["max_updates"] == 35  # competition override
     assert v2_align["hold_updates_required"] == v1_aligns[0]["params"]["hold_updates_required"]
     assert v2_drop["params"]["finish_altitude_m"] == v1_aligns[0]["params"]["finish_altitude_m"]
-    assert v2_drop["params"]["align_descend_max_updates"] == 200  # competition override
+    assert v2_drop["params"]["align_descend_max_updates"] == 35  # competition override
 
 
 def test_v2_base_and_sitl_identical() -> None:

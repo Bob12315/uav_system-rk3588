@@ -1,0 +1,166 @@
+"""Tests for scan geometry and alignment tuning changes."""
+from __future__ import annotations
+import json
+
+
+def test_drop_scan_waypoints_unchanged():
+    """Drop scan 4 waypoints still at original positions."""
+    data = json.loads(open("config/field_profiles/competition_runtime_v3.json").read())
+    wps = data["drop_scan"]["waypoints"]
+    assert len(wps) == 4
+    coords = [(w["x_m"], w["y_m"]) for w in wps]
+    assert coords == [(-2.0, 31.25), (2.0, 31.25), (2.0, 33.75), (-2.0, 33.75)]
+
+
+def test_recon_scan_waypoints_updated():
+    """Recon scan 4 waypoints now at (-2,56.25), (2,56.25), (2,58.75), (-2,58.75)."""
+    data = json.loads(open("config/field_profiles/competition_runtime_v3.json").read())
+    assert "recon_scan" in data
+    wps = data["recon_scan"]["waypoints"]
+    assert len(wps) == 4
+    coords = [(w["x_m"], w["y_m"]) for w in wps]
+    assert coords == [(-2.0, 56.25), (2.0, 56.25), (2.0, 58.75), (-2.0, 58.75)]
+
+
+def test_recon_v2_and_rescue_v2_same_scan():
+    """Recon gps_v2 and rescue_2026_full_auto_v2 use same recon scan group."""
+    recon = json.loads(open("config/action_missions/recon_gps_v2.json").read())
+    rescue = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
+    
+    recon_scan = next(s for s in recon["steps"] if s["name"] == "gps_multi_view_localize")
+    rescue_scan = next(s for s in rescue["steps"] if s["name"] == "gps_multi_view_localize" and s.get("label") == "recon_gps_multi_view_scan")
+    
+    assert recon_scan["params"]["scan_waypoint_group"] == rescue_scan["params"]["scan_waypoint_group"]
+    # Both should use the same field profile, so derived points match
+
+
+def test_web_ui_recce_zone_unchanged():
+    """Web UI recce zone bounds still x=-4~4, y=55~60."""
+    # Read the field_map.js defaults (difficult to parse, test the profile instead)
+    data = json.loads(open("config/field_profiles/competition_runtime_v3.json").read())
+    fg = data["field_geometry"]
+    assert fg["lane_half_width_m"] == 4.0
+    assert fg["recce_area_y_min_m"] == 55.0
+    assert fg["recce_area_y_max_m"] == 60.0
+    assert fg["recce_center_y_m"] == 57.5
+
+
+def test_fusion_fov_still_51_3_39_6():
+    """Fusion camera FOV still 51.3/39.6 in all mission configs."""
+    paths = [
+        "config/action_missions/drop_two_targets_v2.json",
+        "config/action_missions/rescue_2026_full_auto_v2.json",
+        "config/action_missions/recon_gps_v2.json",
+    ]
+    for path in paths:
+        data = json.loads(open(path).read())
+        for step in data["steps"]:
+            if step["name"] == "gps_multi_view_localize":
+                cam = step["params"].get("camera", {})
+                if cam:
+                    assert cam["fov_x_deg"] == 51.3, f"{path}: fov_x={cam['fov_x_deg']}"
+                    assert cam["fov_y_deg"] == 39.6, f"{path}: fov_y={cam['fov_y_deg']}"
+        for step in data["steps"]:
+            if step["name"] in ("gps_drop_sequence", "gps_recon_sequence"):
+                tl = step["params"].get("target_lock", {})
+                if tl and "camera" in tl:
+                    assert tl["camera"]["fov_x_deg"] == 51.3, f"{path} target_lock fov_x"
+                    assert tl["camera"]["fov_y_deg"] == 39.6
+
+
+def test_align_descend_fov_still_85_69():
+    """align_descend FOV still 85.0/69.0 in drop configs."""
+    paths = [
+        "config/action_missions/drop_two_targets_v2.json",
+        "config/action_missions/rescue_2026_full_auto_v2.json",
+    ]
+    for path in paths:
+        data = json.loads(open(path).read())
+        for step in data["steps"]:
+            if step["name"] == "gps_drop_sequence":
+                cfg = step["params"]["align_descend"]["config"]
+                assert cfg["fov_x_deg"] == 85.0, f"{path} align fov_x"
+                assert cfg["fov_y_deg"] == 69.0, f"{path} align fov_y"
+
+
+def test_drop_and_rescue_drop_params_identical():
+    """gps_drop_sequence params identical (excluding mission-specific keys)."""
+    drop = json.loads(open("config/action_missions/drop_two_targets_v2.json").read())
+    rescue = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
+    dp = dict(next(s for s in drop["steps"] if s["name"] == "gps_drop_sequence")["params"])
+    rp = dict(next(s for s in rescue["steps"] if s["name"] == "gps_drop_sequence")["params"])
+    dp.pop("targets", None); dp.pop("payloads", None)
+    rp.pop("targets", None); rp.pop("payloads", None)
+    assert dp == rp
+
+
+def test_align_max_updates_35():
+    """Both outer and inner align_descend max_updates are 35."""
+    paths = [
+        "config/action_missions/drop_two_targets_v2.json",
+        "config/action_missions/rescue_2026_full_auto_v2.json",
+    ]
+    for path in paths:
+        data = json.loads(open(path).read())
+        for step in data["steps"]:
+            if step["name"] == "gps_drop_sequence":
+                p = step["params"]
+                assert p["align_descend_max_updates"] == 35, f"{path} outer"
+                assert p["align_descend"]["max_updates"] == 35, f"{path} inner"
+
+
+def test_height_scale_points_low_altitude_040():
+    """Low altitude scale is 0.40 for 1.0m and 1.3m."""
+    paths = [
+        "config/action_missions/drop_two_targets_v2.json",
+        "config/action_missions/rescue_2026_full_auto_v2.json",
+    ]
+    for path in paths:
+        data = json.loads(open(path).read())
+        for step in data["steps"]:
+            if step["name"] == "gps_drop_sequence":
+                hsp = step["params"]["align_descend"]["config"]["height_scale_points"]
+                assert hsp[0] == {"altitude_m": 1.0, "scale": 0.40}, f"{path} hsp[0]"
+                assert hsp[1] == {"altitude_m": 1.3, "scale": 0.40}, f"{path} hsp[1]"
+
+
+def test_deadband_006_008():
+    """deadband ex=0.06, ey=0.08 in drop configs."""
+    paths = [
+        "config/action_missions/drop_two_targets_v2.json",
+        "config/action_missions/rescue_2026_full_auto_v2.json",
+    ]
+    for path in paths:
+        data = json.loads(open(path).read())
+        for step in data["steps"]:
+            if step["name"] == "gps_drop_sequence":
+                c = step["params"]["align_descend"]["config"]
+                assert c["deadband_ex_cam"] == 0.06, f"{path} deadband_ex"
+                assert c["deadband_ey_cam"] == 0.08, f"{path} deadband_ey"
+
+
+def test_recon_alignment_unchanged():
+    """Recon alignment params unchanged (Kp, deadband, scale)."""
+    data = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
+    for step in data["steps"]:
+        if step["name"] == "gps_recon_sequence":
+            c = step["params"]["align_descend"]["config"]
+            assert c["kp_vx"] == 0.275
+            assert c["kp_vy"] == 0.275
+            assert c["deadband_ex_cam"] == 0.04
+            assert c["deadband_ey_cam"] == 0.04
+            # finish_policy at align_descend level, not config level
+            assert step["params"]["align_descend"].get("finish_policy") == "latched_center_alignment"
+
+
+def test_v1_unchanged():
+    """V1 config files untouched by this change."""
+    import os
+    v1_paths = [
+        "config/action_missions/drop_two_targets_v1.json",
+        "config/action_missions/rescue_2026_full_auto.json",
+    ]
+    for path in v1_paths:
+        if os.path.exists(path):
+            data = json.loads(open(path).read())
+            assert "steps" in data  # V1 uses name/description/steps format

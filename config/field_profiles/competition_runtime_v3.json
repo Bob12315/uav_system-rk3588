@@ -46,6 +46,30 @@
       }
     ]
   },
+  "recon_scan": {
+    "waypoints": [
+      {
+        "x_m": -2.0,
+        "y_m": 56.25,
+        "altitude_m": 5.0
+      },
+      {
+        "x_m": 2.0,
+        "y_m": 56.25,
+        "altitude_m": 5.0
+      },
+      {
+        "x_m": 2.0,
+        "y_m": 58.75,
+        "altitude_m": 5.0
+      },
+      {
+        "x_m": -2.0,
+        "y_m": 58.75,
+        "altitude_m": 5.0
+      }
+    ]
+  },
   "gps_quality": {
     "min_fix_type": 3,
     "min_satellites": 10,

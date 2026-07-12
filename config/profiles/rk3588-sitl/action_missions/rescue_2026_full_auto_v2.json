@@ -142,7 +142,7 @@
         "climb_max_updates": 100,
         "goto_max_updates": 200,
         "target_lock_max_updates": 8,
-        "align_descend_max_updates": 200,
+        "align_descend_max_updates": 35,
         "release_wait_updates": 5,
         "goto": {
           "tolerance_xy_m": 0.25,
@@ -175,7 +175,7 @@
           "lost_timeout_updates": 10,
           "hold_updates_required": 1,
           "max_retries": 1,
-          "max_updates": 200,
+          "max_updates": 35,
           "finish_policy": "latched_center_alignment",
           "finish_alignment_max_ex_cam": 0.35,
           "finish_alignment_max_ey_cam": 0.35,
@@ -190,11 +190,11 @@
             "height_scale_points": [
               {
                 "altitude_m": 1.0,
-                "scale": 0.3
+                "scale": 0.4
               },
               {
                 "altitude_m": 1.3,
-                "scale": 0.25
+                "scale": 0.4
               },
               {
                 "altitude_m": 2.4,
@@ -216,8 +216,8 @@
             "max_ey_cam": 0.22,
             "slow_descend_max_ex_cam": 0.55,
             "slow_descend_max_ey_cam": 0.55,
-            "deadband_ex_cam": 0.04,
-            "deadband_ey_cam": 0.04,
+            "deadband_ex_cam": 0.06,
+            "deadband_ey_cam": 0.08,
             "min_altitude_m": 1.2,
             "require_target_locked": false,
             "payload_offset_enabled": true,

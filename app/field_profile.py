@@ -167,6 +167,7 @@ class FieldProfile:
     centerline_points: List[CenterlinePoint] = field(default_factory=list)
     forward_marker: Optional[ForwardMarker] = None
     drop_scan: Optional[DropScanConfig] = None
+    recon_scan: Optional[DropScanConfig] = None
     gps_quality: GpsQualityThresholds = field(default_factory=GpsQualityThresholds)
     field_geometry: FieldGeometry = field(default_factory=FieldGeometry)
     binding_policy: BindingPolicy = field(default_factory=BindingPolicy)
@@ -384,7 +385,7 @@ def _parse_field_profile_v2(
 _V3_TOP_KEYS = {
     "schema_version", "profile_id", "name", "created_at",
     "coordinate_convention", "forward_marker", "field_geometry",
-    "drop_scan", "gps_quality", "runtime_origin_sampling",
+    "drop_scan", "recon_scan", "gps_quality", "runtime_origin_sampling",
     "binding_policy",
 }
 
@@ -414,6 +415,9 @@ def _parse_field_profile_v3(
     # -- drop_scan -------------------------------------------------------
     drop_scan = _parse_drop_scan_v3(data, field_geometry)
 
+    # -- recon_scan (optional, same format as drop_scan) --------------
+    recon_scan = _parse_recon_scan_v3(data, field_geometry)
+
     # -- gps_quality (v3 requires the object) ----------------------------
     gps_quality = _parse_gps_quality_v3(data)
 
@@ -432,6 +436,7 @@ def _parse_field_profile_v3(
         centerline_points=[],
         forward_marker=forward_marker,
         drop_scan=drop_scan,
+        recon_scan=recon_scan,
         gps_quality=gps_quality,
         field_geometry=field_geometry,
         binding_policy=binding_policy,
@@ -616,6 +621,82 @@ def _parse_drop_scan_v3(data: Dict[str, Any], fg: FieldGeometry) -> DropScanConf
             FieldProfileDiagnostics(
                 errors=["drop_scan.waypoints must not be all identical"]
             )
+        )
+
+    return DropScanConfig(waypoints=waypoints)
+
+
+def _parse_recon_scan_v3(data: Dict[str, Any], fg: FieldGeometry) -> Optional[DropScanConfig]:
+    """Parse optional recon_scan; returns None if key is missing."""
+    raw = data.get("recon_scan")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=["'recon_scan' must be a JSON object when present"]
+            )
+        )
+    waypoints_raw = raw.get("waypoints")
+    if waypoints_raw is None or not isinstance(waypoints_raw, list):
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=["recon_scan.waypoints is required and must be a JSON array"]
+            )
+        )
+    if len(waypoints_raw) != 4:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(
+                errors=[f"recon_scan.waypoints must have exactly 4 waypoints, got {len(waypoints_raw)}"]
+            )
+        )
+
+    waypoints: List[FieldScanWaypoint] = []
+    for i, wp in enumerate(waypoints_raw):
+        if not isinstance(wp, dict):
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(
+                    errors=[f"recon_scan.waypoints[{i}] must be a JSON object"]
+                )
+            )
+        for forbidden in ("lat", "lon", "local_x", "local_y"):
+            if forbidden in wp:
+                raise FieldProfileValidationError(
+                    FieldProfileDiagnostics(
+                        errors=[f"recon_scan.waypoints[{i}] must not contain '{forbidden}'"]
+                    )
+                )
+        x_m = _require_float_in_obj(wp, "x_m", f"recon_scan.waypoints[{i}]")
+        y_m = _require_float_in_obj(wp, "y_m", f"recon_scan.waypoints[{i}]")
+        alt = _require_float_in_obj(wp, "altitude_m", f"recon_scan.waypoints[{i}]")
+        if alt <= 0.0:
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(
+                    errors=[f"recon_scan.waypoints[{i}].altitude_m must be > 0, got {alt}"]
+                )
+            )
+        lane = fg.lane_half_width_m
+        if x_m < -lane or x_m > lane:
+            raise FieldProfileValidationError(
+                FieldProfileDiagnostics(
+                    errors=[f"recon_scan.waypoints[{i}].x_m={x_m} outside lane [-{lane}, {lane}]"]
+                )
+            )
+        rmin = fg.recce_area_y_min
+        rmax = fg.recce_area_y_max
+        if rmin is not None and rmax is not None:
+            if y_m < rmin or y_m > rmax:
+                raise FieldProfileValidationError(
+                    FieldProfileDiagnostics(
+                        errors=[f"recon_scan.waypoints[{i}].y_m={y_m} outside recce area [{rmin}, {rmax}]"]
+                    )
+                )
+        waypoints.append(FieldScanWaypoint(x_m=x_m, y_m=y_m, altitude_m=alt))
+
+    coords = {(w.x_m, w.y_m, w.altitude_m) for w in waypoints}
+    if len(coords) < 2:
+        raise FieldProfileValidationError(
+            FieldProfileDiagnostics(errors=["recon_scan.waypoints must not be all identical"])
         )
 
     return DropScanConfig(waypoints=waypoints)

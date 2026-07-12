@@ -176,7 +176,11 @@ def build_runtime_field_geometry(
             fg.recce_area_y_min, fg.recce_area_y_max,
             origin_lat, origin_lon, heading_rad,
         )
-        recon_scan_points = _build_recon_scan_points(recce_corners, scan_points)
+        recon_scan_points = (
+            _build_scan_points(profile.recon_scan, origin_lat, origin_lon, heading_rad, prefix="RECON_SCAN")
+            if profile.recon_scan is not None and profile.recon_scan.waypoints
+            else _build_recon_scan_points(recce_corners, scan_points)
+        )
     except FieldReferenceError as exc:
         raise RuntimeFieldGeometryError(
             f"runtime FIELD→GPS projection failed: {exc}"
@@ -297,6 +301,7 @@ def _build_scan_points(
     origin_lat: float,
     origin_lon: float,
     heading_rad: float,
+    prefix: str = "DROP_SCAN",
 ) -> list[RuntimeFieldPoint]:
     points: list[RuntimeFieldPoint] = []
     for i, wp in enumerate(ds.waypoints):
@@ -310,7 +315,7 @@ def _build_scan_points(
         )
         points.append(
             RuntimeFieldPoint(
-                name=f"DROP_SCAN_{i + 1}",
+                name=f"{prefix}_{i + 1}",
                 field_x_m=wp.x_m,
                 field_y_m=wp.y_m,
                 altitude_m=wp.altitude_m,
