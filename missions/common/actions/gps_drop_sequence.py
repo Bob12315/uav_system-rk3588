@@ -18,15 +18,17 @@ from .gps_target_lock import GpsTargetLockAction
 from .align_descend import AlignDescendAction
 from .payload_release import PayloadReleaseAction
 from .result import ActionResult
+from .gps_target_sequence_core import GpsTargetSequenceCore
 
 
-class GpsDropSequenceAction(ActionModule):
+class GpsDropSequenceAction(GpsTargetSequenceCore, ActionModule):
     """GPS-first dual-target drop sequence with strict safety rules."""
 
     def __init__(self) -> None:
         self.reset()
 
     def start(self, params: dict[str, Any] | None = None) -> None:
+        self._goto_action_factory=GotoWaypointAction; self._lock_action_factory=GpsTargetLockAction; self._align_action_factory=AlignDescendAction; self._operation_action_factory=PayloadReleaseAction
         data = params or {}
 
         # ── targets (exactly 2 valid GPS targets) ──
@@ -153,435 +155,31 @@ class GpsDropSequenceAction(ActionModule):
         self.started = True
         self.stopped = False
 
-    def update(self, context: dict[str, Any] | None = None) -> ActionResult:
-        if not self.started: return ActionResult(failed=True, reason="action_not_started")
-        if self.stopped:
-            return ActionResult(
-                actions=[_zero_velocity_command(), _clear_continuous_command("1")],
-                done=True, reason="stopped",
-                detail=self._detail(done=True))
 
-        if self.phase == "done":
-            return ActionResult(done=True, reason="gps_drop_sequence_done",
-                                detail=self._detail(done=True))
-        if self.phase == "failed":
-            return ActionResult(failed=True, reason=self._failed_reason,
-                                detail=self._detail())
-
-        data = context or {}
-        self.update_count_at_phase += 1
-
-        if self.phase == "goto":
-            return self._update_goto(data)
-        if self.phase == "lock":
-            return self._update_lock(data)
-        if self.phase == "align":
-            return self._update_align(data)
-        if self.phase == "release":
-            return self._update_release(data)
-        if self.phase == "climb":
-            return self._update_climb(data)
-        return ActionResult(failed=True, reason="invalid_phase")
-
-    def stop(self) -> None:
-        self.stopped = True
-
-    def reset(self) -> None:
-        self.targets = []; self.payloads = []
-        self.phase = "idle"; self.target_index = 0; self.payload_index = 0
-        self.released_count = 0; self.sub_action = None
-        self.started = False; self.stopped = False
-        self.dual_release_servo_outputs: list[dict[str, int]] = []
-        self._climb_target_lat = None
-        self._climb_target_lon = None
-
-    # ── phases ───────────────────────────────────────────────────────
-
-    def _update_goto(self, context: dict[str, Any]) -> ActionResult:
-        if self.sub_action is None:
-            t = self.targets[self.target_index]
-            # Save GPS position for later climb
-            self._climb_target_lat = t["lat"]
-            self._climb_target_lon = t["lon"]
-            ga = GotoWaypointAction()
-            ga.start({
-                "lat": t["lat"], "lon": t["lon"],
-                "altitude_m": self.approach_altitude_m,
-                "target_frame": "global", "waypoint_mode": "absolute",
-                "yaw_mode": "field_heading", "frame": GLOBAL_RELATIVE_ALT_INT,
-                "tolerance_xy_m": self.goto_cfg.get("tolerance_xy_m", 0.25),
-                "tolerance_z_m": self.goto_cfg.get("tolerance_z_m", 0.30),
-                "min_hold_updates": self.goto_cfg.get("min_hold_updates", 3),
-                "require_velocity_valid": self.goto_cfg.get("require_velocity_valid", True),
-                "max_horizontal_speed_mps": self.goto_cfg.get("max_horizontal_speed_mps", 0.15),
-                "max_vertical_speed_mps": self.goto_cfg.get("max_vertical_speed_mps", 0.10),
-                "key": f"gps_drop_goto_{self.target_index}",
-            })
-            self.sub_action = ga
-            self.update_count_at_phase = 0
-
-        if self.update_count_at_phase > self.goto_max_updates:
-            return self._fail("goto_timeout")
-
-        result = self.sub_action.update(context)
-        if result.failed:
-            return self._fail("goto_failed")
-        if not result.done:
-            return ActionResult(actions=result.actions, reason="gps_drop_goto", detail=self._detail())
-
-        # Goto done → lock directly (yaw is field_heading from goto itself)
-        self.phase = "lock"
-        self.sub_action = None
-        self.update_count_at_phase = 0
-        return ActionResult(reason="gps_drop_lock_start", detail=self._detail())
-
-    def _update_lock(self, context: dict[str, Any]) -> ActionResult:
-        if self.sub_action is None:
-            t = self.targets[self.target_index]
-            la = GpsTargetLockAction()
-            la.start({
-                "target": {"id": t["target_id"], "lat": t["lat"], "lon": t["lon"],
-                           "class_name": t["class_name"]},
-                "max_match_distance_m": self.lock_cfg.get("max_match_distance_m", 1.2),
-                "max_updates": self.target_lock_max_updates,
-                "min_confidence": self.lock_cfg.get("min_confidence", 0.35),
-                "class_names": self.lock_cfg.get("class_names"),
-                "camera": self.lock_cfg.get("camera", {}),
-                "detection_source": self.lock_cfg.get("detection_source", "scene"),
-            })
-            self.sub_action = la
-            self.update_count_at_phase = 0
-
-        result = self.sub_action.update(context)
-        if result.failed:
-            self.sub_action = None
-            return self._fail("no_lockable_drop_targets",
-                              actions=[_zero_velocity_command(), _clear_continuous_command("lock_fail")])
-
-        if not result.done:
-            return ActionResult(actions=result.actions, reason="gps_drop_lock_searching",
-                                detail=self._detail(extra={"lock": result.detail}))
-        # Lock success: forward yolo_lock_target action
-        lock_actions = result.actions or []
-        self.phase = "align"
-        self.sub_action = None
-        self.update_count_at_phase = 0
-        return ActionResult(actions=lock_actions, reason="gps_drop_align_start",
-                            detail=self._detail(extra={"lock": result.detail}))
-
-
-    def _update_align(self, context: dict[str, Any]) -> ActionResult:
-        if self.sub_action is None:
-            payload = self.payloads[self.payload_index]
-            align_params = copy.deepcopy(self.align_cfg)
-            align_config = dict(align_params.get("config") or {})
-            align_config["payload_forward_m"] = payload["payload_forward_m"]
-            align_config["payload_right_m"] = payload["payload_right_m"]
-            align_params["config"] = align_config
-            align_params["finish_altitude_m"] = self.finish_altitude_m
-            aa = AlignDescendAction()
-            aa.start(align_params)
-            self.sub_action = aa
-            self.update_count_at_phase = 0
-
-        if self.update_count_at_phase > self.align_descend_max_updates:
-            return self._fail(
-                "align_descend_timeout",
-                actions=[_zero_velocity_command(), _clear_continuous_command("timeout")],
-            )
-
-        result = self.sub_action.update(context)
-        command = result.detail.get("command") if result.detail else None
-
-        if (
-            not result.done
-            and not result.failed
-            and isinstance(command, dict)
-            and (not bool(command.get("valid", False)) or not bool(command.get("active", False)))
-        ):
-            return ActionResult(
-                actions=[_zero_velocity_command(), _clear_continuous_command("align_inactive")],
-                reason="gps_drop_align_inactive",
-                detail=self._detail(extra={"align": result.detail}),
-            )
-
-        # Forward the active align-descend flight command.
-        if not result.done and not result.failed and isinstance(command, dict):
-            action = {
-                "action_type": "flight_command",
-                "params": dict(command),
-                "once": False,
-                "key": "gps_drop_align",
-                "priority": 5,
-            }
-            return ActionResult(actions=[action], reason="gps_drop_align",
-                                detail=self._detail(extra={"align": result.detail}))
-
-        if result.failed:
-            reason = result.reason or "align_failed"
-            return self._fail(
-                reason,
-                actions=[_zero_velocity_command(), _clear_continuous_command("align_fail")],
-            )
-
-        if not result.done:
-            return ActionResult(reason="gps_drop_align", detail=self._detail())
-
-        # Align done — accept any done reason (v1-compatible)
-
-        self.phase = "release"
-        self.sub_action = None
-        self.update_count_at_phase = 0
-        self._release_reason = "align_done_release"
-        return ActionResult(
-            actions=[_zero_velocity_command(), _clear_continuous_command("aligned")],
-            reason="gps_drop_release_start", detail=self._detail(),
-        )
-
-    def _update_release(self, context: dict[str, Any]) -> ActionResult:
-        if self.sub_action is None:
-            t = self.targets[self.target_index]
-            if self.execution_mode == "single_target_dual_release":
-                pa = PayloadReleaseAction()
-                pa.start({
-                    "servo_outputs": self.dual_release_servo_outputs,
-                    "payload_id": "payload_1_and_2",
-                    "target_id": t["target_id"],
-                    "release_wait_updates": self.release_wait_updates,
-                    "priority": min(
-                        self.payloads[0].get("priority", 5),
-                        self.payloads[1].get("priority", 5),
-                    ),
-                })
-            else:
-                payload = self.payloads[self.payload_index]
-                pa = PayloadReleaseAction()
-                pa.start({
-                    "servo_outputs": payload.get("servo_outputs", []),
-                    "payload_id": str(payload.get("payload_id", f"payload_{self.payload_index}")),
-                    "target_id": t["target_id"],
-                    "release_wait_updates": self.release_wait_updates,
-                    "priority": payload.get("priority", 5),
-                })
-            self.sub_action = pa
-            self.update_count_at_phase = 0
-
-        result = self.sub_action.update(context)
-        if result.failed:
-            return self._fail("payload_release_failed")
-
-        if not result.done:
-            return ActionResult(
-                actions=[_zero_velocity_command()] + (result.actions or []),
-                reason="gps_drop_releasing", detail=self._detail(),
-            )
-
-        hold = result.actions or []
-
-        if self.execution_mode == "single_target_dual_release":
-            self.released_count = 2
-            self.payload_index = 2
-            self.sub_action = None
-            self.update_count_at_phase = 0
-            self.phase = "climb"
-            return ActionResult(
-                actions=[_zero_velocity_command()] + (hold or []) + [_clear_continuous_command("release_done")],
-                reason="gps_drop_climb_start", detail=self._detail(done=False),
-            )
-
-        # ── dual_target_sequential ──
-        self.released_count += 1
-        self.payload_index += 1
-        self.sub_action = None
-        self.update_count_at_phase = 0
-
-        is_terminal = self.released_count == 2 and self.payload_index == 2 and self.target_index == 1
-        if not is_terminal and not (
-            self.released_count == 1
-            and self.payload_index == 1
-            and self.target_index == 0
-        ):
-            return self._fail("incomplete_dual_target_drop",
-                              actions=[_zero_velocity_command()] + (hold or []) + [_clear_continuous_command("release_done")])
-
-        if is_terminal:
-            self.phase = "climb"
-            return ActionResult(
-                actions=[_zero_velocity_command()] + (hold or []) + [_clear_continuous_command("release_done")],
-                reason="gps_drop_climb_start", detail=self._detail(done=False),
-            )
-        # First target done: climb before next target
-        self.phase = "climb"
-        self.target_index += 1  # advance for climb goto to use next target's position? No: climb uses current target GPS
-        # Actually, we need to climb at current target, then goto next. Let's revert target_index advance.
-        self.target_index -= 1  # stay on current target for climb
-        return ActionResult(
-            actions=[_zero_velocity_command()] + (hold or []) + [_clear_continuous_command("release_done")],
-            reason="gps_drop_climb_start", detail=self._detail(),
-        )
-
-    def _update_climb(self, context: dict[str, Any]) -> ActionResult:
-        if self.sub_action is None:
-            # Send GLOBAL goto to same GPS position with climb altitude
-            lat = self._climb_target_lat
-            lon = self._climb_target_lon
-            if lat is None or lon is None:
-                return self._fail("climb_no_target_position",
-                                  actions=[_zero_velocity_command(), _clear_continuous_command("climb_fail")])
-            ga = GotoWaypointAction()
-            ga.start({
-                "lat": lat, "lon": lon,
-                "altitude_m": self.climb_after_drop_m,
-                "target_frame": "global", "waypoint_mode": "absolute",
-                "yaw_mode": "field_heading", "frame": GLOBAL_RELATIVE_ALT_INT,
-                "tolerance_xy_m": 99.0,  # effectively ignore horizontal
-                "tolerance_z_m": self.climb_tolerance_z_m,
-                "min_hold_updates": 1,
-                "require_velocity_valid": False,
-                "key": f"gps_drop_climb_{self.target_index}",
-            })
-            self.sub_action = ga
-            self.update_count_at_phase = 0
-
-        # Check altitude first — already at height? complete immediately
-        current_alt = self._current_altitude_m(context)
-        if (
-            current_alt is not None
-            and current_alt >= self.climb_after_drop_m - self.climb_tolerance_z_m
-        ):
-            self.sub_action = None
-            self.update_count_at_phase = 0
-            if self.execution_mode == "single_target_dual_release":
-                self.phase = "done"
-                return ActionResult(
-                    actions=[_zero_velocity_command(), _clear_continuous_command("climb_done")],
-                    done=True, reason="gps_drop_sequence_done", detail=self._detail(done=True),
-                )
-            if self.target_index == 0 and self.released_count == 1:
-                self.target_index = 1
-                self.payload_index = 1
-                self.phase = "goto"
-                return ActionResult(
-                    actions=[_zero_velocity_command(), _clear_continuous_command("climb_done")],
-                    reason="gps_drop_next", detail=self._detail(),
-                )
-            self.phase = "done"
-            return ActionResult(
-                actions=[_zero_velocity_command(), _clear_continuous_command("climb_done")],
-                done=True, reason="gps_drop_sequence_done", detail=self._detail(done=True),
-            )
-
-        # A valid altitude sample wins the timeout boundary above.  Only fail a
-        # climb that is still below the one-way altitude gate.
-        if self.update_count_at_phase > self.climb_max_updates:
-            return self._fail("climb_timeout",
-                              actions=[_zero_velocity_command(), _clear_continuous_command("climb_timeout")])
-
-        # Forward the goto command but use our own altitude-only completion check
-        result = self.sub_action.update(context)
-
-        if result.failed:
-            return self._fail("climb_goto_failed",
-                              actions=[_zero_velocity_command(), _clear_continuous_command("climb_fail")])
-
-        # Check altitude again after goto update
-        current_alt = self._current_altitude_m(context)
-        climb_done = (
-            current_alt is not None
-            and current_alt >= self.climb_after_drop_m - self.climb_tolerance_z_m
-        )
-
-        if climb_done:
-            self.sub_action = None
-            self.update_count_at_phase = 0
-            # Determine next step
-            if self.execution_mode == "single_target_dual_release":
-                self.phase = "done"
-                return ActionResult(
-                    actions=[_zero_velocity_command(), _clear_continuous_command("climb_done")],
-                    done=True, reason="gps_drop_sequence_done", detail=self._detail(done=True),
-                )
-            # dual_target_sequential
-            if self.target_index == 0 and self.released_count == 1:
-                # First target climb done → goto second target
-                self.target_index = 1
-                self.payload_index = 1
-                self.phase = "goto"
-                return ActionResult(
-                    actions=[_zero_velocity_command(), _clear_continuous_command("climb_done")],
-                    reason="gps_drop_next", detail=self._detail(),
-                )
-            # Second target climb done → sequence done
-            self.phase = "done"
-            return ActionResult(
-                actions=[_zero_velocity_command(), _clear_continuous_command("climb_done")],
-                done=True, reason="gps_drop_sequence_done", detail=self._detail(done=True),
-            )
-
-        # Still climbing: forward goto actions
-        return ActionResult(
-            actions=result.actions,
-            reason="gps_drop_climb", detail=self._detail(extra={"altitude_m": current_alt}),
-        )
-
-    def _current_altitude_m(self, context: dict[str, Any]) -> float | None:
-        """Extract current altitude from context (compatible with AlignDescend)."""
-        drone = context.get("drone", {})
-        if isinstance(drone, dict):
-            for name in ("relative_altitude", "relative_altitude_m"):
-                v = drone.get(name)
-                if v is not None:
-                    try:
-                        f = float(v)
-                        if math.isfinite(f) and f >= 0.0:
-                            return f
-                    except (TypeError, ValueError):
-                        continue
-        for name in ("relative_altitude", "relative_altitude_m", "altitude_m"):
-            v = context.get(name)
-            if v is not None:
-                try:
-                    f = float(v)
-                    if math.isfinite(f) and f >= 0.0:
-                        return f
-                except (TypeError, ValueError):
-                    continue
-        return None
-
-    # ── helpers ─────────────────────────────────────────────────────
-
-    def _fail(
-        self,
-        reason: str,
-        *,
-        actions: list[dict[str, Any]] | None = None,
-    ) -> ActionResult:
-        self.phase = "failed"
-        self._failed_reason = reason
-        self.sub_action = None
-        return ActionResult(
-            actions=(
-                actions
-                if actions is not None
-                else [_zero_velocity_command(), _clear_continuous_command("failed")]
-            ),
-            failed=True, reason=reason,
-            detail=self._detail(),
-        )
-
-    def _detail(self, *, done: bool = False, extra: dict[str, Any] | None = None) -> dict[str, Any]:
-        d: dict[str, Any] = {
-            "phase": self.phase, "target_index": self.target_index,
-            "payload_index": self.payload_index, "released_count": self.released_count,
-            "target_count": len(self.targets), "payload_count": len(self.payloads),
-            "release_reason": self._release_reason,
-            "execution_mode": getattr(self, "execution_mode", "dual_target_sequential"),
-            "dual_release": getattr(self, "execution_mode", "") == "single_target_dual_release",
-        }
-        if done: d["done"] = True
-        if extra: d.update(extra)
+    def _sequence_reason(self,event):
+        return {'goto':'gps_drop_goto','lock':'gps_drop_lock_searching','lock_start':'gps_drop_lock_start','align_start':'gps_drop_align_start','align':'gps_drop_align','align_inactive':'gps_drop_align_inactive','operation_start':'gps_drop_release_start','climb_start':'gps_drop_climb_start','climb':'gps_drop_climb','next':'gps_drop_next','done':'gps_drop_sequence_done','goto_timeout':'goto_timeout','goto_failed':'goto_failed','lock_failed':'no_lockable_drop_targets','align_timeout':'align_descend_timeout','operation_failed':'payload_release_failed','climb_timeout':'climb_timeout','climb_failed':'climb_goto_failed'}.get(event,event)
+    def _sequence_namespace(self): return 'gps_drop'
+    def _sequence_detail(self,done=False,extra=None):
+        d={'phase':'release' if self.phase=='operation' else self.phase,'target_index':self.target_index,'payload_index':self.payload_index,'released_count':self.released_count,'target_count':len(self.targets),'payload_count':len(self.payloads),'release_reason':getattr(self,'_release_reason',''),'execution_mode':self.execution_mode,'dual_release':self.execution_mode=='single_target_dual_release'}; d.update(extra or {});
+        if done:d['done']=True
         return d
-
+    def _action_key(self,phase): return f'gps_drop_{phase}_{self.target_index}' if phase != 'align' else 'gps_drop_align'
+    def _build_align_params(self,target):
+        p=copy.deepcopy(self.align_cfg); c=dict(p.get('config') or {}); payload=self.payloads[self.payload_index]; c['payload_forward_m']=payload['payload_forward_m']; c['payload_right_m']=payload['payload_right_m']; p['config']=c; p['finish_altitude_m']=self.finish_altitude_m; return p
+    def _on_align_sample(self,target,ctx,result): pass
+    def _start_operation(self,target):
+        self.sub_action=self._operation_action_factory();
+        if self.execution_mode=='single_target_dual_release': self.sub_action.start({'servo_outputs':self.dual_release_servo_outputs,'payload_id':'payload_1_and_2','target_id':target['target_id'],'release_wait_updates':self.release_wait_updates,'priority':min(self.payloads[0].get('priority',5),self.payloads[1].get('priority',5))})
+        else:
+            p=self.payloads[self.payload_index]; self.sub_action.start({'servo_outputs':p['servo_outputs'],'payload_id':p['payload_id'],'target_id':target['target_id'],'release_wait_updates':self.release_wait_updates,'priority':p.get('priority',5)})
+    def _update_operation_hook(self,ctx):
+        r=self.sub_action.update(ctx)
+        if r.failed:return r
+        if not r.done:return ActionResult(actions=[self._zero_velocity_command()]+(r.actions or []),reason='gps_drop_releasing',detail=self._sequence_detail())
+        self._operation_hold=r.actions or []; return ActionResult(actions=[self._zero_velocity_command()]+self._operation_hold+[self._clear_continuous_command('release_done')],done=True,reason='gps_drop_climb_start',detail=self._sequence_detail())
+    def _operation_complete(self,target):
+        if self.execution_mode=='single_target_dual_release': self.released_count=2; self.payload_index=2
+        else: self.released_count+=1; self.payload_index+=1
 
 def _merge_servo_outputs(payload_a: dict[str, Any], payload_b: dict[str, Any]) -> list[dict[str, int]]:
     """Merge servo_outputs from two payloads into one combined list.
@@ -606,20 +204,12 @@ def _merge_servo_outputs(payload_a: dict[str, Any], payload_b: dict[str, Any]) -
 
 
 def _zero_velocity_command() -> dict[str, Any]:
-    return {"action_type": "flight_command",
-            "params": {"type": "flight_command", "valid": True, "active": True,
-                       "enable_body": True,
-                       "vx_cmd": 0.0, "vy_cmd": 0.0, "vz_cmd": 0.0, "yaw_rate_cmd": 0.0,
-                       "yaw_rate_rad_s": 0.0,
-                       "priority": 3},
-            "once": False}
+    return {'action_type':'flight_command','params':{'type':'flight_command','valid':True,'active':True,'enable_body':True,'vx_cmd':0.0,'vy_cmd':0.0,'vz_cmd':0.0,'yaw_rate_cmd':0.0,'yaw_rate_rad_s':0.0,'priority':3},'once':False}
 
 
 def _clear_continuous_command(key_suffix: str = "") -> dict[str, Any]:
-    return {"action_type": "clear_continuous_commands",
-            "params": {"clear_pending_local_position": False, "send_stop_first": True},
-            "once": True,
-            "key": f"gps_drop_clear_{key_suffix}"}
+    # Preserve the externally asserted drop command key while sharing payload.
+    return {'action_type':'clear_continuous_commands','params':{'clear_pending_local_position':False,'send_stop_first':True},'once':True,'key':f'gps_drop_clear_{key_suffix}'}
 
 
 def _same_gps_position(first: dict[str, Any], second: dict[str, Any]) -> bool:

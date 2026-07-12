@@ -37,6 +37,7 @@ class BuildReconReportAction(ActionModule):
         detected_count = 0
         blank_count = 0
         skipped_count = 0
+        failed_count = 0
 
         for item in self.items:
             if not isinstance(item, dict):
@@ -44,7 +45,7 @@ class BuildReconReportAction(ActionModule):
                 barrels.append({"status": "skipped_missing_target", "content": "blank", "confidence": 0.0})
                 continue
             status = str(item.get("status", ""))
-            barrel = {
+            barrel = {**item,
                 "id": str(item.get("target_id") or item.get("id") or ""),
                 "local_x": item.get("local_x"),
                 "local_y": item.get("local_y"),
@@ -52,8 +53,10 @@ class BuildReconReportAction(ActionModule):
                 "confidence": float(item.get("confidence", 0.0)),
                 "status": status,
             }
-            if status == "detected":
+            if status in {"detected", "confirmed"}:
                 detected_count += 1
+            elif status == "failed":
+                failed_count += 1
             elif status == "skipped_missing_target":
                 skipped_count += 1
             else:
@@ -61,11 +64,16 @@ class BuildReconReportAction(ActionModule):
             barrels.append(barrel)
 
         self._report = {
-            "recon_report": {"barrels": barrels},
+            "recon_report": {"barrels": barrels, "targets": barrels,
+                "selected_count": len(self.items), "attempted_count": len(barrels),
+                "confirmed_count": detected_count, "blank_count": blank_count,
+                "failed_count": failed_count, "completed": failed_count == 0,
+                "completion_reason": "report_built"},
             "barrel_count": len(barrels),
             "detected_count": detected_count,
             "blank_count": blank_count,
             "skipped_count": skipped_count,
+            "failed_count": failed_count,
         }
         self._done = True
         return ActionResult(done=True, reason="report_built", detail=self._detail())

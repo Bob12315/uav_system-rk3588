@@ -148,7 +148,7 @@ def test_action_mission_templates_construct_mission_action_steps() -> None:
         assert len(steps) == len(data["steps"])
         by_save_as = {step.get("save_as", ""): step for step in data["steps"] if step.get("save_as")}
         if "drop_scan" in by_save_as:
-            assert by_save_as["drop_scan"]["name"] in ("multi_view_localize", "fixed_view_localize")
+            assert by_save_as["drop_scan"]["name"] in ("multi_view_localize", "fixed_view_localize", "gps_multi_view_localize")
             assert by_save_as["drop_targets"]["name"] == "select_drop_targets"
 
 
@@ -231,6 +231,9 @@ def test_action_mission_templates_blackboard_references_resolve() -> None:
     blackboard.set(
         "recon_targets",
         {
+            "selected_targets": [
+                {"id": "r1", "target_id": "r1", "lat": 34.0, "lon": 108.0, "east_m": 1.0, "north_m": 5.0},
+            ],
             "target_slots": [
                 {"valid": True, "id": "r1", "class_name": "bucket", "local_x": 1.0, "local_y": 5.0, "x": 1.0, "y": 5.0, "rank": 1},
                 {"valid": False, "id": "missing_1", "class_name": "", "local_x": None, "local_y": None, "x": None, "y": None, "rank": 2, "status": "missing"},
@@ -243,6 +246,7 @@ def test_action_mission_templates_blackboard_references_resolve() -> None:
     blackboard.set(
         "recon_sequence",
         {
+            "observations": [],
             "recon_result_items": [
                 {"target_id": "r1", "content": "shenghua", "status": "detected"},
                 {"target_id": "missing_1", "content": "blank", "status": "skipped_missing_target"},
@@ -611,19 +615,19 @@ def test_recon_scan_v2_retries_then_returns_home() -> None:
     """rescue_2026_full_auto_v2: recon_scan failed → retry_current_then_jump_to return_home."""
     data = _template(FULL_V2_TEMPLATE_PATH)
     by_label = {step.get("label", ""): step for step in data["steps"]}
-    policy = by_label["recon_scan"]["on_failed"]
+    policy = by_label["recon_gps_multi_view_scan"]["on_failed"]
     assert policy["action"] == "retry_current_then_jump_to"
     assert policy["max_attempts"] == 2
-    assert policy["target"] == "return_home"
+    assert policy["target"] == "return_home_gps"
 
 
 def test_recon_sequence_v2_target_lock_camera() -> None:
     """rescue_2026_full_auto_v2: recon_sequence target_lock has camera 85/69/1/-1."""
     data = _template(FULL_V2_TEMPLATE_PATH)
     by_label = {step.get("label", ""): step for step in data["steps"]}
-    camera = by_label["recon_sequence"]["params"]["target_lock"]["camera"]
-    assert camera["fov_x_deg"] == 85.0
-    assert camera["fov_y_deg"] == 69.0
+    camera = by_label["gps_recon_sequence"]["params"]["target_lock"]["camera"]
+    assert camera["fov_x_deg"] == 51.3
+    assert camera["fov_y_deg"] == 39.6
     assert camera["image_x_sign"] == 1.0
     assert camera["image_y_sign"] == -1.0
 
@@ -632,12 +636,12 @@ def test_select_recon_targets_v2_zone_center_mode_field() -> None:
     """rescue_2026_full_auto_v2: select_recon_targets zone_center_mode is field."""
     data = _template(FULL_V2_TEMPLATE_PATH)
     by_label = {step.get("label", ""): step for step in data["steps"]}
-    assert by_label["select_recon_targets"]["params"]["zone_center_mode"] == "field"
+    assert by_label["select_gps_recon_targets"]["params"]["coordinate_mode"] == "gps_enu"
 
 
 def test_full_rescue_v2_has_12_steps() -> None:
     data = _template(FULL_V2_TEMPLATE_PATH)
-    assert len(data["steps"]) == 16
+    assert len(data["steps"]) == 10
 
 
 def test_sitl_profile_matches_base_full_v2_template() -> None:
@@ -662,10 +666,10 @@ def test_select_drop_targets_v2_zone_center_mode_field() -> None:
     """rescue_2026_full_auto_v2: select_drop_targets zone_center_mode is field."""
     data = _template(FULL_V2_TEMPLATE_PATH)
     by_label = {step.get("label", ""): step for step in data["steps"]}
-    assert by_label["select_drop_targets"]["params"]["zone_center_mode"] == "field"
-    assert by_label["select_drop_targets"]["params"]["objects"] == "$drop_scan.localized_objects"
-    assert by_label["select_drop_targets"]["params"]["input_key"] == "localized_objects"
-    assert by_label["select_drop_targets"]["params"]["min_seen_count"] == 2
+    assert by_label["select_gps_drop_targets"]["params"]["coordinate_mode"] == "gps_enu"
+    assert by_label["select_gps_drop_targets"]["params"]["objects"] == "$drop_scan.localized_objects"
+    assert by_label["select_gps_drop_targets"]["params"]["objects"] == "$drop_scan.localized_objects"
+    assert by_label["select_gps_drop_targets"]["params"]["min_seen_count"] == 2
 
 
 def test_drop_two_targets_v2_select_drop_targets_uses_gps_enu() -> None:

@@ -59,7 +59,7 @@ class RuntimeFieldTargetResolver:
         self._fr = field_reference or {}
         self._error: str | None = None
         self._home: Dict[str, Any] | None = None
-        self._scan_waypoints: List[Dict[str, Any]] | None = None
+        self._scan_waypoint_groups: dict[str, List[Dict[str, Any]]] = {}
         self._profile_id: str = ""
 
         # ── readiness checks ──────────────────────────────────────────
@@ -117,33 +117,34 @@ class RuntimeFieldTargetResolver:
             return
         self._home = dict(home)
 
-        scans = geometry.get("drop_scan_waypoints")
-        if not isinstance(scans, list) or len(scans) != 4:
-            self._error = f"geometry.drop_scan_waypoints must be a list of 4, got {type(scans).__name__}"
-            return
-        for i, wp in enumerate(scans):
-            if not isinstance(wp, dict) or "lat" not in wp or "lon" not in wp:
-                self._error = f"geometry.drop_scan_waypoints[{i}] invalid"
+        for group, field, prefix in (("drop", "drop_scan_waypoints", "DROP_SCAN"), ("recon", "recon_scan_waypoints", "RECON_SCAN")):
+            scans = geometry.get(field)
+            if group == "recon" and scans is None:
+                # Old frozen runtime contexts remain valid for the default drop
+                # flow; a recon caller is rejected explicitly by scan_waypoints.
+                continue
+            if not isinstance(scans, list) or len(scans) != 4:
+                self._error = f"geometry.{field} must be a list of 4, got {type(scans).__name__}"
                 return
-            # Validate name and GPS
-            wname = str(wp.get("name", ""))
-            expected = f"DROP_SCAN_{i+1}"
-            if wname != expected:
-                self._error = f"geometry.drop_scan_waypoints[{i}] name={wname!r} expected={expected!r}"
-                return
-            try:
-                wlat = float(wp["lat"]); wlon = float(wp["lon"]); walt = float(wp.get("altitude_m", 0))
-                import math
-                if not math.isfinite(wlat) or not math.isfinite(wlon) or not math.isfinite(walt):
-                    raise ValueError
-                if not (-90.0 <= wlat <= 90.0) or not (-180.0 <= wlon <= 180.0):
-                    raise ValueError
-                if walt <= 0.0:
-                    raise ValueError("altitude_m must be > 0")
-            except (ValueError, TypeError) as e:
-                self._error = f"geometry.drop_scan_waypoints[{i}] invalid: {e}"
-                return
-        self._scan_waypoints = [dict(wp) for wp in scans]
+            for i, wp in enumerate(scans):
+                if not isinstance(wp, dict) or "lat" not in wp or "lon" not in wp:
+                    self._error = f"geometry.{field}[{i}] invalid"
+                    return
+                wname = str(wp.get("name", ""))
+                expected = f"{prefix}_{i+1}"
+                if wname != expected:
+                    self._error = f"geometry.{field}[{i}] name={wname!r} expected={expected!r}"
+                    return
+                try:
+                    wlat = float(wp["lat"]); wlon = float(wp["lon"]); walt = float(wp.get("altitude_m", 0))
+                    import math
+                    if not math.isfinite(wlat) or not math.isfinite(wlon) or not math.isfinite(walt): raise ValueError
+                    if not (-90.0 <= wlat <= 90.0) or not (-180.0 <= wlon <= 180.0): raise ValueError
+                    if walt <= 0.0: raise ValueError("altitude_m must be > 0")
+                except (ValueError, TypeError) as e:
+                    self._error = f"geometry.{field}[{i}] invalid: {e}"
+                    return
+            self._scan_waypoint_groups[group] = [dict(wp) for wp in scans]
 
     # ------------------------------------------------------------------
     # public API
@@ -197,16 +198,18 @@ class RuntimeFieldTargetResolver:
         )
 
     def scan_waypoints(
-        self, altitude_overrides: Dict[str, float] | None = None
+        self, altitude_overrides: Dict[str, float] | None = None, group: str = "drop"
     ) -> Tuple[GpsScanTarget, ...]:
         """Return DROP_SCAN_1..4 as GLOBAL GPS targets.
 
         Optionally override altitude_m per waypoint name.
         """
         self._require_ready()
+        if group not in self._scan_waypoint_groups:
+            raise RuntimeFieldTargetError(f"unknown scan waypoint group: {group!r}")
         overrides = altitude_overrides or {}
         result: list[GpsScanTarget] = []
-        for wp in self._scan_waypoints:
+        for wp in self._scan_waypoint_groups[group]:
             name = str(wp.get("name", ""))
             if name in overrides:
                 alt = self._parse_positive_altitude(overrides[name], f"{name} altitude_m override")
@@ -228,7 +231,7 @@ class RuntimeFieldTargetResolver:
         self._require_ready()
         if name == "HOME":
             return self.home(altitude_m=altitude_m)
-        for wp in self._scan_waypoints:
+        for wp in self._scan_waypoint_groups["drop"]:
             if wp.get("name") == name:
                 if altitude_m is not None:
                     alt = self._parse_positive_altitude(altitude_m, f"{name} altitude_m override")
