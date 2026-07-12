@@ -167,6 +167,35 @@ class GpsDropSequenceAction(GpsTargetSequenceCore, ActionModule):
     def _build_align_params(self,target):
         p=copy.deepcopy(self.align_cfg); c=dict(p.get('config') or {}); payload=self.payloads[self.payload_index]; c['payload_forward_m']=payload['payload_forward_m']; c['payload_right_m']=payload['payload_right_m']; p['config']=c; p['finish_altitude_m']=self.finish_altitude_m; return p
     def _on_align_sample(self,target,ctx,result): pass
+    def _on_align_failure(self,event,target,ctx,result):
+        # Only override for visual alignment timeout/loss errors.
+        # Structural errors (missing altitude, not started, etc.) still fail.
+        FORCE_RELEASE_SUB_REASONS = {'target_lost_timeout', 'align_descend_timeout'}
+        if event == 'align_timeout':
+            pass  # always force release on outer timeout
+        elif event == 'align_failed':
+            if result is None:
+                return None  # should not happen, but fail normally
+            sub_reason = result.reason or ''
+            if sub_reason in FORCE_RELEASE_SUB_REASONS:
+                pass  # force release on target lost or inner align timeout
+            else:
+                return None  # structural error — fail normally
+        else:
+            return None  # unknown event — fail normally
+
+        stop_actions = self._stop_actions('align_force_release')
+        self._operation_started = False
+        self.sub_action = None
+        self.update_count_at_phase = 0
+        self.phase = 'operation'
+        detail = self._sequence_detail()
+        detail['align_timeout_release' if event == 'align_timeout' else 'align_failed_release'] = True
+        detail['failure_event'] = event
+        if result is not None:
+            detail['align_sub_reason'] = result.reason
+        return ActionResult(actions=stop_actions, reason=self._sequence_reason('operation_start'),
+                          detail=detail)
     def _start_operation(self,target):
         self.sub_action=self._operation_action_factory();
         if self.execution_mode=='single_target_dual_release': self.sub_action.start({'servo_outputs':self.dual_release_servo_outputs,'payload_id':'payload_1_and_2','target_id':target['target_id'],'release_wait_updates':self.release_wait_updates,'priority':min(self.payloads[0].get('priority',5),self.payloads[1].get('priority',5))})

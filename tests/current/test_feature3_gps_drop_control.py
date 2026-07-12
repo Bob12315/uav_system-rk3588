@@ -154,16 +154,31 @@ def test_v2_align_config_matches_v1_except_payload_offset() -> None:
             v1_diff_keys.add(k)
     assert v1_diff_keys == {"payload_forward_m"}, f"V1 aligns differ in: {v1_diff_keys}"
 
-    # v2 now uses latched_center_alignment; these are NOT in v1
+    # v2 uses competition params (intentionally different from v1)
     assert v2_align.get("finish_policy") == "latched_center_alignment"
-    assert v2_align.get("finish_alignment_max_ex_cam") == 0.20
-    assert v2_align.get("finish_alignment_max_ey_cam") == 0.20
-    assert v2_align.get("finish_alignment_hold_updates") == 2
+    assert v2_align.get("finish_alignment_max_ex_cam") == 0.35
+    assert v2_align.get("finish_alignment_max_ey_cam") == 0.35
+    assert v2_align.get("finish_alignment_hold_updates") == 1
 
     # v2 require_target_locked is false (matching v1)
     assert v2_cfg["require_target_locked"] is False
 
-    # Compare v2 config to v1 config (excluding payload offset which v2 injects)
+    # Verify v2-only competition keys (not in v1)
+    v2_only_keys = {"descent_gate_policy", "unaligned_descend_speed_mps"}
+    assert v2_cfg["descent_gate_policy"] == "allow_unaligned"
+    assert v2_cfg["unaligned_descend_speed_mps"] == 0.08
+
+    # Competition-intentionally-divergent keys (v1->v2 changed values)
+    v2_changed_keys = {
+        "max_ex_cam": 0.22,
+        "max_ey_cam": 0.22,
+        "slow_descend_max_ex_cam": 0.55,
+        "slow_descend_max_ey_cam": 0.55,
+    }
+    for k, expected in v2_changed_keys.items():
+        assert v2_cfg[k] == expected, f"v2 {k} should be {expected}"
+
+    # Compare v2 config to v1 config (excluding keys only in v2, changed keys, and payload offset which v2 injects)
     v1_ref = dict(v1_cfg_0)
     v1_ref.pop("payload_forward_m", None)
     v1_ref.pop("payload_right_m", None)
@@ -172,16 +187,20 @@ def test_v2_align_config_matches_v1_except_payload_offset() -> None:
     v2_ref.pop("payload_right_m", None)
 
     for k in v1_ref:
+        if k in v2_only_keys or k in v2_changed_keys:
+            continue
         assert v2_ref.get(k) == v1_ref[k], f"Mismatch on key '{k}': v1={v1_ref[k]}, v2={v2_ref.get(k)}"
 
     for k in v2_ref:
+        if k in v2_only_keys or k in v2_changed_keys:
+            continue
         assert k in v1_ref, f"Extra key in v2: '{k}'"
 
     assert v2_align["expected_dt_s"] == v1_aligns[0]["params"]["expected_dt_s"]
-    assert v2_align["max_updates"] == v1_aligns[0]["params"]["max_updates"]
+    assert v2_align["max_updates"] == 200  # competition override
     assert v2_align["hold_updates_required"] == v1_aligns[0]["params"]["hold_updates_required"]
     assert v2_drop["params"]["finish_altitude_m"] == v1_aligns[0]["params"]["finish_altitude_m"]
-    assert v2_drop["params"]["align_descend_max_updates"] == v1_aligns[0]["params"]["max_updates"]
+    assert v2_drop["params"]["align_descend_max_updates"] == 200  # competition override
 
 
 def test_v2_base_and_sitl_identical() -> None:
@@ -325,12 +344,12 @@ def _release_servo_channels(results: list[ActionResult]) -> list[int]:
     (True, "min_altitude_reached", True),
     (True, "finish_altitude_reached", True),
     (True, "aligned_at_finish_altitude", True),
-    (False, "align_descend_timeout", False),
-    (False, "target_lost_timeout", False),
+    (False, "align_descend_timeout", True),
+    (False, "target_lost_timeout", True),
     (False, "missing_altitude", False),
 ])
 def test_align_outcome(v2_children: None, done: bool, reason: str, expect_release: bool) -> None:
-    """Align done → release → climb; align failed → fail with no servo."""
+    """Align done → release → climb; align timeout/lost → force release; structural error → fail with no servo."""
     ScriptedAlignV2.reset(done=done, reason=reason)
     action = GpsDropSequenceAction()
     action.start(params(release_wait_updates=1, align_descend_max_updates=10))
@@ -367,8 +386,8 @@ class HangingAlign:
         )
 
 
-def test_outer_align_timeout_fails_no_release(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Outer update_count > align_descend_max_updates → fail, no release."""
+def test_outer_align_timeout_releases(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Outer update_count > align_descend_max_updates → force release, not fail."""
     ScriptedGotoV2.reset()
     ScriptedLockV2.reset()
     HangingAlign.reset()
@@ -379,14 +398,21 @@ def test_outer_align_timeout_fails_no_release(monkeypatch: pytest.MonkeyPatch) -
     action.start(params(align_descend_max_updates=3, release_wait_updates=1))
     results = _drive_to_terminal(action, limit=30)
 
-    assert results[-1].failed
-    assert results[-1].reason == "align_descend_timeout"
-    assert action.phase == "failed"
-    assert action.released_count == 0
-    _assert_no_servo(results)
-    types = [a.get("action_type") for a in results[-1].actions]
-    assert "flight_command" in types
-    assert "clear_continuous_commands" in types
+    assert not results[-1].failed, f"expected done (force release), got failed: {results[-1].reason}"
+    assert results[-1].done, f"expected done (force release), got {results[-1].reason}"
+    assert action.phase == "done"
+    assert action.released_count in (1, 2)
+    # verify stop actions (zero velocity + clear continuous) were emitted
+    stop_actions = [a for r in results for a in r.actions if a.get('action_type') == 'clear_continuous_commands']
+    assert len(stop_actions) >= 1
+    # verify detail includes force release marker
+    force_detail = None
+    for r in results:
+        if r.detail.get('align_timeout_release') or r.detail.get('align_failed_release'):
+            force_detail = r.detail
+            break
+    assert force_detail is not None, "should have force release marker in detail"
+    assert force_detail['failure_event'] == 'align_timeout'
 
 
 def test_dual_target_first_release_then_climb_then_second(v2_children: None) -> None:
@@ -403,17 +429,18 @@ def test_dual_target_first_release_then_climb_then_second(v2_children: None) -> 
     assert 9 in all_servos
 
 
-def test_dual_target_first_fail_stops_second(v2_children: None) -> None:
-    """First align failed → sequence fails, second target never attempted."""
+def test_dual_target_first_timeout_releases_both(v2_children: None) -> None:
+    """First align timeout → force release p1 → climb → goto target 2 → release p2."""
     ScriptedAlignV2.reset(done=False, reason="align_descend_timeout")
     action = GpsDropSequenceAction()
     action.start(params(align_descend_max_updates=10, release_wait_updates=1))
-    results = _drive_to_terminal(action, limit=40)
+    results = _drive_to_terminal(action, limit=80)
 
-    assert results[-1].failed
-    assert action.released_count == 0
-    assert action.target_index == 0
-    _assert_no_servo(results)
+    assert results[-1].done, f"expected done, got {results[-1].reason}"
+    assert action.released_count == 2
+    all_servos = _release_servo_channels(results)
+    assert 8 in all_servos
+    assert 9 in all_servos
 
 
 def test_single_target_dual_release_done(v2_children: None) -> None:
@@ -431,14 +458,27 @@ def test_single_target_dual_release_done(v2_children: None) -> None:
     assert 8 in ch and 9 in ch
 
 
-def test_single_target_dual_release_fail(v2_children: None) -> None:
-    """Single target: align failed → no servo release."""
+def test_single_target_dual_release_timeout_releases(v2_children: None) -> None:
+    """Single target: align timeout → force dual release → climb → done."""
     ScriptedAlignV2.reset(done=False, reason="target_lost_timeout")
     action = GpsDropSequenceAction()
     action.start(params(
         targets=[TARGETS[0]], release_wait_updates=1, align_descend_max_updates=10,
     ))
-    results = _drive_to_terminal(action, limit=40)
+    results = _drive_to_terminal(action, limit=80)
+
+    assert results[-1].done, f"expected done (force release), got {results[-1].reason}"
+    assert action.released_count == 2
+    ch = _release_servo_channels(results)
+    assert 8 in ch and 9 in ch
+
+
+def test_structural_error_still_fails(v2_children: None) -> None:
+    """Structural error (missing altitude) still fails, no release."""
+    ScriptedAlignV2.reset(done=False, reason="missing_altitude")
+    action = GpsDropSequenceAction()
+    action.start(params(release_wait_updates=1, align_descend_max_updates=10))
+    results = _drive_to_terminal(action)
 
     assert results[-1].failed
     assert action.released_count == 0

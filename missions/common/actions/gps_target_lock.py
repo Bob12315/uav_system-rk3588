@@ -49,6 +49,7 @@ class GpsTargetLockAction(ActionModule):
         self.projector = GpsTargetProjector(self.camera)
 
         self.detection_source = str(data.get("detection_source", "scene")).strip().lower()
+        self.require_track_id = bool(data.get("require_track_id", True))
         self.update_count = 0
         self.locked_track_id: int | None = None
         self.best_distance_m: float | None = None
@@ -118,20 +119,42 @@ class GpsTargetLockAction(ActionModule):
                 best_track_id = est.track_id
                 best_gps = {"lat": est.lat, "lon": est.lon, "distance_m": dist}
 
-        if best_track_id is not None and best_track_id != self.locked_track_id:
-            self.locked_track_id = best_track_id
-            self.best_distance_m = best_dist
-            self.matched_detection_gps = best_gps
-            return ActionResult(
-                done=True, reason="gps_target_locked",
-                actions=[{"action_type": "yolo_lock_target", "params": {"track_id": best_track_id}}],
-                detail={
-                    "locked_track_id": best_track_id,
+        if self.require_track_id:
+            if best_track_id is not None and best_track_id != self.locked_track_id:
+                self.locked_track_id = best_track_id
+                self.best_distance_m = best_dist
+                self.matched_detection_gps = best_gps
+                return ActionResult(
+                    done=True, reason="gps_target_locked",
+                    actions=[{"action_type": "yolo_lock_target", "params": {"track_id": best_track_id}}],
+                    detail={
+                        "locked_track_id": best_track_id,
+                        "best_distance_m": best_dist,
+                        "matched_detection_gps": best_gps,
+                        "target_gps": {"lat": self.target_lat, "lon": self.target_lon},
+                    },
+                )
+        else:
+            if best_dist < float("inf"):
+                self.best_distance_m = best_dist
+                self.matched_detection_gps = best_gps
+                detail: dict[str, Any] = {
                     "best_distance_m": best_dist,
                     "matched_detection_gps": best_gps,
                     "target_gps": {"lat": self.target_lat, "lon": self.target_lon},
-                },
-            )
+                }
+                actions: list[dict[str, Any]] = []
+                if best_track_id is not None:
+                    self.locked_track_id = best_track_id
+                    detail["locked_track_id"] = best_track_id
+                    actions.append({"action_type": "yolo_lock_target", "params": {"track_id": best_track_id}})
+                else:
+                    detail["matched_without_track_id"] = True
+                return ActionResult(
+                    done=True, reason="gps_target_locked",
+                    actions=actions,
+                    detail=detail,
+                )
 
         if self.update_count >= self.max_updates:
             return ActionResult(
