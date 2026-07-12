@@ -579,7 +579,10 @@ class AlignDescendAction(ActionModule):
 
         if target_ok:
             self.lost_updates = 0
-        elif self.config.target_loss_policy == "continue_descent":
+        elif (
+            self.config.target_loss_policy == "continue_descent"
+            and command_detail["hold_reason"] == "target_not_valid"
+        ):
             # Blind descent: zero horizontal, continue vertical
             self.hold_updates = 0
             blind_vz = self.config.target_loss_descend_speed_mps
@@ -621,6 +624,24 @@ class AlignDescendAction(ActionModule):
                 command_detail["descent_speed_after_stage_mps"] = stage_result.get("descent_speed_after_stage_mps", blind_vz)
                 command_detail["descent_speed_stage_max_altitude_m"] = stage_result.get("descent_speed_stage_max_altitude_m")
                 command_detail["descent_speed_stage_active"] = stage_result.get("descent_speed_stage_active", False)
+        elif self.config.target_loss_policy == "continue_descent":
+            # Blind descent is only permitted for loss of visual target.  A
+            # control/state/input fault must fail so the mission can take its
+            # configured fallback (for visual_land, land_home).
+            self.failed = True
+            self.failure_reason = str(command_detail["hold_reason"])
+            detail = self._failed_detail(
+                self.failure_reason,
+                height_m=altitude.value_m,
+                altitude_source=altitude.source,
+            )
+            self.last_detail = detail
+            return ActionResult(
+                actions=[],
+                failed=True,
+                reason=self.failure_reason,
+                detail=detail,
+            )
         else:
             self.lost_updates += 1
             self.hold_updates = 0
