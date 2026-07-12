@@ -56,6 +56,21 @@ def test_local_ned_source_never_falls_back_to_relative_altitude() -> None:
     assert result.failed and result.reason == "missing_local_ned_altitude"
 
 
+def test_continue_descent_fails_when_control_is_not_allowed() -> None:
+    action = AlignDescendAction()
+    action.start({
+        "config": {
+            "target_loss_policy": "continue_descent",
+            "target_loss_descend_speed_mps": 0.3,
+        },
+    })
+
+    result = action.update(_active_context(control_allowed=False))
+
+    assert result.failed
+    assert result.reason == "control_not_allowed"
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [

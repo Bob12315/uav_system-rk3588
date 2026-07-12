@@ -36,6 +36,7 @@ def test_create_action_lab_registry_lists_supported_actions() -> None:
         "takeoff",
         "target_lock",
         "validate_target",
+        "visual_land",
         "yaw_align",
     ]
     assert len(names) == len(set(names))
@@ -84,6 +85,7 @@ def test_action_lab_specs_are_json_serializable() -> None:
         "gps_multi_view_localize",
         "gps_target_lock",
         "gps_drop_sequence",
+        "visual_land",
     ]
     assert len(spec_names) == len(set(spec_names))
     assert spec_names.count("gps_multi_view_localize") == 1

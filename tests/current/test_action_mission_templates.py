@@ -83,7 +83,7 @@ def test_action_mission_waypoint_frames_are_explicit_and_match_coordinate_source
                 continue
             params = step["params"]
             assert params["waypoint_mode"] in {"field", "absolute"}
-            assert params["yaw_mode"] == "field_heading"
+            assert params["yaw_mode"] in {"field_heading", "hold"}
             if step["name"] == "goto_waypoint":
                 uses_localized_target = str(params.get("x", "")).endswith(".local_x")
                 assert params["waypoint_mode"] == ("absolute" if uses_localized_target else "field")
@@ -641,7 +641,7 @@ def test_select_recon_targets_v2_zone_center_mode_field() -> None:
 
 def test_full_rescue_v2_has_12_steps() -> None:
     data = _template(FULL_V2_TEMPLATE_PATH)
-    assert len(data["steps"]) == 10
+    assert len(data["steps"]) == 12
 
 
 def test_sitl_profile_matches_base_full_v2_template() -> None:
