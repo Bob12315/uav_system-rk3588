@@ -547,7 +547,7 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "detection_source": "scene",
                 "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
                 "min_confidence": 0.35,
-                "camera": {"fov_x_deg": 51.3, "fov_y_deg": 39.6, "image_x_sign": 1.0, "image_y_sign": -1.0},
+                "camera": {"fov_x_deg": 68.15, "fov_y_deg": 54.3, "image_x_sign": 1.0, "image_y_sign": -1.0},
                 "fusion": {"cluster_radius_m": 0.8, "outlier_radius_m": 0.8, "min_cluster_size": 2, "center_weight_power": 1.0}
             },
         },
@@ -559,7 +559,7 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "target": {},
                 "max_match_distance_m": 1.2,
                 "max_updates": 40,
-                "camera": {"fov_x_deg": 51.3, "fov_y_deg": 39.6, "image_x_sign": 1.0, "image_y_sign": -1.0},
+                "camera": {"fov_x_deg": 68.15, "fov_y_deg": 54.3, "image_x_sign": 1.0, "image_y_sign": -1.0},
             },
         },
         {
@@ -593,8 +593,8 @@ def action_lab_specs() -> list[dict[str, Any]]:
                     "class_names": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
                     "detection_source": "scene",
                     "camera": {
-                        "fov_x_deg": 51.3,
-                        "fov_y_deg": 39.6,
+                        "fov_x_deg": 68.15,
+                        "fov_y_deg": 54.3,
                         "image_x_sign": 1.0,
                         "image_y_sign": -1.0
                     }
@@ -619,15 +619,15 @@ def action_lab_specs() -> list[dict[str, Any]]:
                         "height_scale_points": [
                             {"altitude_m": 1.0, "scale": 0.40},
                             {"altitude_m": 1.3, "scale": 0.40},
-                            {"altitude_m": 2.4, "scale": 0.55},
-                            {"altitude_m": 3.5, "scale": 0.55},
-                            {"altitude_m": 4.5, "scale": 0.55}
+                            {"altitude_m": 2.4, "scale": 0.65},
+                            {"altitude_m": 3.5, "scale": 0.65},
+                            {"altitude_m": 4.5, "scale": 0.65}
                         ],
                         "scale_max_velocity_with_height": True,
-                        "descend_speed_mps": 0.3,
+                        "descend_speed_mps": 0.24,
                         "slow_descend_speed_mps": 0.18,
-                        "max_ex_cam": 0.22,
-                        "max_ey_cam": 0.22,
+                        "max_ex_cam": 0.28,
+                        "max_ey_cam": 0.28,
                         "slow_descend_max_ex_cam": 0.55,
                         "slow_descend_max_ey_cam": 0.55,
                         "deadband_ex_cam": 0.06,

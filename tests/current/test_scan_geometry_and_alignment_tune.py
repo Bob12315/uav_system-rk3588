@@ -46,7 +46,7 @@ def test_web_ui_recce_zone_unchanged():
 
 
 def test_fusion_fov_still_51_3_39_6():
-    """Fusion camera FOV still 51.3/39.6 in all mission configs."""
+    """Fusion camera FOV is 68.15/54.3 in all mission configs."""
     paths = [
         "config/action_missions/drop_two_targets_v2.json",
         "config/action_missions/rescue_2026_full_auto_v2.json",
@@ -58,14 +58,14 @@ def test_fusion_fov_still_51_3_39_6():
             if step["name"] == "gps_multi_view_localize":
                 cam = step["params"].get("camera", {})
                 if cam:
-                    assert cam["fov_x_deg"] == 51.3, f"{path}: fov_x={cam['fov_x_deg']}"
-                    assert cam["fov_y_deg"] == 39.6, f"{path}: fov_y={cam['fov_y_deg']}"
+                    assert cam["fov_x_deg"] == 68.15, f"{path}: fov_x={cam['fov_x_deg']}"
+                    assert cam["fov_y_deg"] == 54.3, f"{path}: fov_y={cam['fov_y_deg']}"
         for step in data["steps"]:
             if step["name"] in ("gps_drop_sequence", "gps_recon_sequence"):
                 tl = step["params"].get("target_lock", {})
                 if tl and "camera" in tl:
-                    assert tl["camera"]["fov_x_deg"] == 51.3, f"{path} target_lock fov_x"
-                    assert tl["camera"]["fov_y_deg"] == 39.6
+                    assert tl["camera"]["fov_x_deg"] == 68.15, f"{path} target_lock fov_x"
+                    assert tl["camera"]["fov_y_deg"] == 54.3
 
 
 def test_align_descend_fov_still_85_69():

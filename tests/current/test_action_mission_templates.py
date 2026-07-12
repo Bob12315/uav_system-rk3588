@@ -626,8 +626,8 @@ def test_recon_sequence_v2_target_lock_camera() -> None:
     data = _template(FULL_V2_TEMPLATE_PATH)
     by_label = {step.get("label", ""): step for step in data["steps"]}
     camera = by_label["gps_recon_sequence"]["params"]["target_lock"]["camera"]
-    assert camera["fov_x_deg"] == 51.3
-    assert camera["fov_y_deg"] == 39.6
+    assert camera["fov_x_deg"] == 68.15
+    assert camera["fov_y_deg"] == 54.3
     assert camera["image_x_sign"] == 1.0
     assert camera["image_y_sign"] == -1.0
 
