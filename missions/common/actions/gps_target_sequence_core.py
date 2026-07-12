@@ -31,7 +31,7 @@ class GpsTargetSequenceCore:
     def _update_lock(self,ctx):
         t=self.targets[self.target_index]
         if self.sub_action is None:
-            self.sub_action=self._lock_action_factory(); self.sub_action.start({"target":{"id":t['target_id'],"lat":t['lat'],"lon":t['lon'],"class_name":t.get('class_name','')},"max_match_distance_m":self.lock_cfg.get('max_match_distance_m',1.2),"max_updates":self.target_lock_max_updates,"min_confidence":self.lock_cfg.get('min_confidence',.35),"class_names":self.lock_cfg.get('class_names'),"camera":self.lock_cfg.get('camera',{}),"detection_source":self.lock_cfg.get('detection_source','scene')}); self.update_count_at_phase=0
+            self.sub_action=self._lock_action_factory(); self.sub_action.start({"target":{"id":t['target_id'],"lat":t['lat'],"lon":t['lon'],"class_name":t.get('class_name','')},"max_match_distance_m":self.lock_cfg.get('max_match_distance_m',1.2),"max_updates":self.target_lock_max_updates,"min_confidence":self.lock_cfg.get('min_confidence',.35),"class_names":self.lock_cfg.get('class_names'),"camera":self.lock_cfg.get('camera',{}),"detection_source":self.lock_cfg.get('detection_source','scene'),"require_track_id":self.lock_cfg.get("require_track_id",True)}); self.update_count_at_phase=0
         r=self.sub_action.update(ctx)
         if r.failed:return self._fail('lock_failed',self._stop_actions('lock_fail'))
         if not r.done:return ActionResult(actions=r.actions,reason=self._sequence_reason('lock'),detail=self._sequence_detail(extra={'lock':r.detail}))
@@ -40,9 +40,15 @@ class GpsTargetSequenceCore:
         t=self.targets[self.target_index]
         if self.sub_action is None:
             self.sub_action=self._align_action_factory(); self.sub_action.start(self._build_align_params(t)); self.update_count_at_phase=0
-        if self.update_count_at_phase > self.align_descend_max_updates:return self._fail('align_timeout',self._stop_actions('timeout'))
+        if self.update_count_at_phase > self.align_descend_max_updates:
+            override=self._on_align_failure('align_timeout',t,ctx,None)
+            if override is not None:return override
+            return self._fail('align_timeout',self._stop_actions('timeout'))
         r=self.sub_action.update(ctx); command=(r.detail or {}).get('command'); self._on_align_sample(t,ctx,r)
-        if r.failed:return self._fail('align_failed',self._stop_actions('align_fail'),r.reason)
+        if r.failed:
+            override=self._on_align_failure('align_failed',t,ctx,r)
+            if override is not None:return override
+            return self._fail('align_failed',self._stop_actions('align_fail'),r.reason)
         if not r.done and isinstance(command,dict) and (not command.get('valid') or not command.get('active')): return ActionResult(actions=self._stop_actions('align_inactive'),reason=self._sequence_reason('align_inactive'),detail=self._sequence_detail(extra={'align':r.detail}))
         if not r.done and command is None: return ActionResult(actions=[],reason=self._sequence_reason('align'),detail=self._sequence_detail(extra={'align':r.detail}))
         if not r.done:return ActionResult(actions=[{'action_type':'flight_command','params':dict(command),'once':False,'key':self._action_key('align'),'priority':5}],reason=self._sequence_reason('align'),detail=self._sequence_detail(extra={'align':r.detail}))
@@ -73,6 +79,9 @@ class GpsTargetSequenceCore:
         self.phase='done'; return ActionResult(actions=self._stop_actions('climb_done'),done=True,reason=self._sequence_reason('done'),detail=self._sequence_detail(done=True))
     def _transition(self,phase,event,actions=None): self.phase=phase; self.phase_history.append(phase); self.sub_action=None; self.update_count_at_phase=0; return ActionResult(actions=actions or [],reason=self._sequence_reason(event),detail=self._sequence_detail())
     def _fail(self,event,actions=None,reason=None): self.phase='failed'; self._failed_reason=reason or self._sequence_reason(event); self.sub_action=None; return ActionResult(actions=actions if actions is not None else self._stop_actions('failed'),failed=True,reason=self._failed_reason,detail=self._sequence_detail())
+    def _on_align_failure(self,event,target,ctx,result):
+        """Hook called before _fail on align timeout/failure. Return an ActionResult to override the default _fail behaviour; return None to proceed with the normal _fail path."""
+        return None
     def _current_altitude_m(self,c):
         d=c.get('drone',{});
         for src,names in ((d,('relative_altitude','relative_altitude_m')),(c,('relative_altitude','relative_altitude_m','altitude_m'))):
