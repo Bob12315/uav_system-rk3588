@@ -3,12 +3,133 @@
   "name": "recon_gps_v2",
   "profile": "v3-default",
   "steps": [
-    {"name": "takeoff", "label": "takeoff_3_5m", "params": {"mode": "GUIDED", "altitude_m": 3.5, "altitude_tolerance_m": 0.35, "require_armed": true, "max_updates": 150}},
-    {"name": "gps_multi_view_localize", "label": "recon_gps_multi_view_scan", "save_as": "recon_scan", "params": {"scan_waypoint_group": "recon", "scan_altitude_m": 4.5, "capture_updates_per_waypoint": 4, "settle_updates_per_waypoint": 1, "max_updates_per_waypoint": 120, "tolerance_xy_m": 0.8, "tolerance_z_m": 0.6, "goto_min_hold_updates": 1, "yaw_mode": "field_heading", "detection_source": "scene", "min_confidence": 0.3}},
-    {"name": "select_recon_targets", "label": "select_gps_recon_targets", "save_as": "recon_targets", "params": {"objects": "$recon_scan.localized_objects", "coordinate_mode": "gps_enu", "target_count": 5, "allow_fewer": true, "deduplicate_radius_m": 0.8}},
-    {"name": "gps_recon_sequence", "label": "gps_recon_sequence", "save_as": "recon_sequence", "params": {"targets": "$recon_targets.selected_targets", "approach_altitude_m": 2.5, "finish_altitude_m": 1.2, "climb_after_drop_m": 2.5, "climb_tolerance_z_m": 0.1, "climb_max_updates": 100, "goto_max_updates": 200, "target_lock_max_updates": 60, "align_descend_max_updates": 160, "goto": {"tolerance_xy_m": 0.25, "tolerance_z_m": 0.3, "min_hold_updates": 3, "require_velocity_valid": true, "max_horizontal_speed_mps": 0.15, "max_vertical_speed_mps": 0.1}, "target_lock": {"max_match_distance_m": 1.2, "min_confidence": 0.35, "detection_source": "scene"}, "align_descend": {"expected_dt_s": 0.1, "lost_timeout_updates": 10, "max_updates": 160, "config": {"kp_vx": 0.275, "kp_vy": 0.275, "max_vx_mps": 0.2, "max_vy_mps": 0.2, "payload_offset_enabled": false}}}},
-    {"name": "build_recon_report", "label": "build_recon_report", "save_as": "recon_report", "params": {"items": "$recon_sequence.observations"}},
-    {"name": "goto_waypoint", "label": "return_home_gps", "params": {"waypoint_mode": "field", "target_frame": "global", "x": 0.0, "y": 0.0, "altitude_m": 3.0}},
-    {"name": "land", "label": "land_home", "params": {}}
+    {
+      "name": "takeoff",
+      "label": "takeoff_3_5m",
+      "params": {
+        "mode": "GUIDED",
+        "altitude_m": 3.5,
+        "altitude_tolerance_m": 0.35,
+        "require_armed": true,
+        "max_updates": 150
+      }
+    },
+    {
+      "name": "gps_multi_view_localize",
+      "label": "recon_gps_multi_view_scan",
+      "save_as": "recon_scan",
+      "params": {
+        "scan_waypoint_group": "recon",
+        "scan_altitude_m": 4.5,
+        "capture_updates_per_waypoint": 4,
+        "settle_updates_per_waypoint": 1,
+        "max_updates_per_waypoint": 120,
+        "tolerance_xy_m": 0.8,
+        "tolerance_z_m": 0.6,
+        "goto_min_hold_updates": 1,
+        "yaw_mode": "field_heading",
+        "detection_source": "scene",
+        "min_confidence": 0.3
+      }
+    },
+    {
+      "name": "select_recon_targets",
+      "label": "select_gps_recon_targets",
+      "save_as": "recon_targets",
+      "params": {
+        "objects": "$recon_scan.localized_objects",
+        "coordinate_mode": "gps_enu",
+        "target_count": 5,
+        "allow_fewer": true,
+        "deduplicate_radius_m": 0.8
+      }
+    },
+    {
+      "name": "gps_recon_sequence",
+      "label": "gps_recon_sequence",
+      "save_as": "recon_sequence",
+      "params": {
+        "targets": "$recon_targets.selected_targets",
+        "approach_altitude_m": 2.0,
+        "finish_altitude_m": 2.2,
+        "climb_after_drop_m": 2.0,
+        "climb_tolerance_z_m": 0.2,
+        "climb_max_updates": 100,
+        "goto_max_updates": 200,
+        "target_lock_max_updates": 60,
+        "align_descend_max_updates": 160,
+        "goto": {
+          "tolerance_xy_m": 0.25,
+          "tolerance_z_m": 0.15,
+          "min_hold_updates": 3,
+          "require_velocity_valid": true,
+          "max_horizontal_speed_mps": 0.15,
+          "max_vertical_speed_mps": 0.1
+        },
+        "target_lock": {
+          "max_match_distance_m": 1.2,
+          "min_confidence": 0.35,
+          "detection_source": "scene"
+        },
+        "align_descend": {
+          "expected_dt_s": 0.1,
+          "lost_timeout_updates": 10,
+          "max_updates": 160,
+          "config": {
+            "kp_vx": 0.275,
+            "kp_vy": 0.275,
+            "max_vx_mps": 0.2,
+            "max_vy_mps": 0.2,
+            "payload_offset_enabled": false,
+            "min_altitude_m": 1.7
+          },
+          "finish_policy": "latched_center_alignment",
+          "finish_alignment_max_ex_cam": 0.2,
+          "finish_alignment_max_ey_cam": 0.2,
+          "finish_alignment_hold_updates": 1,
+          "finish_altitude_m": 2.2
+        },
+        "observation": {
+          "record_start_altitude_m": 2.3,
+          "finish_altitude_m": 1.7,
+          "sign_class_names": [
+            "danger_1",
+            "danger_2",
+            "danger_3"
+          ],
+          "min_sign_confidence": 0.35,
+          "min_seen_frames": 1,
+          "min_confidence_max": 0.55,
+          "min_confidence_mean": 0.4,
+          "min_score": 0.55,
+          "min_margin_ratio": 1.2,
+          "detection_source": "scene"
+        }
+      }
+    },
+    {
+      "name": "build_recon_report",
+      "label": "build_recon_report",
+      "save_as": "recon_report",
+      "params": {
+        "items": "$recon_sequence.observations"
+      }
+    },
+    {
+      "name": "goto_waypoint",
+      "label": "return_home_gps",
+      "params": {
+        "waypoint_mode": "field",
+        "target_frame": "global",
+        "x": 0.0,
+        "y": 0.0,
+        "altitude_m": 3.0
+      }
+    },
+    {
+      "name": "land",
+      "label": "land_home",
+      "params": {}
+    }
   ]
 }
