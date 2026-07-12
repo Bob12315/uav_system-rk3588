@@ -85,7 +85,10 @@ class SystemRunner:
         self.system_events: deque[dict[str, object]] = deque(maxlen=160)
         self.latest_snapshot: dict[str, object] = {}
         self.latest_localization_result: dict[str, object] = {}
+        self.latest_drop_localization_result: dict[str, object] = {}
+        self.latest_recon_localization_result: dict[str, object] = {}
         self.latest_drop_targets_result: dict[str, object] = {}
+        self.latest_recon_targets_result: dict[str, object] = {}
         self.latest_recon_inspection_result: dict[str, object] = {}
         self.latest_drop_workflow_result: dict[str, object] = {}
         self.camera_recording: dict[str, object] = {
@@ -122,7 +125,10 @@ class SystemRunner:
             latest_stage_controller=self.latest_stage_controller,
             latest_hold_reason=self.latest_hold_reason,
             get_latest_localization_result=lambda: self.latest_localization_result,
+            get_latest_drop_localization_result=lambda: self.latest_drop_localization_result,
+            get_latest_recon_localization_result=lambda: self.latest_recon_localization_result,
             get_latest_drop_targets_result=lambda: self.latest_drop_targets_result,
+            get_latest_recon_targets_result=lambda: self.latest_recon_targets_result,
             get_latest_recon_inspection_result=lambda: self.latest_recon_inspection_result,
             get_latest_drop_workflow_result=lambda: self.latest_drop_workflow_result,
         )
@@ -708,27 +714,24 @@ class SystemRunner:
         self._save_localization_from_detail(detail, source=name)
 
     def _maybe_save_localization_from_mission(self) -> None:
-        """Check mission blackboard for localized_objects saved by a completed multi_view step."""
+        """Persist drop/recon fusion independently from their explicit mission keys."""
         orch = getattr(self, "action_mission_orchestrator", None)
         if orch is None:
             return
         bb = getattr(orch, "blackboard", None)
         if bb is None:
             return
-        for _key, value in list(getattr(bb, "data", {}).items()):
+        data = getattr(bb, "data", {})
+        for key, attribute in (("drop_scan", "latest_drop_localization_result"), ("recon_scan", "latest_recon_localization_result")):
+            value = data.get(key) if isinstance(data, dict) else None
             if isinstance(value, dict) and isinstance(value.get("localized_objects"), list):
-                # Detect GPS fusion results: coordinate_frame=GLOBAL or objects have lat/lon
-                source = "multi_view_localize"
-                if value.get("coordinate_frame") == "GLOBAL":
-                    source = "gps_multi_view_localize"
-                else:
-                    objects = value.get("localized_objects")
-                    if isinstance(objects, list) and objects:
-                        first = objects[0]
-                        if isinstance(first, dict) and ("lat" in first or "lon" in first):
-                            source = "gps_multi_view_localize"
-                self._save_localization_from_detail(value, source=source)
-                return  # save only the first valid result
+                result = self._localization_result(value, "gps_multi_view_localize")
+                setattr(self, attribute, result)
+
+    def _localization_result(self, detail: dict[str, object], source: str) -> dict[str, object]:
+        localized = detail.get("localized_objects")
+        objects = localized if isinstance(localized, list) else []
+        return {"source": source, "updated_at": time.time(), "run_id": str(detail.get("run_id", "")), "objects": self._with_field_coordinates(objects), "object_count": int(detail.get("object_count", len(objects)))}
 
     def _ensure_drop_workflow(self) -> dict[str, object]:
         if not isinstance(self.latest_drop_workflow_result, dict):
@@ -1007,6 +1010,10 @@ class SystemRunner:
 
     def clear_localization_result(self) -> CommandResult:
         self.latest_localization_result = {}
+        self.latest_drop_localization_result = {}
+        self.latest_recon_localization_result = {}
+        self.latest_recon_targets_result = {}
+        self.latest_recon_inspection_result = {}
         result = CommandResult(True, "localized object coordinates cleared")
         self._record_event("OK", result.message)
         return result
@@ -1090,6 +1097,25 @@ class SystemRunner:
             "inspected_count": len(report), "detected_sign_count": detected,
             "no_sign_count": no_sign, "failed_count": failed,
         }
+
+    def _maybe_save_recon_targets_from_mission(self) -> None:
+        orch = self.action_mission_orchestrator
+        data = getattr(getattr(orch, "blackboard", None), "data", {}) if orch else {}
+        value = data.get("recon_targets") if isinstance(data, dict) else None
+        if not isinstance(value, dict): return
+        selected = value.get("selected_targets")
+        if isinstance(selected, list):
+            self.latest_recon_targets_result = {"source": "select_recon_targets", "updated_at": time.time(), "selected_targets": self._with_field_coordinates(selected), "selected_count": value.get("selected_count", len(selected)), "candidate_count": value.get("candidate_count", 0)}
+
+    def _maybe_save_recon_report_from_mission(self) -> None:
+        orch = self.action_mission_orchestrator
+        data = getattr(getattr(orch, "blackboard", None), "data", {}) if orch else {}
+        detail = data.get("recon_report") if isinstance(data, dict) else None
+        if not isinstance(detail, dict): return
+        report = detail.get("recon_report", detail)
+        barrels = report.get("barrels", []) if isinstance(report, dict) else []
+        if isinstance(barrels, list):
+            self.latest_recon_inspection_result = {"source": "build_recon_report", "updated_at": time.time(), "report": self._with_field_coordinates(barrels), "barrels": self._with_field_coordinates(barrels), "barrel_count": len(barrels), "detected_count": detail.get("detected_count", 0), "blank_count": detail.get("blank_count", 0), "skipped_count": detail.get("skipped_count", 0), "failed_count": detail.get("failed_count", 0)}
 
     def manual_step_move(self, direction: str, step_m: float) -> CommandResult:
         """Move the drone by step_m in the given body-frame direction.
@@ -1271,6 +1297,9 @@ class SystemRunner:
             return self.action_mission_status_payload()
         with self.action_runtime_lock:
             self.latest_recon_inspection_result = {}
+            self.latest_drop_localization_result = {}
+            self.latest_recon_localization_result = {}
+            self.latest_recon_targets_result = {}
             self.latest_drop_workflow_result = {}
             requirements = self._action_mission_field_requirements()
             if requirements["needs_gps"]:
@@ -1414,6 +1443,9 @@ class SystemRunner:
             return self.action_mission_status_payload()
         with self.action_runtime_lock:
             self.latest_recon_inspection_result = {}
+            self.latest_drop_localization_result = {}
+            self.latest_recon_localization_result = {}
+            self.latest_recon_targets_result = {}
             self.latest_drop_workflow_result = {}
             self.action_mission_orchestrator.reset(
                 link_manager=self.services.link_manager,
@@ -1437,6 +1469,8 @@ class SystemRunner:
                 send_commands=bool(self.controller_switches.snapshot().send_commands),
             )
             self._maybe_save_localization_from_mission()
+            self._maybe_save_recon_targets_from_mission()
+            self._maybe_save_recon_report_from_mission()
             self._maybe_save_localization_result()
             self._maybe_save_drop_targets_result()
             self._maybe_save_recon_inspection_result()

@@ -57,3 +57,12 @@ def test_no_flight_actions_produced() -> None:
     ]})
     result = action.update()
     assert result.actions == []
+
+
+def test_gps_hover_report_fields_are_normalized() -> None:
+    action = BuildReconReportAction()
+    action.start({"items": [{"target_id": "r1", "status": "confirmed", "hazard_label": "danger_3", "confidence_max": 0.91, "confidence_mean": 0.8}]})
+    barrel = action.update().detail["recon_report"]["barrels"][0]
+    assert barrel["status"] == "confirmed"
+    assert barrel["content"] == "danger_3"
+    assert barrel["confidence"] == 0.91

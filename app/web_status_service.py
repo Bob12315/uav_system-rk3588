@@ -35,9 +35,15 @@ class WebStatusService:
         get_action_runtime: Callable[[], Any] | None = None,
         latest_localization_result: dict[str, object] | None = None,
         latest_drop_targets_result: dict[str, object] | None = None,
+        latest_drop_localization_result: dict[str, object] | None = None,
+        latest_recon_localization_result: dict[str, object] | None = None,
+        latest_recon_targets_result: dict[str, object] | None = None,
         latest_recon_inspection_result: dict[str, object] | None = None,
         get_latest_localization_result: Callable[[], dict[str, object]] | None = None,
         get_latest_drop_targets_result: Callable[[], dict[str, object]] | None = None,
+        get_latest_drop_localization_result: Callable[[], dict[str, object]] | None = None,
+        get_latest_recon_localization_result: Callable[[], dict[str, object]] | None = None,
+        get_latest_recon_targets_result: Callable[[], dict[str, object]] | None = None,
         get_latest_recon_inspection_result: Callable[[], dict[str, object]] | None = None,
         get_latest_drop_workflow_result: Callable[[], dict[str, object]] | None = None,
         get_link_manager: Callable[[], Any] | None = None,
@@ -62,9 +68,15 @@ class WebStatusService:
         self._get_action_mission_status_payload = get_action_mission_status_payload
         self._latest_localization = latest_localization_result
         self._latest_drop_targets = latest_drop_targets_result
+        self._latest_drop_localization = latest_drop_localization_result
+        self._latest_recon_localization = latest_recon_localization_result
+        self._latest_recon_targets = latest_recon_targets_result
         self._latest_recon = latest_recon_inspection_result
         self._get_latest_localization_result = get_latest_localization_result
         self._get_latest_drop_targets_result = get_latest_drop_targets_result
+        self._get_latest_drop_localization_result = get_latest_drop_localization_result
+        self._get_latest_recon_localization_result = get_latest_recon_localization_result
+        self._get_latest_recon_targets_result = get_latest_recon_targets_result
         self._get_latest_recon_inspection_result = get_latest_recon_inspection_result
         self._get_latest_drop_workflow_result = get_latest_drop_workflow_result
         self._get_link_manager = get_link_manager
@@ -121,6 +133,9 @@ class WebStatusService:
                 if self._get_latest_drop_targets_result
                 else self._latest_drop_targets
             ) or {},
+            "drop_localization": (self._get_latest_drop_localization_result() if self._get_latest_drop_localization_result else self._latest_drop_localization) or {},
+            "recon_localization": (self._get_latest_recon_localization_result() if self._get_latest_recon_localization_result else self._latest_recon_localization) or {},
+            "recon_targets": (self._get_latest_recon_targets_result() if self._get_latest_recon_targets_result else self._latest_recon_targets) or {},
             "recon_inspection": (
                 self._get_latest_recon_inspection_result()
                 if self._get_latest_recon_inspection_result

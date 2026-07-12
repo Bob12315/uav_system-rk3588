@@ -398,8 +398,9 @@ function summarizeReconReport(blackboard) {
   const barrels = Array.isArray(report.barrels) ? report.barrels : [];
   const rows = barrels.slice(0, 8).map((barrel, index) => {
     const id = barrel.id || `recon_${index + 1}`;
-    const content = barrel.content || barrel.class_name || "blank";
-    const confidence = barrel.confidence !== undefined ? ` conf=${Number(barrel.confidence).toFixed(2)}` : "";
+    const content = barrel.hazard_label || barrel.content || barrel.sign_class || barrel.class_name || "blank";
+    const rawConfidence = barrel.confidence ?? barrel.confidence_max ?? barrel.confidence_mean;
+    const confidence = rawConfidence !== undefined ? ` conf=${Number(rawConfidence).toFixed(2)}` : "";
     return `<div>${escapeHtml(id)}: ${escapeHtml(content)}${escapeHtml(confidence)}</div>`;
   }).join("");
   return `<div class="mission-result-group"><strong>侦察报告</strong><div>桶数：${barrelCount} / detected：${detectedCount} / blank：${blankCount} / skipped：${skippedCount}</div>${rows}</div>`;
@@ -502,11 +503,12 @@ function renderReconInspection(result) {
   const report = Array.isArray(result.report) ? result.report : [];
   element.innerHTML = report.length ? report.map((item, index) => {
     const x = pointX(item), y = pointY(item);
-    const statusLabel = item.status === "detected"
-      ? `${item.sign_class || item.content || "--"} ${num(item.confidence, 2)}`
-      : item.status === "no_sign" ? "无标识"
-        : item.status === "blank_or_uncertain" ? "空白"
-        : item.status === "skipped_missing_target" ? "跳过" : "识别失败";
+    const label = item.hazard_label || item.content || item.sign_class || item.class_name || "--";
+    const confidence = item.confidence ?? item.confidence_max ?? item.confidence_mean;
+    const statusLabel = ["confirmed", "detected"].includes(item.status)
+      ? `${label} ${num(confidence, 2)}`
+      : ["blank", "no_sign", "blank_or_uncertain"].includes(item.status) ? "空白或未识别到可靠标识"
+        : item.status === "skipped_missing_target" ? "跳过：目标数据缺失" : "识别失败";
     return `<div>#${index + 1} &nbsp; x=${num(x, 2)} y=${num(y, 2)} &nbsp; ${escapeHtml(statusLabel)}</div>`;
   }).join("") : `<div class="hint">暂无侦察识别结果。</div>`;
 }

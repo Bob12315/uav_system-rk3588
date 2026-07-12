@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from .base import ActionModule
@@ -44,13 +45,16 @@ class BuildReconReportAction(ActionModule):
                 skipped_count += 1
                 barrels.append({"status": "skipped_missing_target", "content": "blank", "confidence": 0.0})
                 continue
-            status = str(item.get("status", ""))
+            status = str(item.get("status", "blank"))
+            content = item.get("content") or item.get("hazard_label") or item.get("class_name") or "blank"
+            confidence = self._first_finite(item.get("confidence"), item.get("confidence_max"), item.get("confidence_mean"), 0.0)
             barrel = {**item,
                 "id": str(item.get("target_id") or item.get("id") or ""),
+                "target_id": str(item.get("target_id") or item.get("id") or ""),
                 "local_x": item.get("local_x"),
                 "local_y": item.get("local_y"),
-                "content": str(item.get("content", "blank")),
-                "confidence": float(item.get("confidence", 0.0)),
+                "content": str(content),
+                "confidence": confidence,
                 "status": status,
             }
             if status in {"detected", "confirmed"}:
@@ -90,3 +94,14 @@ class BuildReconReportAction(ActionModule):
 
     def _detail(self) -> dict[str, Any]:
         return dict(self._report)
+
+    @staticmethod
+    def _first_finite(*values: Any) -> float:
+        for value in values:
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(number):
+                return number
+        return 0.0

@@ -144,13 +144,23 @@ def test_field_map_drone_uses_field_x_directly():
     assert "x: fieldX" in js
 
 
-def test_index_field_map_asset_gps_fused_targets_version():
-    """index.html 使用 gps-fused-targets 新缓存版本。"""
+def test_index_field_map_asset_recon_web_status_version():
+    """index.html updates cache versions for the recon status assets."""
     html = _read_html()
     assert "uav-x-mirror-20260710-1" not in html
     assert "uav-x-unmirror-20260711-1" not in html
     assert "uav-gps-field-position-20260711-1" not in html
-    assert "gps-fused-targets-20260711-1" in html
+    assert "recon-web-status-20260712-1" in html
+
+
+def test_recon_map_and_dashboard_use_separate_recon_state() -> None:
+    field_map = Path("web_ui/static/js/field_map.js").read_text()
+    app_js = Path("web_ui/static/app.js").read_text()
+    for name in ("drop_localization", "recon_localization", "recon_targets", "recon_inspection"):
+        assert name in field_map
+    assert "R-L" in field_map
+    assert '"confirmed", "detected"' in app_js
+    assert "confidence_max" in app_js
 
 
 def test_field_map_gps_ready_blocks_local_fallback():
