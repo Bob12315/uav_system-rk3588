@@ -28,13 +28,7 @@ class GpsDropSequenceAction(GpsTargetSequenceCore, ActionModule):
         self.reset()
 
     def start(self, params: dict[str, Any] | None = None) -> None:
-        # Preserve the historic module-level monkeypatch seam used by drop
-        # regression tests while the lifecycle itself now lives in the core.
-        from . import gps_target_sequence_core as core_module
-        core_module.GotoWaypointAction = GotoWaypointAction
-        core_module.GpsTargetLockAction = GpsTargetLockAction
-        core_module.AlignDescendAction = AlignDescendAction
-        core_module.PayloadReleaseAction = PayloadReleaseAction
+        self._goto_action_factory=GotoWaypointAction; self._lock_action_factory=GpsTargetLockAction; self._align_action_factory=AlignDescendAction; self._operation_action_factory=PayloadReleaseAction
         data = params or {}
 
         # ── targets (exactly 2 valid GPS targets) ──
@@ -161,6 +155,30 @@ class GpsDropSequenceAction(GpsTargetSequenceCore, ActionModule):
         self.started = True
         self.stopped = False
 
+
+    def _sequence_reason(self,event):
+        return {'goto':'gps_drop_goto','lock':'gps_drop_lock_searching','lock_start':'gps_drop_align_start','align':'gps_drop_align','align_inactive':'gps_drop_align_inactive','operation_start':'gps_drop_release_start','climb_start':'gps_drop_climb_start','climb':'gps_drop_climb','next':'gps_drop_next','done':'gps_drop_sequence_done','goto_timeout':'goto_timeout','goto_failed':'goto_failed','lock_failed':'no_lockable_drop_targets','align_timeout':'align_descend_timeout','operation_failed':'payload_release_failed','climb_timeout':'climb_timeout','climb_failed':'climb_goto_failed'}.get(event,event)
+    def _sequence_detail(self,done=False,extra=None):
+        d={'phase':'release' if self.phase=='operation' else self.phase,'target_index':self.target_index,'payload_index':self.payload_index,'released_count':self.released_count,'target_count':len(self.targets),'payload_count':len(self.payloads),'release_reason':getattr(self,'_release_reason',''),'execution_mode':self.execution_mode,'dual_release':self.execution_mode=='single_target_dual_release'}; d.update(extra or {});
+        if done:d['done']=True
+        return d
+    def _action_key(self,phase): return f'gps_drop_{phase}_{self.target_index}' if phase != 'align' else 'gps_drop_align'
+    def _build_align_params(self,target):
+        p=copy.deepcopy(self.align_cfg); c=dict(p.get('config') or {}); payload=self.payloads[self.payload_index]; c['payload_forward_m']=payload['payload_forward_m']; c['payload_right_m']=payload['payload_right_m']; p['config']=c; p['finish_altitude_m']=self.finish_altitude_m; return p
+    def _on_align_sample(self,target,ctx,result): pass
+    def _start_operation(self,target):
+        self.sub_action=self._operation_action_factory();
+        if self.execution_mode=='single_target_dual_release': self.sub_action.start({'servo_outputs':self.dual_release_servo_outputs,'payload_id':'payload_1_and_2','target_id':target['target_id'],'release_wait_updates':self.release_wait_updates,'priority':min(self.payloads[0].get('priority',5),self.payloads[1].get('priority',5))})
+        else:
+            p=self.payloads[self.payload_index]; self.sub_action.start({'servo_outputs':p['servo_outputs'],'payload_id':p['payload_id'],'target_id':target['target_id'],'release_wait_updates':self.release_wait_updates,'priority':p.get('priority',5)})
+    def _update_operation_hook(self,ctx):
+        r=self.sub_action.update(ctx)
+        if r.failed:return r
+        if not r.done:return ActionResult(actions=[self._zero_velocity_command()]+(r.actions or []),reason='gps_drop_releasing',detail=self._sequence_detail())
+        self._operation_hold=r.actions or []; return ActionResult(actions=[self._zero_velocity_command()]+self._operation_hold+[self._clear_continuous_command('release_done')],done=True,reason='gps_drop_climb_start',detail=self._sequence_detail())
+    def _operation_complete(self,target):
+        if self.execution_mode=='single_target_dual_release': self.released_count=2; self.payload_index=2
+        else: self.released_count+=1; self.payload_index+=1
 
 def _merge_servo_outputs(payload_a: dict[str, Any], payload_b: dict[str, Any]) -> list[dict[str, int]]:
     """Merge servo_outputs from two payloads into one combined list.
