@@ -27,6 +27,7 @@ from .survey_area import SurveyAreaAction
 from .takeoff import TakeoffAction
 from .target_lock import TargetLockAction
 from .validate_target import ValidateTargetAction
+from .visual_land import VisualLandAction
 from .yaw_align import YawAlignAction
 
 
@@ -57,6 +58,7 @@ def create_action_lab_registry() -> ActionRegistry:
     registry.register("gps_target_lock", GpsTargetLockAction)
     registry.register("gps_drop_sequence", GpsDropSequenceAction)
     registry.register("gps_recon_sequence", GpsReconSequenceAction)
+    registry.register("visual_land", VisualLandAction)
     return registry
 
 
@@ -645,6 +647,55 @@ def action_lab_specs() -> list[dict[str, Any]]:
                         "max_payload_offset_ey_cam": 0.8
                     }
                 }
+            },
+        },
+        {
+            "name": "visual_land",
+            "label": "Visual Land",
+            "description": (
+                "Search for YOLO class H, select the one closest to image centre, "
+                "lock, then visually descend to 0.3 m. Falls back to blind vertical "
+                "descent if no H is found. On completion outputs zero velocity and "
+                "clears continuous commands."
+            ),
+            "default_params": {
+                "class_names": ["H"],
+                "min_confidence": 0.35,
+                "search_max_updates": 8,
+                "finish_altitude_m": 0.3,
+                "blind_descend_speed_mps": 0.3,
+                "priority": 5,
+                "align_descend": {
+                    "expected_dt_s": 0.1,
+                    "max_updates": 300,
+                    "finish_altitude_m": 0.3,
+                    "finish_policy": "legacy",
+                    "config": {
+                        "kp_vx": 0.3,
+                        "kp_vy": 0.3,
+                        "max_vx_mps": 0.3,
+                        "max_vy_mps": 0.3,
+                        "descend_speed_mps": 0.35,
+                        "slow_descend_speed_mps": 0.3,
+                        "max_ex_cam": 0.3,
+                        "max_ey_cam": 0.3,
+                        "slow_descend_max_ex_cam": 0.55,
+                        "slow_descend_max_ey_cam": 0.55,
+                        "deadband_ex_cam": 0.04,
+                        "deadband_ey_cam": 0.04,
+                        "min_altitude_m": 0.3,
+                        "require_target_locked": False,
+                        "payload_offset_enabled": False,
+                        "descent_gate_policy": "allow_unaligned",
+                        "unaligned_descend_speed_mps": 0.3,
+                        "yaw_control_mode": "hold",
+                        "altitude_source": "local_ned",
+                        "descent_speed_stages": [
+                            {"max_altitude_m": 0.8, "max_descend_speed_mps": 0.18},
+                            {"max_altitude_m": 2.5, "max_descend_speed_mps": 0.35},
+                        ],
+                    },
+                },
             },
         },
     ]

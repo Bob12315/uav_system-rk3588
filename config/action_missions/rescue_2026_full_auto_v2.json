@@ -452,6 +452,82 @@
       }
     },
     {
+      "name": "goto_waypoint",
+      "label": "descend_home_2_5m",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "land_home",
+        "max_attempts": 1
+      },
+      "params": {
+        "x": 0.0,
+        "y": 0.0,
+        "altitude_m": 2.5,
+        "waypoint_mode": "field",
+        "target_frame": "global",
+        "yaw_mode": "hold",
+        "tolerance_xy_m": 0.7,
+        "tolerance_z_m": 0.25,
+        "min_hold_updates": 1,
+        "priority": 5,
+        "key": "descend_home_2_5m"
+      }
+    },
+    {
+      "name": "visual_land",
+      "label": "visual_land_home",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "land_home",
+        "max_attempts": 1
+      },
+      "params": {
+        "class_names": ["H"],
+        "min_confidence": 0.35,
+        "search_max_updates": 8,
+        "finish_altitude_m": 0.3,
+        "blind_descend_speed_mps": 0.3,
+        "priority": 5,
+        "align_descend": {
+          "expected_dt_s": 0.1,
+          "max_updates": 300,
+          "finish_altitude_m": 0.3,
+          "finish_policy": "legacy",
+          "config": {
+            "kp_vx": 0.3,
+            "kp_vy": 0.3,
+            "max_vx_mps": 0.3,
+            "max_vy_mps": 0.3,
+            "descend_speed_mps": 0.35,
+            "slow_descend_speed_mps": 0.3,
+            "max_ex_cam": 0.3,
+            "max_ey_cam": 0.3,
+            "slow_descend_max_ex_cam": 0.55,
+            "slow_descend_max_ey_cam": 0.55,
+            "deadband_ex_cam": 0.04,
+            "deadband_ey_cam": 0.04,
+            "min_altitude_m": 0.3,
+            "require_target_locked": false,
+            "payload_offset_enabled": false,
+            "descent_gate_policy": "allow_unaligned",
+            "unaligned_descend_speed_mps": 0.3,
+            "yaw_control_mode": "hold",
+            "altitude_source": "local_ned",
+            "descent_speed_stages": [
+              {
+                "max_altitude_m": 0.8,
+                "max_descend_speed_mps": 0.18
+              },
+              {
+                "max_altitude_m": 2.5,
+                "max_descend_speed_mps": 0.35
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
       "name": "land",
       "label": "land_home",
       "params": {

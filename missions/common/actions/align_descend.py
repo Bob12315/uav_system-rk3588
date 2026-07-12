@@ -50,6 +50,9 @@ class AlignDescendConfig:
     yaw_control_mode: str = "hold"
     altitude_source: str = "auto"
     descent_speed_stages: list[dict[str, float]] | None = None
+    # target loss behaviour — "fail" (default, existing behaviour) or "continue_descent"
+    target_loss_policy: str = "fail"
+    target_loss_descend_speed_mps: float = 0.0
 
     def __post_init__(self) -> None:
         for name in ("kp_vx", "kp_vy"):
@@ -177,6 +180,13 @@ class AlignDescendConfig:
                     raise ValueError(f"descent_speed_stages[{i}].max_altitude_m must be finite and > 0, got {alt}")
                 if not math.isfinite(spd) or spd < 0.0:
                     raise ValueError(f"descent_speed_stages[{i}].max_descend_speed_mps must be finite and >= 0, got {spd}")
+        # target loss policy validation
+        if self.target_loss_policy not in ("fail", "continue_descent"):
+            raise ValueError("target_loss_policy must be 'fail' or 'continue_descent'")
+        if float(self.target_loss_descend_speed_mps) < 0.0:
+            raise ValueError("target_loss_descend_speed_mps must be non-negative")
+        if not math.isfinite(float(self.target_loss_descend_speed_mps)):
+            raise ValueError("target_loss_descend_speed_mps must be finite")
 
 
 @dataclass(frozen=True, slots=True)
@@ -569,6 +579,48 @@ class AlignDescendAction(ActionModule):
 
         if target_ok:
             self.lost_updates = 0
+        elif self.config.target_loss_policy == "continue_descent":
+            # Blind descent: zero horizontal, continue vertical
+            self.hold_updates = 0
+            blind_vz = self.config.target_loss_descend_speed_mps
+            command = _command_dict(vx=0.0, vy=0.0, vz=blind_vz, enabled=True)
+            gain_scale = _height_gain_scale(altitude.value_m, self.config)
+            command_detail = {
+                "enabled": True,
+                "aligned": False,
+                "slow_descending": False,
+                "hold_reason": "target_loss_blind_descent",
+                "ex_cam": 0.0,
+                "ey_cam": 0.0,
+                "raw_ex_cam": 0.0,
+                "raw_ey_cam": 0.0,
+                "desired_ex_cam": 0.0,
+                "desired_ey_cam": 0.0,
+                "corrected_ex_cam": 0.0,
+                "corrected_ey_cam": 0.0,
+                "height_gain_scale": gain_scale,
+                "height_gain_mode": self.config.height_gain_mode,
+                "height_gain_points_active": False,
+                "kp_vx_eff": 0.0,
+                "kp_vy_eff": 0.0,
+                "max_vx_eff": 0.0,
+                "max_vy_eff": 0.0,
+                "payload_offset_enabled": False,
+                "payload_offset_valid": False,
+                "descent_speed_before_stage_mps": blind_vz,
+                "descent_speed_cap_mps": None,
+                "descent_speed_after_stage_mps": blind_vz,
+                "descent_speed_stage_max_altitude_m": None,
+                "descent_speed_stage_active": False,
+            }
+            stage_result = _apply_descent_speed_stages(blind_vz, altitude.value_m, self.config)
+            if stage_result is not None:
+                command["vz_cmd"] = stage_result["vz_cmd"]
+                command_detail["descent_speed_before_stage_mps"] = stage_result.get("descent_speed_before_stage_mps", blind_vz)
+                command_detail["descent_speed_cap_mps"] = stage_result.get("descent_speed_cap_mps")
+                command_detail["descent_speed_after_stage_mps"] = stage_result.get("descent_speed_after_stage_mps", blind_vz)
+                command_detail["descent_speed_stage_max_altitude_m"] = stage_result.get("descent_speed_stage_max_altitude_m")
+                command_detail["descent_speed_stage_active"] = stage_result.get("descent_speed_stage_active", False)
         else:
             self.lost_updates += 1
             self.hold_updates = 0
