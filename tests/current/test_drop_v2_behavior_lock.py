@@ -32,7 +32,7 @@ def test_drop_v2_sequence_contract_is_locked() -> None:
 
 def test_drop_v2_failure_and_stop_contract_is_covered_by_phase_suite() -> None:
     """Keep the stable failure names and stop primitives discoverable."""
-    text = (ROOT / "missions/common/actions/gps_drop_sequence.py").read_text(encoding="utf-8")
+    text = (ROOT / "missions/common/actions/gps_target_sequence_core.py").read_text(encoding="utf-8")
     for required in (
         "goto_timeout", "no_lockable_drop_targets", "align_descend_timeout",
         "payload_release_failed", "climb_goto_failed", "climb_timeout",
