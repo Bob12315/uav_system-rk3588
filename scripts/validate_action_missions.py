@@ -18,6 +18,7 @@ from missions.common.actions.action_lab import create_action_lab_registry
 DEFAULT_TEMPLATE_PATHS = [
     ROOT / "config/action_missions/drop_two_targets_v1.json",
     ROOT / "config/action_missions/drop_two_targets_v2.json",
+    ROOT / "config/action_missions/recon_gps_v2.json",
     ROOT / "config/action_missions/recon_inspect_5_targets_stepwise_v1.json",
     ROOT / "config/action_missions/rescue_2026_full_auto.json",
     ROOT / "config/action_missions/rescue_2026_full_auto_v2.json",
@@ -328,6 +329,9 @@ def _smoke_blackboard() -> MissionBlackboard:
     blackboard.set(
         "recon_sequence",
         {
+            "observations": [
+                {"target_index": 0, "target_id": "r1", "hazard_label": "", "status": "blank"},
+            ],
             "recon_result_items": [
                 {"target_index": 0, "target_id": "r1", "content": "baozha", "confidence": 0.72, "status": "detected"},
             ],
