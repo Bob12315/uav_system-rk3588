@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -53,6 +54,21 @@ class AlignDescendConfig:
     # target loss behaviour — "fail" (default, existing behaviour) or "continue_descent"
     target_loss_policy: str = "fail"
     target_loss_descend_speed_mps: float = 0.0
+    # Low-altitude visual-alignment assistance. Disabled by default so visual
+    # landing and existing missions retain their current behaviour.
+    integral_enabled: bool = False
+    integral_active_below_altitude_m: float = 1.6
+    ki_vx: float = 0.04
+    ki_vy: float = 0.04
+    integral_vx_limit_mps: float = 0.03
+    integral_vy_limit_mps: float = 0.03
+    min_effective_speed_enabled: bool = False
+    min_effective_speed_active_below_altitude_m: float = 1.6
+    min_effective_speed_mps: float = 0.035
+    min_effective_speed_ex_threshold: float = 0.12
+    min_effective_speed_ey_threshold: float = 0.16
+    target_loss_grace_updates: int = 0
+    target_loss_grace_horizontal_scale: float = 0.5
 
     def __post_init__(self) -> None:
         for name in ("kp_vx", "kp_vy"):
@@ -187,6 +203,20 @@ class AlignDescendConfig:
             raise ValueError("target_loss_descend_speed_mps must be non-negative")
         if not math.isfinite(float(self.target_loss_descend_speed_mps)):
             raise ValueError("target_loss_descend_speed_mps must be finite")
+        for name in (
+            "integral_active_below_altitude_m", "ki_vx", "ki_vy",
+            "integral_vx_limit_mps", "integral_vy_limit_mps",
+            "min_effective_speed_active_below_altitude_m", "min_effective_speed_mps",
+            "min_effective_speed_ex_threshold", "min_effective_speed_ey_threshold",
+        ):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be finite and non-negative")
+        if (isinstance(self.target_loss_grace_updates, bool) or not isinstance(self.target_loss_grace_updates, int) or self.target_loss_grace_updates < 0):
+            raise ValueError("target_loss_grace_updates must be a non-negative integer")
+        scale = float(self.target_loss_grace_horizontal_scale)
+        if not math.isfinite(scale) or scale < 0.0 or scale > 1.0:
+            raise ValueError("target_loss_grace_horizontal_scale must be in [0, 1]")
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,6 +339,8 @@ def compute_align_descend_command(
     inputs: dict[str, Any],
     config: AlignDescendConfig,
     altitude_m: float | None = None,
+    integral_vx_mps: float = 0.0,
+    integral_vy_mps: float = 0.0,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     control_allowed = bool(inputs.get("control_allowed", True))
     target_valid = bool(inputs.get("target_valid") or inputs.get("vision_valid"))
@@ -364,16 +396,25 @@ def compute_align_descend_command(
         slow_descend_aligned = _slow_descend_aligned(corrected_ex_cam, corrected_ey_cam, config)
         ex_for_control = 0.0 if abs(corrected_ex_cam) <= config.deadband_ex_cam else corrected_ex_cam
         ey_for_control = 0.0 if abs(corrected_ey_cam) <= config.deadband_ey_cam else corrected_ey_cam
-        vx = _clamp(
-            config.vx_sign * kp_vx_eff * ey_for_control,
-            -max_vx_eff,
-            max_vx_eff,
+        p_vx = _clamp(config.vx_sign * kp_vx_eff * ey_for_control, -max_vx_eff, max_vx_eff)
+        p_vy = _clamp(config.vy_sign * kp_vy_eff * ex_for_control, -max_vy_eff, max_vy_eff)
+        combined_vx = p_vx + integral_vx_mps
+        combined_vy = p_vy + integral_vy_mps
+        vx = _clamp(combined_vx, -max_vx_eff, max_vx_eff)
+        vy = _clamp(combined_vy, -max_vy_eff, max_vy_eff)
+        min_speed_active = (
+            config.min_effective_speed_enabled
+            and altitude_m is not None
+            and altitude_m <= config.min_effective_speed_active_below_altitude_m
         )
-        vy = _clamp(
-            config.vy_sign * kp_vy_eff * ex_for_control,
-            -max_vy_eff,
-            max_vy_eff,
-        )
+        min_speed_applied_vx = False
+        min_speed_applied_vy = False
+        if min_speed_active and abs(corrected_ey_cam) >= config.min_effective_speed_ey_threshold and 0.0 < abs(vx) < config.min_effective_speed_mps:
+            vx = _clamp(math.copysign(config.min_effective_speed_mps, vx), -max_vx_eff, max_vx_eff)
+            min_speed_applied_vx = True
+        if min_speed_active and abs(corrected_ex_cam) >= config.min_effective_speed_ex_threshold and 0.0 < abs(vy) < config.min_effective_speed_mps:
+            vy = _clamp(math.copysign(config.min_effective_speed_mps, vy), -max_vy_eff, max_vy_eff)
+            min_speed_applied_vy = True
         if aligned:
             vz = config.descend_speed_mps
             reason = "descending"
@@ -419,6 +460,17 @@ def compute_align_descend_command(
         "kp_vy_eff": kp_vy_eff,
         "max_vx_eff": max_vx_eff,
         "max_vy_eff": max_vy_eff,
+        "p_vx_mps": p_vx if enabled else 0.0,
+        "p_vy_mps": p_vy if enabled else 0.0,
+        "integral_vx_mps": integral_vx_mps if enabled else 0.0,
+        "integral_vy_mps": integral_vy_mps if enabled else 0.0,
+        "combined_vx_before_clamp_mps": combined_vx if enabled else 0.0,
+        "combined_vy_before_clamp_mps": combined_vy if enabled else 0.0,
+        "min_effective_speed_enabled": bool(config.min_effective_speed_enabled),
+        "min_effective_speed_active": min_speed_active if enabled else False,
+        "min_effective_speed_applied_vx": min_speed_applied_vx if enabled else False,
+        "min_effective_speed_applied_vy": min_speed_applied_vy if enabled else False,
+        "min_effective_speed_mps": config.min_effective_speed_mps,
         "descent_speed_before_stage_mps": stage_detail["descent_speed_before_stage_mps"] if stage_detail is not None else (vz if vz > 0 else 0.0),
         "descent_speed_cap_mps": stage_detail["descent_speed_cap_mps"] if stage_detail is not None else None,
         "descent_speed_after_stage_mps": stage_detail["descent_speed_after_stage_mps"] if stage_detail is not None else vz,
@@ -500,6 +552,10 @@ class AlignDescendAction(ActionModule):
 
         self.final_align_started = False
         self.finish_alignment_hold_count = 0
+        self._reset_integral("start")
+        self._previous_update_monotonic_s = None
+        self._last_valid_vx = 0.0
+        self._last_valid_vy = 0.0
 
         self.yaw_hold_rad = None
         self.yaw_hold_source = None
@@ -570,15 +626,71 @@ class AlignDescendAction(ActionModule):
                 detail=detail,
             )
 
-        command, command_detail = compute_align_descend_command(
-            inputs,
-            self.config,
-            altitude_m=altitude.value_m,
-        )
+        now = time.monotonic()
+        dt_s = 0.0 if self._previous_update_monotonic_s is None else _clamp(now - self._previous_update_monotonic_s, 0.0, 1.0)
+        self._previous_update_monotonic_s = now
+        command, command_detail = compute_align_descend_command(inputs, self.config, altitude_m=altitude.value_m)
         target_ok = command_detail["enabled"] is True
 
         if target_ok:
             self.lost_updates = 0
+            self._reset_integral_for_track_change(inputs)
+            self._update_integral(command_detail, altitude.value_m, dt_s)
+            if self.config.integral_enabled or self.config.min_effective_speed_enabled:
+                command, command_detail = compute_align_descend_command(
+                    inputs, self.config, altitude_m=altitude.value_m,
+                    integral_vx_mps=self._integral_vx, integral_vy_mps=self._integral_vy,
+                )
+            command_detail["integral_enabled"] = bool(self.config.integral_enabled)
+            command_detail["integral_active"] = self._integral_active(altitude.value_m)
+            command_detail["integral_dt_s"] = dt_s
+            command_detail["integral_reset_reason"] = self._integral_reset_reason
+            self._last_valid_vx = float(command.get("vx_cmd", 0.0))
+            self._last_valid_vy = float(command.get("vy_cmd", 0.0))
+        elif (
+            command_detail["hold_reason"] == "target_not_valid"
+            and self.config.target_loss_policy != "continue_descent"
+        ):
+            self.lost_updates += 1
+            self.hold_updates = 0
+            if self.lost_updates <= self.config.target_loss_grace_updates:
+                command = _command_dict(
+                    vx=self._last_valid_vx * self.config.target_loss_grace_horizontal_scale,
+                    vy=self._last_valid_vy * self.config.target_loss_grace_horizontal_scale,
+                    vz=0.0,
+                    enabled=True,
+                )
+                command_detail = {
+                    **command_detail,
+                    "enabled": True,
+                    "hold_reason": "target_loss_grace",
+                    "integral_enabled": bool(self.config.integral_enabled),
+                    "integral_active": False,
+                    "integral_dt_s": dt_s,
+                    "integral_vx_mps": self._integral_vx,
+                    "integral_vy_mps": self._integral_vy,
+                    "integral_reset_reason": self._integral_reset_reason,
+                }
+            else:
+                self._reset_integral("target_loss_timeout")
+                if self.lost_updates > self.lost_timeout_updates:
+                    if self.retries < self.max_retries:
+                        self.retries += 1
+                        self.lost_updates = 0
+                        detail = self._detail(
+                            command=_inactive_command(),
+                            command_detail={**command_detail, "hold_reason": "align_retry"},
+                            height_m=altitude.value_m,
+                            altitude_source=altitude.source,
+                        )
+                        self.last_detail = detail
+                        return ActionResult(actions=[], reason="align_retry", detail=detail)
+                    self.failed = True
+                    self.failure_reason = "target_lost_timeout"
+                    return ActionResult(
+                        actions=[], failed=True, reason="target_lost_timeout",
+                        detail=self._failed_detail("target_lost_timeout", height_m=altitude.value_m, altitude_source=altitude.source),
+                    )
         elif (
             self.config.target_loss_policy == "continue_descent"
             and command_detail["hold_reason"] == "target_not_valid"
@@ -645,6 +757,7 @@ class AlignDescendAction(ActionModule):
         else:
             self.lost_updates += 1
             self.hold_updates = 0
+            self._reset_integral(str(command_detail["hold_reason"]))
             if self.lost_updates > self.lost_timeout_updates:
                 if self.retries < self.max_retries:
                     self.retries += 1
@@ -710,6 +823,7 @@ class AlignDescendAction(ActionModule):
 
                     if self.finish_alignment_hold_count >= self.finish_alignment_hold_updates:
                         self.done = True
+                        self._reset_integral("completed")
                         detail = self._detail(
                             command=self._command_with_yaw_hold(_inactive_command(), data),
                             command_detail={
@@ -758,6 +872,7 @@ class AlignDescendAction(ActionModule):
             # Not aligned yet — continue with vz=0, vx/vy still active
             command, command_detail = compute_align_descend_command(
                 inputs, self.config, altitude_m=altitude.value_m,
+                integral_vx_mps=self._integral_vx, integral_vy_mps=self._integral_vy,
             )
             if isinstance(command, dict):
                 command["vz_cmd"] = 0.0
@@ -775,6 +890,7 @@ class AlignDescendAction(ActionModule):
                 # Strict: don't set done, continue with vz=0
                 command, command_detail = compute_align_descend_command(
                     inputs, self.config, altitude_m=altitude.value_m,
+                    integral_vx_mps=self._integral_vx, integral_vy_mps=self._integral_vy,
                 )
                 if isinstance(command, dict):
                     command["vz_cmd"] = 0.0
@@ -787,6 +903,7 @@ class AlignDescendAction(ActionModule):
                 self.last_detail = detail
                 return ActionResult(actions=[], reason="aligning_at_finish_altitude", detail=detail)
             self.done = True
+            self._reset_integral("completed")
             detail = self._detail(
                 command=self._command_with_yaw_hold(_inactive_command(), data),
                 command_detail={**command_detail, "hold_reason": "min_altitude_reached"},
@@ -816,6 +933,7 @@ class AlignDescendAction(ActionModule):
                 # Not aligned yet — continue with vz=0, vx/vy still active
                 command, command_detail = compute_align_descend_command(
                     inputs, self.config, altitude_m=altitude.value_m,
+                    integral_vx_mps=self._integral_vx, integral_vy_mps=self._integral_vy,
                 )
                 if isinstance(command, dict):
                     command["vz_cmd"] = 0.0
@@ -828,6 +946,7 @@ class AlignDescendAction(ActionModule):
                 self.last_detail = detail
                 return ActionResult(actions=[], reason="aligning_at_finish_altitude", detail=detail)
             self.done = True
+            self._reset_integral("completed")
             done_reason = (
                 "aligned_at_finish_altitude"
                 if target_ok
@@ -857,6 +976,7 @@ class AlignDescendAction(ActionModule):
 
     def stop(self) -> None:
         self.stopped = True
+        self._reset_integral("stop")
 
     def reset(self) -> None:
         self.config = AlignDescendConfig()
@@ -880,6 +1000,66 @@ class AlignDescendAction(ActionModule):
         self.yaw_hold_source: str | None = None
         self.latest_context: dict[str, Any] = {}
         self.last_detail: dict[str, Any] = {}
+        self._integral_vx = 0.0
+        self._integral_vy = 0.0
+        self._integral_reset_reason = "reset"
+        self._previous_integral_ex: float | None = None
+        self._previous_integral_ey: float | None = None
+        self._integral_track_id: Any = None
+        self._previous_update_monotonic_s: float | None = None
+        self._last_valid_vx = 0.0
+        self._last_valid_vy = 0.0
+
+    def _reset_integral(self, reason: str) -> None:
+        self._integral_vx = 0.0
+        self._integral_vy = 0.0
+        self._previous_integral_ex = None
+        self._previous_integral_ey = None
+        self._integral_reset_reason = reason
+
+    def _integral_active(self, altitude_m: float) -> bool:
+        return bool(self.config.integral_enabled and altitude_m <= self.config.integral_active_below_altitude_m)
+
+    def _reset_integral_for_track_change(self, inputs: dict[str, Any]) -> None:
+        track_id = inputs.get("track_id")
+        if track_id is not None and self._integral_track_id is not None and track_id != self._integral_track_id:
+            self._reset_integral("track_changed")
+        if track_id is not None:
+            self._integral_track_id = track_id
+
+    def _update_integral(self, detail: dict[str, Any], altitude_m: float, dt_s: float) -> None:
+        if not self._integral_active(altitude_m):
+            return
+        ex = float(detail["corrected_ex_cam"])
+        ey = float(detail["corrected_ey_cam"])
+        ex_active = abs(ex) > self.config.deadband_ex_cam
+        ey_active = abs(ey) > self.config.deadband_ey_cam
+        if not ex_active:
+            self._integral_vy = 0.0
+            self._previous_integral_ex = None
+            self._integral_reset_reason = "ex_deadband"
+        if not ey_active:
+            self._integral_vx = 0.0
+            self._previous_integral_ey = None
+            self._integral_reset_reason = "ey_deadband"
+        if ex_active and self._previous_integral_ex is not None and ex * self._previous_integral_ex < 0.0:
+            self._integral_vy = 0.0
+            self._integral_reset_reason = "ex_direction_reversed"
+        if ey_active and self._previous_integral_ey is not None and ey * self._previous_integral_ey < 0.0:
+            self._integral_vx = 0.0
+            self._integral_reset_reason = "ey_direction_reversed"
+        p_vx = float(detail["p_vx_mps"])
+        p_vy = float(detail["p_vy_mps"])
+        max_vx = float(detail["max_vx_eff"])
+        max_vy = float(detail["max_vy_eff"])
+        add_vx = self.config.vx_sign * self.config.ki_vx * ey * dt_s
+        add_vy = self.config.vy_sign * self.config.ki_vy * ex * dt_s
+        if ey_active and not (abs(p_vx) >= max_vx and p_vx * add_vx > 0.0):
+            self._integral_vx = _clamp(self._integral_vx + add_vx, -self.config.integral_vx_limit_mps, self.config.integral_vx_limit_mps)
+        if ex_active and not (abs(p_vy) >= max_vy and p_vy * add_vy > 0.0):
+            self._integral_vy = _clamp(self._integral_vy + add_vy, -self.config.integral_vy_limit_mps, self.config.integral_vy_limit_mps)
+        self._previous_integral_ex = ex if ex_active else None
+        self._previous_integral_ey = ey if ey_active else None
 
     def _ensure_yaw_hold(self, context: dict[str, Any]) -> None:
         if self.config.yaw_control_mode in ("ignore", "hold_zero_rate"):
@@ -959,6 +1139,7 @@ class AlignDescendAction(ActionModule):
             "ex",
             "ey",
             "tracking_state",
+            "track_id",
         ):
             if key in context:
                 inputs[key] = context[key]
@@ -1125,6 +1306,21 @@ class AlignDescendAction(ActionModule):
             "kp_vy_eff": command_detail.get("kp_vy_eff"),
             "max_vx_eff": command_detail.get("max_vx_eff"),
             "max_vy_eff": command_detail.get("max_vy_eff"),
+            "integral_enabled": command_detail.get("integral_enabled", bool(self.config.integral_enabled)),
+            "integral_active": command_detail.get("integral_active", False),
+            "integral_dt_s": command_detail.get("integral_dt_s", 0.0),
+            "integral_vx_mps": command_detail.get("integral_vx_mps", self._integral_vx),
+            "integral_vy_mps": command_detail.get("integral_vy_mps", self._integral_vy),
+            "p_vx_mps": command_detail.get("p_vx_mps", 0.0),
+            "p_vy_mps": command_detail.get("p_vy_mps", 0.0),
+            "combined_vx_before_clamp_mps": command_detail.get("combined_vx_before_clamp_mps", 0.0),
+            "combined_vy_before_clamp_mps": command_detail.get("combined_vy_before_clamp_mps", 0.0),
+            "integral_reset_reason": command_detail.get("integral_reset_reason", self._integral_reset_reason),
+            "min_effective_speed_enabled": command_detail.get("min_effective_speed_enabled", bool(self.config.min_effective_speed_enabled)),
+            "min_effective_speed_active": command_detail.get("min_effective_speed_active", False),
+            "min_effective_speed_applied_vx": command_detail.get("min_effective_speed_applied_vx", False),
+            "min_effective_speed_applied_vy": command_detail.get("min_effective_speed_applied_vy", False),
+            "min_effective_speed_mps": command_detail.get("min_effective_speed_mps", self.config.min_effective_speed_mps),
             "yaw_hold_rad": self.yaw_hold_rad,
             "yaw_hold_source": self.yaw_hold_source,
             "yaw_hold_active": self.yaw_hold_rad is not None,

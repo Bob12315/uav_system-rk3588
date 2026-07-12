@@ -1769,3 +1769,88 @@ def test_real_action_nan_error_continuous_triggers_target_lost_timeout() -> None
             break
     assert r.failed
     assert r.reason == "target_lost_timeout"
+
+
+def _low_altitude_integral_config(**overrides):
+    config = {
+        "require_target_locked": False,
+        "min_altitude_m": 0.3,
+        "integral_enabled": True,
+        "integral_active_below_altitude_m": 1.6,
+        "ki_vx": 0.04,
+        "ki_vy": 0.04,
+        "integral_vx_limit_mps": 0.03,
+        "integral_vy_limit_mps": 0.03,
+    }
+    config.update(overrides)
+    return config
+
+
+def test_low_altitude_integral_uses_monotonic_time_and_resets_on_deadband(monkeypatch) -> None:
+    clock = iter((100.0, 100.5, 101.0))
+    monkeypatch.setattr("missions.common.actions.align_descend.time.monotonic", lambda: next(clock))
+    action = AlignDescendAction()
+    action.start({"config": _low_altitude_integral_config()})
+    context = _active_context(ex_cam=0.2, ey_cam=0.2)
+    context["drone"] = {"relative_altitude": 1.5}
+    first = action.update(context)
+    second = action.update(context)
+    assert first.detail["integral_active"] is True
+    assert second.detail["integral_dt_s"] == pytest.approx(0.5)
+    assert abs(second.detail["integral_vx_mps"]) > abs(first.detail["integral_vx_mps"])
+    assert abs(second.detail["integral_vx_mps"]) <= 0.03
+    context["ey_cam"] = 0.01
+    reset = action.update(context)
+    assert reset.detail["integral_vx_mps"] == pytest.approx(0.0)
+    assert reset.detail["integral_reset_reason"] == "ey_deadband"
+
+
+def test_integral_is_inactive_above_configured_altitude() -> None:
+    action = AlignDescendAction()
+    action.start({"config": _low_altitude_integral_config()})
+    context = _active_context(ex_cam=0.2, ey_cam=0.2)
+    context["drone"] = {"relative_altitude": 2.0}
+    result = action.update(context)
+    assert result.detail["integral_active"] is False
+    assert result.detail["integral_vx_mps"] == pytest.approx(0.0)
+
+
+def test_min_effective_speed_is_low_altitude_direction_preserving_and_limited() -> None:
+    config = AlignDescendConfig(
+        kp_vx=0.1, kp_vy=0.1, max_vx_mps=0.04, max_vy_mps=0.04,
+        min_effective_speed_enabled=True,
+        min_effective_speed_active_below_altitude_m=1.6,
+        min_effective_speed_mps=0.035,
+        min_effective_speed_ex_threshold=0.12,
+        min_effective_speed_ey_threshold=0.16,
+    )
+    command, detail = compute_align_descend_command(_valid_inputs(ex_cam=0.2, ey_cam=-0.2), config, altitude_m=1.5)
+    assert command["vx_cmd"] == pytest.approx(0.035)
+    assert command["vy_cmd"] == pytest.approx(0.035)
+    assert detail["min_effective_speed_applied_vx"] is True
+    high_command, high_detail = compute_align_descend_command(_valid_inputs(ex_cam=0.2, ey_cam=-0.2), config, altitude_m=2.0)
+    assert high_command["vx_cmd"] == pytest.approx(0.02)
+    assert high_detail["min_effective_speed_active"] is False
+
+
+def test_one_target_loss_update_keeps_scaled_horizontal_command_then_stops(monkeypatch) -> None:
+    clock = iter((10.0, 10.1, 10.2))
+    monkeypatch.setattr("missions.common.actions.align_descend.time.monotonic", lambda: next(clock))
+    action = AlignDescendAction()
+    action.start({"config": {
+        **_low_altitude_integral_config(),
+        "target_loss_grace_updates": 1,
+        "target_loss_grace_horizontal_scale": 0.5,
+    }, "lost_timeout_updates": 1, "max_retries": 0})
+    good = _active_context(ex_cam=0.2, ey_cam=0.2)
+    good["drone"] = {"relative_altitude": 1.5}
+    active = action.update(good)
+    lost = action.update({"drone": {"relative_altitude": 1.5}, "target_valid": False, "control_allowed": True})
+    assert lost.reason == "target_loss_grace"
+    assert lost.detail["command"]["valid"] is True
+    assert lost.detail["command"]["active"] is True
+    assert lost.detail["command"]["vz_cmd"] == pytest.approx(0.0)
+    assert lost.detail["command"]["vx_cmd"] == pytest.approx(active.detail["command"]["vx_cmd"] * 0.5)
+    stopped = action.update({"drone": {"relative_altitude": 1.5}, "target_valid": False, "control_allowed": True})
+    assert stopped.failed
+    assert stopped.reason == "target_lost_timeout"

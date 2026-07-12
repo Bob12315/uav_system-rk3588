@@ -164,9 +164,20 @@ def test_v2_align_config_matches_v1_except_payload_offset() -> None:
     assert v2_cfg["require_target_locked"] is False
 
     # Verify v2-only competition keys (not in v1)
-    v2_only_keys = {"descent_gate_policy", "unaligned_descend_speed_mps"}
+    v2_only_keys = {
+        "descent_gate_policy", "unaligned_descend_speed_mps",
+        "integral_enabled", "integral_active_below_altitude_m", "ki_vx", "ki_vy",
+        "integral_vx_limit_mps", "integral_vy_limit_mps",
+        "min_effective_speed_enabled", "min_effective_speed_active_below_altitude_m",
+        "min_effective_speed_mps", "min_effective_speed_ex_threshold",
+        "min_effective_speed_ey_threshold", "target_loss_grace_updates",
+        "target_loss_grace_horizontal_scale",
+    }
     assert v2_cfg["descent_gate_policy"] == "allow_unaligned"
     assert v2_cfg["unaligned_descend_speed_mps"] == 0.08
+    assert v2_cfg["integral_enabled"] is True
+    assert v2_cfg["min_effective_speed_enabled"] is True
+    assert v2_cfg["target_loss_grace_updates"] == 1
 
     # Competition-intentionally-divergent keys (v1->v2 changed values)
     # height_scale_points and deadband are also auto-excluded from the dict comparison
