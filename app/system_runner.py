@@ -662,6 +662,10 @@ class SystemRunner:
             )
             self._maybe_save_localization_result()
             self._maybe_save_drop_targets_result()
+            self._publish_recon_ranking_from_action_result(
+                getattr(self.action_runtime, "last_result", None),
+                action_name=getattr(self.action_runtime, "action_name", None),
+            )
             self._maybe_save_recon_inspection_result()
             last = getattr(self.action_runtime, "last_result", None)
             if isinstance(last, dict):
@@ -1049,7 +1053,7 @@ class SystemRunner:
 
     def _maybe_save_recon_inspection_result(self) -> None:
         name = getattr(self.action_runtime, "action_name", None)
-        if name not in ("recon_inspect_target", "build_recon_report", "gps_recon_area_scan"):
+        if name not in ("recon_inspect_target", "build_recon_report"):
             return
         last = getattr(self.action_runtime, "last_result", None)
         if last is None:
@@ -1059,16 +1063,6 @@ class SystemRunner:
             detail = {}
         done = last.get("done") if isinstance(last, dict) else getattr(last, "done", False)
         if not done:
-            return
-
-        if name == "gps_recon_area_scan":
-            if detail.get("ranking_mode") is not True or not isinstance(detail.get("ranking"), list):
-                return
-            self.latest_recon_inspection_result = {
-                "source": "gps_recon_area_scan", "updated_at": time.time(),
-                "ranking_mode": True, "ranking": detail["ranking"],
-                "scan_summary": detail.get("scan_summary", {}),
-            }
             return
 
         # new path: build_recon_report output
@@ -1136,6 +1130,30 @@ class SystemRunner:
         ranking = detail.get("ranking")
         if isinstance(ranking, list):
             self.latest_recon_inspection_result = {"source": "gps_recon_area_scan", "updated_at": time.time(), "ranking_mode": True, "ranking": ranking, "scan_summary": detail.get("scan_summary", {})}
+
+    def _publish_recon_ranking_from_action_result(
+        self,
+        result: object,
+        *,
+        action_name: object,
+    ) -> bool:
+        """Publish live/final area-scan rankings without waiting for blackboard save."""
+        if action_name != "gps_recon_area_scan" or not isinstance(result, dict):
+            return False
+        detail = result.get("detail")
+        if not isinstance(detail, dict) or detail.get("ranking_mode") is not True:
+            return False
+        ranking = detail.get("ranking")
+        if not isinstance(ranking, list):
+            return False
+        self.latest_recon_inspection_result = {
+            "source": "gps_recon_area_scan",
+            "updated_at": time.time(),
+            "ranking_mode": True,
+            "ranking": ranking,
+            "scan_summary": detail.get("scan_summary", {}),
+        }
+        return True
 
     def manual_step_move(self, direction: str, step_m: float) -> CommandResult:
         """Move the drone by step_m in the given body-frame direction.
@@ -1491,6 +1509,10 @@ class SystemRunner:
             self._maybe_save_localization_from_mission()
             self._maybe_save_recon_targets_from_mission()
             self._maybe_save_recon_report_from_mission()
+            self._publish_recon_ranking_from_action_result(
+                getattr(self.action_runtime, "last_result", None),
+                action_name=pre_name,
+            )
             self._maybe_save_recon_ranking_from_mission()
             self._maybe_save_localization_result()
             self._maybe_save_drop_targets_result()

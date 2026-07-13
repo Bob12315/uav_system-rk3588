@@ -392,7 +392,7 @@ function summarizeDropTargets(blackboard) {
 function summarizeReconReport(blackboard) {
   const rankingResult = blackboard.recon_scan_ranking;
   if (rankingResult?.ranking_mode && Array.isArray(rankingResult.ranking)) {
-    return renderReconRanking(rankingResult.ranking, "mission-result-group");
+    return "";
   }
   const report = getPathValue(blackboard, ["recon_report", "recon_report"])
     || getPathValue(blackboard, ["recon_scan", "recon_report"]);
@@ -412,27 +412,57 @@ function summarizeReconReport(blackboard) {
   }).join("");
   return `<div class="mission-result-group"><strong>侦察报告</strong><div>桶数：${barrelCount} / detected：${detectedCount} / blank：${blankCount} / skipped：${skippedCount}</div>${rows}</div>`;
 }
-function renderReconRanking(ranking, className = "") {
-  const rows = ranking.slice().sort((a, b) => Number(a.rank) - Number(b.rank)).map(item =>
-    `<tr><td>${escapeHtml(item.rank)}</td><td>${escapeHtml(item.class_name)}</td><td>${num(item.confidence_sum, 3)}</td><td>${num(item.seen_frames, 0)}</td><td>${num(item.confidence_mean, 3)}</td><td>${num(item.confidence_max, 3)}</td><td>${(Number(item.hit_ratio || 0) * 100).toFixed(1)}%</td></tr>`
-  ).join("");
-  return `<div class="${className}"><strong>危险标识扫描排名</strong><table><thead><tr><th>排名</th><th>标识类别</th><th>总参考值</th><th>出现帧数</th><th>平均置信度</th><th>最大置信度</th><th>命中率</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+function setTextIfChanged(element, value) {
+  const text = String(value);
+  if (element.textContent !== text) element.textContent = text;
+}
+function renderReconRankingStable(container, ranking, className = "") {
+  if (container.dataset.resultMode !== "ranking") {
+    container.replaceChildren();
+    container.dataset.resultMode = "ranking";
+    const block = document.createElement("div"); block.className = className;
+    const title = document.createElement("strong"); title.textContent = "危险标识扫描排名";
+    const table = document.createElement("table");
+    const thead = document.createElement("thead"); const header = document.createElement("tr");
+    ["排名", "标识类别", "总参考值", "出现帧数", "平均置信度", "最大置信度", "命中率"].forEach(text => { const th = document.createElement("th"); th.textContent = text; header.appendChild(th); });
+    thead.appendChild(header); table.appendChild(thead); table.appendChild(document.createElement("tbody"));
+    block.append(title, table); container.appendChild(block);
+  }
+  const tbody = container.querySelector("tbody");
+  ranking.slice().sort((a, b) => Number(a.rank) - Number(b.rank)).forEach(item => {
+    let row = tbody.querySelector(`[data-recon-class="${CSS.escape(String(item.class_name))}"]`);
+    if (!row) {
+      row = document.createElement("tr"); row.dataset.reconClass = item.class_name;
+      for (let index = 0; index < 7; index += 1) row.appendChild(document.createElement("td"));
+    }
+    const values = [item.rank, item.class_name, num(item.confidence_sum, 3), num(item.seen_frames, 0), num(item.confidence_mean, 3), num(item.confidence_max, 3), `${(Number(item.hit_ratio || 0) * 100).toFixed(1)}%`];
+    values.forEach((value, index) => setTextIfChanged(row.children[index], value));
+    tbody.appendChild(row);
+  });
+}
+function setResultSection(container, name, html) {
+  let section = container.querySelector(`[data-result-section="${name}"]`);
+  if (!section) { section = document.createElement("div"); section.dataset.resultSection = name; container.appendChild(section); }
+  if (section.dataset.html !== html) { section.dataset.html = html; section.innerHTML = html; }
+  return section;
 }
 function renderActionMissionSummary(actionMission) {
   const element = $("actionMissionResults");
   if (!element) return;
   const blackboard = actionMissionBlackboard(actionMission);
-  const html = [
-    summarizeDropScan(blackboard),
-    summarizeDropTargets(blackboard),
-    summarizeReconReport(blackboard),
-  ].filter(Boolean).join("") || `<div class="hint">暂无任务结果详情。</div>`;
-
-  if (html === lastActionMissionSummaryHtml && element.innerHTML === html) {
-    return;
+  const dropScan = summarizeDropScan(blackboard), dropTargets = summarizeDropTargets(blackboard);
+  const ranking = blackboard.recon_scan_ranking;
+  setResultSection(element, "drop-scan", dropScan);
+  setResultSection(element, "drop-targets", dropTargets);
+  const recon = setResultSection(element, "recon", "");
+  if (ranking?.ranking_mode && Array.isArray(ranking.ranking)) renderReconRankingStable(recon, ranking.ranking, "mission-result-group");
+  else {
+    const legacy = summarizeReconReport(blackboard);
+    if (recon.dataset.resultMode !== "legacy" || recon.dataset.html !== legacy) { recon.dataset.resultMode = "legacy"; recon.dataset.html = legacy; recon.innerHTML = legacy; }
   }
-  lastActionMissionSummaryHtml = html;
-  element.innerHTML = html;
+  const hasResults = Boolean(dropScan || dropTargets || (ranking?.ranking_mode) || summarizeReconReport(blackboard));
+  if (!hasResults) setResultSection(element, "empty", `<div class="hint">暂无任务结果详情。</div>`);
+  else { const empty = element.querySelector('[data-result-section="empty"]'); if (empty) empty.remove(); }
 }
 function updateActionMissionAutoTickButton() {
   const button = $("actionMissionAutoTick");
@@ -514,10 +544,7 @@ function renderReconInspection(result) {
   const element = $("reconInspectionResults");
   if (!element) return;
   if (result.ranking_mode && Array.isArray(result.ranking)) {
-    const html = renderReconRanking(result.ranking);
-    if (html === lastReconInspectionHtml && element.innerHTML === html) return;
-    lastReconInspectionHtml = html;
-    element.innerHTML = html;
+    renderReconRankingStable(element, result.ranking);
     return;
   }
   const report = Array.isArray(result.report) ? result.report : [];
@@ -531,7 +558,9 @@ function renderReconInspection(result) {
         : item.status === "skipped_missing_target" ? "跳过：目标数据缺失" : "识别失败";
     return `<div>#${index + 1} &nbsp; x=${num(x, 2)} y=${num(y, 2)} &nbsp; ${escapeHtml(statusLabel)}</div>`;
   }).join("") : `<div class="hint">暂无侦察识别结果。</div>`;
-  if (html === lastReconInspectionHtml && element.innerHTML === html) return;
+  if (element.dataset.resultMode === "legacy" && element.dataset.html === html) return;
+  element.dataset.resultMode = "legacy";
+  element.dataset.html = html;
   lastReconInspectionHtml = html;
   element.innerHTML = html;
 }

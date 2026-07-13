@@ -94,10 +94,11 @@ def test_app_js_summary_html_cache_variable():
     assert "lastActionMissionSummaryHtml" in js
 
 
-def test_app_js_summary_html_comparison():
-    """renderActionMissionSummary 使用 html === lastActionMissionSummaryHtml 比对。"""
+def test_app_js_summary_uses_stable_result_sections():
     js = _read_js("web_ui/static/app.js")
-    assert "html === lastActionMissionSummaryHtml" in js
+    assert "data-result-section" in js
+    assert "renderReconRankingStable" in js
+    assert "setTextIfChanged" in js
 
 
 def test_app_js_recon_report_path_v2_first():
@@ -155,9 +156,8 @@ def test_index_field_map_asset_recon_web_status_version():
 
 def test_index_recon_area_ranking_scripts_use_new_cache_version():
     html = _read_html()
-    version = "recon-area-ranking-20260714-1"
-    assert f'/static/js/action_lab.js?v={version}' in html
-    assert f'/static/app.js?v={version}' in html
+    assert '/static/js/action_lab.js?v=recon-area-ranking-20260714-1' in html
+    assert '/static/app.js?v=recon-ranking-stable-20260714-1' in html
 
 
 def test_recon_map_and_dashboard_use_separate_recon_state() -> None:
