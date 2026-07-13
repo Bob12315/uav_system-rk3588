@@ -71,7 +71,7 @@ def test_app_js_v2_safety_hints():
 def test_server_template_names_v2_only():
     js = _read_js("web_ui/server.py")
     assert '"drop_two_targets_v2"' in js
-    assert '"recon_inspect_5_targets_stepwise_v2"' in js
+    assert '"recon_inspect_5_targets_stepwise_v2"' not in js
     assert '"rescue_2026_full_auto_v2"' in js
     assert '"drop_two_targets_v1"' not in js
     assert '"recon_sequence_v1"' not in js
