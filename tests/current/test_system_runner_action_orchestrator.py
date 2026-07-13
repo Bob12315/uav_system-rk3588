@@ -265,3 +265,51 @@ def test_takeoff_set_mode_is_first_action():
     assert len(result.actions) == 1
     assert result.actions[0]["action_type"] == "set_mode"
     assert result.actions[0]["action_type"] != "confirm_field_heading"
+
+
+def _live_ranking(confidence_sum: float = 0.0) -> list[dict[str, object]]:
+    names = ["baozha", "shenghua", "yiran", "fangshe", "buran", "fushi", "youdu", "yushi", "ziran", "ciji"]
+    return [
+        {"rank": index + 1, "class_name": name, "seen_frames": 0,
+         "confidence_sum": confidence_sum if index == 0 else 0.0,
+         "confidence_mean": 0.0, "confidence_max": 0.0, "hit_ratio": 0.0}
+        for index, name in enumerate(names)
+    ]
+
+
+def test_action_lab_live_recon_ranking_publishes_before_action_done():
+    runner = _make_runner()
+    runner.action_runtime.runner.action_name = "gps_recon_area_scan"
+    runner.action_runtime.last_result = {
+        "done": False, "detail": {"ranking_mode": True, "ranking": _live_ranking(), "scan_summary": {"scored_unique_frame_count": 0}},
+    }
+
+    runner.action_lab_tick()
+
+    published = runner.latest_recon_inspection_result
+    assert published["ranking_mode"] is True
+    assert len(published["ranking"]) == 10
+    assert published["scan_summary"]["scored_unique_frame_count"] == 0
+
+
+def test_mission_recon_completion_keeps_ranking_after_next_action_switch():
+    runner = _make_runner()
+    result = {"done": True, "detail": {"ranking_mode": True, "ranking": _live_ranking(1.2), "scan_summary": {"scored_unique_frame_count": 2}}}
+
+    assert runner._publish_recon_ranking_from_action_result(result, action_name="gps_recon_area_scan")
+    # Simulate MissionOrchestrator immediately moving on to return_home_gps.
+    assert not runner._publish_recon_ranking_from_action_result(result, action_name="goto_waypoint")
+    published = runner.latest_recon_inspection_result
+    assert published["ranking"][0]["confidence_sum"] == 1.2
+    assert published["source"] == "gps_recon_area_scan"
+
+
+def test_mission_start_and_reset_clear_live_recon_ranking():
+    runner = _make_runner()
+    runner.latest_recon_inspection_result = {"ranking_mode": True, "ranking": _live_ranking()}
+    runner.configure_action_mission(_local_steps())
+    runner.action_mission_start()
+    assert runner.latest_recon_inspection_result == {}
+    runner.latest_recon_inspection_result = {"ranking_mode": True, "ranking": _live_ranking()}
+    runner.action_mission_reset()
+    assert runner.latest_recon_inspection_result == {}
