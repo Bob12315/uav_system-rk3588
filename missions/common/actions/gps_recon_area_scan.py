@@ -55,7 +55,9 @@ class GpsReconAreaScanAction(ActionModule):
         self.goto_updates = 0
         self.goto_action = self._new_goto_action()
         self.class_stats = {name: {"seen_frames": 0, "confidence_sum": 0.0, "confidence_max": 0.0} for name in DANGER_SIGN_CLASS_NAMES}
-        self.seen_frame_identities: set[tuple[str, str]] = set()
+        self.observed_frame_identities: set[tuple[str, str]] = set()
+        self.observed_unique_frame_count = 0
+        self.non_scoring_unique_frame_count = 0
         self.scored_unique_frame_count = 0
         self.duplicate_frame_count = 0
         self.missing_frame_identity_count = 0
@@ -76,6 +78,11 @@ class GpsReconAreaScanAction(ActionModule):
         if self.goto_action is None:
             return ActionResult(failed=True, reason="goto_not_initialized", detail=self._detail())
 
+        # Always consume a reliable scene identity, including approach and
+        # connector segments.  A frame first observed outside a scoring segment
+        # must never become scoreable merely because it remains on screen.
+        self._observe_scene(context or {}, scoring=self.waypoint_index in self.scoring_target_indices)
+
         self.goto_updates += 1
         if self.goto_updates > self.goto_max_updates:
             self.goto_action.stop()
@@ -87,11 +94,6 @@ class GpsReconAreaScanAction(ActionModule):
             self.goto_action.stop()
             self.state = "failed"
             return ActionResult(failed=True, reason="goto_failed", detail=self._detail(extra={"goto": result.detail, "goto_reason": result.reason}))
-
-        # target index describes the segment currently being flown: P0->P1 is 1,
-        # P1->P2 is 2, and P2->P3 is 3.  It is intentionally not inferred.
-        if self.waypoint_index in self.scoring_target_indices:
-            self._sample_scene(context or {})
 
         if not result.done:
             return ActionResult(actions=result.actions, reason="gps_recon_area_scan_goto", detail=self._detail(extra={"goto": result.detail, "goto_reason": result.reason}))
@@ -126,7 +128,9 @@ class GpsReconAreaScanAction(ActionModule):
         self.goto_updates = 0
         self.goto_action: GotoWaypointAction | None = None
         self.class_stats: dict[str, dict[str, float]] = {}
-        self.seen_frame_identities: set[tuple[str, str]] = set()
+        self.observed_frame_identities: set[tuple[str, str]] = set()
+        self.observed_unique_frame_count = 0
+        self.non_scoring_unique_frame_count = 0
         self.scored_unique_frame_count = 0
         self.duplicate_frame_count = 0
         self.missing_frame_identity_count = 0
@@ -147,7 +151,7 @@ class GpsReconAreaScanAction(ActionModule):
         action.start(params)
         return action
 
-    def _sample_scene(self, context: dict[str, Any]) -> None:
+    def _observe_scene(self, context: dict[str, Any], *, scoring: bool) -> None:
         scene = context.get("scene")
         if not isinstance(scene, dict):
             self.missing_frame_identity_count += 1
@@ -156,10 +160,14 @@ class GpsReconAreaScanAction(ActionModule):
         if identity is None:
             self.missing_frame_identity_count += 1
             return
-        if identity in self.seen_frame_identities:
+        if identity in self.observed_frame_identities:
             self.duplicate_frame_count += 1
             return
-        self.seen_frame_identities.add(identity)
+        self.observed_frame_identities.add(identity)
+        self.observed_unique_frame_count += 1
+        if not scoring:
+            self.non_scoring_unique_frame_count += 1
+            return
         self.scored_unique_frame_count += 1
         best: dict[str, float] = {}
         detections = scene.get("detections")
@@ -221,6 +229,8 @@ class GpsReconAreaScanAction(ActionModule):
                 "duplicate_frame_count": self.duplicate_frame_count,
                 "missing_frame_identity_count": self.missing_frame_identity_count,
                 "valid_sign_frame_count": self.valid_sign_frame_count,
+                "observed_unique_frame_count": self.observed_unique_frame_count,
+                "non_scoring_unique_frame_count": self.non_scoring_unique_frame_count,
             },
         }
         if done:

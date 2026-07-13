@@ -20,11 +20,13 @@ class FakeGoto:
     def __init__(self):
         self.params = {}
         self.done = False
+        self.failed = False
         self.stopped = False
         self.created.append(self)
 
     def start(self, params): self.params = dict(params)
-    def update(self, context): return ActionResult(done=self.done, actions=[] if self.done else [{"action_type": "global_goto"}])
+    def update(self, context):
+        return ActionResult(failed=self.failed, done=self.done, actions=[] if self.done else [{"action_type": "global_goto"}])
     def stop(self): self.stopped = True
 
 
@@ -74,6 +76,7 @@ def test_unique_frames_filters_classes_and_uses_best_box_per_class(action):
     assert action.scored_unique_frame_count == 1
     assert action.duplicate_frame_count == 1
     assert action.valid_sign_frame_count == 1
+    assert action.observed_unique_frame_count == 1
     assert "bucket" not in ranking and "H" not in ranking
 
 
@@ -85,7 +88,7 @@ def test_missing_identity_is_not_scored_and_ranking_is_complete_and_stable(actio
     assert len(ranking) == 10
     assert [item["class_name"] for item in ranking[:2]] == ["baozha", "shenghua"]
     assert ranking[0]["hit_ratio"] == pytest.approx(1.0)
-    assert action.missing_frame_identity_count == 1
+    assert action.missing_frame_identity_count >= 1
 
 
 def test_all_zero_scores_complete_normally_and_gotos_are_exact(action):
@@ -110,3 +113,35 @@ def test_stop_stops_active_goto(action):
     action.stop()
     assert goto.stopped is True
     assert action.update({}).done is True
+
+
+def test_approach_frame_is_consumed_before_first_scoring_segment(action):
+    frame_a = scene("approach-A", [{"class_name": "baozha", "confidence": .9}])
+    action.update(frame_a)  # flying to P0: observe but do not score
+    action.goto_action.done = True
+    action.update(frame_a)  # arrives P0 with the same stale scene
+    action.update(frame_a)  # P0 -> P1: must still not score A
+    action.update(scene("fresh-C", [{"class_name": "baozha", "confidence": .7}]))
+
+    ranked = {item["class_name"]: item for item in action._ranking()}
+    assert ranked["baozha"]["seen_frames"] == 1
+    assert ranked["baozha"]["confidence_sum"] == pytest.approx(.7)
+    assert action.non_scoring_unique_frame_count == 1
+    assert action.scored_unique_frame_count == 1
+
+
+def test_connector_frame_is_consumed_before_second_scoring_segment(action):
+    arrive(action)  # P0 -> P1
+    action.goto_action.done = True
+    action.update(scene("scoring-A", []))  # reach P1; start connector P1 -> P2
+    frame_b = scene("connector-B", [{"class_name": "fushi", "confidence": .9}])
+    action.update(frame_b)
+    action.goto_action.done = True
+    action.update(frame_b)  # reach P2 with the same connector frame
+    action.update(frame_b)  # P2 -> P3: B must not score
+    action.update(scene("fresh-C", [{"class_name": "fushi", "confidence": .6}]))
+
+    ranked = {item["class_name"]: item for item in action._ranking()}
+    assert ranked["fushi"]["seen_frames"] == 1
+    assert ranked["fushi"]["confidence_sum"] == pytest.approx(.6)
+    assert action.non_scoring_unique_frame_count >= 1
