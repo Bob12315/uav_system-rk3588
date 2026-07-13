@@ -248,115 +248,30 @@
       }
     },
     {
-      "name": "gps_multi_view_localize",
-      "label": "recon_gps_multi_view_scan",
-      "save_as": "recon_scan",
+      "name": "gps_recon_area_scan",
+      "label": "gps_recon_area_scan",
+      "save_as": "recon_scan_ranking",
       "on_failed": {
-        "action": "retry_current_then_jump_to",
-        "max_attempts": 2,
+        "action": "jump_to",
+        "max_attempts": 1,
         "target": "return_home_gps"
       },
       "params": {
-        "scan_altitude_m": 4.5,
-        "capture_updates_per_waypoint": 4,
-        "settle_updates_per_waypoint": 1,
-        "max_updates_per_waypoint": 120,
-        "tolerance_xy_m": 0.8,
-        "tolerance_z_m": 0.6,
-        "goto_min_hold_updates": 1,
+        "waypoints": [
+          {"x": -3.0, "y": 56.0, "altitude_m": 3.0},
+          {"x": 3.0, "y": 56.0, "altitude_m": 3.0},
+          {"x": 3.0, "y": 58.0, "altitude_m": 3.0},
+          {"x": -3.0, "y": 58.0, "altitude_m": 3.0}
+        ],
+        "waypoint_mode": "field",
+        "target_frame": "global",
         "yaw_mode": "field_heading",
         "detection_source": "scene",
-        "class_names": [
-          "bucket_1",
-          "bucket_2",
-          "bucket_3",
-          "bucket"
-        ],
-        "min_confidence": 0.3,
-        "camera": {
-          "fov_x_deg": 68.15,
-          "fov_y_deg": 54.3,
-          "image_x_sign": 1.0,
-          "image_y_sign": -1.0
-        },
-        "fusion": {
-          "cluster_radius_m": 0.8,
-          "outlier_radius_m": 0.8,
-          "min_cluster_size": 2,
-          "center_weight_power": 1.0
-        },
-        "priority": 5,
-        "scan_waypoint_group": "recon"
-      }
-    },
-    {
-      "name": "select_recon_targets",
-      "label": "select_gps_recon_targets",
-      "save_as": "recon_targets",
-      "on_failed": {
-        "action": "jump_to",
-        "target": "return_home_gps",
-        "max_attempts": 1
-      },
-      "params": {
-        "objects": "$recon_scan.localized_objects",
-        "coordinate_mode": "gps_enu",
-        "target_count": 5,
-        "allow_fewer": true,
-        "deduplicate_radius_m": 0.8
-      }
-    },
-    {
-      "name": "gps_recon_sequence",
-      "label": "gps_recon_sequence",
-      "save_as": "recon_sequence",
-      "on_failed": {
-        "action": "jump_to",
-        "target": "return_home_gps",
-        "max_attempts": 1
-      },
-      "params": {
-        "approach_altitude_m": 2.5,
-        "observe_duration_s": 2.0,
+        "scoring_target_indices": [1, 3],
+        "min_sign_confidence": 0.35,
         "goto_max_updates": 200,
-        "goto": {
-          "tolerance_xy_m": 0.25,
-          "tolerance_z_m": 0.15,
-          "min_hold_updates": 3,
-          "require_velocity_valid": true,
-          "max_horizontal_speed_mps": 0.15,
-          "max_vertical_speed_mps": 0.1
-        },
-        "targets": "$recon_targets.selected_targets",
-        "observation": {
-          "record_start_altitude_m": 3.0,
-          "finish_altitude_m": 2.0,
-          "sign_class_names": [
-            "danger_1",
-            "danger_2",
-            "danger_3"
-          ],
-          "min_sign_confidence": 0.35,
-          "min_seen_frames": 1,
-          "min_confidence_max": 0.55,
-          "min_confidence_mean": 0.4,
-          "min_score": 0.55,
-          "min_margin_ratio": 1.2,
-          "detection_source": "scene"
-        }
-      }
-    },
-    {
-      "name": "build_recon_report",
-      "label": "build_recon_report",
-      "save_as": "recon_report",
-      "on_failed": {
-        "action": "jump_to",
-        "target": "return_home_gps",
-        "max_attempts": 1
-      },
-      "params": {
-        "items": "$recon_sequence.observations"
+        "goto": {"tolerance_xy_m": 0.4, "tolerance_z_m": 0.3, "min_hold_updates": 1, "require_velocity_valid": false},
+        "priority": 5
       }
     },
     {

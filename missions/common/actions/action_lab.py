@@ -8,6 +8,7 @@ from .gps_multi_view_localize import GpsMultiViewLocalizeAction
 from .gps_target_lock import GpsTargetLockAction
 from .gps_drop_sequence import GpsDropSequenceAction
 from .gps_recon_sequence import GpsReconSequenceAction
+from .gps_recon_area_scan import GpsReconAreaScanAction
 from .goto_waypoint import GotoWaypointAction
 from .land import LandAction
 from .multi_view_localize import MultiViewLocalizeAction
@@ -58,6 +59,7 @@ def create_action_lab_registry() -> ActionRegistry:
     registry.register("gps_target_lock", GpsTargetLockAction)
     registry.register("gps_drop_sequence", GpsDropSequenceAction)
     registry.register("gps_recon_sequence", GpsReconSequenceAction)
+    registry.register("gps_recon_area_scan", GpsReconAreaScanAction)
     registry.register("visual_land", VisualLandAction)
     return registry
 
@@ -326,6 +328,24 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "deduplicate_radius_m": 0.6,
                 "prefer_class_order": ["bucket_1", "bucket_2", "bucket_3", "bucket"],
                 "zone_center": {"x": 0.0, "y": 5.5},
+            },
+        },
+        {
+            "name": "gps_recon_area_scan",
+            "label": "GPS Recon Area Scan",
+            "description": "Fly the fixed reconnaissance sweep and return a complete ranking of the ten permitted danger signs.",
+            "default_params": {
+                "waypoints": [
+                    {"x": -3.0, "y": 56.0, "altitude_m": 3.0},
+                    {"x": 3.0, "y": 56.0, "altitude_m": 3.0},
+                    {"x": 3.0, "y": 58.0, "altitude_m": 3.0},
+                    {"x": -3.0, "y": 58.0, "altitude_m": 3.0},
+                ],
+                "waypoint_mode": "field", "target_frame": "global", "yaw_mode": "field_heading",
+                "scoring_target_indices": [1, 3], "detection_source": "scene",
+                "min_sign_confidence": 0.35, "goto_max_updates": 200,
+                "goto": {"tolerance_xy_m": 0.4, "tolerance_z_m": 0.3, "min_hold_updates": 1, "require_velocity_valid": False},
+                "priority": 5,
             },
         },
         {

@@ -13,25 +13,25 @@ def test_drop_scan_waypoints_unchanged():
 
 
 def test_recon_scan_waypoints_updated():
-    """Recon scan 4 waypoints now at (-2,56.25), (2,56.25), (2,58.75), (-2,58.75)."""
+    """Recon scan preview matches the fixed 3m area-scan route."""
     data = json.loads(open("config/field_profiles/competition_runtime_v3.json").read())
     assert "recon_scan" in data
     wps = data["recon_scan"]["waypoints"]
     assert len(wps) == 4
     coords = [(w["x_m"], w["y_m"]) for w in wps]
-    assert coords == [(-2.0, 56.25), (2.0, 56.25), (2.0, 58.75), (-2.0, 58.75)]
+    assert coords == [(-3.0, 56.0), (3.0, 56.0), (3.0, 58.0), (-3.0, 58.0)]
+    assert [w["altitude_m"] for w in wps] == [3.0, 3.0, 3.0, 3.0]
 
 
 def test_recon_v2_and_rescue_v2_same_scan():
-    """Recon gps_v2 and rescue_2026_full_auto_v2 use same recon scan group."""
+    """Recon gps_v2 and rescue_2026_full_auto_v2 use the same area scan."""
     recon = json.loads(open("config/action_missions/recon_gps_v2.json").read())
     rescue = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
     
-    recon_scan = next(s for s in recon["steps"] if s["name"] == "gps_multi_view_localize")
-    rescue_scan = next(s for s in rescue["steps"] if s["name"] == "gps_multi_view_localize" and s.get("label") == "recon_gps_multi_view_scan")
+    recon_scan = next(s for s in recon["steps"] if s["name"] == "gps_recon_area_scan")
+    rescue_scan = next(s for s in rescue["steps"] if s["name"] == "gps_recon_area_scan")
     
-    assert recon_scan["params"]["scan_waypoint_group"] == rescue_scan["params"]["scan_waypoint_group"]
-    # Both should use the same field profile, so derived points match
+    assert recon_scan["params"] == rescue_scan["params"]
 
 
 def test_web_ui_recce_zone_unchanged():
