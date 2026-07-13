@@ -153,6 +153,13 @@ def test_index_field_map_asset_recon_web_status_version():
     assert "recon-web-status-20260712-1" in html
 
 
+def test_index_recon_area_ranking_scripts_use_new_cache_version():
+    html = _read_html()
+    version = "recon-area-ranking-20260714-1"
+    assert f'/static/js/action_lab.js?v={version}' in html
+    assert f'/static/app.js?v={version}' in html
+
+
 def test_recon_map_and_dashboard_use_separate_recon_state() -> None:
     field_map = Path("web_ui/static/js/field_map.js").read_text()
     app_js = Path("web_ui/static/app.js").read_text()

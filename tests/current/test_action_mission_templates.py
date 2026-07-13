@@ -25,13 +25,7 @@ DROP_V2_TEMPLATE_PATH = Path("config/action_missions/drop_two_targets_v2.json")
 REQUIRED_REFERENCES = {
     "$drop_scan.localized_objects",
 }
-FULL_TEMPLATE_REQUIRED_REFERENCES = {
-    "$drop_scan.localized_objects",
-    "$drop_targets.target_slots",
-    "$recon_scan.localized_objects",
-    "$recon_targets.target_slots",
-    "$recon_sequence.recon_result_items",
-}
+FULL_TEMPLATE_REQUIRED_REFERENCES = {"$drop_scan.localized_objects", "$drop_targets.target_slots"}
 ALLOWED_FAILURE_ACTIONS = {"fail", "retry_current", "retry_current_then_jump_to", "jump_to", "continue"}
 
 
@@ -76,7 +70,7 @@ def test_action_mission_template_steps_have_name_and_params() -> None:
 
 
 def test_action_mission_waypoint_frames_are_explicit_and_match_coordinate_source() -> None:
-    flight_actions = {"goto_waypoint", "multi_view_localize", "survey_area", "recon_scan"}
+    flight_actions = {"goto_waypoint", "multi_view_localize", "survey_area", "recon_scan", "gps_recon_area_scan"}
     for path in TEMPLATE_PATHS:
         for step in _template(path)["steps"]:
             if step["name"] not in flight_actions:
@@ -89,6 +83,28 @@ def test_action_mission_waypoint_frames_are_explicit_and_match_coordinate_source
                 assert params["waypoint_mode"] == ("absolute" if uses_localized_target else "field")
             else:
                 assert params["waypoint_mode"] == "field"
+
+
+def test_v2_recon_templates_use_only_the_fixed_area_scan_and_match_sitl() -> None:
+    expected_waypoints = [(-3.0, 56.0, 3.0), (3.0, 56.0, 3.0), (3.0, 58.0, 3.0), (-3.0, 58.0, 3.0)]
+    for relative in ("recon_gps_v2.json", "rescue_2026_full_auto_v2.json"):
+        base = _template(Path("config/action_missions") / relative)
+        sitl = _template(Path("config/profiles/rk3588-sitl/action_missions") / relative)
+        assert base == sitl
+        scans = [step for step in base["steps"] if step["name"] == "gps_recon_area_scan"]
+        assert len(scans) == 1
+        names = [step["name"] for step in base["steps"]]
+        assert "select_recon_targets" not in names
+        assert "gps_recon_sequence" not in names
+        assert "build_recon_report" not in names
+        if relative == "rescue_2026_full_auto_v2.json":
+            assert names.count("gps_multi_view_localize") == 1  # drop localization only
+        params = scans[0]["params"]
+        assert [(item["x"], item["y"], item["altitude_m"]) for item in params["waypoints"]] == expected_waypoints
+        assert params["scoring_target_indices"] == [1, 3]
+        assert params["waypoint_mode"] == "field"
+        assert params["target_frame"] == "global"
+        assert params["yaw_mode"] == "field_heading"
 
 
 def test_action_mission_template_actions_are_registered() -> None:
@@ -611,37 +627,34 @@ def test_validator_rejects_retry_current_then_jump_to_zero_max_attempts(tmp_path
 # ── rescue_2026_full_auto_v2 tests ─────────────────────────────────────
 
 
-def test_recon_scan_v2_retries_then_returns_home() -> None:
-    """rescue_2026_full_auto_v2: recon_scan failed → retry_current_then_jump_to return_home."""
+def test_recon_area_scan_v2_returns_home_on_failure() -> None:
     data = _template(FULL_V2_TEMPLATE_PATH)
     by_label = {step.get("label", ""): step for step in data["steps"]}
-    policy = by_label["recon_gps_multi_view_scan"]["on_failed"]
-    assert policy["action"] == "retry_current_then_jump_to"
-    assert policy["max_attempts"] == 2
+    policy = by_label["gps_recon_area_scan"]["on_failed"]
+    assert policy["action"] == "jump_to"
+    assert policy["max_attempts"] == 1
     assert policy["target"] == "return_home_gps"
 
 
-def test_recon_sequence_v2_is_gps_hover_only() -> None:
-    """rescue_2026_full_auto_v2 recon uses only stable GPS goto plus timed observation."""
+def test_recon_area_scan_v2_has_fixed_gps_first_segments() -> None:
     data = _template(FULL_V2_TEMPLATE_PATH)
     by_label = {step.get("label", ""): step for step in data["steps"]}
-    params = by_label["gps_recon_sequence"]["params"]
-    assert params["approach_altitude_m"] == 2.5
-    assert params["observe_duration_s"] == 2.0
-    for name in ("target_lock", "align_descend", "finish_altitude_m", "climb_after_drop_m"):
-        assert name not in params
+    params = by_label["gps_recon_area_scan"]["params"]
+    assert params["scoring_target_indices"] == [1, 3]
+    assert params["target_frame"] == "global"
+    assert params["waypoint_mode"] == "field"
 
 
-def test_select_recon_targets_v2_zone_center_mode_field() -> None:
-    """rescue_2026_full_auto_v2: select_recon_targets zone_center_mode is field."""
+def test_recon_area_scan_v2_removes_per_bucket_recon_actions() -> None:
     data = _template(FULL_V2_TEMPLATE_PATH)
     by_label = {step.get("label", ""): step for step in data["steps"]}
-    assert by_label["select_gps_recon_targets"]["params"]["coordinate_mode"] == "gps_enu"
+    names = {step["name"] for step in data["steps"]}
+    assert not {"select_recon_targets", "gps_recon_sequence", "build_recon_report"} & names
 
 
-def test_full_rescue_v2_has_12_steps() -> None:
+def test_full_rescue_v2_has_9_steps() -> None:
     data = _template(FULL_V2_TEMPLATE_PATH)
-    assert len(data["steps"]) == 12
+    assert len(data["steps"]) == 9
 
 
 def test_sitl_profile_matches_base_full_v2_template() -> None:

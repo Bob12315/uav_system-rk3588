@@ -1049,7 +1049,7 @@ class SystemRunner:
 
     def _maybe_save_recon_inspection_result(self) -> None:
         name = getattr(self.action_runtime, "action_name", None)
-        if name not in ("recon_inspect_target", "build_recon_report"):
+        if name not in ("recon_inspect_target", "build_recon_report", "gps_recon_area_scan"):
             return
         last = getattr(self.action_runtime, "last_result", None)
         if last is None:
@@ -1059,6 +1059,16 @@ class SystemRunner:
             detail = {}
         done = last.get("done") if isinstance(last, dict) else getattr(last, "done", False)
         if not done:
+            return
+
+        if name == "gps_recon_area_scan":
+            if detail.get("ranking_mode") is not True or not isinstance(detail.get("ranking"), list):
+                return
+            self.latest_recon_inspection_result = {
+                "source": "gps_recon_area_scan", "updated_at": time.time(),
+                "ranking_mode": True, "ranking": detail["ranking"],
+                "scan_summary": detail.get("scan_summary", {}),
+            }
             return
 
         # new path: build_recon_report output
@@ -1116,6 +1126,16 @@ class SystemRunner:
         barrels = report.get("barrels", []) if isinstance(report, dict) else []
         if isinstance(barrels, list):
             self.latest_recon_inspection_result = {"source": "build_recon_report", "updated_at": time.time(), "report": self._with_field_coordinates(barrels), "barrels": self._with_field_coordinates(barrels), "barrel_count": len(barrels), "detected_count": detail.get("detected_count", 0), "blank_count": detail.get("blank_count", 0), "skipped_count": detail.get("skipped_count", 0), "failed_count": detail.get("failed_count", 0)}
+
+    def _maybe_save_recon_ranking_from_mission(self) -> None:
+        orch = self.action_mission_orchestrator
+        data = getattr(getattr(orch, "blackboard", None), "data", {}) if orch else {}
+        detail = data.get("recon_scan_ranking") if isinstance(data, dict) else None
+        if not isinstance(detail, dict) or detail.get("ranking_mode") is not True:
+            return
+        ranking = detail.get("ranking")
+        if isinstance(ranking, list):
+            self.latest_recon_inspection_result = {"source": "gps_recon_area_scan", "updated_at": time.time(), "ranking_mode": True, "ranking": ranking, "scan_summary": detail.get("scan_summary", {})}
 
     def manual_step_move(self, direction: str, step_m: float) -> CommandResult:
         """Move the drone by step_m in the given body-frame direction.
@@ -1471,6 +1491,7 @@ class SystemRunner:
             self._maybe_save_localization_from_mission()
             self._maybe_save_recon_targets_from_mission()
             self._maybe_save_recon_report_from_mission()
+            self._maybe_save_recon_ranking_from_mission()
             self._maybe_save_localization_result()
             self._maybe_save_drop_targets_result()
             self._maybe_save_recon_inspection_result()

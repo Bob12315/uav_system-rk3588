@@ -152,3 +152,36 @@ def test_reset_calls_clear_navigation_queue_with_stop_and_clear() -> None:
     assert "stop_body_velocity_and_clear" in calls
     assert "stop_body_velocity" not in calls
     assert "clear_continuous_commands" not in calls
+
+
+def test_failed_gps_recon_area_scan_clears_global_navigation_and_holds_current() -> None:
+    """Direct Action Lab failure uses the same queue clear + hold primitive as Mission."""
+    from app.action_dispatcher import ActionDispatcher
+    from missions.common.actions.registry import ActionRegistry
+    from missions.common.actions.runner import ActionRunner
+    from missions.common.actions.base import ActionModule
+    from missions.common.actions.result import ActionResult
+
+    class FailingRecon(ActionModule):
+        def start(self, params=None): pass
+        def update(self, context=None): return ActionResult(failed=True, reason="goto_failed")
+        def stop(self): pass
+        def reset(self): pass
+
+    calls: list[str] = []
+    class FakeLink:
+        def stop_body_velocity_and_clear(self): calls.append("stop_body_velocity_and_clear")
+        def clear_pending_local_position_actions(self): calls.append("clear_pending_local_position_actions")
+        def hold_current_local_position(self): calls.append("hold_current_local_position")
+
+    registry = ActionRegistry()
+    registry.register("gps_recon_area_scan", FailingRecon)
+    service = ActionRuntimeService(runner=ActionRunner(registry), dispatcher=ActionDispatcher())
+    service.start("gps_recon_area_scan", link_manager=None)
+    service.tick({}, link_manager=FakeLink(), send_commands=False)
+
+    assert calls == [
+        "stop_body_velocity_and_clear",
+        "clear_pending_local_position_actions",
+        "hold_current_local_position",
+    ]

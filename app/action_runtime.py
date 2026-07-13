@@ -79,6 +79,12 @@ class ActionRuntimeService:
         result = self.runner.update(context)
         result_dict = result.to_dict()
         self.last_result = result_dict
+        # A failed GPS recon area scan may have refreshed a GLOBAL_GOTO on its
+        # preceding tick.  The direct Action Lab path has no MissionOrchestrator
+        # failure transition, so clear that target and actively hold position.
+        # Mission failure handling retains its existing clear/reset path.
+        if result.failed and self.runner.action_name == "gps_recon_area_scan":
+            self.clear_navigation_queue(link_manager, hold_current=True)
         self.dispatcher.last_dispatch = self.dispatcher.dispatch_result(
             result.to_dict(),
             action_name=self.runner.action_name,

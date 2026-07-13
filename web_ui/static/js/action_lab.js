@@ -34,6 +34,7 @@
     "align_descend",
     "select_drop_targets",
     "drop_sequence",
+    "gps_recon_area_scan",
     "select_recon_targets",
     "recon_sequence",
     "recon_descend_observe",

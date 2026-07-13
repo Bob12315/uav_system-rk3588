@@ -49,24 +49,24 @@
   "recon_scan": {
     "waypoints": [
       {
-        "x_m": -2.0,
-        "y_m": 56.25,
-        "altitude_m": 5.0
+        "x_m": -3.0,
+        "y_m": 56.0,
+        "altitude_m": 3.0
       },
       {
-        "x_m": 2.0,
-        "y_m": 56.25,
-        "altitude_m": 5.0
+        "x_m": 3.0,
+        "y_m": 56.0,
+        "altitude_m": 3.0
       },
       {
-        "x_m": 2.0,
-        "y_m": 58.75,
-        "altitude_m": 5.0
+        "x_m": 3.0,
+        "y_m": 58.0,
+        "altitude_m": 3.0
       },
       {
-        "x_m": -2.0,
-        "y_m": 58.75,
-        "altitude_m": 5.0
+        "x_m": -3.0,
+        "y_m": 58.0,
+        "altitude_m": 3.0
       }
     ]
   },
