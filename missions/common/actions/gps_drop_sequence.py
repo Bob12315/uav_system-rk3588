@@ -10,6 +10,8 @@ import copy
 import math
 from typing import Any
 
+from app.coordinate_transform import field_to_gps_from_origin
+from app.field_reference import FieldReferenceError
 from telemetry_link.frames import GLOBAL_RELATIVE_ALT_INT
 
 from .base import ActionModule
@@ -31,10 +33,10 @@ class GpsDropSequenceAction(GpsTargetSequenceCore, ActionModule):
         self._goto_action_factory=GotoWaypointAction; self._lock_action_factory=GpsTargetLockAction; self._align_action_factory=AlignDescendAction; self._operation_action_factory=PayloadReleaseAction
         data = params or {}
 
-        # ── targets (exactly 2 valid GPS targets) ──
+        # ── targets (0-2 valid GPS targets) ──
         raw_targets = data.get("targets", [])
-        if not isinstance(raw_targets, list) or len(raw_targets) not in (1, 2):
-            raise ValueError("targets must contain 1 or 2 entries")
+        if not isinstance(raw_targets, list) or len(raw_targets) not in (0, 1, 2):
+            raise ValueError("targets must contain 0, 1, or 2 entries")
         self.targets: list[dict[str, Any]] = []
         seen_ids = set()
         for t in raw_targets:
@@ -64,8 +66,25 @@ class GpsDropSequenceAction(GpsTargetSequenceCore, ActionModule):
                 "class_name": str(t.get("class_name", "")),
                 "target_id": tid,
             })
+        self.no_target_strategy = str(data.get("no_target_strategy") or "").strip()
+        self.no_target_field_center: dict[str, float] | None = None
         if len(self.targets) == 0:
-            raise ValueError("at least 1 valid GPS target required, got 0")
+            if self.no_target_strategy != "field_center_direct_dual_release":
+                raise ValueError("0 targets require no_target_strategy=field_center_direct_dual_release")
+            raw_center = data.get("no_target_field_center")
+            if not isinstance(raw_center, dict):
+                raise ValueError("no_target_field_center must be an object")
+            try:
+                center = {
+                    "x": float(raw_center["x"]),
+                    "y": float(raw_center["y"]),
+                    "altitude_m": float(raw_center["altitude_m"]),
+                }
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError("no_target_field_center requires finite x, y, altitude_m") from exc
+            if not all(math.isfinite(value) for value in center.values()) or center["altitude_m"] <= 0.0:
+                raise ValueError("no_target_field_center requires finite x, y, altitude_m > 0")
+            self.no_target_field_center = center
         if len(self.targets) > 2:
             raise ValueError("at most 2 valid GPS targets allowed, got " + str(len(self.targets)))
         if len(self.targets) == 2 and _same_gps_position(self.targets[0], self.targets[1]):
@@ -81,12 +100,13 @@ class GpsDropSequenceAction(GpsTargetSequenceCore, ActionModule):
 
         # ── execution mode ──
         self.execution_mode = (
-            "single_target_dual_release" if len(self.targets) == 1
+            "field_center_direct_dual_release" if not self.targets
+            else "single_target_dual_release" if len(self.targets) == 1
             else "dual_target_sequential"
         )
 
         # ── pre-validate merged servo outputs for dual release ──
-        if self.execution_mode == "single_target_dual_release":
+        if self.execution_mode in {"single_target_dual_release", "field_center_direct_dual_release"}:
             self.dual_release_servo_outputs = _merge_servo_outputs(
                 self.payloads[0], self.payloads[1]
             )
@@ -103,6 +123,11 @@ class GpsDropSequenceAction(GpsTargetSequenceCore, ActionModule):
 
         # ── climb params ──
         self.climb_after_drop_m = float(data.get("climb_after_drop_m", 2.5))
+        self.single_target_climb_after_release_m = float(
+            data.get("single_target_climb_after_release_m", self.climb_after_drop_m)
+        )
+        if self.execution_mode == "single_target_dual_release":
+            self.climb_after_drop_m = self.single_target_climb_after_release_m
         self.climb_tolerance_z_m = float(data.get("climb_tolerance_z_m", 0.1))
         self.climb_max_updates = int(data.get("climb_max_updates", 100))
         for name, val in (("climb_after_drop_m", self.climb_after_drop_m),
@@ -142,7 +167,7 @@ class GpsDropSequenceAction(GpsTargetSequenceCore, ActionModule):
         self.align_cfg["config"] = align_config
 
         # ── state ──
-        self.phase = "goto"
+        self.phase = "resolve_no_target" if self.execution_mode == "field_center_direct_dual_release" else "goto"
         self.target_index = 0
         self.payload_index = 0
         self.released_count = 0
@@ -161,7 +186,7 @@ class GpsDropSequenceAction(GpsTargetSequenceCore, ActionModule):
         return {'goto':'gps_drop_goto','lock':'gps_drop_lock_searching','lock_start':'gps_drop_lock_start','align_start':'gps_drop_align_start','align':'gps_drop_align','align_inactive':'gps_drop_align_inactive','operation_start':'gps_drop_release_start','climb_start':'gps_drop_climb_start','climb':'gps_drop_climb','next':'gps_drop_next','done':'gps_drop_sequence_done','goto_timeout':'goto_timeout','goto_failed':'goto_failed','lock_failed':'no_lockable_drop_targets','align_timeout':'align_descend_timeout','operation_failed':'payload_release_failed','climb_timeout':'climb_timeout','climb_failed':'climb_goto_failed'}.get(event,event)
     def _sequence_namespace(self): return 'gps_drop'
     def _sequence_detail(self,done=False,extra=None):
-        d={'phase':'release' if self.phase=='operation' else self.phase,'target_index':self.target_index,'payload_index':self.payload_index,'released_count':self.released_count,'target_count':len(self.targets),'payload_count':len(self.payloads),'release_reason':getattr(self,'_release_reason',''),'execution_mode':self.execution_mode,'dual_release':self.execution_mode=='single_target_dual_release'}; d.update(extra or {});
+        d={'phase':'release' if self.phase=='operation' else self.phase,'target_index':self.target_index,'payload_index':self.payload_index,'released_count':self.released_count,'target_count':len(self.targets),'payload_count':len(self.payloads),'release_reason':getattr(self,'_release_reason',''),'execution_mode':self.execution_mode,'dual_release':self.execution_mode in {'single_target_dual_release', 'field_center_direct_dual_release'}}; d.update(extra or {});
         if done:d['done']=True
         return d
     def _action_key(self,phase): return f'gps_drop_{phase}_{self.target_index}' if phase != 'align' else 'gps_drop_align'
@@ -199,9 +224,9 @@ class GpsDropSequenceAction(GpsTargetSequenceCore, ActionModule):
                           detail=detail)
     def _start_operation(self,target):
         self.sub_action=self._operation_action_factory();
-        common = {'release_wait_updates': self.release_wait_updates, 'priority': min(self.payloads[0].get('priority',5),self.payloads[1].get('priority',5)) if self.execution_mode=='single_target_dual_release' else self.payloads[self.payload_index].get('priority',5)}
+        common = {'release_wait_updates': self.release_wait_updates, 'priority': min(self.payloads[0].get('priority',5),self.payloads[1].get('priority',5)) if self.execution_mode in {'single_target_dual_release', 'field_center_direct_dual_release'} else self.payloads[self.payload_index].get('priority',5)}
         if self.release_wait_s is not None: common['release_wait_s'] = self.release_wait_s
-        if self.execution_mode=='single_target_dual_release': self.sub_action.start({'servo_outputs':self.dual_release_servo_outputs,'payload_id':'payload_1_and_2','target_id':target['target_id'], **common})
+        if self.execution_mode in {'single_target_dual_release', 'field_center_direct_dual_release'}: self.sub_action.start({'servo_outputs':self.dual_release_servo_outputs,'payload_id':'payload_1_and_2','target_id':target['target_id'], **common})
         else:
             p=self.payloads[self.payload_index]; self.sub_action.start({'servo_outputs':p['servo_outputs'],'payload_id':p['payload_id'],'target_id':target['target_id'], **common})
 
@@ -218,8 +243,55 @@ class GpsDropSequenceAction(GpsTargetSequenceCore, ActionModule):
         if not r.done:return ActionResult(actions=[self._zero_velocity_command()]+(r.actions or []),reason='gps_drop_releasing',detail=self._sequence_detail())
         self._operation_hold=r.actions or []; return ActionResult(actions=[self._zero_velocity_command()]+self._operation_hold+[self._clear_continuous_command('release_done')],done=True,reason='gps_drop_climb_start',detail=self._sequence_detail())
     def _operation_complete(self,target):
-        if self.execution_mode=='single_target_dual_release': self.released_count=2; self.payload_index=2
+        if self.execution_mode in {'single_target_dual_release', 'field_center_direct_dual_release'}: self.released_count=2; self.payload_index=2
         else: self.released_count+=1; self.payload_index+=1
+
+    def _update_resolve_no_target(self, context: dict[str, Any]) -> ActionResult:
+        """Resolve the configured FIELD centre through the frozen runtime binding."""
+        field_reference = context.get("field_reference")
+        if not isinstance(field_reference, dict):
+            return self._fail("goto_failed", reason="missing_field_reference_context")
+        runtime_binding = field_reference.get("runtime_binding")
+        geometry = runtime_binding.get("geometry") if isinstance(runtime_binding, dict) else None
+        home = geometry.get("home") if isinstance(geometry, dict) else None
+        try:
+            if not (
+                field_reference.get("is_confirmed") is True
+                and field_reference.get("is_frozen") is True
+                and field_reference.get("is_ready_for_field_to_gps") is True
+                and field_reference.get("synced_to_runtime") is True
+                and isinstance(runtime_binding, dict)
+                and runtime_binding.get("state") == "applied"
+                and isinstance(home, dict)
+            ):
+                raise FieldReferenceError("runtime field reference is not ready for FIELD to GPS conversion")
+            point = field_to_gps_from_origin(
+                self.no_target_field_center["x"], self.no_target_field_center["y"],
+                self.no_target_field_center["altitude_m"],
+                origin_lat=float(home["lat"]), origin_lon=float(home["lon"]),
+                field_heading_yaw_rad=float(field_reference["field_heading_yaw_rad"]),
+            )
+        except (KeyError, TypeError, ValueError, FieldReferenceError) as exc:
+            return self._fail("goto_failed", reason="no_target_field_center_resolve_failed")
+        self.targets = [{"lat": point.lat, "lon": point.lon, "class_name": "", "target_id": "field_center_direct"}]
+        return self._transition("goto", "goto", [])
+
+    def _transition_after_goto(self, target, ctx, actions):
+        if self.execution_mode == "field_center_direct_dual_release":
+            self._operation_started = False
+            return self._transition("operation", "operation_start", actions)
+        return super()._transition_after_goto(target, ctx, actions)
+
+    def _transition_after_operation(self, target, ctx, actions):
+        if self.execution_mode == "field_center_direct_dual_release":
+            self.phase = "done"
+            return ActionResult(
+                actions=self._ensure_stop_actions(actions or [], "field_center_release_done"),
+                done=True,
+                reason=self._sequence_reason("done"),
+                detail=self._sequence_detail(done=True),
+            )
+        return super()._transition_after_operation(target, ctx, actions)
 
 def _merge_servo_outputs(payload_a: dict[str, Any], payload_b: dict[str, Any]) -> list[dict[str, int]]:
     """Merge servo_outputs from two payloads into one combined list.

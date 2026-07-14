@@ -401,15 +401,21 @@ class GpsMultiViewLocalizeAction(ActionModule):
 
         # Fuse
         if not self.raw_estimates:
-            self.phase = "failed"
-            self.failure_reason = "no_targets"
-            return ActionResult(failed=True, reason="no_targets", detail=self._detail())
+            self.phase = "done"
+            return ActionResult(
+                done=True,
+                reason="gps_multi_view_localized_empty",
+                detail=self._detail(done=True),
+            )
 
         self.fused_objects = self.fuser.fuse(self.raw_estimates)
         if not self.fused_objects:
-            self.phase = "failed"
-            self.failure_reason = "no_target_fused"
-            return ActionResult(failed=True, reason="no_target_fused", detail=self._detail())
+            self.phase = "done"
+            return ActionResult(
+                done=True,
+                reason="gps_multi_view_localized_empty",
+                detail=self._detail(done=True),
+            )
 
         self.phase = "done"
         return ActionResult(done=True, reason="gps_multi_view_localized", detail=self._detail(done=True))
@@ -599,7 +605,7 @@ class GpsMultiViewLocalizeAction(ActionModule):
             "target_frame": "global",
             "rejected_by_reason": dict(self.rejected_by_reason),
         }
-        if done and self.fused_objects:
+        if done:
             localized_objects: list[dict[str, Any]] = []
             for obj in self.fused_objects:
                 localized_objects.append({

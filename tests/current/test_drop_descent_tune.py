@@ -17,19 +17,15 @@ def test_descend_speed_024():
                 assert c["descend_speed_mps"] == 0.24, f"{path}: {c['descend_speed_mps']}"
 
 
-def test_slow_descend_unchanged():
-    """Slow descend and unaligned speeds unchanged."""
-    paths = [
-        "config/action_missions/drop_two_targets_v2.json",
-        "config/action_missions/rescue_2026_full_auto_v2.json",
-    ]
-    for path in paths:
-        data = json.loads(open(path).read())
-        for step in data["steps"]:
-            if step["name"] == "gps_drop_sequence":
-                c = step["params"]["align_descend"]["config"]
-                assert c["slow_descend_speed_mps"] == 0.18
-                assert c["unaligned_descend_speed_mps"] == 0.08
+def test_slow_descend_and_complete_v2_edge_descend_speeds():
+    """Complete rescue v2 alone lowers the unaligned descent band."""
+    drop = json.loads(open("config/action_missions/drop_two_targets_v2.json").read())
+    rescue = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
+    drop_cfg = next(s for s in drop["steps"] if s["name"] == "gps_drop_sequence")["params"]["align_descend"]["config"]
+    rescue_cfg = next(s for s in rescue["steps"] if s["name"] == "gps_drop_sequence")["params"]["align_descend"]["config"]
+    assert drop_cfg["slow_descend_speed_mps"] == rescue_cfg["slow_descend_speed_mps"] == 0.18
+    assert drop_cfg["unaligned_descend_speed_mps"] == 0.08
+    assert rescue_cfg["unaligned_descend_speed_mps"] == 0.06
 
 
 def test_fast_window_028():
@@ -158,15 +154,15 @@ def test_align_descend_fov_still_85_69():
                 assert c["fov_y_deg"] == 69.0, f"{path} align fov_y"
 
 
-def test_drop_v2_and_rescue_v2_drop_params_identical():
-    """gps_drop_sequence params identical (excluding mission-specific keys)."""
+def test_complete_rescue_v2_drop_overrides_are_deliberate():
+    """Rescue v2 no longer shares the generic template's conservative values."""
     drop = json.loads(open("config/action_missions/drop_two_targets_v2.json").read())
     rescue = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
     dp = dict(next(s for s in drop["steps"] if s["name"] == "gps_drop_sequence")["params"])
     rp = dict(next(s for s in rescue["steps"] if s["name"] == "gps_drop_sequence")["params"])
-    dp.pop("targets", None); dp.pop("payloads", None)
-    rp.pop("targets", None); rp.pop("payloads", None)
-    assert dp == rp
+    assert dp["approach_altitude_m"] == 2.5 and rp["approach_altitude_m"] == 3.5
+    assert dp["align_descend_max_updates"] == 35 and rp["align_descend_max_updates"] == 150
+    assert rp["single_target_climb_after_release_m"] == 3.5
 
 
 def test_recon_fov_consistent():

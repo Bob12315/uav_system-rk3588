@@ -12,14 +12,13 @@
         "altitude_tolerance_m": 0.35,
         "require_armed": true,
         "max_updates": 150,
+        "max_duration_s": 8.0,
         "priority": 2,
         "arm_priority": 1,
         "mode_priority": 2
       },
       "on_failed": {
-        "action": "jump_to",
-        "target": "land_home",
-        "max_attempts": 1
+        "action": "continue"
       }
     },
     {
@@ -135,14 +134,21 @@
             "payload_right_m": 0.0
           }
         ],
-        "approach_altitude_m": 2.5,
+        "approach_altitude_m": 3.5,
         "finish_altitude_m": 1.2,
         "climb_after_drop_m": 2.5,
+        "single_target_climb_after_release_m": 3.5,
+        "no_target_strategy": "field_center_direct_dual_release",
+        "no_target_field_center": {
+          "x": 0.0,
+          "y": 32.5,
+          "altitude_m": 3.5
+        },
         "climb_tolerance_z_m": 0.1,
         "climb_max_updates": 100,
         "goto_max_updates": 200,
         "target_lock_max_updates": 8,
-        "align_descend_max_updates": 35,
+        "align_descend_max_updates": 150,
         "release_wait_s": 1.0,
         "release_wait_updates": 5,
         "goto": {
@@ -176,7 +182,7 @@
           "lost_timeout_updates": 10,
           "hold_updates_required": 1,
           "max_retries": 1,
-          "max_updates": 35,
+          "max_updates": 150,
           "finish_policy": "latched_center_alignment",
           "finish_alignment_max_ex_cam": 0.35,
           "finish_alignment_max_ey_cam": 0.35,
@@ -236,7 +242,7 @@
             "require_target_locked": false,
             "payload_offset_enabled": true,
             "descent_gate_policy": "allow_unaligned",
-            "unaligned_descend_speed_mps": 0.08,
+            "unaligned_descend_speed_mps": 0.06,
             "fov_x_deg": 85.0,
             "fov_y_deg": 69.0,
             "image_x_sign": 1.0,
@@ -329,9 +335,9 @@
       "params": {
         "class_names": ["H"],
         "min_confidence": 0.35,
-        "search_max_updates": 8,
+        "search_max_updates": 1,
         "finish_altitude_m": 0.3,
-        "blind_descend_speed_mps": 0.3,
+        "blind_descend_speed_mps": 0.5,
         "priority": 5,
         "align_descend": {
           "expected_dt_s": 0.1,
@@ -343,7 +349,7 @@
             "kp_vy": 0.3,
             "max_vx_mps": 0.3,
             "max_vy_mps": 0.3,
-            "descend_speed_mps": 0.35,
+            "descend_speed_mps": 0.5,
             "slow_descend_speed_mps": 0.3,
             "max_ex_cam": 0.3,
             "max_ey_cam": 0.3,
@@ -361,11 +367,11 @@
             "descent_speed_stages": [
               {
                 "max_altitude_m": 0.8,
-                "max_descend_speed_mps": 0.18
+                "max_descend_speed_mps": 0.25
               },
               {
                 "max_altitude_m": 2.5,
-                "max_descend_speed_mps": 0.35
+                "max_descend_speed_mps": 0.5
               }
             ]
           }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,6 +31,7 @@ class TakeoffAction(ActionModule):
         altitude_m = float(data.get("altitude_m", 3.0))
         altitude_tolerance_m = float(data.get("altitude_tolerance_m", 0.3))
         max_updates = int(data.get("max_updates", 120))
+        max_duration_s = self._optional_positive_seconds(data.get("max_duration_s"))
         if altitude_m <= 0.0:
             raise ValueError("altitude_m must be positive")
         if altitude_tolerance_m <= 0.0:
@@ -42,6 +44,8 @@ class TakeoffAction(ActionModule):
         self.altitude_tolerance_m = altitude_tolerance_m
         self.require_armed = self._parse_bool(data.get("require_armed", True), "require_armed")
         self.max_updates = max_updates
+        self.max_duration_s = max_duration_s
+        self.started_monotonic_s = time.monotonic()
         self.priority = int(data.get("priority", 2))
         self.arm_priority = int(data.get("arm_priority", 1))
         self.mode_priority = int(data.get("mode_priority", 2))
@@ -70,7 +74,10 @@ class TakeoffAction(ActionModule):
         self.update_count += 1
         context_data = context or {}
         altitude = self._current_altitude(context_data)
-        if self.update_count > self.max_updates:
+        timed_out = self.update_count > self.max_updates
+        if self.max_duration_s is not None:
+            timed_out = time.monotonic() - self.started_monotonic_s >= self.max_duration_s
+        if timed_out:
             self.phase = "failed"
             self.failed = True
             self.failure_reason = "takeoff_timeout"
@@ -147,6 +154,8 @@ class TakeoffAction(ActionModule):
         self.altitude_tolerance_m = 0.3
         self.require_armed = True
         self.max_updates = 120
+        self.max_duration_s: float | None = None
+        self.started_monotonic_s: float | None = None
         self.priority = 2
         self.arm_priority = 1
         self.mode_priority = 2
@@ -257,6 +266,7 @@ class TakeoffAction(ActionModule):
             "reached": reached,
             "update_count": self.update_count,
             "max_updates": self.max_updates,
+            "max_duration_s": self.max_duration_s,
             "mode_sent": self.mode_sent,
             "arm_sent": self.arm_sent,
             "takeoff_sent": self.takeoff_sent,
@@ -270,6 +280,18 @@ class TakeoffAction(ActionModule):
             if name in context_data:
                 detail[name] = context_data[name]
         return detail
+
+    @staticmethod
+    def _optional_positive_seconds(raw: Any) -> float | None:
+        if raw is None:
+            return None
+        try:
+            value = float(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("max_duration_s must be finite and > 0") from exc
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError("max_duration_s must be finite and > 0")
+        return value
 
     def _current_yaw_rad(self, context: dict[str, Any]) -> float | None:
         drone = context.get("drone")
@@ -324,4 +346,3 @@ class TakeoffAction(ActionModule):
         except (TypeError, ValueError):
             return None
         return result if math.isfinite(result) else None
-
