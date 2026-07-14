@@ -80,17 +80,17 @@ def _drive(action: GpsDropSequenceAction, context: dict) -> list[ActionResult]:
     raise AssertionError("drop sequence did not terminate")
 
 
-def test_takeoff_duration_timeout_is_eight_second_cap() -> None:
+def test_takeoff_duration_timeout_is_twelve_second_cap() -> None:
     action = TakeoffAction()
-    action.start({"max_duration_s": 8.0, "max_updates": 999})
-    action.started_monotonic_s = time.monotonic() - 8.0
+    action.start({"max_duration_s": 12.0, "max_updates": 999})
+    action.started_monotonic_s = time.monotonic() - 12.0
     result = action.update({"relative_altitude": 0.0})
     assert result.failed and result.reason == "takeoff_timeout"
 
 
 def test_takeoff_reaching_height_before_duration_completes_normally() -> None:
     action = TakeoffAction()
-    action.start({"altitude_m": 3.5, "altitude_tolerance_m": 0.35, "max_duration_s": 8.0})
+    action.start({"altitude_m": 3.5, "altitude_tolerance_m": 0.35, "max_duration_s": 12.0})
     action.update({})
     action.update({})
     action.update({})
@@ -101,7 +101,7 @@ def test_takeoff_reaching_height_before_duration_completes_normally() -> None:
 def test_complete_v2_takeoff_timeout_continues_to_scan() -> None:
     steps = json.loads(MISSION.read_text())["steps"]
     takeoff = steps[0]
-    assert takeoff["params"]["max_duration_s"] == 8.0
+    assert takeoff["params"]["max_duration_s"] == 12.0
     assert takeoff["on_failed"] == {"action": "continue"}
     assert steps[1]["name"] == "gps_multi_view_localize"
 
