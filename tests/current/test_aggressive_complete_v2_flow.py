@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+import copy
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from missions.common.actions import gps_drop_sequence as drop_module
 from missions.common.actions.gps_drop_sequence import GpsDropSequenceAction
 from missions.common.actions.result import ActionResult
 from missions.common.actions.takeoff import TakeoffAction
+from missions.common.actions.align_descend import AlignDescendAction, AlignDescendConfig, compute_align_descend_command
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -142,10 +144,56 @@ def test_complete_v2_descent_and_landing_parameters() -> None:
     steps = json.loads(MISSION.read_text())["steps"]
     drop = next(step["params"] for step in steps if step["name"] == "gps_drop_sequence")
     config = drop["align_descend"]["config"]
-    assert (config["descend_speed_mps"], config["slow_descend_speed_mps"], config["unaligned_descend_speed_mps"]) == (0.24, 0.18, 0.06)
+    assert (config["descend_speed_mps"], config["slow_descend_speed_mps"], config["unaligned_descend_speed_mps"]) == (0.30, 0.14, 0.0)
+    assert (config["max_ex_cam"], config["max_ey_cam"]) == (0.16, 0.16)
+    assert (config["slow_descend_max_ex_cam"], config["slow_descend_max_ey_cam"]) == (0.35, 0.35)
+    assert config["descent_gate_policy"] == "aligned_or_slow"
+    assert (config["deadband_ex_cam"], config["deadband_ey_cam"]) == (0.04, 0.04)
+    assert (drop["align_descend"]["finish_alignment_max_ex_cam"], drop["align_descend"]["finish_alignment_max_ey_cam"], drop["align_descend"]["finish_alignment_hold_updates"]) == (0.20, 0.20, 1)
     assert drop["align_descend_max_updates"] == drop["align_descend"]["max_updates"] == 150
+    assert config["height_scale_points"] == [{"altitude_m": 1.0, "scale": 0.4}, {"altitude_m": 1.3, "scale": 0.4}, {"altitude_m": 2.4, "scale": 0.65}, {"altitude_m": 3.5, "scale": 0.65}, {"altitude_m": 4.5, "scale": 0.65}]
+    assert (config["integral_enabled"], config["integral_active_below_altitude_m"], config["ki_vx"], config["ki_vy"], config["integral_vx_limit_mps"], config["integral_vy_limit_mps"]) == (True, 1.6, 0.04, 0.04, 0.03, 0.03)
+    assert (config["min_effective_speed_enabled"], config["min_effective_speed_active_below_altitude_m"], config["min_effective_speed_mps"], config["min_effective_speed_ex_threshold"], config["min_effective_speed_ey_threshold"]) == (True, 1.6, 0.035, 0.12, 0.16)
     land = next(step["params"] for step in steps if step["name"] == "visual_land")
     assert land["search_max_updates"] == 1 and land["blind_descend_speed_mps"] == 0.5
     land_config = land["align_descend"]["config"]
     assert (land_config["descend_speed_mps"], land_config["slow_descend_speed_mps"], land_config["unaligned_descend_speed_mps"]) == (0.5, 0.3, 0.3)
     assert land_config["descent_speed_stages"] == [{"max_altitude_m": 0.8, "max_descend_speed_mps": 0.25}, {"max_altitude_m": 2.5, "max_descend_speed_mps": 0.5}]
+
+
+def test_complete_v2_drop_align_control_windows_and_finish_latch() -> None:
+    drop = next(step["params"] for step in json.loads(MISSION.read_text())["steps"] if step["name"] == "gps_drop_sequence")
+    align = drop["align_descend"]
+    config = AlignDescendConfig(**align["config"])
+
+    def command(ex: float, ey: float, altitude_m: float = 3.5):
+        return compute_align_descend_command({"target_valid": True, "target_locked": True, "control_allowed": True, "ex_cam": ex, "ey_cam": ey}, config, altitude_m=altitude_m)[0]
+
+    center = command(0.10, 0.10)
+    center_edge = command(0.16, 0.16)
+    slow = command(0.25, 0.25)
+    slow_edge = command(0.35, 0.35)
+    edge_x = command(0.36, 0.10)
+    edge_y = command(0.10, 0.36)
+    deadband = command(0.03, 0.03)
+    assert center["vz_cmd"] == pytest.approx(0.30) and center["vx_cmd"] != 0.0 and center["vy_cmd"] != 0.0
+    assert center_edge["vz_cmd"] == pytest.approx(0.30)
+    assert slow["vz_cmd"] == pytest.approx(0.14) and slow["vx_cmd"] != 0.0 and slow["vy_cmd"] != 0.0
+    assert slow_edge["vz_cmd"] == pytest.approx(0.14)
+    assert edge_x["vz_cmd"] == edge_y["vz_cmd"] == 0.0
+    assert edge_x["vx_cmd"] != 0.0 and edge_x["vy_cmd"] != 0.0
+    assert edge_y["vx_cmd"] != 0.0 and edge_y["vy_cmd"] != 0.0
+    assert deadband["vx_cmd"] == deadband["vy_cmd"] == 0.0
+
+    def update_at_finish(ex: float, ey: float):
+        action = AlignDescendAction()
+        params = copy.deepcopy(align)
+        params["finish_altitude_m"] = drop["finish_altitude_m"]
+        action.start(params)
+        return action.update({"relative_altitude": 1.2, "target_valid": True, "target_locked": True, "control_allowed": True, "ex_cam": ex, "ey_cam": ey})
+
+    outside = update_at_finish(0.21, 0.0)
+    inside = update_at_finish(0.20, 0.0)
+    assert not outside.done and outside.detail["command"]["vz_cmd"] == 0.0
+    assert outside.detail["command"]["vx_cmd"] != 0.0 or outside.detail["command"]["vy_cmd"] != 0.0
+    assert inside.done and inside.reason == "latched_center_aligned"

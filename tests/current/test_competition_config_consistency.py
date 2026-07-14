@@ -30,7 +30,7 @@ def test_complete_rescue_v2_has_its_intentional_aggressive_drop_overrides() -> N
     assert rp["single_target_climb_after_release_m"] == 3.5
     assert rp["no_target_strategy"] == "field_center_direct_dual_release"
     assert rp["align_descend_max_updates"] == rp["align_descend"]["max_updates"] == 150
-    assert rp["align_descend"]["config"]["unaligned_descend_speed_mps"] == 0.06
+    assert rp["align_descend"]["config"]["unaligned_descend_speed_mps"] == 0.0
 
 
 def test_rescue_v2_base_and_sitl_identical() -> None:

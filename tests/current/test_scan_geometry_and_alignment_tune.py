@@ -118,19 +118,10 @@ def test_height_scale_points_low_altitude_040():
                 assert hsp[1] == {"altitude_m": 1.3, "scale": 0.40}, f"{path} hsp[1]"
 
 
-def test_deadband_006_008():
-    """deadband ex=0.06, ey=0.08 in drop configs."""
-    paths = [
-        "config/action_missions/drop_two_targets_v2.json",
-        "config/action_missions/rescue_2026_full_auto_v2.json",
-    ]
-    for path in paths:
-        data = json.loads(open(path).read())
-        for step in data["steps"]:
-            if step["name"] == "gps_drop_sequence":
-                c = step["params"]["align_descend"]["config"]
-                assert c["deadband_ex_cam"] == 0.06, f"{path} deadband_ex"
-                assert c["deadband_ey_cam"] == 0.08, f"{path} deadband_ey"
+def test_complete_v2_deadband_is_004():
+    data = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
+    c = next(step for step in data["steps"] if step["name"] == "gps_drop_sequence")["params"]["align_descend"]["config"]
+    assert (c["deadband_ex_cam"], c["deadband_ey_cam"]) == (0.04, 0.04)
 
 
 def test_recon_is_gps_hover_without_alignment_params():

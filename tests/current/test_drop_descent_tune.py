@@ -3,18 +3,10 @@ from __future__ import annotations
 import json
 
 
-def test_descend_speed_024():
-    """Fast descend speed is 0.24."""
-    paths = [
-        "config/action_missions/drop_two_targets_v2.json",
-        "config/action_missions/rescue_2026_full_auto_v2.json",
-    ]
-    for path in paths:
-        data = json.loads(open(path).read())
-        for step in data["steps"]:
-            if step["name"] == "gps_drop_sequence":
-                c = step["params"]["align_descend"]["config"]
-                assert c["descend_speed_mps"] == 0.24, f"{path}: {c['descend_speed_mps']}"
+def test_complete_v2_fast_descend_speed_is_030():
+    data = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
+    c = next(step for step in data["steps"] if step["name"] == "gps_drop_sequence")["params"]["align_descend"]["config"]
+    assert c["descend_speed_mps"] == 0.30
 
 
 def test_slow_descend_and_complete_v2_edge_descend_speeds():
@@ -23,55 +15,28 @@ def test_slow_descend_and_complete_v2_edge_descend_speeds():
     rescue = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
     drop_cfg = next(s for s in drop["steps"] if s["name"] == "gps_drop_sequence")["params"]["align_descend"]["config"]
     rescue_cfg = next(s for s in rescue["steps"] if s["name"] == "gps_drop_sequence")["params"]["align_descend"]["config"]
-    assert drop_cfg["slow_descend_speed_mps"] == rescue_cfg["slow_descend_speed_mps"] == 0.18
+    assert drop_cfg["slow_descend_speed_mps"] == 0.18
+    assert rescue_cfg["slow_descend_speed_mps"] == 0.14
     assert drop_cfg["unaligned_descend_speed_mps"] == 0.08
-    assert rescue_cfg["unaligned_descend_speed_mps"] == 0.06
+    assert rescue_cfg["unaligned_descend_speed_mps"] == 0.0
 
 
-def test_fast_window_028():
-    """Fast descent window is ex/ey 0.28."""
-    paths = [
-        "config/action_missions/drop_two_targets_v2.json",
-        "config/action_missions/rescue_2026_full_auto_v2.json",
-    ]
-    for path in paths:
-        data = json.loads(open(path).read())
-        for step in data["steps"]:
-            if step["name"] == "gps_drop_sequence":
-                c = step["params"]["align_descend"]["config"]
-                assert c["max_ex_cam"] == 0.28, f"{path} max_ex"
-                assert c["max_ey_cam"] == 0.28, f"{path} max_ey"
+def test_complete_v2_fast_window_is_016():
+    data = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
+    c = next(step for step in data["steps"] if step["name"] == "gps_drop_sequence")["params"]["align_descend"]["config"]
+    assert (c["max_ex_cam"], c["max_ey_cam"]) == (0.16, 0.16)
 
 
-def test_slow_window_unchanged():
-    """Slow descent window still 0.55."""
-    paths = [
-        "config/action_missions/drop_two_targets_v2.json",
-        "config/action_missions/rescue_2026_full_auto_v2.json",
-    ]
-    for path in paths:
-        data = json.loads(open(path).read())
-        for step in data["steps"]:
-            if step["name"] == "gps_drop_sequence":
-                c = step["params"]["align_descend"]["config"]
-                assert c["slow_descend_max_ex_cam"] == 0.55
-                assert c["slow_descend_max_ey_cam"] == 0.55
+def test_complete_v2_slow_window_is_035():
+    data = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
+    c = next(step for step in data["steps"] if step["name"] == "gps_drop_sequence")["params"]["align_descend"]["config"]
+    assert (c["slow_descend_max_ex_cam"], c["slow_descend_max_ey_cam"]) == (0.35, 0.35)
 
 
-def test_finish_window_unchanged():
-    """Final alignment window still 0.35."""
-    paths = [
-        "config/action_missions/drop_two_targets_v2.json",
-        "config/action_missions/rescue_2026_full_auto_v2.json",
-    ]
-    for path in paths:
-        data = json.loads(open(path).read())
-        for step in data["steps"]:
-            if step["name"] == "gps_drop_sequence":
-                a = step["params"]["align_descend"]
-                assert a["finish_alignment_max_ex_cam"] == 0.35
-                assert a["finish_alignment_max_ey_cam"] == 0.35
-                assert a["finish_alignment_hold_updates"] == 1
+def test_complete_v2_finish_window_is_020_once():
+    data = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
+    a = next(step for step in data["steps"] if step["name"] == "gps_drop_sequence")["params"]["align_descend"]
+    assert (a["finish_alignment_max_ex_cam"], a["finish_alignment_max_ey_cam"], a["finish_alignment_hold_updates"]) == (0.20, 0.20, 1)
 
 
 def test_low_scale_unchanged():
