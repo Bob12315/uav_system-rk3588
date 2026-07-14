@@ -159,8 +159,8 @@ class TestEstimateEmpty:
         r = a.update(ctx)
         assert a.phase != "failed" or a.failure_reason != "invalid_capture_telemetry"
 
-    def test_all_filtered_no_targets_later(self):
-        """After 4 waypoints with all detections filtered → eventually no_targets."""
+    def test_all_filtered_detections_complete_as_empty_localization(self):
+        """A normal four-point scan without usable detections is a successful empty result."""
         a = GpsMultiViewLocalizeAction()
         a.start({"class_names": ["bucket"], "min_confidence": 0.99,
                   "settle_updates_per_waypoint": 0, "capture_updates_per_waypoint": 1,
@@ -178,8 +178,12 @@ class TestEstimateEmpty:
                 a.update(ctx)
                 if a.phase in ("done", "failed"):
                     break
-        assert a.phase == "failed"
-        assert a.failure_reason == "no_targets"
+        assert a.phase == "done"
+        result = a.update(ctx)
+        assert result.done is True
+        assert result.reason == "gps_multi_view_localized"
+        assert result.detail["localized_objects"] == []
+        assert result.detail["object_count"] == 0
 
 
 # =============================================================================

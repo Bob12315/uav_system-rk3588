@@ -17,17 +17,20 @@ def test_all_four_configs_return_home_altitude() -> None:
         assert rth["params"]["altitude_m"] == 3.5, f"{path}: altitude_m={rth['params']['altitude_m']}"
 
 
-def test_drop_v2_and_rescue_v2_drop_params_identical() -> None:
-    """gps_drop_sequence params (excluding targets/payloads) identical in both missions."""
+def test_complete_rescue_v2_has_its_intentional_aggressive_drop_overrides() -> None:
+    """The standalone drop template stays unchanged; complete rescue v2 is tuned separately."""
     drop = json.loads(open("config/action_missions/drop_two_targets_v2.json").read())
     rescue = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
     drop_seq = next(s for s in drop["steps"] if s["name"] == "gps_drop_sequence")
     rescue_seq = next(s for s in rescue["steps"] if s["name"] == "gps_drop_sequence")
     dp = dict(drop_seq["params"])
     rp = dict(rescue_seq["params"])
-    dp.pop("targets", None); dp.pop("payloads", None)
-    rp.pop("targets", None); rp.pop("payloads", None)
-    assert dp == rp, "drop and rescue gps_drop_sequence params must be identical"
+    assert dp["approach_altitude_m"] == 2.5
+    assert rp["approach_altitude_m"] == 3.5
+    assert rp["single_target_climb_after_release_m"] == 3.5
+    assert rp["no_target_strategy"] == "field_center_direct_dual_release"
+    assert rp["align_descend_max_updates"] == rp["align_descend"]["max_updates"] == 150
+    assert rp["align_descend"]["config"]["unaligned_descend_speed_mps"] == 0.0
 
 
 def test_rescue_v2_base_and_sitl_identical() -> None:

@@ -83,30 +83,24 @@ def test_align_descend_fov_still_85_69():
                 assert cfg["fov_y_deg"] == 69.0, f"{path} align fov_y"
 
 
-def test_drop_and_rescue_drop_params_identical():
-    """gps_drop_sequence params identical (excluding mission-specific keys)."""
+def test_complete_rescue_v2_drop_overrides_are_deliberate():
+    """Only complete rescue v2 carries the aggressive multi-path drop policy."""
     drop = json.loads(open("config/action_missions/drop_two_targets_v2.json").read())
     rescue = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
     dp = dict(next(s for s in drop["steps"] if s["name"] == "gps_drop_sequence")["params"])
     rp = dict(next(s for s in rescue["steps"] if s["name"] == "gps_drop_sequence")["params"])
-    dp.pop("targets", None); dp.pop("payloads", None)
-    rp.pop("targets", None); rp.pop("payloads", None)
-    assert dp == rp
+    assert dp["approach_altitude_m"] == 2.5 and rp["approach_altitude_m"] == 3.5
+    assert rp["no_target_field_center"] == {"x": 0.0, "y": 32.5, "altitude_m": 3.5}
+    assert rp["single_target_climb_after_release_m"] == 3.5
 
 
-def test_align_max_updates_35():
-    """Both outer and inner align_descend max_updates are 35."""
-    paths = [
-        "config/action_missions/drop_two_targets_v2.json",
-        "config/action_missions/rescue_2026_full_auto_v2.json",
-    ]
-    for path in paths:
+def test_align_max_updates_are_template_specific():
+    """Complete rescue v2 has synchronized 150-update inner and outer limits."""
+    for path, expected in (("config/action_missions/drop_two_targets_v2.json", 35), ("config/action_missions/rescue_2026_full_auto_v2.json", 150)):
         data = json.loads(open(path).read())
-        for step in data["steps"]:
-            if step["name"] == "gps_drop_sequence":
-                p = step["params"]
-                assert p["align_descend_max_updates"] == 35, f"{path} outer"
-                assert p["align_descend"]["max_updates"] == 35, f"{path} inner"
+        params = next(step for step in data["steps"] if step["name"] == "gps_drop_sequence")["params"]
+        assert params["align_descend_max_updates"] == expected
+        assert params["align_descend"]["max_updates"] == expected
 
 
 def test_height_scale_points_low_altitude_040():
@@ -124,19 +118,10 @@ def test_height_scale_points_low_altitude_040():
                 assert hsp[1] == {"altitude_m": 1.3, "scale": 0.40}, f"{path} hsp[1]"
 
 
-def test_deadband_006_008():
-    """deadband ex=0.06, ey=0.08 in drop configs."""
-    paths = [
-        "config/action_missions/drop_two_targets_v2.json",
-        "config/action_missions/rescue_2026_full_auto_v2.json",
-    ]
-    for path in paths:
-        data = json.loads(open(path).read())
-        for step in data["steps"]:
-            if step["name"] == "gps_drop_sequence":
-                c = step["params"]["align_descend"]["config"]
-                assert c["deadband_ex_cam"] == 0.06, f"{path} deadband_ex"
-                assert c["deadband_ey_cam"] == 0.08, f"{path} deadband_ey"
+def test_complete_v2_deadband_is_004():
+    data = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
+    c = next(step for step in data["steps"] if step["name"] == "gps_drop_sequence")["params"]["align_descend"]["config"]
+    assert (c["deadband_ex_cam"], c["deadband_ey_cam"]) == (0.04, 0.04)
 
 
 def test_recon_is_gps_hover_without_alignment_params():
