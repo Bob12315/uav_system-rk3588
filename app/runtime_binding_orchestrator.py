@@ -140,7 +140,7 @@ class RuntimeBindingOrchestrator:
                 state="sampling_failed",
                 observed=True,
             )
-        # Try to generate a preview as soon as enough valid samples arrive.
+        # Try to generate a preview after the sampling window completes
         self._try_preview(observed_at_s=float(observed_at_s))
         return {
             "ok": True,
@@ -175,6 +175,10 @@ class RuntimeBindingOrchestrator:
         if sampling.state == "failed":
             return self._failure(
                 "runtime sampler is failed", state="sampling_failed"
+            )
+        if not sampling.window_complete:
+            return self._failure(
+                "sampling window not yet complete", state="sampling"
             )
         if not sampling.can_finalize:
             return self._failure(
@@ -462,7 +466,7 @@ class RuntimeBindingOrchestrator:
         return result
 
     def _try_preview(self, *, observed_at_s: float) -> None:
-        """Attempt to generate a preview candidate after enough samples arrive.
+        """Attempt to generate a preview candidate after window completion.
 
         Only runs when sampler state is still 'sampling' (not already failed).
         On failure, sets ``_preview_error`` and optionally transitions to
@@ -474,7 +478,7 @@ class RuntimeBindingOrchestrator:
             sampling = self._sampler.status(now_s=observed_at_s)
         except Exception:
             return
-        if not sampling.can_finalize:
+        if not sampling.window_complete:
             return
         # Try preview
         try:

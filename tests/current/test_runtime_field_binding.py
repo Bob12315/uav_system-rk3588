@@ -230,22 +230,15 @@ class TestStatusTiming:
         st = s.status(now_s=1003.0)
         assert st.elapsed_s == pytest.approx(3.0)
 
-    def test_elapsed_time_does_not_complete_sampling(self):
+    def test_window_at_boundary(self):
         s = RuntimeFieldBindingSampler(_profile())
         s.start(started_at_s=1000.0)
-        assert s.status(now_s=1005.0).can_finalize is False
+        assert s.status(now_s=1005.0).window_complete is True
 
-    def test_minimum_samples_complete_before_legacy_window(self):
+    def test_window_below(self):
         s = RuntimeFieldBindingSampler(_profile())
         s.start(started_at_s=1000.0)
-        for i in range(20):
-            s.observe_snapshot(
-                _valid_snapshot(2000.0 + i * 0.1),
-                observed_at_s=1000.0 + i * 0.1,
-            )
-        assert s.status(now_s=1001.9).can_finalize is True
-        candidate = s.finalize(completed_at_s=1001.9)
-        assert candidate.sample_count == 20
+        assert s.status(now_s=1004.9).window_complete is False
 
 
 # =========================================================================
@@ -782,11 +775,11 @@ class TestReadyFailedStatus:
         with pytest.raises(RuntimeFieldBindingError):
             s.status(now_s=999.0)
 
-    def test_failed_insufficient_samples_cannot_finalize(self):
+    def test_failed_window_complete(self):
         s = self._make_failed_insufficient()
         st = s.status()
         assert st.state == "failed"
-        assert st.window_complete is False
+        assert st.window_complete is True
         assert st.can_finalize is False
 
     def test_failed_rejects_bad_now(self):
