@@ -52,7 +52,7 @@ window.UavFieldProfiles = (function () {
             (ds.waypoints && ds.waypoints.length ? ds.waypoints[0].altitude_m + " m" : "--"));
         var ros = data.runtime_origin_sampling || {};
         setText("cfsSamplingPolicy",
-            ros.min_samples + " samples / " + ros.sample_window_s + "s / spread<" +
+            ros.min_samples + " valid samples / spread<" +
             ros.max_horizontal_spread_m + "m / " + ros.estimator);
         var bp = data.binding_policy || {};
         setText("cfsBaselinePolicy",
@@ -196,8 +196,7 @@ window.UavFieldProfiles = (function () {
         setText("cfsSamplingDuplicate",
             sampling.duplicate_samples != null ? String(sampling.duplicate_samples) : "--");
         setText("cfsSamplingElapsed",
-            (sampling.elapsed_s != null ? Number(sampling.elapsed_s).toFixed(1) : "--") +
-            " / " + (sampling.sample_window_s || 0) + " s");
+            (sampling.elapsed_s != null ? Number(sampling.elapsed_s).toFixed(1) : "--") + " s");
         var summary = runtime.candidate_summary;
         setText("cfsSamplingSpread",
             (summary && summary.horizontal_spread_m != null)
@@ -206,15 +205,15 @@ window.UavFieldProfiles = (function () {
 
         var prog = $("cfsSamplingProgress");
         if (prog) {
-            prog.max = Math.max(Number(sampling.sample_window_s) || 1, 1);
-            prog.value = Math.min(Number(sampling.elapsed_s) || 0, prog.max);
+            prog.max = Math.max(Number(sampling.min_samples) || 20, 1);
+            prog.value = Math.min(Number(sampling.accepted_samples) || 0, prog.max);
         }
 
         // ---- candidate preview --------------------------------------------
         var preview_panel = $("cfsCandidatePanel");
         var preview_error = $("cfsError");
         if (preview_panel) {
-            var showPreview = (summary && runtime.state === "sampling" && sampling.window_complete);
+            var showPreview = (summary && runtime.state === "sampling" && sampling.can_finalize);
             if (runtime.preview_error) showPreview = true;
             if (runtime.state === "sampling_failed") showPreview = true;
             preview_panel.style.display = showPreview ? "" : "none";

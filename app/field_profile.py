@@ -115,10 +115,14 @@ class RuntimeOriginSampling:
     Sampling is performed while the drone is stationary during pre-mission
     field confirmation, NOT after takeoff.  Only valid GPS samples are
     accepted.
+
+    ``sample_window_s`` is retained only to read existing v3 profiles.  It is
+    no longer a completion condition; sampling completes once ``min_samples``
+    valid, non-duplicate observations have been collected.
     """
 
     min_samples: int = 20
-    sample_window_s: float = 5.0
+    sample_window_s: float = 0.0
     max_horizontal_spread_m: float = 1.0
     estimator: str = "median"
 
@@ -787,18 +791,13 @@ def _parse_runtime_origin_sampling_v3(data: Dict[str, Any]) -> RuntimeOriginSamp
                 ]
             )
         )
+    # Legacy v3 field.  Keep accepting it so deployed profiles remain valid,
+    # but do not require or use it to decide when sampling can finish.
+    window_raw = raw.get("sample_window_s", 0.0)
     window = _require_float_nonneg(
-        _require_in_obj(raw, "sample_window_s"),
+        window_raw,
         "runtime_origin_sampling.sample_window_s",
     )
-    if window <= 0.0:
-        raise FieldProfileValidationError(
-            FieldProfileDiagnostics(
-                errors=[
-                    f"runtime_origin_sampling.sample_window_s must be > 0, got {window}"
-                ]
-            )
-        )
     spread = _require_float_nonneg(
         _require_in_obj(raw, "max_horizontal_spread_m"),
         "runtime_origin_sampling.max_horizontal_spread_m",
@@ -1252,9 +1251,9 @@ def _validate_field_profile_v3(
                 f"runtime_origin_sampling.sample_window_s must be a finite"
                 f" number, got {ros.sample_window_s!r}"
             )
-        elif ros.sample_window_s <= 0.0:
+        elif ros.sample_window_s < 0.0:
             diag.errors.append(
-                f"runtime_origin_sampling.sample_window_s must be > 0,"
+                f"runtime_origin_sampling.sample_window_s must be >= 0,"
                 f" got {ros.sample_window_s}"
             )
         if not _is_finite_number(ros.max_horizontal_spread_m):

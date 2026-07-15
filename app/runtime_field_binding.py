@@ -1,7 +1,7 @@
 """Runtime field binding — pure GPS sampling and binding candidate.
 
 Deterministic sampling layer: Schema v3 profile + DroneState snapshots →
-GPS quality filtering → duplicate detection → 5 s window → ≥20 samples →
+GPS quality filtering → duplicate detection → ≥20 samples →
 median origin → horizontal spread → RuntimeFieldBindingCandidate.
 
 No hardware access, no global state, no RuntimeContext writes.
@@ -248,10 +248,11 @@ class RuntimeFieldBindingSampler:
                     f"now_s ({now_s}) < started_at_s ({started})"
                 )
             elapsed = now_s - started
-            window_complete = elapsed >= window_s
-            can_finalize = (
-                window_complete and self._accepted_n >= min_samples
-            )
+            # ``sample_window_s`` is legacy profile metadata.  Completion is
+            # deliberately count-based: do not make the operator wait for a
+            # fixed duration after enough valid GPS observations arrive.
+            window_complete = self._accepted_n >= min_samples
+            can_finalize = window_complete
             return RuntimeFieldSamplingStatus(
                 state="sampling", profile_id=profile_id,
                 started_at_s=started, elapsed_s=elapsed,
@@ -283,7 +284,7 @@ class RuntimeFieldBindingSampler:
                 )
             effective = max(completed, float(now_s))
             elapsed = max(0.0, effective - started)
-        window_complete = elapsed >= window_s
+        window_complete = self._accepted_n >= min_samples
 
         return RuntimeFieldSamplingStatus(
             state=self._state, profile_id=profile_id,
@@ -522,13 +523,9 @@ class RuntimeFieldBindingSampler:
                 f"completed_at_s ({completed_at_s}) < started_at_s ({started})"
             )
 
+        # Preserve the measured duration as a diagnostic, but never use it
+        # as a completion gate.
         elapsed = completed_at_s - started
-        if elapsed < self._ros.sample_window_s:
-            raise RuntimeFieldBindingError(
-                f"sampling window not yet complete: elapsed {elapsed:.2f}s "
-                f"< {self._ros.sample_window_s}s"
-            )
-
         n = self._accepted_n
         if n < self._ros.min_samples:
             raise RuntimeFieldBindingError(

@@ -556,11 +556,10 @@ class TestSampling:
         with pytest.raises(FieldProfileValidationError):
             parse_field_profile(data)
 
-    def test_window_zero(self):
+    def test_window_zero_is_allowed_for_count_based_sampling(self):
         data = make_valid_v3_profile_dict()
         data["runtime_origin_sampling"]["sample_window_s"] = 0.0
-        with pytest.raises(FieldProfileValidationError):
-            parse_field_profile(data)
+        assert parse_field_profile(data).runtime_origin_sampling.sample_window_s == 0.0
 
     def test_spread_zero(self):
         data = make_valid_v3_profile_dict()

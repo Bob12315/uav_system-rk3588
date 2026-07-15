@@ -25,6 +25,9 @@
    - `field_heading` = 中心线拟合 heading
    - `field_reference` confirmed + synced_to_runtime + frozen
 
+运行时 GPS 采样只以有效样本数量为完成条件：达到 profile 的
+`min_samples`（比赛 profile 为 20）即可确认，不要求固定采样时长。
+
 4. Action Mission 启动前 preflight 强制检查：
    - `field_reference` confirmed
    - `synced_to_runtime` = true
