@@ -429,12 +429,15 @@ class _FakeMav:
     def __init__(self) -> None:
         self.command_long_calls = []
         self.local_position_calls = []
+        self.events = []
 
     def command_long_send(self, *args) -> None:
         self.command_long_calls.append(args)
+        self.events.append(("command_long", args))
 
     def set_position_target_local_ned_send(self, *args) -> None:
         self.local_position_calls.append(args)
+        self.events.append(("local_position", args))
 
 
 class _FakeMaster:
@@ -622,6 +625,65 @@ def test_command_sender_local_position_can_hold_yaw() -> None:
     assert type_mask & mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_RATE_IGNORE
     assert call[5:8] == (1.0, 2.0, -3.0)
     assert call[14] == pytest.approx(0.75)
+
+
+def _local_position_with_speed_override() -> ActionCommand:
+    return ActionCommand(
+        action_type=ActionType.LOCAL_POSITION,
+        params={
+            "x": 1.0,
+            "y": 2.0,
+            "z": -3.0,
+            "frame": 1,
+            "_speed_overrides": [{"speed_type": 1, "speed_mps": 1.0}],
+        },
+    )
+
+
+def test_position_transition_reapplies_speed_after_position_setpoint() -> None:
+    sender, client = _sender_with_fake_client()
+
+    sender._send_action(_local_position_with_speed_override())
+
+    assert [event[0] for event in client.master.mav.events] == [
+        "local_position",
+        "command_long",
+    ]
+    speed_call = client.master.mav.command_long_calls[-1]
+    assert speed_call[2] == mavutil.mavlink.MAV_CMD_DO_CHANGE_SPEED
+    assert speed_call[4:7] == (1.0, 1.0, -1.0)
+
+
+def test_repeated_position_setpoint_does_not_spam_speed_command() -> None:
+    sender, client = _sender_with_fake_client()
+    command = _local_position_with_speed_override()
+
+    sender._send_action(command)
+    sender._send_action(command)
+
+    assert len(client.master.mav.local_position_calls) == 2
+    assert len(client.master.mav.command_long_calls) == 1
+
+
+def test_velocity_to_position_transition_reapplies_speed_again() -> None:
+    sender, client = _sender_with_fake_client()
+    command = _local_position_with_speed_override()
+    sender._send_action(command)
+
+    sender._send_control(
+        ControlCommand(
+            command_type=ControlType.VELOCITY,
+            vx=0.1,
+            vy=0.0,
+            vz=0.0,
+            frame=8,
+        )
+    )
+    sender._send_action(command)
+
+    assert len(client.master.mav.command_long_calls) == 2
+    assert client.master.mav.events[-2][0] == "local_position"
+    assert client.master.mav.events[-1][0] == "command_long"
 
 
 def test_command_sender_release_payload_does_not_emit_mavlink_without_mapping() -> None:

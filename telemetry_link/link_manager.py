@@ -171,6 +171,8 @@ class LinkManager:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.active_source = cfg.active_source
         self.active_lock = threading.Lock()
+        self._speed_override_lock = threading.Lock()
+        self._speed_overrides: dict[str, dict[int, float]] = {}
         self.runtimes: dict[str, SourceRuntime] = {}
         self._start_thread: threading.Thread | None = None
 
@@ -190,6 +192,7 @@ class LinkManager:
                 stop_event=threading.Event(),
                 worker_stop_event=threading.Event(),
             )
+            self._speed_overrides[source_name] = {}
 
     def start(self) -> None:
         for runtime in self.runtimes.values():
@@ -404,6 +407,9 @@ class LinkManager:
         )
 
     def change_speed(self, speed_mps: float, speed_type: int = 1, priority: int = 4) -> None:
+        source_name = self.get_active_source()
+        with self._speed_override_lock:
+            self._speed_overrides[source_name][int(speed_type)] = float(speed_mps)
         self.submit_action_command(
             ActionCommand(
                 action_type=ActionType.CHANGE_SPEED,
@@ -414,6 +420,22 @@ class LinkManager:
                 created_at=time.time(),
             )
         )
+
+    def _active_speed_overrides(self) -> list[dict[str, float | int]]:
+        """Return the active source's transient flight-controller speed targets.
+
+        ArduCopter can reset DO_CHANGE_SPEED when a Guided position setpoint
+        changes the internal Guided submode.  Position commands carry this
+        snapshot so CommandSender can reapply it immediately after that
+        transition without bypassing the normal telemetry send path.
+        """
+        source_name = self.get_active_source()
+        with self._speed_override_lock:
+            overrides = dict(self._speed_overrides[source_name])
+        return [
+            {"speed_type": speed_type, "speed_mps": overrides[speed_type]}
+            for speed_type in sorted(overrides)
+        ]
 
     def set_home_current(self, priority: int = 4) -> None:
         self.submit_action_command(
@@ -451,6 +473,7 @@ class LinkManager:
         params: dict[str, Any] = {"lat": float(lat), "lon": float(lon), "alt": float(alt), "frame": int(frame)}
         if yaw_rad is not None:
             params["yaw"] = float(yaw_rad)
+        params["_speed_overrides"] = self._active_speed_overrides()
         self.submit_latest_action_command(
             ActionCommand(
                 action_type=ActionType.GLOBAL_GOTO,
@@ -474,6 +497,7 @@ class LinkManager:
         params = {"x": float(x), "y": float(y), "z": float(z), "frame": int(frame)}
         if yaw is not None:
             params["yaw"] = float(yaw)
+        params["_speed_overrides"] = self._active_speed_overrides()
         self.submit_latest_action_command(
             ActionCommand(
                 action_type=ActionType.LOCAL_POSITION,

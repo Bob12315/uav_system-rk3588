@@ -48,7 +48,10 @@ change_speed Action → ActionDispatcher → LinkManager.change_speed
 
 `goto_waypoint.max_horizontal_speed_mps` 是到点速度门槛，不是飞行限速。需要限定
 任务阶段地速时，必须显式编排 `change_speed` Action，并在阶段结束或失败恢复路径中
-恢复后续阶段速度。Action 不得直接调用 `LinkManager` 或 pymavlink。
+恢复后续阶段速度。`LinkManager` 会把当前速度目标附加到后续位置航点；发送线程检测到
+Guided 由速度控制切回位置控制时，必须先发送位置目标，再立即重发
+`MAV_CMD_DO_CHANGE_SPEED`，防止飞控位置控制初始化覆盖阶段限速。Action 不得直接调用
+`LinkManager` 或 pymavlink。
 
 ## 投放契约
 

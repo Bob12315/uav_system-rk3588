@@ -116,6 +116,38 @@ def test_local_position_defaults_parameters_sensibly() -> None:
     assert cmd.params["frame"] == 1
 
 
+def test_position_commands_carry_latest_speed_override() -> None:
+    manager = LinkManager(_config())
+    manager.change_speed(1.0, speed_type=1, priority=4)
+
+    speed_cmd = _cq(manager).get_next_action()
+    assert speed_cmd is not None
+    assert speed_cmd.action_type == ActionType.CHANGE_SPEED
+
+    manager.local_position(1.0, 2.0, -3.0, frame=1, priority=4)
+    position_cmd = _cq(manager).get_next_action()
+    assert position_cmd is not None
+    assert position_cmd.action_type == ActionType.LOCAL_POSITION
+    assert position_cmd.params["_speed_overrides"] == [
+        {"speed_type": 1, "speed_mps": 1.0}
+    ]
+
+
+def test_new_speed_replaces_previous_override_for_position_commands() -> None:
+    manager = LinkManager(_config())
+    manager.change_speed(1.0, speed_type=1)
+    manager.change_speed(2.0, speed_type=1)
+    _cq(manager).clear_actions(ActionType.CHANGE_SPEED)
+
+    manager.global_goto(34.0, 108.0, 3.0, frame=6)
+    position_cmd = _cq(manager).get_next_action()
+    assert position_cmd is not None
+    assert position_cmd.action_type == ActionType.GLOBAL_GOTO
+    assert position_cmd.params["_speed_overrides"] == [
+        {"speed_type": 1, "speed_mps": 2.0}
+    ]
+
+
 # ── send_velocity_command ────────────────────────────────────────────
 
 
