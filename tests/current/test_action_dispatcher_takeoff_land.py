@@ -29,6 +29,9 @@ class FakeLinkManager:
     ) -> None:
         self.calls.append(("condition_yaw", yaw_deg, yaw_speed_deg_s, direction, relative, priority))
 
+    def change_speed(self, speed_mps: float, speed_type: int = 1, priority: int = 4) -> None:
+        self.calls.append(("change_speed", speed_mps, speed_type, priority))
+
     def global_goto(
         self,
         lat: float,
@@ -142,6 +145,22 @@ def test_condition_yaw_dispatches_for_yaw_align() -> None:
 
     assert dispatch["sent"][0]["action_type"] == "condition_yaw"
     assert fake_link.calls == [("condition_yaw", 90.0, 25.0, 0, False, 4)]
+
+
+def test_change_speed_dispatches_through_link_manager() -> None:
+    dispatch, fake_link = _dispatch(
+        {
+            "action_type": "change_speed",
+            "params": {"speed_mps": 1.0, "speed_type": 1},
+            "key": "drop_speed_1mps",
+            "once": True,
+            "priority": 4,
+        },
+        action_name="change_speed",
+    )
+
+    assert dispatch["sent"][0]["action_type"] == "change_speed"
+    assert fake_link.calls == [("change_speed", 1.0, 1, 4)]
 
 
 def test_global_goto_dispatches_for_goto_waypoint() -> None:

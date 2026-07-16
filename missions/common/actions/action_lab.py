@@ -4,6 +4,7 @@ from typing import Any
 
 from .align_descend import AlignDescendAction
 from .build_recon_report import BuildReconReportAction
+from .change_speed import ChangeSpeedAction
 from .gps_multi_view_localize import GpsMultiViewLocalizeAction
 from .gps_target_lock import GpsTargetLockAction
 from .gps_drop_sequence import GpsDropSequenceAction
@@ -36,6 +37,7 @@ def create_action_lab_registry() -> ActionRegistry:
     registry = ActionRegistry()
     registry.register("takeoff", TakeoffAction)
     registry.register("yaw_align", YawAlignAction)
+    registry.register("change_speed", ChangeSpeedAction)
     registry.register("land", LandAction)
     registry.register("goto_waypoint", GotoWaypointAction)
     registry.register("survey_area", SurveyAreaAction)
@@ -104,6 +106,17 @@ def action_lab_specs() -> list[dict[str, Any]]:
                 "max_updates": 120,
                 "priority": 4,
                 "key": "yaw_align_field",
+            },
+        },
+        {
+            "name": "change_speed",
+            "label": "Change Speed",
+            "description": "Set a flight-controller speed target through MAV_CMD_DO_CHANGE_SPEED.",
+            "default_params": {
+                "speed_mps": 1.0,
+                "speed_type": "ground",
+                "priority": 4,
+                "key": "change_ground_speed",
             },
         },
         {

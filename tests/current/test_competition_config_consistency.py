@@ -47,6 +47,30 @@ def test_rescue_v2_base_and_sitl_identical() -> None:
     assert base == sitl
 
 
+def test_complete_rescue_v2_scopes_ground_speed_changes() -> None:
+    data = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
+    steps = data["steps"]
+    labels = [step.get("label") for step in steps]
+    expected = {
+        "drop_speed_1mps": 1.0,
+        "restore_transition_speed_2mps": 2.0,
+        "recon_speed_1mps": 1.0,
+        "restore_return_speed_2mps": 2.0,
+    }
+    for label, speed in expected.items():
+        step = next(step for step in steps if step.get("label") == label)
+        assert step["name"] == "change_speed"
+        assert step["params"]["speed_mps"] == speed
+        assert step["params"]["speed_type"] == "ground"
+
+    assert labels.index("drop_speed_1mps") + 1 == labels.index("gps_drop_sequence")
+    assert labels.index("gps_drop_sequence") + 1 == labels.index("restore_transition_speed_2mps")
+    assert labels.index("goto_recon_entry_4m") + 1 == labels.index("recon_speed_1mps")
+    assert labels.index("recon_speed_1mps") + 1 == labels.index("gps_recon_area_scan")
+    assert labels.index("gps_recon_area_scan") + 1 == labels.index("restore_return_speed_2mps")
+    assert next(step for step in steps if step.get("label") == "gps_drop_sequence")["on_failed"]["target"] == "restore_return_speed_2mps"
+
+
 def test_action_lab_defaults_match_v2_drop() -> None:
     """Action Lab gps_drop_sequence defaults match drop_two_targets_v2 mission params."""
     from missions.common.actions.action_lab import action_lab_specs

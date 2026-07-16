@@ -37,6 +37,19 @@ Action Lab 说明、Action Mission JSON、validator 和回归测试，不能一�
 FIELD 航点必须经过唯一的 `app/coordinate_transform.py` 进行转换；未确认
 Field Reference 时必须拒绝实发。BODY_NED 速度不参与 FIELD 转换。
 
+## 速度切换契约
+
+航点阶段的地速切换只能走正式发送链：
+
+```text
+change_speed Action → ActionDispatcher → LinkManager.change_speed
+→ MAV_CMD_DO_CHANGE_SPEED
+```
+
+`goto_waypoint.max_horizontal_speed_mps` 是到点速度门槛，不是飞行限速。需要限定
+任务阶段地速时，必须显式编排 `change_speed` Action，并在阶段结束或失败恢复路径中
+恢复后续阶段速度。Action 不得直接调用 `LinkManager` 或 pymavlink。
+
 ## 投放契约
 
 投放主线只能是：

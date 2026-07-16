@@ -103,7 +103,11 @@ def test_v2_recon_templates_use_only_the_fixed_area_scan_and_match_sitl() -> Non
             assert drop["no_target_field_center"] == {"x": 0.0, "y": 32.5, "altitude_m": 3.0}
         entry_index = next(index for index, step in enumerate(base["steps"]) if step.get("label") == "goto_recon_entry_4m")
         scan_index = names.index("gps_recon_area_scan")
-        assert entry_index == scan_index - 1
+        if relative == "rescue_2026_full_auto_v2.json":
+            assert base["steps"][entry_index + 1].get("label") == "recon_speed_1mps"
+            assert entry_index == scan_index - 2
+        else:
+            assert entry_index == scan_index - 1
         entry = base["steps"][entry_index]
         assert entry["name"] == "goto_waypoint"
         assert entry["params"] == {
@@ -112,7 +116,12 @@ def test_v2_recon_templates_use_only_the_fixed_area_scan_and_match_sitl() -> Non
             "tolerance_xy_m": 0.5, "tolerance_z_m": 0.35, "min_hold_updates": 2,
             "priority": 5, "key": "goto_recon_entry_4m",
         }
-        assert entry["on_failed"] == {"action": "jump_to", "target": "return_home_gps", "max_attempts": 1}
+        expected_failure_target = (
+            "restore_return_speed_2mps"
+            if relative == "rescue_2026_full_auto_v2.json"
+            else "return_home_gps"
+        )
+        assert entry["on_failed"] == {"action": "jump_to", "target": expected_failure_target, "max_attempts": 1}
         params = scans[0]["params"]
         assert [(item["x"], item["y"], item["altitude_m"]) for item in params["waypoints"]] == expected_waypoints
         assert params["scoring_target_indices"] == [1, 3]
@@ -649,7 +658,9 @@ def test_recon_area_scan_v2_returns_home_on_failure() -> None:
     policy = by_label["gps_recon_area_scan"]["on_failed"]
     assert policy["action"] == "jump_to"
     assert policy["max_attempts"] == 1
-    assert policy["target"] == "return_home_gps"
+    assert policy["target"] == "restore_return_speed_2mps"
+    labels = [step.get("label") for step in data["steps"]]
+    assert labels[labels.index("restore_return_speed_2mps") + 1] == "return_home_gps"
 
 
 def test_recon_area_scan_v2_has_fixed_gps_first_segments() -> None:
@@ -668,9 +679,9 @@ def test_recon_area_scan_v2_removes_per_bucket_recon_actions() -> None:
     assert not {"select_recon_targets", "gps_recon_sequence", "build_recon_report"} & names
 
 
-def test_full_rescue_v2_has_10_steps_including_safe_recon_entry() -> None:
+def test_full_rescue_v2_has_14_steps_including_speed_guards_and_safe_recon_entry() -> None:
     data = _template(FULL_V2_TEMPLATE_PATH)
-    assert len(data["steps"]) == 10
+    assert len(data["steps"]) == 14
 
 
 def test_sitl_profile_matches_base_full_v2_template() -> None:

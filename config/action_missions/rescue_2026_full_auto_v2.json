@@ -96,12 +96,22 @@
       }
     },
     {
+      "name": "change_speed",
+      "label": "drop_speed_1mps",
+      "params": {
+        "speed_mps": 1.0,
+        "speed_type": "ground",
+        "priority": 4,
+        "key": "drop_speed_1mps"
+      }
+    },
+    {
       "name": "gps_drop_sequence",
       "label": "gps_drop_sequence",
       "save_as": "drop_sequence",
       "on_failed": {
         "action": "jump_to",
-        "target": "return_home_gps",
+        "target": "restore_return_speed_2mps",
         "max_attempts": 1
       },
       "params": {
@@ -258,11 +268,21 @@
       }
     },
     {
+      "name": "change_speed",
+      "label": "restore_transition_speed_2mps",
+      "params": {
+        "speed_mps": 2.0,
+        "speed_type": "ground",
+        "priority": 4,
+        "key": "restore_transition_speed_2mps"
+      }
+    },
+    {
       "name": "goto_waypoint",
       "label": "goto_recon_entry_4m",
       "on_failed": {
         "action": "jump_to",
-        "target": "return_home_gps",
+        "target": "restore_return_speed_2mps",
         "max_attempts": 1
       },
       "params": {
@@ -280,13 +300,23 @@
       }
     },
     {
+      "name": "change_speed",
+      "label": "recon_speed_1mps",
+      "params": {
+        "speed_mps": 1.0,
+        "speed_type": "ground",
+        "priority": 4,
+        "key": "recon_speed_1mps"
+      }
+    },
+    {
       "name": "gps_recon_area_scan",
       "label": "gps_recon_area_scan",
       "save_as": "recon_scan_ranking",
       "on_failed": {
         "action": "jump_to",
         "max_attempts": 1,
-        "target": "return_home_gps"
+        "target": "restore_return_speed_2mps"
       },
       "params": {
         "waypoints": [
@@ -304,6 +334,16 @@
         "goto_max_updates": 200,
         "goto": {"tolerance_xy_m": 0.4, "tolerance_z_m": 0.3, "min_hold_updates": 1, "require_velocity_valid": false},
         "priority": 5
+      }
+    },
+    {
+      "name": "change_speed",
+      "label": "restore_return_speed_2mps",
+      "params": {
+        "speed_mps": 2.0,
+        "speed_type": "ground",
+        "priority": 4,
+        "key": "restore_return_speed_2mps"
       }
     },
     {

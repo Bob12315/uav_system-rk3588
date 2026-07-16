@@ -15,7 +15,7 @@ from app.dispatch.local_position_handler import dispatch_local_position
 from app.dispatch.global_position_handler import dispatch_global_goto
 from app.dispatch.flight_mode_handler import (
     dispatch_set_mode, dispatch_arm, dispatch_takeoff, dispatch_land,
-    dispatch_condition_yaw,
+    dispatch_condition_yaw, dispatch_change_speed,
 )
 from telemetry_link.frames import BODY_NED, LOCAL_NED
 
@@ -281,6 +281,8 @@ class ActionDispatcher:
             return self._dispatch_land(action, link_manager=link_manager)
         if action_type == "condition_yaw":
             return self._dispatch_condition_yaw(action, link_manager=link_manager)
+        if action_type == "change_speed":
+            return self._dispatch_change_speed(action, link_manager=link_manager)
         if action_type == "local_position":
             return self._dispatch_local_position(action, link_manager=link_manager)
         if action_type == "global_goto":
@@ -385,6 +387,22 @@ class ActionDispatcher:
                 detail.get("relative"),
                 detail.get("priority"),
                 detail.get("key"),
+            )
+        return result
+
+    def _dispatch_change_speed(
+        self,
+        action: dict[str, object],
+        *,
+        link_manager: object | None,
+    ) -> dict[str, object]:
+        result = dispatch_change_speed(action, link_manager=link_manager)
+        detail = result.get("detail", {})
+        if result.get("status") == "sent" and isinstance(detail, dict):
+            self._logger.info(
+                "action_lab dispatch change_speed speed_mps=%s speed_type=%s priority=%s key=%s",
+                detail.get("speed_mps"), detail.get("speed_type"),
+                detail.get("priority"), detail.get("key"),
             )
         return result
 

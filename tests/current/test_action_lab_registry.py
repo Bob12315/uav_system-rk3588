@@ -12,9 +12,10 @@ def test_create_action_lab_registry_lists_supported_actions() -> None:
 
     names = registry.list()
     assert names == [
-        "align_descend",
-        "build_recon_report",
-        "drop_sequence",
+            "align_descend",
+            "build_recon_report",
+            "change_speed",
+            "drop_sequence",
         "fixed_view_localize",
         "goto_waypoint",
             "gps_drop_sequence",
@@ -64,10 +65,11 @@ def test_action_lab_specs_are_json_serializable() -> None:
     json.dumps(specs)
     spec_names = [item["name"] for item in specs]
     assert spec_names == [
-        "takeoff",
-        "land",
-        "yaw_align",
-        "goto_waypoint",
+            "takeoff",
+            "land",
+            "yaw_align",
+            "change_speed",
+            "goto_waypoint",
         "survey_area",
         "single_view_localize",
         "target_lock",

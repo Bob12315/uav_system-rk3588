@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from app.dispatch.normalizer import get_action_params
 
 
@@ -132,6 +134,38 @@ def dispatch_condition_yaw(
             "yaw_speed_deg_s": yaw_speed_deg_s,
             "direction": direction,
             "relative": relative,
+            "priority": priority,
+            "key": key,
+        },
+    }
+
+
+def dispatch_change_speed(
+    action: dict[str, object],
+    *,
+    link_manager: object | None,
+) -> dict[str, object]:
+    params = get_action_params(action)
+    speed_mps = float(params["speed_mps"])
+    speed_type = int(params.get("speed_type", 1))
+    priority = int(action.get("priority", params.get("priority", 4)))
+    key = str(action.get("key") or "")
+    if not math.isfinite(speed_mps) or speed_mps <= 0.0:
+        return {"status": "error", "reason": "invalid_speed_mps"}
+    if speed_type not in {0, 1, 2, 3}:
+        return {"status": "error", "reason": "invalid_speed_type"}
+    if link_manager is None:
+        return {"status": "error", "reason": "telemetry_not_connected"}
+    sender = getattr(link_manager, "change_speed", None)
+    if not callable(sender):
+        return {"status": "error", "reason": "change_speed_not_callable"}
+    sender(speed_mps, speed_type, priority=priority)
+    return {
+        "status": "sent",
+        "detail": {
+            "action_type": "change_speed",
+            "speed_mps": speed_mps,
+            "speed_type": speed_type,
             "priority": priority,
             "key": key,
         },

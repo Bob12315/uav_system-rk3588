@@ -101,6 +101,11 @@ ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
         requires_send_actions=True,
         requires_send_commands=True,
     ),
+    "change_speed": DispatchRule(
+        allowed_actions={"change_speed"},
+        requires_send_actions=True,
+        requires_send_commands=True,
+    ),
     "yolo_lock_target": DispatchRule(
         allowed_actions={"target_lock", "recon_inspect_target", "drop_sequence", "recon_sequence", "gps_target_lock", "gps_drop_sequence", "gps_recon_sequence", "visual_land"},
         requires_send_actions=True,
