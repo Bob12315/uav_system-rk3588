@@ -141,7 +141,7 @@
         "no_target_strategy": "field_center_direct_dual_release",
         "no_target_field_center": {
           "x": 0.0,
-          "y": 32.5,
+          "y": 35.5,
           "altitude_m": 3.5
         },
         "climb_tolerance_z_m": 0.1,
@@ -254,6 +254,28 @@
       }
     },
     {
+      "name": "goto_waypoint",
+      "label": "goto_recon_entry_4m",
+      "on_failed": {
+        "action": "jump_to",
+        "target": "return_home_gps",
+        "max_attempts": 1
+      },
+      "params": {
+        "x": -3.0,
+        "y": 59.0,
+        "altitude_m": 4.0,
+        "waypoint_mode": "field",
+        "target_frame": "global",
+        "yaw_mode": "field_heading",
+        "tolerance_xy_m": 0.5,
+        "tolerance_z_m": 0.35,
+        "min_hold_updates": 2,
+        "priority": 5,
+        "key": "goto_recon_entry_4m"
+      }
+    },
+    {
       "name": "gps_recon_area_scan",
       "label": "gps_recon_area_scan",
       "save_as": "recon_scan_ranking",
@@ -264,10 +286,10 @@
       },
       "params": {
         "waypoints": [
-          {"x": -3.0, "y": 56.0, "altitude_m": 3.0},
-          {"x": 3.0, "y": 56.0, "altitude_m": 3.0},
-          {"x": 3.0, "y": 58.0, "altitude_m": 3.0},
-          {"x": -3.0, "y": 58.0, "altitude_m": 3.0}
+          {"x": -3.0, "y": 59.0, "altitude_m": 3.0},
+          {"x": 3.0, "y": 59.0, "altitude_m": 3.0},
+          {"x": 3.0, "y": 61.0, "altitude_m": 3.0},
+          {"x": -3.0, "y": 61.0, "altitude_m": 3.0}
         ],
         "waypoint_mode": "field",
         "target_frame": "global",
