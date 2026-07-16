@@ -97,8 +97,8 @@ class TestTemplate:
     def test_template_geometry_fixed(self):
         p = _read_template()
         assert p.field_geometry.lane_half_width_m == 4.0
-        assert p.field_geometry.drop_area_y_min == 33.0
-        assert p.field_geometry.drop_area_y_max == 38.0
+        assert p.field_geometry.drop_area_y_min == 30.0
+        assert p.field_geometry.drop_area_y_max == 35.0
 
     def test_template_drop_scan_4_waypoints(self):
         p = _read_template()

@@ -28,10 +28,10 @@
   function _clearLocalization() { if (typeof cfg.onClearLocalization === "function") return cfg.onClearLocalization(); }
 
 const FIELD_DEFAULTS = {
-  bounds: {xMin: -8, xMax: 8, yMin: -8, yMax: 65},
+  bounds: {xMin: -8, xMax: 8, yMin: -8, yMax: 62},
   takeoff: {x: 0, y: 0, xLen: 8, yLen: 8, label: "起降区"},
-  drop: {x: 0, y: 35.5, xLen: 8, yLen: 5, label: "投放区"},
-  recce: {x: 0, y: 60.5, xLen: 8, yLen: 5, label: "侦察区"},
+  drop: {x: 0, y: 32.5, xLen: 8, yLen: 5, label: "投放区"},
+  recce: {x: 0, y: 57.5, xLen: 8, yLen: 5, label: "侦察区"},
 };
 
 function pointX(obj) {

@@ -15,33 +15,33 @@
   },
   "field_geometry": {
     "lane_half_width_m": 4.0,
-    "drop_area_y_min_m": 33.0,
-    "drop_area_y_max_m": 38.0,
-    "drop_center_y_m": 35.5,
-    "recce_area_y_min_m": 58.0,
-    "recce_area_y_max_m": 63.0,
-    "recce_center_y_m": 60.5
+    "drop_area_y_min_m": 30.0,
+    "drop_area_y_max_m": 35.0,
+    "drop_center_y_m": 32.5,
+    "recce_area_y_min_m": 55.0,
+    "recce_area_y_max_m": 60.0,
+    "recce_center_y_m": 57.5
   },
   "drop_scan": {
     "waypoints": [
       {
         "x_m": -2.0,
-        "y_m": 34.25,
+        "y_m": 31.25,
         "altitude_m": 5.0
       },
       {
         "x_m": 2.0,
-        "y_m": 34.25,
+        "y_m": 31.25,
         "altitude_m": 5.0
       },
       {
         "x_m": 2.0,
-        "y_m": 36.75,
+        "y_m": 33.75,
         "altitude_m": 5.0
       },
       {
         "x_m": -2.0,
-        "y_m": 36.75,
+        "y_m": 33.75,
         "altitude_m": 5.0
       }
     ]
@@ -50,22 +50,22 @@
     "waypoints": [
       {
         "x_m": -3.0,
-        "y_m": 59.0,
+        "y_m": 56.0,
         "altitude_m": 3.0
       },
       {
         "x_m": 3.0,
-        "y_m": 59.0,
+        "y_m": 56.0,
         "altitude_m": 3.0
       },
       {
         "x_m": 3.0,
-        "y_m": 61.0,
+        "y_m": 58.0,
         "altitude_m": 3.0
       },
       {
         "x_m": -3.0,
-        "y_m": 61.0,
+        "y_m": 58.0,
         "altitude_m": 3.0
       }
     ]

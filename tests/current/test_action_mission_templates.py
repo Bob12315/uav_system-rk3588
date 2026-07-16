@@ -86,7 +86,7 @@ def test_action_mission_waypoint_frames_are_explicit_and_match_coordinate_source
 
 
 def test_v2_recon_templates_use_only_the_fixed_area_scan_and_match_sitl() -> None:
-    expected_waypoints = [(-3.0, 59.0, 3.0), (3.0, 59.0, 3.0), (3.0, 61.0, 3.0), (-3.0, 61.0, 3.0)]
+    expected_waypoints = [(-3.0, 56.0, 3.0), (3.0, 56.0, 3.0), (3.0, 58.0, 3.0), (-3.0, 58.0, 3.0)]
     for relative in ("recon_gps_v2.json", "rescue_2026_full_auto_v2.json"):
         base = _template(Path("config/action_missions") / relative)
         sitl = _template(Path("config/profiles/rk3588-sitl/action_missions") / relative)
@@ -100,14 +100,14 @@ def test_v2_recon_templates_use_only_the_fixed_area_scan_and_match_sitl() -> Non
         if relative == "rescue_2026_full_auto_v2.json":
             assert names.count("gps_multi_view_localize") == 1  # drop localization only
             drop = next(step["params"] for step in base["steps"] if step["name"] == "gps_drop_sequence")
-            assert drop["no_target_field_center"] == {"x": 0.0, "y": 35.5, "altitude_m": 3.5}
+            assert drop["no_target_field_center"] == {"x": 0.0, "y": 32.5, "altitude_m": 3.5}
         entry_index = next(index for index, step in enumerate(base["steps"]) if step.get("label") == "goto_recon_entry_4m")
         scan_index = names.index("gps_recon_area_scan")
         assert entry_index == scan_index - 1
         entry = base["steps"][entry_index]
         assert entry["name"] == "goto_waypoint"
         assert entry["params"] == {
-            "x": -3.0, "y": 59.0, "altitude_m": 4.0,
+            "x": -3.0, "y": 56.0, "altitude_m": 4.0,
             "waypoint_mode": "field", "target_frame": "global", "yaw_mode": "field_heading",
             "tolerance_xy_m": 0.5, "tolerance_z_m": 0.35, "min_hold_updates": 2,
             "priority": 5, "key": "goto_recon_entry_4m",

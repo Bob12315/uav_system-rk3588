@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 
 _log = logging.getLogger(__name__)
@@ -93,7 +93,13 @@ class MissionOrchestrator:
     through the ActionRuntimeService the caller injects.
     """
 
-    def __init__(self, runtime: object, steps: list[MissionActionStep]) -> None:
+    def __init__(
+        self,
+        runtime: object,
+        steps: list[MissionActionStep],
+        *,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
         if not steps:
             raise ValueError("steps must be non-empty")
         self.runtime = runtime
@@ -108,6 +114,10 @@ class MissionOrchestrator:
         self.step_attempts: dict[int, int] = {}
         self.failure_policy_counts: dict[str, int] = {}
         self.skipped_steps: list[dict[str, Any]] = []
+        self._monotonic = monotonic
+        self._mission_started_monotonic: float | None = None
+        self._mission_finished_monotonic: float | None = None
+        self._step_timings: dict[int, dict[str, Any]] = {}
         self.labels = self._build_labels()
 
     # ------------------------------------------------------------------
@@ -125,6 +135,9 @@ class MissionOrchestrator:
         self.step_attempts.clear()
         self.failure_policy_counts.clear()
         self.skipped_steps.clear()
+        self._mission_started_monotonic = self._monotonic()
+        self._mission_finished_monotonic = None
+        self._step_timings.clear()
         self._start_current_step(link_manager=link_manager)
 
     def tick(
@@ -174,13 +187,25 @@ class MissionOrchestrator:
                         "error": str(exc),
                         "blackboard_keys": sorted(self.blackboard.data.keys()),
                     }
+                    self._finish_step_timing(
+                        self.current_index,
+                        status="failed",
+                        reason=self.reason,
+                    )
+                    self._finish_mission_timing()
                     return self.status()
 
+            self._finish_step_timing(
+                self.current_index,
+                status="done",
+                reason=str(result.get("reason") or "done"),
+            )
             if self.current_index + 1 >= len(self.steps):
                 self.done = True
                 self.running = False
                 self.reason = "mission_done"
                 self.detail = {"action_result": result}
+                self._finish_mission_timing()
                 return self.status()
 
             previous_step = self.steps[self.current_index]
@@ -214,6 +239,12 @@ class MissionOrchestrator:
         stop = getattr(self.runtime, "stop", None)
         if callable(stop):
             stop(link_manager, hold_current=hold_current)
+        self._finish_step_timing(
+            self.current_index,
+            status="stopped",
+            reason="stopped",
+        )
+        self._finish_mission_timing()
         self.running = False
         self.reason = "stopped"
 
@@ -231,6 +262,9 @@ class MissionOrchestrator:
         self.step_attempts.clear()
         self.failure_policy_counts.clear()
         self.skipped_steps.clear()
+        self._mission_started_monotonic = None
+        self._mission_finished_monotonic = None
+        self._step_timings.clear()
 
     def skip_current_step(
         self,
@@ -269,6 +303,12 @@ class MissionOrchestrator:
         skipped_name = step.name
         skipped_label = step.label
 
+        self._finish_step_timing(
+            skipped_index,
+            status="skipped",
+            reason=reason,
+        )
+
         # 1. stop the runtime action
         stop = getattr(self.runtime, "stop", None)
         if callable(stop):
@@ -303,6 +343,7 @@ class MissionOrchestrator:
                 "requested_reason": reason,
                 "blackboard_keys": sorted(self.blackboard.data.keys()),
             }
+            self._finish_mission_timing()
             return self.status()
 
         self.current_index += 1
@@ -333,6 +374,8 @@ class MissionOrchestrator:
         detail["step_attempts"] = dict(self.step_attempts)
         detail["failure_policy_counts"] = dict(self.failure_policy_counts)
         detail["skipped_steps"] = list(self.skipped_steps)
+        detail["step_timings"] = self._step_timing_payload()
+        detail["mission_duration_s"] = self._mission_duration_s()
         return MissionOrchestratorStatus(
             running=self.running,
             done=self.done,
@@ -350,6 +393,7 @@ class MissionOrchestrator:
         clear_navigation: bool = True,
     ) -> None:
         step = self.steps[self.current_index]
+        self._start_step_timing(self.current_index)
         start = getattr(self.runtime, "start", None)
         if callable(start):
             try:
@@ -448,6 +492,12 @@ class MissionOrchestrator:
             self._fail_mission(result, reason="retry_jump_target_not_found")
             return
 
+        failed_index = self.current_index
+        self._finish_step_timing(
+            failed_index,
+            status="continued",
+            reason=str(result.get("reason") or "retry_attempts_exhausted"),
+        )
         self.current_index = self.labels[target]
         self.reason = "retry_current_then_jump_to"
         self.detail = {
@@ -475,6 +525,12 @@ class MissionOrchestrator:
         count = self.failure_policy_counts.get(key, 0)
         if count < max_attempts:
             self.failure_policy_counts[key] = count + 1
+            failed_index = self.current_index
+            self._finish_step_timing(
+                failed_index,
+                status="continued",
+                reason=str(result.get("reason") or "action_failed"),
+            )
             self.current_index = self.labels[target]
             self.reason = "jump_to"
             self.detail = {
@@ -490,11 +546,17 @@ class MissionOrchestrator:
         self._fail_mission(result, reason="jump_attempts_exhausted")
 
     def _handle_continue(self, result: dict[str, Any], *, link_manager: object | None) -> None:
+        self._finish_step_timing(
+            self.current_index,
+            status="continued",
+            reason=str(result.get("reason") or "action_failed"),
+        )
         if self.current_index + 1 >= len(self.steps):
             self.done = True
             self.running = False
             self.reason = "mission_done_after_failed_continue"
             self.detail = {"failed_action_result": result}
+            self._finish_mission_timing()
             return
         self.current_index += 1
         self.reason = "continue_after_failed_step"
@@ -503,6 +565,12 @@ class MissionOrchestrator:
         self._start_current_step(link_manager=link_manager)
 
     def _fail_mission(self, result: dict[str, Any], *, reason: str) -> None:
+        self._finish_step_timing(
+            self.current_index,
+            status="failed",
+            reason=reason,
+        )
+        self._finish_mission_timing()
         self.failed = True
         self.running = False
         self.reason = reason
@@ -515,6 +583,74 @@ class MissionOrchestrator:
         reset = getattr(self.runtime, "reset", None)
         if callable(reset):
             reset(link_manager, hold_current=True)
+
+    def _start_step_timing(self, index: int) -> None:
+        now = self._monotonic()
+        timing = self._step_timings.setdefault(
+            index,
+            {
+                "duration_s": 0.0,
+                "running_since_monotonic": None,
+                "status": "pending",
+                "reason": "",
+            },
+        )
+        if timing.get("running_since_monotonic") is not None:
+            return
+        timing["running_since_monotonic"] = now
+        timing["status"] = "running"
+        timing["reason"] = ""
+
+    def _finish_step_timing(self, index: int, *, status: str, reason: str) -> None:
+        timing = self._step_timings.get(index)
+        if timing is None:
+            return
+        started = timing.get("running_since_monotonic")
+        if started is not None:
+            timing["duration_s"] = float(timing.get("duration_s", 0.0)) + max(
+                0.0,
+                self._monotonic() - float(started),
+            )
+        timing["running_since_monotonic"] = None
+        timing["status"] = status
+        timing["reason"] = reason
+
+    def _finish_mission_timing(self) -> None:
+        if self._mission_started_monotonic is None:
+            return
+        if self._mission_finished_monotonic is None:
+            self._mission_finished_monotonic = self._monotonic()
+
+    def _mission_duration_s(self) -> float:
+        started = self._mission_started_monotonic
+        if started is None:
+            return 0.0
+        finished = self._mission_finished_monotonic
+        end = self._monotonic() if finished is None else finished
+        return round(max(0.0, end - started), 3)
+
+    def _step_timing_payload(self) -> dict[int, dict[str, Any]]:
+        now = self._monotonic()
+        payload: dict[int, dict[str, Any]] = {}
+        for index in range(len(self.steps)):
+            timing = self._step_timings.get(index)
+            if timing is None:
+                payload[index] = {
+                    "duration_s": 0.0,
+                    "status": "pending",
+                    "reason": "",
+                }
+                continue
+            duration = float(timing.get("duration_s", 0.0))
+            started = timing.get("running_since_monotonic")
+            if started is not None:
+                duration += max(0.0, now - float(started))
+            payload[index] = {
+                "duration_s": round(duration, 3),
+                "status": str(timing.get("status") or "pending"),
+                "reason": str(timing.get("reason") or ""),
+            }
+        return payload
 
     def _build_labels(self) -> dict[str, int]:
         labels: dict[str, int] = {}

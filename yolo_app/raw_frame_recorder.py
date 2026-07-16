@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import time
 from typing import Any
 
 import cv2
@@ -17,9 +18,21 @@ class RawFrameRecorderStatus:
 
 
 class RawFrameRecorder:
-    def __init__(self, output_dir: str, fps: float) -> None:
+    DEFAULT_MAX_DURATION_S = 10.0 * 60.0
+
+    def __init__(
+        self,
+        output_dir: str,
+        fps: float,
+        *,
+        max_duration_s: float = DEFAULT_MAX_DURATION_S,
+        monotonic: Any = time.monotonic,
+    ) -> None:
         self.output_dir = Path(output_dir).expanduser()
         self.fps = fps if fps > 0 else 30.0
+        self.max_duration_s = max(0.0, float(max_duration_s))
+        self._monotonic = monotonic
+        self._deadline_monotonic: float | None = None
         self.writer: cv2.VideoWriter | None = None
         self.path = ""
         self.frames = 0
@@ -37,6 +50,7 @@ class RawFrameRecorder:
 
     def start(self, frame_shape: tuple[int, ...]) -> RawFrameRecorderStatus:
         if self.writer is not None:
+            self._refresh_deadline()
             return self.status()
         height, width = int(frame_shape[0]), int(frame_shape[1])
         try:
@@ -60,9 +74,11 @@ class RawFrameRecorder:
         self.path = str(path)
         self.frames = 0
         self.error = ""
+        self._refresh_deadline()
         return self.status()
 
     def write(self, frame: Any) -> None:
+        self.stop_if_expired()
         if self.writer is None:
             return
         self.writer.write(frame)
@@ -72,7 +88,20 @@ class RawFrameRecorder:
         if self.writer is not None:
             self.writer.release()
             self.writer = None
+        self._deadline_monotonic = None
         return self.status()
+
+    def stop_if_expired(self, *, now_monotonic: float | None = None) -> bool:
+        if self.writer is None or self._deadline_monotonic is None:
+            return False
+        now = self._monotonic() if now_monotonic is None else float(now_monotonic)
+        if now < self._deadline_monotonic:
+            return False
+        self.stop()
+        return True
+
+    def _refresh_deadline(self) -> None:
+        self._deadline_monotonic = self._monotonic() + self.max_duration_s
 
     def status(self) -> RawFrameRecorderStatus:
         return RawFrameRecorderStatus(

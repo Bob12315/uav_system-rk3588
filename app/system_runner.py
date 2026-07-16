@@ -37,6 +37,8 @@ from app.control_switches import ControlRuntimeSwitches
 from app.ui_commands import CommandResult, build_ui_command_handler, format_controller_snapshot
 from app.yolo_command_client import YoloCommandClient
 
+ACTION_MISSION_RECORDING_MAX_DURATION_S = 10.0 * 60.0
+
 @dataclass(frozen=True, slots=True)
 class _IdleCommandSnapshot:
     """Neutral blackbox/status value for the current Action-only runtime."""
@@ -96,6 +98,8 @@ class SystemRunner:
             "path": "",
             "message": "未录制",
         }
+        self._action_mission_recording_requested = False
+        self._action_mission_recording_deadline_monotonic: float | None = None
         self.external_processes: dict[str, subprocess.Popen] = {}
         self.action_lab_specs = action_lab_specs()
         self.action_lab_enabled = True
@@ -162,6 +166,7 @@ class SystemRunner:
 
     def stop(self) -> None:
         self.stop_event.set()
+        self._stop_action_mission_recording(trigger="app_shutdown")
         self.blackbox.close()
         if self.web_server is not None:
             self.web_server.stop()
@@ -178,6 +183,7 @@ class SystemRunner:
 
         try:
             while not self.stop_event.is_set():
+                self._enforce_action_mission_recording_timeout()
                 now = time.time()
                 run_seconds = self.config.runtime.run_seconds
                 if run_seconds is not None and (now - started_at) >= run_seconds:
@@ -1227,6 +1233,7 @@ class SystemRunner:
                 self.action_runtime.stop(link_manager=manager, hold_current=False)
             if self.action_mission_orchestrator is not None and self.action_mission_orchestrator.running:
                 self.action_mission_orchestrator.stop(link_manager=manager, hold_current=False)
+                self._stop_action_mission_recording(trigger="manual_step_interruption")
 
         clear_continuous = getattr(manager, "clear_continuous_commands", None)
         if callable(clear_continuous):
@@ -1263,6 +1270,35 @@ class SystemRunner:
 
     def camera_recording_toggle(self) -> CommandResult:
         return self.command_pipeline.camera_recording_toggle()
+
+    def _start_action_mission_recording(self) -> None:
+        self._action_mission_recording_requested = True
+        self._action_mission_recording_deadline_monotonic = (
+            time.monotonic() + ACTION_MISSION_RECORDING_MAX_DURATION_S
+        )
+        self.command_pipeline.camera_recording_start(trigger="action_mission_start")
+
+    def _stop_action_mission_recording(self, *, trigger: str) -> None:
+        if not self._action_mission_recording_requested:
+            return
+        result = self.command_pipeline.camera_recording_stop(trigger=trigger)
+        if result.ok:
+            self._action_mission_recording_requested = False
+            self._action_mission_recording_deadline_monotonic = None
+
+    def _enforce_action_mission_recording_timeout(
+        self,
+        *,
+        now_monotonic: float | None = None,
+    ) -> bool:
+        deadline = self._action_mission_recording_deadline_monotonic
+        if not self._action_mission_recording_requested or deadline is None:
+            return False
+        now = time.monotonic() if now_monotonic is None else float(now_monotonic)
+        if now < deadline:
+            return False
+        self._stop_action_mission_recording(trigger="action_mission_10m_timeout")
+        return not self._action_mission_recording_requested
 
     def action_lab_start_action(
         self,
@@ -1351,7 +1387,10 @@ class SystemRunner:
             self.action_mission_orchestrator.start(
                 link_manager=self.services.link_manager,
             )
-            return self.action_mission_status_payload()
+            payload = self.action_mission_status_payload()
+            if payload["running"]:
+                self._start_action_mission_recording()
+            return payload
 
     def _action_mission_uses_field_coordinates(self) -> bool:
         requirements = self._action_mission_field_requirements()
@@ -1474,6 +1513,7 @@ class SystemRunner:
                 link_manager=self.services.link_manager,
                 hold_current=True,
             )
+            self._stop_action_mission_recording(trigger="action_mission_stop")
             return self.action_mission_status_payload()
 
     def action_mission_reset(self) -> dict[str, object]:
@@ -1489,6 +1529,7 @@ class SystemRunner:
                 link_manager=self.services.link_manager,
                 hold_current=True,
             )
+            self._stop_action_mission_recording(trigger="action_mission_reset")
             return self.action_mission_status_payload()
 
     def action_mission_tick(self) -> dict[str, object]:
@@ -1540,17 +1581,25 @@ class SystemRunner:
                 self._save_drop_workflow_from_action_result(
                     pre_name, final_result,
                     step_index=pre_index, step_label=pre_label)
+            if not mission_status.running:
+                self._stop_action_mission_recording(
+                    trigger=f"action_mission_{mission_status.reason}"
+                )
             return mission_status
 
     def action_mission_skip_current(self) -> dict[str, object]:
         if self.action_mission_orchestrator is None:
             return self.action_mission_status_payload()
         with self.action_runtime_lock:
-            self.action_mission_orchestrator.skip_current_step(
+            mission_status = self.action_mission_orchestrator.skip_current_step(
                 link_manager=self.services.link_manager,
                 hold_current=True,
                 reason="manual_web_skip",
             )
+            if not mission_status.running:
+                self._stop_action_mission_recording(
+                    trigger=f"action_mission_{mission_status.reason}"
+                )
             self._record_event("WARN", "action mission current step skipped manually")
             return self.action_mission_status_payload()
 

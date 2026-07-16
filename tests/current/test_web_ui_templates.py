@@ -157,7 +157,17 @@ def test_index_field_map_asset_recon_web_status_version():
 def test_index_recon_area_ranking_scripts_use_new_cache_version():
     html = _read_html()
     assert '/static/js/action_lab.js?v=recon-area-ranking-20260714-1' in html
-    assert '/static/app.js?v=recon-ranking-stable-20260714-1' in html
+    assert '/static/app.js?v=mission-stage-timing-20260716-1' in html
+
+
+def test_action_mission_timeline_displays_stage_and_total_duration():
+    html = _read_html()
+    js = _read_js("web_ui/static/app.js")
+    assert '<th>用时</th>' in html
+    assert 'id="actionMissionDuration"' in html
+    assert "step_timings" in js
+    assert "mission_duration_s" in js
+    assert "actionMissionDurationLabel" in js
 
 
 def test_recon_map_and_dashboard_use_separate_recon_state() -> None:

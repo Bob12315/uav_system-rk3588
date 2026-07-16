@@ -750,6 +750,7 @@ button.active-choice {
 .step-status.failed { color: var(--danger); border: 1px solid rgba(241, 93, 99, .6); background: rgba(241, 93, 99, .1); }
 .step-status.skipped,
 .step-status.continued { color: var(--warn); border: 1px solid rgba(237, 169, 61, .55); background: rgba(237, 169, 61, .09); }
+.step-status.stopped { color: var(--muted); border: 1px solid var(--line); background: rgba(255, 255, 255, .03); }
 .mission-result-group {
   margin-bottom: 10px;
 }

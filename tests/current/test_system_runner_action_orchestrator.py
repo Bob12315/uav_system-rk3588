@@ -1,6 +1,8 @@
 """Tests for mission preflight gate and TakeoffAction centerline-only behavior."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from app.app_config import build_arg_parser, load_app_config
@@ -13,8 +15,8 @@ from app.field_profile import (
     GpsQualityThresholds,
 )
 from app.field_profile_service import FieldProfileService
-from app.mission_orchestrator import MissionActionStep
-from app.system_runner import SystemRunner
+from app.mission_orchestrator import MissionActionStep, MissionOrchestratorStatus
+from app.system_runner import ACTION_MISSION_RECORDING_MAX_DURATION_S, SystemRunner
 from missions.common.actions.takeoff import TakeoffAction
 
 
@@ -235,6 +237,98 @@ def test_non_field_mission_starts_without_field_reference():
     payload = runner.action_mission_start()
 
     assert payload["running"] is True
+
+
+def test_mission_start_and_stop_control_camera_recording(monkeypatch):
+    runner = _make_runner()
+    runner.configure_action_mission(_local_steps())
+    starts = []
+    stops = []
+    monkeypatch.setattr(
+        runner.command_pipeline,
+        "camera_recording_start",
+        lambda *, trigger: starts.append(trigger) or SimpleNamespace(ok=True),
+    )
+    monkeypatch.setattr(
+        runner.command_pipeline,
+        "camera_recording_stop",
+        lambda *, trigger: stops.append(trigger) or SimpleNamespace(ok=True),
+    )
+
+    payload = runner.action_mission_start()
+    assert payload["running"] is True
+    assert starts == ["action_mission_start"]
+    assert runner._action_mission_recording_requested is True
+    assert runner._action_mission_recording_deadline_monotonic is not None
+
+    runner.action_mission_stop()
+    assert stops == ["action_mission_stop"]
+    assert runner._action_mission_recording_requested is False
+    assert runner._action_mission_recording_deadline_monotonic is None
+
+
+@pytest.mark.parametrize(
+    ("done", "failed", "reason"),
+    [(True, False, "mission_done"), (False, True, "action_failed")],
+)
+def test_mission_completion_or_failure_stops_camera_recording(
+    monkeypatch, done, failed, reason,
+):
+    runner = _make_runner()
+    runner.configure_action_mission(_local_steps())
+    stops = []
+    monkeypatch.setattr(
+        runner.command_pipeline,
+        "camera_recording_start",
+        lambda *, trigger: SimpleNamespace(ok=True),
+    )
+    monkeypatch.setattr(
+        runner.command_pipeline,
+        "camera_recording_stop",
+        lambda *, trigger: stops.append(trigger) or SimpleNamespace(ok=True),
+    )
+    runner.action_mission_start()
+    orchestrator = runner.action_mission_orchestrator
+    assert orchestrator is not None
+
+    def terminal_tick(*args, **kwargs):
+        orchestrator.running = False
+        orchestrator.done = done
+        orchestrator.failed = failed
+        orchestrator.reason = reason
+        return MissionOrchestratorStatus(
+            running=False,
+            done=done,
+            failed=failed,
+            current_index=0,
+            current_action="takeoff",
+            reason=reason,
+            detail={},
+        )
+
+    monkeypatch.setattr(orchestrator, "tick", terminal_tick)
+    runner.action_mission_tick()
+
+    assert stops == [f"action_mission_{reason}"]
+    assert runner._action_mission_recording_requested is False
+
+
+def test_mission_recording_timeout_stops_after_600_seconds(monkeypatch):
+    runner = _make_runner()
+    stops = []
+    monkeypatch.setattr(
+        runner.command_pipeline,
+        "camera_recording_stop",
+        lambda *, trigger: stops.append(trigger) or SimpleNamespace(ok=True),
+    )
+    runner._action_mission_recording_requested = True
+    runner._action_mission_recording_deadline_monotonic = 1000.0
+
+    assert runner._enforce_action_mission_recording_timeout(now_monotonic=999.9) is False
+    assert stops == []
+    assert runner._enforce_action_mission_recording_timeout(now_monotonic=1000.0) is True
+    assert stops == ["action_mission_10m_timeout"]
+    assert ACTION_MISSION_RECORDING_MAX_DURATION_S == 600.0
 
 
 # ---------------------------------------------------------------------------

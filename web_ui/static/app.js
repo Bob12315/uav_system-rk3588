@@ -296,9 +296,13 @@ function inferActionMissionStepStatus(actionMission, index, stepCount) {
   const payload = actionMission || {};
   const current = Number.isFinite(Number(payload.current_index)) ? Number(payload.current_index) : 0;
   const detail = actionMissionDetail(payload);
+  const timing = detail.step_timings?.[index] || detail.step_timings?.[String(index)] || {};
   const skippedSet = new Set((Array.isArray(detail.skipped_steps) ? detail.skipped_steps : []).map(s => s.index));
   if (skippedSet.has(index)) return "skipped";
-  if (payload.done) return "done";
+  if (["done", "failed", "skipped", "continued", "stopped"].includes(timing.status)) return timing.status;
+  if (timing.status === "running") return "running";
+  if (timing.status === "pending" && detail.step_timings) return "pending";
+  if (payload.done) return index <= current ? "done" : "pending";
   if (payload.failed) {
     if (index < current) return "done";
     if (index === current) return "failed";
@@ -323,7 +327,15 @@ function actionMissionStatusLabel(status) {
     failed: "失败",
     skipped: "已跳过",
     continued: "已继续",
+    stopped: "已停止",
   }[status] || status;
+}
+function actionMissionDurationLabel(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds < 0) return "-";
+  if (seconds < 60) return `${seconds.toFixed(2)} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes} 分 ${(seconds - minutes * 60).toFixed(1)} 秒`;
 }
 function renderActionMissionTimeline(actionMission, configuredSteps) {
   const element = $("actionMissionTimeline");
@@ -331,14 +343,16 @@ function renderActionMissionTimeline(actionMission, configuredSteps) {
   const steps = Array.isArray(configuredSteps) ? configuredSteps : [];
   const detail = actionMissionDetail(actionMission);
   const attempts = detail.step_attempts || {};
+  const timings = detail.step_timings || {};
   const skippedSet = new Set((Array.isArray(detail.skipped_steps) ? detail.skipped_steps : []).map(s => s.index));
   const current = Number.isFinite(Number(actionMission?.current_index)) ? Number(actionMission.current_index) : -1;
   const statuses = steps.map((step, index) => inferActionMissionStepStatus(actionMission || {}, index, steps.length));
   element.innerHTML = steps.map((step, index) => {
     const status = statuses[index];
-    const reason = index === current ? (actionMission?.reason || "-")
+    const timing = timings[index] || timings[String(index)] || {};
+    const reason = timing.reason || (index === current ? (actionMission?.reason || "-")
       : skippedSet.has(index) ? "manual skip"
-      : "-";
+      : "-");
     return `<tr class="${index === current ? "current-step" : ""}" data-step-status="${status}">
       <td>${index}</td>
       <td><span class="step-status ${status}">${escapeHtml(actionMissionStatusLabel(status))}</span></td>
@@ -347,9 +361,10 @@ function renderActionMissionTimeline(actionMission, configuredSteps) {
       <td>${escapeHtml(step.save_as || "-")}</td>
       <td>${escapeHtml(failurePolicyLabel(step.on_failed))}</td>
       <td>${escapeHtml(attempts[index] ?? attempts[String(index)] ?? "-")}</td>
+      <td>${escapeHtml(actionMissionDurationLabel(timing.duration_s))}</td>
       <td>${escapeHtml(reason)}</td>
     </tr>`;
-  }).join("") || `<tr><td colspan="8" class="hint">加载模板或粘贴任务 JSON 后预览步骤。</td></tr>`;
+  }).join("") || `<tr><td colspan="9" class="hint">加载模板或粘贴任务 JSON 后预览步骤。</td></tr>`;
   return statuses;
 }
 function renderBlackboardKeys(actionMission) {
@@ -494,6 +509,7 @@ function renderActionMissionStatus(actionMission) {
   setOptionalText("actionMissionIndex", payload.current_index ?? "--");
   setOptionalText("actionMissionCurrent", actionNameWithZh(payload.current_action));
   setOptionalText("actionMissionReason", payload.reason || "--");
+  setOptionalText("actionMissionDuration", actionMissionDurationLabel(detail.mission_duration_s));
   const warning = $("actionMissionSendWarning");
   if (warning) {
     warning.textContent = sendEnabled

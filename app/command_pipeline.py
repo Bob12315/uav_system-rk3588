@@ -33,27 +33,45 @@ class CommandPipeline:
         return dict(self._camera_recording)
 
     def camera_recording_toggle(self) -> Any:
+        recording = bool(self._camera_recording.get("recording"))
+        if recording:
+            return self.camera_recording_stop(trigger="manual")
+        return self.camera_recording_start(trigger="manual")
+
+    def camera_recording_start(self, *, trigger: str = "system") -> Any:
         from telemetry_link.command_dispatcher import CommandResult
 
-        recording = bool(self._camera_recording.get("recording"))
-        client = YoloCommandClient(self._yolo_cfg)
         try:
-            if recording:
-                client.stop_recording()
-                self._camera_recording.update({
-                    "recording": False,
-                    "message": "录制停止请求已发送",
-                })
-                message = "camera recording stop sent"
-            else:
-                client.start_recording()
-                self._camera_recording.clear()
-                self._camera_recording.update({
-                    "recording": True,
-                    "path": "~/uav_recordings/camera_*.mp4",
-                    "message": "录制开始请求已发送",
-                })
-                message = "camera recording start sent"
+            YoloCommandClient(self._yolo_cfg).start_recording()
+            self._camera_recording.clear()
+            self._camera_recording.update({
+                "recording": True,
+                "path": "~/uav_recordings/camera_*.mp4",
+                "message": "录制开始请求已发送",
+                "trigger": trigger,
+            })
+            message = f"camera recording start sent trigger={trigger}"
+        except Exception as exc:
+            message = f"camera recording command failed: {exc}"
+            self._camera_recording.update({"message": message})
+            result = CommandResult(False, message)
+            self._record_event("ERROR", result.message)
+            return result
+        result = CommandResult(True, message)
+        self._record_event("OK", result.message)
+        return result
+
+    def camera_recording_stop(self, *, trigger: str = "system") -> Any:
+        from telemetry_link.command_dispatcher import CommandResult
+
+        try:
+            YoloCommandClient(self._yolo_cfg).stop_recording()
+            self._camera_recording.update({
+                "recording": False,
+                "message": "录制停止请求已发送",
+                "trigger": trigger,
+            })
+            message = f"camera recording stop sent trigger={trigger}"
         except Exception as exc:
             message = f"camera recording command failed: {exc}"
             self._camera_recording.update({"message": message})

@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 
 
-def test_drop_scan_waypoints_shifted_with_field_origin():
-    """Drop scan preview follows the V2 field-origin shift."""
+def test_drop_scan_waypoints_restored_to_original_field_positions():
+    """Drop scan preview uses the original field positions."""
     data = json.loads(open("config/field_profiles/competition_runtime_v3.json").read())
     wps = data["drop_scan"]["waypoints"]
     assert len(wps) == 4
     coords = [(w["x_m"], w["y_m"]) for w in wps]
-    assert coords == [(-2.0, 34.25), (2.0, 34.25), (2.0, 36.75), (-2.0, 36.75)]
+    assert coords == [(-2.0, 31.25), (2.0, 31.25), (2.0, 33.75), (-2.0, 33.75)]
 
 
 def test_recon_scan_waypoints_updated():
@@ -19,7 +19,7 @@ def test_recon_scan_waypoints_updated():
     wps = data["recon_scan"]["waypoints"]
     assert len(wps) == 4
     coords = [(w["x_m"], w["y_m"]) for w in wps]
-    assert coords == [(-3.0, 59.0), (3.0, 59.0), (3.0, 61.0), (-3.0, 61.0)]
+    assert coords == [(-3.0, 56.0), (3.0, 56.0), (3.0, 58.0), (-3.0, 58.0)]
     assert [w["altitude_m"] for w in wps] == [3.0, 3.0, 3.0, 3.0]
 
 
@@ -34,14 +34,14 @@ def test_recon_v2_and_rescue_v2_same_scan():
     assert recon_scan["params"] == rescue_scan["params"]
 
 
-def test_profile_drop_and_recce_zones_shifted_with_field_origin():
-    """The Profile geometry is the single source for the shifted map zones."""
+def test_profile_drop_and_recce_zones_restored():
+    """The Profile geometry is the single source for the original map zones."""
     # Read the field_map.js defaults (difficult to parse, test the profile instead)
     data = json.loads(open("config/field_profiles/competition_runtime_v3.json").read())
     fg = data["field_geometry"]
     assert fg["lane_half_width_m"] == 4.0
-    assert (fg["drop_area_y_min_m"], fg["drop_area_y_max_m"], fg["drop_center_y_m"]) == (33.0, 38.0, 35.5)
-    assert (fg["recce_area_y_min_m"], fg["recce_area_y_max_m"], fg["recce_center_y_m"]) == (58.0, 63.0, 60.5)
+    assert (fg["drop_area_y_min_m"], fg["drop_area_y_max_m"], fg["drop_center_y_m"]) == (30.0, 35.0, 32.5)
+    assert (fg["recce_area_y_min_m"], fg["recce_area_y_max_m"], fg["recce_center_y_m"]) == (55.0, 60.0, 57.5)
 
 
 def test_fusion_fov_still_51_3_39_6():
@@ -89,7 +89,7 @@ def test_complete_rescue_v2_drop_overrides_are_deliberate():
     dp = dict(next(s for s in drop["steps"] if s["name"] == "gps_drop_sequence")["params"])
     rp = dict(next(s for s in rescue["steps"] if s["name"] == "gps_drop_sequence")["params"])
     assert dp["approach_altitude_m"] == 2.5 and rp["approach_altitude_m"] == 3.5
-    assert rp["no_target_field_center"] == {"x": 0.0, "y": 35.5, "altitude_m": 3.5}
+    assert rp["no_target_field_center"] == {"x": 0.0, "y": 32.5, "altitude_m": 3.5}
     assert rp["single_target_climb_after_release_m"] == 3.5
 
 

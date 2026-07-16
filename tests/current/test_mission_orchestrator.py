@@ -203,6 +203,78 @@ def test_empty_steps_raises_value_error() -> None:
         MissionOrchestrator(runtime, [])
 
 
+def test_step_and_mission_durations_are_recorded() -> None:
+    now = [100.0]
+    runtime = FakeRuntime([
+        FakeActionResult(done=True, reason="first_done"),
+        FakeActionResult(done=True, reason="second_done"),
+    ])
+    orch = MissionOrchestrator(runtime, _steps(), monotonic=lambda: now[0])
+
+    orch.start()
+    now[0] = 102.345
+    first_status = orch.tick({})
+    first_timing = first_status.detail["step_timings"][0]
+    assert first_timing == {
+        "duration_s": 2.345,
+        "status": "done",
+        "reason": "first_done",
+    }
+    assert first_status.detail["step_timings"][1]["status"] == "running"
+
+    now[0] = 107.0
+    final_status = orch.tick({})
+    assert final_status.detail["step_timings"][1] == {
+        "duration_s": 4.655,
+        "status": "done",
+        "reason": "second_done",
+    }
+    assert final_status.detail["mission_duration_s"] == 7.0
+
+
+def test_retry_time_accumulates_in_same_step() -> None:
+    now = [10.0]
+    runtime = FakeRuntime([
+        FakeActionResult(failed=True, reason="temporary"),
+        FakeActionResult(done=True, reason="recovered"),
+    ])
+    steps = [MissionActionStep(
+        "goto_waypoint",
+        on_failed={"action": "retry_current", "max_attempts": 2},
+    )]
+    orch = MissionOrchestrator(runtime, steps, monotonic=lambda: now[0])
+
+    orch.start()
+    now[0] = 12.0
+    retry_status = orch.tick({})
+    assert retry_status.detail["step_timings"][0]["status"] == "running"
+    assert retry_status.detail["step_timings"][0]["duration_s"] == 2.0
+
+    now[0] = 15.0
+    done_status = orch.tick({})
+    assert done_status.detail["step_timings"][0]["duration_s"] == 5.0
+    assert done_status.detail["step_attempts"][0] == 2
+
+
+def test_skipped_and_stopped_steps_freeze_duration() -> None:
+    now = [20.0]
+    runtime = FakeRuntime([])
+    orch = MissionOrchestrator(runtime, _steps(), monotonic=lambda: now[0])
+
+    orch.start()
+    now[0] = 21.25
+    skipped = orch.skip_current_step()
+    assert skipped.detail["step_timings"][0]["status"] == "skipped"
+    assert skipped.detail["step_timings"][0]["duration_s"] == 1.25
+
+    now[0] = 23.0
+    orch.stop()
+    stopped = orch.status()
+    assert stopped.detail["step_timings"][1]["status"] == "stopped"
+    assert stopped.detail["step_timings"][1]["duration_s"] == 1.75
+    assert stopped.detail["mission_duration_s"] == 3.0
+
+
 def test_step_transition_clears_navigation_queue() -> None:
     """When a step completes and the next begins, clear_navigation_queue is called."""
     runtime = FakeRuntime([FakeActionResult(done=True, reason="step1_done")])

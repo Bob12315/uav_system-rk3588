@@ -141,7 +141,7 @@
         "no_target_strategy": "field_center_direct_dual_release",
         "no_target_field_center": {
           "x": 0.0,
-          "y": 35.5,
+          "y": 32.5,
           "altitude_m": 3.5
         },
         "climb_tolerance_z_m": 0.1,
@@ -263,7 +263,7 @@
       },
       "params": {
         "x": -3.0,
-        "y": 59.0,
+        "y": 56.0,
         "altitude_m": 4.0,
         "waypoint_mode": "field",
         "target_frame": "global",
@@ -286,10 +286,10 @@
       },
       "params": {
         "waypoints": [
-          {"x": -3.0, "y": 59.0, "altitude_m": 3.0},
-          {"x": 3.0, "y": 59.0, "altitude_m": 3.0},
-          {"x": 3.0, "y": 61.0, "altitude_m": 3.0},
-          {"x": -3.0, "y": 61.0, "altitude_m": 3.0}
+          {"x": -3.0, "y": 56.0, "altitude_m": 3.0},
+          {"x": 3.0, "y": 56.0, "altitude_m": 3.0},
+          {"x": 3.0, "y": 58.0, "altitude_m": 3.0},
+          {"x": -3.0, "y": 58.0, "altitude_m": 3.0}
         ],
         "waypoint_mode": "field",
         "target_frame": "global",

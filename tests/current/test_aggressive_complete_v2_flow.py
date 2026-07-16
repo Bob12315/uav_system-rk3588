@@ -111,11 +111,11 @@ def test_zero_target_flies_field_center_and_releases_without_lock_align_or_climb
     action.start({
         "targets": [], "payloads": PAYLOADS, "approach_altitude_m": 3.5,
         "no_target_strategy": "field_center_direct_dual_release",
-        "no_target_field_center": {"x": 0.0, "y": 35.5, "altitude_m": 3.5},
+        "no_target_field_center": {"x": 0.0, "y": 32.5, "altitude_m": 3.5},
         "release_wait_updates": 1,
     })
     results = _drive(action, {"field_reference": _field_reference()})
-    expected = field_to_gps_from_origin(0.0, 35.5, 3.5, origin_lat=34.0, origin_lon=108.0, field_heading_yaw_rad=0.25)
+    expected = field_to_gps_from_origin(0.0, 32.5, 3.5, origin_lat=34.0, origin_lon=108.0, field_heading_yaw_rad=0.25)
     assert results[-1].done
     assert len(_Goto.starts) == 1
     assert _Goto.starts[0]["lat"] == pytest.approx(expected.lat)
