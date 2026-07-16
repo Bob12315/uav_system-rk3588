@@ -1589,6 +1589,37 @@ def test_lc_corrected_in_center_two_consecutive_done(monkeypatch) -> None:
     assert r.reason == "latched_center_aligned"
 
 
+def test_lc_finish_alignment_timeout_completes_for_release(monkeypatch) -> None:
+    action = _start_lc_action(monkeypatch, command_detail_overrides={
+        "corrected_ex_cam": 0.30,
+        "corrected_ey_cam": -0.25,
+    }, finish_alignment_timeout_s=1.5, lost_timeout_updates=99)
+    times = iter((10.0, 11.0, 11.5))
+    monkeypatch.setattr(_ad.time, "monotonic", lambda: next(times))
+    ctx = _mk_lc_ctx(altitude=1.15, target_valid=True)
+
+    first = action.update(ctx)
+    second = action.update(ctx)
+    final = action.update(ctx)
+
+    assert not first.done and not second.done
+    assert final.done
+    assert final.reason == "finish_alignment_timeout_release"
+    assert final.detail["finish_alignment_elapsed_s"] == pytest.approx(1.5)
+    assert final.detail["hold_reason"] == "finish_alignment_timeout_release"
+
+
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), 0.0, -1.0])
+def test_lc_rejects_invalid_finish_alignment_timeout(bad_value) -> None:
+    with pytest.raises(ValueError, match="finish_alignment_timeout_s must be finite and > 0"):
+        AlignDescendAction().start({
+            "config": {"require_target_locked": False},
+            "finish_policy": "latched_center_alignment",
+            "finish_altitude_m": 1.2,
+            "finish_alignment_timeout_s": bad_value,
+        })
+
+
 # ══════════════════════════════════════════════════════════════════════
 # latched_center_alignment parameter validation
 # ══════════════════════════════════════════════════════════════════════

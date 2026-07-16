@@ -543,6 +543,15 @@ class AlignDescendAction(ActionModule):
         ):
             raise ValueError("finish_alignment_hold_updates must be an integer >= 1")
         self.finish_alignment_hold_updates = raw_hold_updates
+        raw_finish_timeout_s = data.get("finish_alignment_timeout_s")
+        self.finish_alignment_timeout_s: float | None = None
+        if raw_finish_timeout_s is not None:
+            self.finish_alignment_timeout_s = float(raw_finish_timeout_s)
+            if (
+                not math.isfinite(self.finish_alignment_timeout_s)
+                or self.finish_alignment_timeout_s <= 0.0
+            ):
+                raise ValueError("finish_alignment_timeout_s must be finite and > 0")
 
         # Validate latched_center_alignment params
         if not math.isfinite(self.finish_alignment_max_ex_cam) or self.finish_alignment_max_ex_cam <= 0.0:
@@ -551,6 +560,8 @@ class AlignDescendAction(ActionModule):
             raise ValueError("finish_alignment_max_ey_cam must be finite and > 0")
 
         self.final_align_started = False
+        self.final_align_started_monotonic_s: float | None = None
+        self.finish_alignment_elapsed_s = 0.0
         self.finish_alignment_hold_count = 0
         self._reset_integral("start")
         self._previous_update_monotonic_s = None
@@ -792,9 +803,14 @@ class AlignDescendAction(ActionModule):
         if self.finish_policy == "latched_center_alignment" and self.finish_altitude_m is not None:
             if not self.final_align_started and altitude.value_m <= self.finish_altitude_m:
                 self.final_align_started = True
+                self.final_align_started_monotonic_s = now
                 self.finish_alignment_hold_count = 0
 
             if self.final_align_started:
+                self.finish_alignment_elapsed_s = (
+                    0.0 if self.final_align_started_monotonic_s is None
+                    else max(0.0, now - self.final_align_started_monotonic_s)
+                )
                 # Continue vx/vy from visual error, but stop descent
                 if isinstance(command, dict):
                     command["vz_cmd"] = 0.0
@@ -840,6 +856,29 @@ class AlignDescendAction(ActionModule):
                             reason="latched_center_aligned",
                             detail=detail,
                         )
+
+                if (
+                    self.finish_alignment_timeout_s is not None
+                    and self.finish_alignment_elapsed_s >= self.finish_alignment_timeout_s
+                ):
+                    self.done = True
+                    self._reset_integral("finish_alignment_timeout")
+                    detail = self._detail(
+                        command=self._command_with_yaw_hold(_inactive_command(), data),
+                        command_detail={
+                            **command_detail,
+                            "hold_reason": "finish_alignment_timeout_release",
+                        },
+                        height_m=altitude.value_m,
+                        altitude_source=altitude.source,
+                    )
+                    self.last_detail = detail
+                    return ActionResult(
+                        actions=[],
+                        done=True,
+                        reason="finish_alignment_timeout_release",
+                        detail=detail,
+                    )
 
                 detail = self._detail(
                     command=self._command_with_yaw_hold(command, data),
@@ -995,6 +1034,9 @@ class AlignDescendAction(ActionModule):
         self.retries = 0
         self.failure_reason = ""
         self.final_align_started = False
+        self.final_align_started_monotonic_s: float | None = None
+        self.finish_alignment_elapsed_s = 0.0
+        self.finish_alignment_timeout_s: float | None = None
         self.finish_alignment_hold_count = 0
         self.yaw_hold_rad: float | None = None
         self.yaw_hold_source: str | None = None
@@ -1335,6 +1377,8 @@ class AlignDescendAction(ActionModule):
             "finish_policy": self.finish_policy,
             "final_align_started": getattr(self, "final_align_started", False),
             "finish_alignment_hold_count": getattr(self, "finish_alignment_hold_count", 0),
+            "finish_alignment_timeout_s": getattr(self, "finish_alignment_timeout_s", None),
+            "finish_alignment_elapsed_s": getattr(self, "finish_alignment_elapsed_s", 0.0),
         }
 
     def _failed_detail(

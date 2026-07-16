@@ -149,7 +149,9 @@ def test_complete_v2_descent_and_landing_parameters() -> None:
     assert (config["slow_descend_max_ex_cam"], config["slow_descend_max_ey_cam"]) == (0.35, 0.35)
     assert config["descent_gate_policy"] == "aligned_or_slow"
     assert (config["deadband_ex_cam"], config["deadband_ey_cam"]) == (0.04, 0.04)
-    assert (drop["align_descend"]["finish_alignment_max_ex_cam"], drop["align_descend"]["finish_alignment_max_ey_cam"], drop["align_descend"]["finish_alignment_hold_updates"]) == (0.20, 0.20, 1)
+    assert (drop["align_descend"]["finish_alignment_max_ex_cam"], drop["align_descend"]["finish_alignment_max_ey_cam"], drop["align_descend"]["finish_alignment_hold_updates"]) == (0.18, 0.18, 2)
+    assert drop["align_descend"]["finish_alignment_timeout_s"] == 1.5
+    assert (drop["approach_altitude_m"], drop["finish_altitude_m"], config["min_altitude_m"]) == (3.0, 1.8, 1.8)
     assert drop["align_descend_max_updates"] == drop["align_descend"]["max_updates"] == 150
     assert config["height_scale_points"] == [{"altitude_m": 1.0, "scale": 0.4}, {"altitude_m": 1.3, "scale": 0.4}, {"altitude_m": 2.4, "scale": 0.65}, {"altitude_m": 3.5, "scale": 0.65}, {"altitude_m": 4.5, "scale": 0.65}]
     assert (config["integral_enabled"], config["integral_active_below_altitude_m"], config["ki_vx"], config["ki_vy"], config["integral_vx_limit_mps"], config["integral_vy_limit_mps"]) == (True, 1.6, 0.04, 0.04, 0.03, 0.03)
@@ -190,10 +192,14 @@ def test_complete_v2_drop_align_control_windows_and_finish_latch() -> None:
         params = copy.deepcopy(align)
         params["finish_altitude_m"] = drop["finish_altitude_m"]
         action.start(params)
-        return action.update({"relative_altitude": 1.2, "target_valid": True, "target_locked": True, "control_allowed": True, "ex_cam": ex, "ey_cam": ey})
+        context = {"relative_altitude": drop["finish_altitude_m"], "target_valid": True, "target_locked": True, "control_allowed": True, "ex_cam": ex, "ey_cam": ey}
+        first = action.update(context)
+        second = action.update(context)
+        return first, second
 
-    outside = update_at_finish(0.21, 0.0)
-    inside = update_at_finish(0.20, 0.0)
+    _, outside = update_at_finish(0.19, 0.0)
+    inside_first, inside = update_at_finish(0.18, 0.0)
     assert not outside.done and outside.detail["command"]["vz_cmd"] == 0.0
     assert outside.detail["command"]["vx_cmd"] != 0.0 or outside.detail["command"]["vy_cmd"] != 0.0
+    assert not inside_first.done
     assert inside.done and inside.reason == "latched_center_aligned"

@@ -100,7 +100,7 @@ def test_v2_recon_templates_use_only_the_fixed_area_scan_and_match_sitl() -> Non
         if relative == "rescue_2026_full_auto_v2.json":
             assert names.count("gps_multi_view_localize") == 1  # drop localization only
             drop = next(step["params"] for step in base["steps"] if step["name"] == "gps_drop_sequence")
-            assert drop["no_target_field_center"] == {"x": 0.0, "y": 32.5, "altitude_m": 3.5}
+            assert drop["no_target_field_center"] == {"x": 0.0, "y": 32.5, "altitude_m": 3.0}
         entry_index = next(index for index, step in enumerate(base["steps"]) if step.get("label") == "goto_recon_entry_4m")
         scan_index = names.index("gps_recon_area_scan")
         assert entry_index == scan_index - 1

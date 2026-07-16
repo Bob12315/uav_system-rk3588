@@ -26,11 +26,18 @@ def test_complete_rescue_v2_has_its_intentional_aggressive_drop_overrides() -> N
     dp = dict(drop_seq["params"])
     rp = dict(rescue_seq["params"])
     assert dp["approach_altitude_m"] == 2.5
-    assert rp["approach_altitude_m"] == 3.5
+    assert rp["approach_altitude_m"] == 3.0
+    assert rp["finish_altitude_m"] == 1.8
     assert rp["single_target_climb_after_release_m"] == 3.5
     assert rp["no_target_strategy"] == "field_center_direct_dual_release"
     assert rp["align_descend_max_updates"] == rp["align_descend"]["max_updates"] == 150
     assert rp["align_descend"]["config"]["unaligned_descend_speed_mps"] == 0.0
+    assert rp["align_descend"]["config"]["min_altitude_m"] == 1.8
+    assert rp["target_lock"]["max_match_distance_m"] == 1.5
+    assert rp["target_lock"]["fallback_max_match_distance_m"] == 3.0
+    assert rp["target_lock"]["min_confidence"] == 0.75
+    assert rp["target_lock"]["try_next_target_on_failure"] is True
+    assert rp["target_lock"]["direct_release_when_exhausted"] is True
 
 
 def test_rescue_v2_base_and_sitl_identical() -> None:

@@ -153,6 +153,24 @@ class GpsDropSequenceAction(GpsTargetSequenceCore, ActionModule):
         self.goto_cfg = dict(data.get("goto") or {})
         self.lock_cfg = dict(data.get("target_lock") or {})
         self.align_cfg = dict(data.get("align_descend") or {})
+        self.lock_fallback_max_distance_m: float | None = None
+        raw_lock_fallback = self.lock_cfg.get("fallback_max_match_distance_m")
+        if raw_lock_fallback is not None:
+            self.lock_fallback_max_distance_m = float(raw_lock_fallback)
+            primary_lock_distance_m = float(self.lock_cfg.get("max_match_distance_m", 1.2))
+            if (
+                not math.isfinite(self.lock_fallback_max_distance_m)
+                or self.lock_fallback_max_distance_m < primary_lock_distance_m
+            ):
+                raise ValueError(
+                    "target_lock.fallback_max_match_distance_m must be finite and >= max_match_distance_m"
+                )
+        self.try_next_target_on_lock_failure = bool(
+            self.lock_cfg.get("try_next_target_on_failure", False)
+        )
+        self.direct_release_when_lock_exhausted = bool(
+            self.lock_cfg.get("direct_release_when_exhausted", False)
+        )
         # finish_policy: allow default (legacy), consistent with v1
         align_config = dict(self.align_cfg.get("config") or {})
         align_config.setdefault("min_altitude_m", self.finish_altitude_m)
@@ -177,6 +195,8 @@ class GpsDropSequenceAction(GpsTargetSequenceCore, ActionModule):
         self._failed_reason = ""
         self._climb_target_lat: float | None = None
         self._climb_target_lon: float | None = None
+        self._lock_stage = "primary"
+        self._skipped_lock_target_indices: list[int] = []
 
         self.started = True
         self.stopped = False
@@ -280,7 +300,31 @@ class GpsDropSequenceAction(GpsTargetSequenceCore, ActionModule):
         if self.execution_mode == "field_center_direct_dual_release":
             self._operation_started = False
             return self._transition("operation", "operation_start", actions)
+        self._lock_stage = "primary"
         return super()._transition_after_goto(target, ctx, actions)
+
+    def _on_lock_success(self, target, ctx, result) -> None:
+        if self._skipped_lock_target_indices and self.released_count == 0:
+            self._switch_to_single_target_dual_release()
+
+    def _on_lock_exhausted(self, target, ctx, result):
+        if not self.direct_release_when_lock_exhausted:
+            return None
+        if self.released_count == 0:
+            self._switch_to_single_target_dual_release()
+        self._release_reason = "lock_candidates_exhausted_at_approach_altitude"
+        self._operation_started = False
+        return self._transition(
+            "operation", "operation_start",
+            self._ensure_stop_actions(result.actions or [], "lock_exhausted_release"),
+        )
+
+    def _switch_to_single_target_dual_release(self) -> None:
+        self.execution_mode = "single_target_dual_release"
+        self.dual_release_servo_outputs = _merge_servo_outputs(
+            self.payloads[0], self.payloads[1]
+        )
+        self.climb_after_drop_m = self.single_target_climb_after_release_m
 
     def _transition_after_operation(self, target, ctx, actions):
         if self.execution_mode == "field_center_direct_dual_release":

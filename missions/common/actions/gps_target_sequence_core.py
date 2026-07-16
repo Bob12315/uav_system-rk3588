@@ -28,14 +28,74 @@ class GpsTargetSequenceCore:
         if r.failed:return self._fail('goto_failed')
         if not r.done:return ActionResult(actions=r.actions,reason=self._sequence_reason('goto'),detail=self._sequence_detail())
         return self._transition_after_goto(t, ctx, r.actions)
-    def _update_lock(self,ctx):
-        t=self.targets[self.target_index]
+    def _update_lock(self, ctx):
+        target = self.targets[self.target_index]
+        lock_stage = getattr(self, "_lock_stage", "primary")
+        fallback_distance_m = getattr(self, "lock_fallback_max_distance_m", None)
+        lock_distance_m = float(self.lock_cfg.get("max_match_distance_m", 1.2))
+        if lock_stage == "fallback" and fallback_distance_m is not None:
+            lock_distance_m = fallback_distance_m
+
         if self.sub_action is None:
-            self.sub_action=self._lock_action_factory(); self.sub_action.start({"target":{"id":t['target_id'],"lat":t['lat'],"lon":t['lon'],"class_name":t.get('class_name','')},"max_match_distance_m":self.lock_cfg.get('max_match_distance_m',1.2),"max_updates":self.target_lock_max_updates,"min_confidence":self.lock_cfg.get('min_confidence',.35),"class_names":self.lock_cfg.get('class_names'),"camera":self.lock_cfg.get('camera',{}),"detection_source":self.lock_cfg.get('detection_source','scene'),"require_track_id":self.lock_cfg.get("require_track_id",True)}); self.update_count_at_phase=0
-        r=self.sub_action.update(ctx)
-        if r.failed:return self._fail('lock_failed',self._stop_actions('lock_fail'))
-        if not r.done:return ActionResult(actions=r.actions,reason=self._sequence_reason('lock'),detail=self._sequence_detail(extra={'lock':r.detail}))
-        return self._transition('align','align_start',r.actions)
+            self.sub_action = self._lock_action_factory()
+            self.sub_action.start({
+                "target": {
+                    "id": target["target_id"],
+                    "lat": target["lat"],
+                    "lon": target["lon"],
+                    "class_name": target.get("class_name", ""),
+                },
+                "max_match_distance_m": lock_distance_m,
+                "max_updates": self.target_lock_max_updates,
+                "min_confidence": self.lock_cfg.get("min_confidence", .35),
+                "class_names": self.lock_cfg.get("class_names"),
+                "camera": self.lock_cfg.get("camera", {}),
+                "detection_source": self.lock_cfg.get("detection_source", "scene"),
+                "require_track_id": self.lock_cfg.get("require_track_id", True),
+            })
+            self.update_count_at_phase = 0
+
+        result = self.sub_action.update(ctx)
+        lock_detail = {
+            "stage": lock_stage,
+            "max_match_distance_m": lock_distance_m,
+            "result": result.detail,
+        }
+        if not result.failed:
+            if not result.done:
+                return ActionResult(
+                    actions=result.actions,
+                    reason=self._sequence_reason("lock"),
+                    detail=self._sequence_detail(extra={"lock": lock_detail}),
+                )
+            self._on_lock_success(target, ctx, result)
+            return self._transition("align", "align_start", result.actions)
+
+        if lock_stage == "primary" and fallback_distance_m is not None:
+            self._lock_stage = "fallback"
+            return self._transition(
+                "lock", "lock_start",
+                self._ensure_stop_actions(result.actions or [], "lock_retry"),
+            )
+
+        has_next_target = self.target_index + 1 < len(self.targets)
+        if has_next_target and getattr(self, "try_next_target_on_lock_failure", False):
+            skipped = getattr(self, "_skipped_lock_target_indices", None)
+            if isinstance(skipped, list):
+                skipped.append(self.target_index)
+            self.target_index += 1
+            self._lock_stage = "primary"
+            return self._transition(
+                "goto", "next",
+                self._ensure_stop_actions(result.actions or [], "lock_next_target"),
+            )
+
+        override = self._on_lock_exhausted(target, ctx, result)
+        if override is not None:
+            return override
+        return self._fail(
+            "lock_failed", self._ensure_stop_actions(result.actions or [], "lock_fail")
+        )
     def _update_align(self,ctx):
         t=self.targets[self.target_index]
         if self.sub_action is None:
@@ -81,6 +141,11 @@ class GpsTargetSequenceCore:
     def _fail(self,event,actions=None,reason=None): self.phase='failed'; self._failed_reason=reason or self._sequence_reason(event); self.sub_action=None; return ActionResult(actions=actions if actions is not None else self._stop_actions('failed'),failed=True,reason=self._failed_reason,detail=self._sequence_detail())
     def _on_align_failure(self,event,target,ctx,result):
         """Hook called before _fail on align timeout/failure. Return an ActionResult to override the default _fail behaviour; return None to proceed with the normal _fail path."""
+        return None
+    def _on_lock_success(self, target, ctx, result):
+        """Hook for wrapper-specific state after a target lock succeeds."""
+    def _on_lock_exhausted(self, target, ctx, result):
+        """Return an ActionResult to override fail-fast after all lock attempts."""
         return None
     def _transition_after_goto(self, target, ctx, actions):
         return self._transition('lock', 'lock_start', actions)

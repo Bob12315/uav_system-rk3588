@@ -310,6 +310,38 @@ class ScriptedLockV2:
     def update(self, c): return ActionResult(done=True)
 
 
+class LockOnlySecondTarget:
+    """Reject both radii for target one, then accept target two."""
+    starts: list[dict[str, Any]] = []
+    def start(self, p):
+        self.params = p
+        type(self).starts.append(p)
+    def update(self, c):
+        if self.params["target"]["id"] == "one":
+            return ActionResult(failed=True, reason="target_lock_timeout")
+        return ActionResult(done=True, detail={"track_id": 22})
+
+
+class LockAlwaysFails:
+    starts: list[dict[str, Any]] = []
+    def start(self, p):
+        self.params = p
+        type(self).starts.append(p)
+    def update(self, c):
+        return ActionResult(failed=True, reason="target_lock_timeout")
+
+
+class LockOnlyFirstTarget:
+    starts: list[dict[str, Any]] = []
+    def start(self, p):
+        self.params = p
+        type(self).starts.append(p)
+    def update(self, c):
+        if self.params["target"]["id"] == "one":
+            return ActionResult(done=True, detail={"track_id": 11})
+        return ActionResult(failed=True, reason="target_lock_timeout")
+
+
 @pytest.fixture
 def v2_children(monkeypatch: pytest.MonkeyPatch) -> None:
     """Replace all child actions with scriptable mocks."""
@@ -441,6 +473,104 @@ def test_dual_target_first_release_then_climb_then_second(v2_children: None) -> 
     all_servos = _release_servo_channels(results)
     assert 8 in all_servos
     assert 9 in all_servos
+
+
+def test_lock_fallback_then_next_target_releases_both_at_second(monkeypatch) -> None:
+    ScriptedGotoV2.reset()
+    ScriptedAlignV2.reset(done=True, reason="latched_center_aligned")
+    LockOnlySecondTarget.starts = []
+    monkeypatch.setattr(mod, "GotoWaypointAction", ScriptedGotoV2)
+    monkeypatch.setattr(mod, "GpsTargetLockAction", LockOnlySecondTarget)
+    monkeypatch.setattr(mod, "AlignDescendAction", ScriptedAlignV2)
+    action = GpsDropSequenceAction()
+    action.start(params(
+        approach_altitude_m=3.0,
+        single_target_climb_after_release_m=3.0,
+        target_lock={
+            "max_match_distance_m": 1.5,
+            "fallback_max_match_distance_m": 3.0,
+            "try_next_target_on_failure": True,
+            "direct_release_when_exhausted": True,
+            "min_confidence": 0.75,
+        },
+    ))
+
+    results = _drive_to_terminal(action)
+
+    assert results[-1].done
+    assert action.released_count == 2
+    assert action.execution_mode == "single_target_dual_release"
+    assert len(ScriptedAlignV2.starts) == 1
+    assert [p["target"]["id"] for p in LockOnlySecondTarget.starts] == ["one", "one", "two"]
+    assert [p["max_match_distance_m"] for p in LockOnlySecondTarget.starts] == [1.5, 3.0, 1.5]
+    assert all(p["min_confidence"] == 0.75 for p in LockOnlySecondTarget.starts)
+    assert 8 in _release_servo_channels(results) and 9 in _release_servo_channels(results)
+
+
+def test_all_lock_candidates_failed_direct_dual_release_at_approach(monkeypatch) -> None:
+    ScriptedGotoV2.reset()
+    ScriptedAlignV2.reset(done=True, reason="should_not_run")
+    LockAlwaysFails.starts = []
+    monkeypatch.setattr(mod, "GotoWaypointAction", ScriptedGotoV2)
+    monkeypatch.setattr(mod, "GpsTargetLockAction", LockAlwaysFails)
+    monkeypatch.setattr(mod, "AlignDescendAction", ScriptedAlignV2)
+    action = GpsDropSequenceAction()
+    action.start(params(
+        approach_altitude_m=3.0,
+        target_lock={
+            "max_match_distance_m": 1.5,
+            "fallback_max_match_distance_m": 3.0,
+            "try_next_target_on_failure": True,
+            "direct_release_when_exhausted": True,
+        },
+    ))
+
+    results = _drive_to_terminal(action)
+
+    assert results[-1].done
+    assert action.released_count == 2
+    assert not ScriptedAlignV2.starts
+    assert action._release_reason == "lock_candidates_exhausted_at_approach_altitude"
+    assert [p["altitude_m"] for p in ScriptedGotoV2.starts if "goto" in p["key"]] == [3.0, 3.0]
+    assert [p["max_match_distance_m"] for p in LockAlwaysFails.starts] == [1.5, 3.0, 1.5, 3.0]
+    assert 8 in _release_servo_channels(results) and 9 in _release_servo_channels(results)
+
+
+def test_second_lock_exhausted_releases_only_remaining_payload(monkeypatch) -> None:
+    ScriptedGotoV2.reset()
+    ScriptedAlignV2.reset(done=True, reason="latched_center_aligned")
+    LockOnlyFirstTarget.starts = []
+    monkeypatch.setattr(mod, "GotoWaypointAction", ScriptedGotoV2)
+    monkeypatch.setattr(mod, "GpsTargetLockAction", LockOnlyFirstTarget)
+    monkeypatch.setattr(mod, "AlignDescendAction", ScriptedAlignV2)
+    action = GpsDropSequenceAction()
+    action.start(params(
+        approach_altitude_m=3.0,
+        target_lock={
+            "max_match_distance_m": 1.5,
+            "fallback_max_match_distance_m": 3.0,
+            "try_next_target_on_failure": True,
+            "direct_release_when_exhausted": True,
+        },
+    ))
+
+    results = _drive_to_terminal(action)
+
+    assert results[-1].done
+    assert action.released_count == 2
+    assert action.execution_mode == "dual_target_sequential"
+    assert len(ScriptedAlignV2.starts) == 1
+    assert _release_servo_channels(results) == [8, 9]
+    assert [p["target"]["id"] for p in LockOnlyFirstTarget.starts] == ["one", "two", "two"]
+    assert action._release_reason == "lock_candidates_exhausted_at_approach_altitude"
+
+
+def test_rejects_lock_fallback_smaller_than_primary() -> None:
+    with pytest.raises(ValueError, match="fallback_max_match_distance_m"):
+        GpsDropSequenceAction().start(params(target_lock={
+            "max_match_distance_m": 1.5,
+            "fallback_max_match_distance_m": 1.4,
+        }))
 
 
 def test_dual_target_first_timeout_releases_both(v2_children: None) -> None:

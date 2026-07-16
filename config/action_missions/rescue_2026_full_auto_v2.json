@@ -134,15 +134,15 @@
             "payload_right_m": 0.0
           }
         ],
-        "approach_altitude_m": 3.5,
-        "finish_altitude_m": 1.2,
+        "approach_altitude_m": 3.0,
+        "finish_altitude_m": 1.8,
         "climb_after_drop_m": 2.5,
         "single_target_climb_after_release_m": 3.5,
         "no_target_strategy": "field_center_direct_dual_release",
         "no_target_field_center": {
           "x": 0.0,
           "y": 32.5,
-          "altitude_m": 3.5
+          "altitude_m": 3.0
         },
         "climb_tolerance_z_m": 0.1,
         "climb_max_updates": 100,
@@ -161,7 +161,10 @@
         },
         "target_lock": {
           "max_match_distance_m": 1.5,
-          "min_confidence": 0.35,
+          "fallback_max_match_distance_m": 3.0,
+          "try_next_target_on_failure": true,
+          "direct_release_when_exhausted": true,
+          "min_confidence": 0.75,
           "require_track_id": false,
           "class_names": [
             "bucket_1",
@@ -184,9 +187,10 @@
           "max_retries": 1,
           "max_updates": 150,
           "finish_policy": "latched_center_alignment",
-          "finish_alignment_max_ex_cam": 0.20,
-          "finish_alignment_max_ey_cam": 0.20,
-          "finish_alignment_hold_updates": 1,
+          "finish_alignment_max_ex_cam": 0.18,
+          "finish_alignment_max_ey_cam": 0.18,
+          "finish_alignment_hold_updates": 2,
+          "finish_alignment_timeout_s": 1.5,
           "config": {
             "kp_vx": 0.275,
             "kp_vy": 0.275,
@@ -238,7 +242,7 @@
             "min_effective_speed_ey_threshold": 0.16,
             "target_loss_grace_updates": 1,
             "target_loss_grace_horizontal_scale": 0.5,
-            "min_altitude_m": 1.2,
+            "min_altitude_m": 1.8,
             "require_target_locked": false,
             "payload_offset_enabled": true,
             "descent_gate_policy": "aligned_or_slow",

@@ -88,8 +88,8 @@ def test_complete_rescue_v2_drop_overrides_are_deliberate():
     rescue = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
     dp = dict(next(s for s in drop["steps"] if s["name"] == "gps_drop_sequence")["params"])
     rp = dict(next(s for s in rescue["steps"] if s["name"] == "gps_drop_sequence")["params"])
-    assert dp["approach_altitude_m"] == 2.5 and rp["approach_altitude_m"] == 3.5
-    assert rp["no_target_field_center"] == {"x": 0.0, "y": 32.5, "altitude_m": 3.5}
+    assert dp["approach_altitude_m"] == 2.5 and rp["approach_altitude_m"] == 3.0
+    assert rp["no_target_field_center"] == {"x": 0.0, "y": 32.5, "altitude_m": 3.0}
     assert rp["single_target_climb_after_release_m"] == 3.5
 
 
