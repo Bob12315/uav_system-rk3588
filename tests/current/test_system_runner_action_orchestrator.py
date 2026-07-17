@@ -16,7 +16,11 @@ from app.field_profile import (
 )
 from app.field_profile_service import FieldProfileService
 from app.mission_orchestrator import MissionActionStep, MissionOrchestratorStatus
-from app.system_runner import ACTION_MISSION_RECORDING_MAX_DURATION_S, SystemRunner
+from app.system_runner import (
+    ACTION_MISSION_RECORDING_MAX_DURATION_S,
+    ACTION_MISSION_TICK_INTERVAL_S,
+    SystemRunner,
+)
 from missions.common.actions.takeoff import TakeoffAction
 
 
@@ -329,6 +333,24 @@ def test_mission_recording_timeout_stops_after_600_seconds(monkeypatch):
     assert runner._enforce_action_mission_recording_timeout(now_monotonic=1000.0) is True
     assert stops == ["action_mission_10m_timeout"]
     assert ACTION_MISSION_RECORDING_MAX_DURATION_S == 600.0
+
+
+def test_background_tick_advances_running_mission_without_web_client(monkeypatch):
+    runner = _make_runner()
+    runner.configure_action_mission(_local_steps())
+    runner.action_mission_start()
+    calls = []
+    monkeypatch.setattr(
+        runner,
+        "action_mission_tick",
+        lambda: calls.append("tick") or runner.action_mission_status_payload(),
+    )
+    runner._action_mission_next_tick_monotonic = 100.0
+
+    assert runner._tick_action_mission_in_background(now_monotonic=99.9) is False
+    assert runner._tick_action_mission_in_background(now_monotonic=100.0) is True
+    assert calls == ["tick"]
+    assert ACTION_MISSION_TICK_INTERVAL_S == 0.5
 
 
 # ---------------------------------------------------------------------------

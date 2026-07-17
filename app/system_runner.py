@@ -38,6 +38,7 @@ from app.ui_commands import CommandResult, build_ui_command_handler, format_cont
 from app.yolo_command_client import YoloCommandClient
 
 ACTION_MISSION_RECORDING_MAX_DURATION_S = 10.0 * 60.0
+ACTION_MISSION_TICK_INTERVAL_S = 0.5
 
 @dataclass(frozen=True, slots=True)
 class _IdleCommandSnapshot:
@@ -100,6 +101,7 @@ class SystemRunner:
         }
         self._action_mission_recording_requested = False
         self._action_mission_recording_deadline_monotonic: float | None = None
+        self._action_mission_next_tick_monotonic: float | None = None
         self.external_processes: dict[str, subprocess.Popen] = {}
         self.action_lab_specs = action_lab_specs()
         self.action_lab_enabled = True
@@ -184,6 +186,7 @@ class SystemRunner:
         try:
             while not self.stop_event.is_set():
                 self._enforce_action_mission_recording_timeout()
+                self._tick_action_mission_in_background()
                 now = time.time()
                 run_seconds = self.config.runtime.run_seconds
                 if run_seconds is not None and (now - started_at) >= run_seconds:
@@ -1335,6 +1338,7 @@ class SystemRunner:
 
     def configure_action_mission(self, steps: list[MissionActionStep]) -> None:
         with self.action_runtime_lock:
+            self._action_mission_next_tick_monotonic = None
             self.action_mission_orchestrator = MissionOrchestrator(
                 runtime=self.action_runtime,
                 steps=steps,
@@ -1387,6 +1391,7 @@ class SystemRunner:
             self.action_mission_orchestrator.start(
                 link_manager=self.services.link_manager,
             )
+            self._action_mission_next_tick_monotonic = time.monotonic()
             payload = self.action_mission_status_payload()
             if payload["running"]:
                 self._start_action_mission_recording()
@@ -1509,6 +1514,7 @@ class SystemRunner:
         if self.action_mission_orchestrator is None:
             return self.action_mission_status_payload()
         with self.action_runtime_lock:
+            self._action_mission_next_tick_monotonic = None
             self.action_mission_orchestrator.stop(
                 link_manager=self.services.link_manager,
                 hold_current=True,
@@ -1520,6 +1526,7 @@ class SystemRunner:
         if self.action_mission_orchestrator is None:
             return self.action_mission_status_payload()
         with self.action_runtime_lock:
+            self._action_mission_next_tick_monotonic = None
             self.latest_recon_inspection_result = {}
             self.latest_drop_localization_result = {}
             self.latest_recon_localization_result = {}
@@ -1536,6 +1543,9 @@ class SystemRunner:
         if self.action_mission_orchestrator is None:
             return self.action_mission_status_payload()
         with self.action_runtime_lock:
+            self._action_mission_next_tick_monotonic = (
+                time.monotonic() + ACTION_MISSION_TICK_INTERVAL_S
+            )
             orch = self.action_mission_orchestrator
             pre_index = orch.current_index
             pre_step = orch.steps[pre_index] if 0 <= pre_index < len(orch.steps) else None
@@ -1586,6 +1596,29 @@ class SystemRunner:
                     trigger=f"action_mission_{mission_status.reason}"
                 )
             return mission_status
+
+    def _tick_action_mission_in_background(
+        self,
+        *,
+        now_monotonic: float | None = None,
+    ) -> bool:
+        """Advance a running Action Mission without depending on a Web UI client."""
+        now = time.monotonic() if now_monotonic is None else float(now_monotonic)
+        with self.action_runtime_lock:
+            orchestrator = self.action_mission_orchestrator
+            if orchestrator is None or not orchestrator.running:
+                self._action_mission_next_tick_monotonic = None
+                return False
+            deadline = self._action_mission_next_tick_monotonic
+            if deadline is not None and now < deadline:
+                return False
+        try:
+            self.action_mission_tick()
+        except Exception:
+            self.logger.exception("autonomous Action Mission tick failed")
+            self.action_mission_stop()
+            return False
+        return True
 
     def action_mission_skip_current(self) -> dict[str, object]:
         if self.action_mission_orchestrator is None:

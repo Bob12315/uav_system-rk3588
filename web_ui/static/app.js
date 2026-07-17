@@ -13,7 +13,6 @@ let lastActionMissionStatus = null;
 let lastActionMissionResult = null;
 let lastActionMissionSummaryHtml = "";
 let lastReconInspectionHtml = "";
-let actionMissionAutoTickTimer = null;
 let statusUpdatesStop = null;
 // latestCameraRecording moved to video_panel.js (WU-6 v2)
 const fallbackStageModes = ["AUTO", "IDLE", "APPROACH_TRACK", "OVERHEAD_HOLD", "CORRIDOR_FOLLOW"];
@@ -482,16 +481,11 @@ function renderActionMissionSummary(actionMission) {
 function updateActionMissionAutoTickButton() {
   const button = $("actionMissionAutoTick");
   if (!button) return;
-  const enabled = Boolean(actionMissionAutoTickTimer);
   const running = Boolean(lastActionMissionStatus?.running);
-  button.textContent = enabled ? (running ? "自动推进 开" : "自动推进 待命") : "自动推进 关";
-  button.classList.toggle("warning", enabled);
+  button.textContent = running ? "后台自动推进中" : "后台自动推进";
+  button.disabled = true;
 }
 function stopActionMissionAutoTick() {
-  if (actionMissionAutoTickTimer) {
-    clearTimeout(actionMissionAutoTickTimer);
-    actionMissionAutoTickTimer = null;
-  }
   updateActionMissionAutoTickButton();
 }
 function renderActionMissionStatus(actionMission) {
@@ -944,27 +938,8 @@ async function copyText(text, message) {
   $("completionHint").textContent = message;
 }
 async function toggleActionMissionAutoTick() {
-  if (actionMissionAutoTickTimer) {
-    stopActionMissionAutoTick();
-    return;
-  }
-  const scheduleTick = () => {
-    actionMissionAutoTickTimer = setTimeout(async () => {
-      try {
-        if (lastActionMissionStatus?.running) await tickActionMission();
-        updateActionMissionAutoTickButton();
-        if (actionMissionAutoTickTimer !== null) scheduleTick();
-      } catch (error) {
-        stopActionMissionAutoTick();
-        $("completionHint").textContent = error.message;
-      }
-    }, 500);
-  };
-  scheduleTick();
   updateActionMissionAutoTickButton();
-  $("completionHint").textContent = lastActionMissionStatus?.running
-    ? "自动推进已开启"
-    : "自动推进已待命，启动任务后会自动推进";
+  $("completionHint").textContent = "任务由 RK3588 后台自动推进，无需保持网页连接";
 }
 function loadActionMissionPreset(name) {
   const preset = actionMissionPresets[name];
