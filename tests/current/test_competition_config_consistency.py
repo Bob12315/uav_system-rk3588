@@ -3,18 +3,17 @@ from __future__ import annotations
 import json
 
 
-def test_all_four_configs_return_home_altitude() -> None:
-    """All four config files have return_home_gps altitude_m == 3.5."""
-    paths = [
-        "config/action_missions/drop_two_targets_v2.json",
-        "config/action_missions/rescue_2026_full_auto_v2.json",
-        "config/profiles/rk3588-sitl/action_missions/drop_two_targets_v2.json",
-        "config/profiles/rk3588-sitl/action_missions/rescue_2026_full_auto_v2.json",
-    ]
-    for path in paths:
+def test_return_home_altitudes_match_each_mission_profile() -> None:
+    expected_altitudes = {
+        "config/action_missions/drop_two_targets_v2.json": 3.5,
+        "config/action_missions/rescue_2026_full_auto_v2.json": 4.0,
+        "config/profiles/rk3588-sitl/action_missions/drop_two_targets_v2.json": 3.5,
+        "config/profiles/rk3588-sitl/action_missions/rescue_2026_full_auto_v2.json": 4.0,
+    }
+    for path, expected_altitude_m in expected_altitudes.items():
         data = json.loads(open(path).read())
         rth = next(s for s in data["steps"] if s["label"] == "return_home_gps")
-        assert rth["params"]["altitude_m"] == 3.5, f"{path}: altitude_m={rth['params']['altitude_m']}"
+        assert rth["params"]["altitude_m"] == expected_altitude_m
 
 
 def test_complete_rescue_v2_has_its_intentional_aggressive_drop_overrides() -> None:
@@ -26,13 +25,18 @@ def test_complete_rescue_v2_has_its_intentional_aggressive_drop_overrides() -> N
     dp = dict(drop_seq["params"])
     rp = dict(rescue_seq["params"])
     assert dp["approach_altitude_m"] == 2.5
-    assert rp["approach_altitude_m"] == 3.0
+    assert rp["approach_altitude_m"] == 3.5
     assert rp["finish_altitude_m"] == 1.8
     assert rp["single_target_climb_after_release_m"] == 3.5
     assert rp["no_target_strategy"] == "field_center_direct_dual_release"
     assert rp["align_descend_max_updates"] == rp["align_descend"]["max_updates"] == 150
     assert rp["align_descend"]["config"]["unaligned_descend_speed_mps"] == 0.0
     assert rp["align_descend"]["config"]["min_altitude_m"] == 1.8
+    assert rp["align_descend"]["config"]["descent_speed_stages"] == [
+        {"max_altitude_m": 2.4, "max_descend_speed_mps": 0.18},
+        {"max_altitude_m": 3.2, "max_descend_speed_mps": 0.24},
+        {"max_altitude_m": 3.5, "max_descend_speed_mps": 0.30},
+    ]
     assert rp["target_lock"]["max_match_distance_m"] == 1.5
     assert rp["target_lock"]["fallback_max_match_distance_m"] == 3.0
     assert rp["target_lock"]["min_confidence"] == 0.75
@@ -67,7 +71,8 @@ def test_complete_rescue_v2_scopes_ground_speed_changes() -> None:
     assert labels.index("gps_drop_sequence") + 1 == labels.index("restore_transition_speed_2mps")
     assert labels.index("goto_recon_entry_4m") + 1 == labels.index("recon_speed_1mps")
     assert labels.index("recon_speed_1mps") + 1 == labels.index("gps_recon_area_scan")
-    assert labels.index("gps_recon_area_scan") + 1 == labels.index("restore_return_speed_2mps")
+    assert labels.index("gps_recon_area_scan") + 1 == labels.index("climb_recon_exit_4m")
+    assert labels.index("climb_recon_exit_4m") + 1 == labels.index("restore_return_speed_2mps")
     assert next(step for step in steps if step.get("label") == "gps_drop_sequence")["on_failed"]["target"] == "restore_return_speed_2mps"
 
 
