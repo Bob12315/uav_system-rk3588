@@ -88,6 +88,13 @@ def test_takeoff_duration_timeout_is_twelve_second_cap() -> None:
     assert result.failed and result.reason == "takeoff_timeout"
 
 
+def test_complete_v2_drop_scan_accepts_edge_detections_for_fusion() -> None:
+    steps = json.loads(MISSION.read_text())["steps"]
+    scan = next(step["params"] for step in steps if step["name"] == "gps_multi_view_localize")
+    assert scan["fusion"]["max_abs_ex"] == 1.0
+    assert scan["fusion"]["max_abs_ey"] == 1.0
+
+
 def test_takeoff_reaching_height_before_duration_completes_normally() -> None:
     action = TakeoffAction()
     action.start({"altitude_m": 3.5, "altitude_tolerance_m": 0.35, "max_duration_s": 12.0})

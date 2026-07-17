@@ -37,8 +37,9 @@ def test_complete_rescue_v2_has_its_intentional_aggressive_drop_overrides() -> N
         {"max_altitude_m": 3.2, "max_descend_speed_mps": 0.24},
         {"max_altitude_m": 3.5, "max_descend_speed_mps": 0.30},
     ]
-    assert rp["target_lock"]["max_match_distance_m"] == 1.5
-    assert rp["target_lock"]["fallback_max_match_distance_m"] == 3.0
+    assert rp["target_lock"]["max_match_distance_m"] == 3.0
+    assert "fallback_max_match_distance_m" not in rp["target_lock"]
+    assert rp["target_lock_max_updates"] == 6
     assert rp["target_lock"]["min_confidence"] == 0.75
     assert rp["target_lock"]["try_next_target_on_failure"] is True
     assert rp["target_lock"]["direct_release_when_exhausted"] is True

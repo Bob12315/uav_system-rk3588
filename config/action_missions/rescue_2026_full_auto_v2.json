@@ -57,7 +57,9 @@
           "cluster_radius_m": 0.8,
           "outlier_radius_m": 0.8,
           "min_cluster_size": 2,
-          "center_weight_power": 1.0
+          "center_weight_power": 1.0,
+          "max_abs_ex": 1.0,
+          "max_abs_ey": 1.0
         },
         "priority": 5
       }
@@ -157,7 +159,7 @@
         "climb_tolerance_z_m": 0.1,
         "climb_max_updates": 100,
         "goto_max_updates": 200,
-        "target_lock_max_updates": 8,
+        "target_lock_max_updates": 6,
         "align_descend_max_updates": 150,
         "release_wait_s": 1.0,
         "release_wait_updates": 5,
@@ -170,8 +172,7 @@
           "max_vertical_speed_mps": 0.1
         },
         "target_lock": {
-          "max_match_distance_m": 1.5,
-          "fallback_max_match_distance_m": 3.0,
+          "max_match_distance_m": 3.0,
           "try_next_target_on_failure": true,
           "direct_release_when_exhausted": true,
           "min_confidence": 0.75,
