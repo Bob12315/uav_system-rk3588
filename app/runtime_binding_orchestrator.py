@@ -140,6 +140,16 @@ class RuntimeBindingOrchestrator:
                 state="sampling_failed",
                 observed=True,
             )
+        # Completing a valid sampling window is the confirmation point for
+        # schema-v3 runtime GPS binding.  There is deliberately no second
+        # operator action between a passed sample set and freezing the field
+        # reference: the transaction below still validates, applies, syncs,
+        # and freezes atomically.
+        if sampling.window_complete and sampling.can_finalize:
+            result = self.finalize(completed_at_s=float(observed_at_s))
+            result["observed"] = True
+            result["auto_finalized"] = True
+            return result
         # Try to generate a preview after the sampling window completes
         self._try_preview(observed_at_s=float(observed_at_s))
         return {

@@ -55,6 +55,19 @@ class TestOrchestratorLifecycle:
         assert r["is_frozen"] is True
         assert r["is_ready_for_field_to_gps"] is True
 
+    def test_observe_auto_confirms_and_freezes_after_valid_window(self):
+        o = RuntimeBindingOrchestrator(FieldReferenceService(), RuntimeContextBuilder())
+        o.start(_make_profile(), started_at_s=1000.0)
+        for i in range(20):
+            o.observe(_valid_snap(2000.0 + i * 0.1), observed_at_s=1000.0 + i * 0.2)
+
+        result = o.observe(_valid_snap(2100.0), observed_at_s=1005.0)
+
+        assert result["ok"] is True
+        assert result["auto_finalized"] is True
+        assert result["state"] == "applied"
+        assert result["is_frozen"] is True
+
     def test_applied_finalize_requires_reset(self):
         o = RuntimeBindingOrchestrator(FieldReferenceService(), RuntimeContextBuilder())
         o.start(_make_profile(), started_at_s=1000.0)

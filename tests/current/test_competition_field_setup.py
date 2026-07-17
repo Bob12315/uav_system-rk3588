@@ -372,31 +372,22 @@ class TestBaselineWarningLifecycle:
         assert result["ok"] is False
         assert result["state"] == "sampling_failed"
 
-    def test_warning_baseline_survives_preview_and_finalize(self):
+    def test_warning_baseline_survives_automatic_finalize(self):
         ctl = _sample_competition_baseline(40.0)
         status = ctl._runtime_binding.status(now_s=1013.0)
         warnings = status["candidate_summary"]["warnings"]
         assert any("below warning threshold" in warning for warning in warnings)
 
-        result = ctl.finalize_runtime_profile_binding(completed_at_s=1012.0)
-
+        result = status["last_result"]
         assert result["ok"] is True
+        assert result["state"] == "applied"
         assert any("below warning threshold" in warning for warning in result["warnings"])
         retained = ctl._runtime_binding.status()["candidate_summary"]["warnings"]
         assert retained == result["warnings"]
 
-    def test_try_preview_persists_warning_added_by_orchestrator(self, monkeypatch):
+    def test_automatic_finalize_retains_orchestrator_baseline_warning(self):
         ctl = _sample_competition_baseline(40.0)
         orchestrator = ctl._runtime_binding
-        candidate = orchestrator._preview_candidate
-        stripped = replace(candidate, warnings=())
-        orchestrator._preview_candidate = None
-        monkeypatch.setattr(
-            orchestrator._sampler, "preview_candidate", lambda **_kwargs: stripped
-        )
-
-        orchestrator._try_preview(observed_at_s=1015.0)
-
         warnings = orchestrator.status(now_s=1013.0)["candidate_summary"]["warnings"]
         assert any("below warning threshold" in warning for warning in warnings)
 

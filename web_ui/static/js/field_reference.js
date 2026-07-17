@@ -169,12 +169,6 @@ window.UavFieldRef = (function () {
             await api.request("/api/field-profiles/" + encodeURIComponent(id) + "/runtime-sampling/start", { method: "POST", body: "{}" });
             fetchFieldReferenceStatus({ scheduleNext: false });
         });
-        var rfb = $("fpRuntimeFinalize");
-        if (rfb) rfb.addEventListener("click", async function () {
-            if (!window.confirm("将结束 GPS 采样，应用动态原点和场地方向并冻结 Field Reference。\n成功后如需更改，必须执行完整重置。\n该操作不会启动 Mission，不会发送飞控命令。")) return;
-            await api.request("/api/field-reference/runtime-sampling/finalize", { method: "POST", body: "{}" });
-            fetchFieldReferenceStatus({ scheduleNext: false });
-        });
         var rcb = $("fpRuntimeCancel");
         if (rcb) rcb.addEventListener("click", async function () {
             if (!window.confirm("取消当前 GPS 采样？")) return;

@@ -97,12 +97,11 @@ window.UavFieldProfiles = (function () {
         var rs = getRuntimeState();
         var busy = requestBusy;
         var inputOk = isInputValid();
-        var sBtn = $("cfsStart"), fBtn = $("cfsFinalize");
+        var sBtn = $("cfsStart");
         var cBtn = $("cfsCancel"), rBtn = $("cfsReset");
 
         function disableAll() {
             if (sBtn) sBtn.disabled = true;
-            if (fBtn) { fBtn.disabled = true; fBtn.textContent = "确认并冻结"; }
             if (cBtn) cBtn.disabled = true;
             if (rBtn) rBtn.disabled = true;
         }
@@ -132,9 +131,6 @@ window.UavFieldProfiles = (function () {
         if (rs.isSampling) {
             disableAll();
             if (cBtn) cBtn.disabled = false;
-            if (fBtn) {
-                fBtn.disabled = !rs.canFinalize;
-            }
             if (rBtn) rBtn.disabled = false;
             return;
         }
@@ -148,7 +144,6 @@ window.UavFieldProfiles = (function () {
 
         if (rs.isApplyFailed) {
             disableAll();
-            if (fBtn) { fBtn.disabled = false; fBtn.textContent = "重试确认并冻结"; }
             if (cBtn) cBtn.disabled = false;
             if (rBtn) rBtn.disabled = false;
             return;
@@ -303,19 +298,11 @@ window.UavFieldProfiles = (function () {
         if (!coords) { alert("请先输入有效的 WGS84 坐标"); return; }
         _doPost(
             "/api/field-reference/runtime-sampling/start",
-            "将使用当前飞机 WGS84 GPS 采样起点 A，\n并使用输入的远点 B 定义场地 +Y。\n请保持无人机静止。\n该操作不会启动 Mission，不会发送飞控命令。",
+            "将使用当前飞机 WGS84 GPS 采样起点 A，\n并使用输入的远点 B 定义场地 +Y。\n请保持无人机静止；采样通过后会自动确认并冻结。\n该操作不会启动 Mission，不会发送飞控命令。",
             JSON.stringify({
                 forward_marker_lat: coords.lat,
                 forward_marker_lon: coords.lon
             }),
-            null
-        );
-    }
-
-    function onFinalize() {
-        _doPost(
-            "/api/field-reference/runtime-sampling/finalize",
-            "将应用动态原点 A、远点 B 和固定场地几何，\n并冻结 Field Reference。\n成功后如需修改，必须完整重置。\n该操作不会启动 Mission，不会发送飞控命令。",
             null
         );
     }
@@ -362,7 +349,6 @@ window.UavFieldProfiles = (function () {
         initCalled = true;
         // Wire competition buttons
         var sb = $("cfsStart"); if (sb) sb.addEventListener("click", onStart);
-        var fb = $("cfsFinalize"); if (fb) fb.addEventListener("click", onFinalize);
         var cb = $("cfsCancel"); if (cb) cb.addEventListener("click", onCancel);
         var rb = $("cfsReset"); if (rb) rb.addEventListener("click", onReset);
 

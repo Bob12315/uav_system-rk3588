@@ -94,10 +94,11 @@ Mission execution will require frozen at the runtime-binding layer.
 ### Runtime GPS binding integration (step 5B.2.3)
 
 - `FieldReferenceController` owns the runtime binding orchestrator and exposes
-  the start, observe, finalize, and cancel lifecycle.
+  the start, observe, finalize (compatibility API), and cancel lifecycle.
 - `SystemRunner` feeds exactly one current `DroneState` snapshot into the
-  Controller on each main-loop iteration. Start, finalize, and cancel remain
-  explicit operator-side operations; sampling does not auto-finalize.
+  Controller on each main-loop iteration. Once the sampling window completes
+  with enough valid samples, observation automatically finalizes, applies, and
+  freezes the reference; the operator only starts or cancels sampling.
 - Applying a candidate is one transaction across `FieldReferenceService` and
   `RuntimeContextBuilder`. A failure at snapshot, apply, synchronization,
   freeze, or post-freeze verification attempts to restore both owners from
@@ -322,16 +323,18 @@ The v1 mission file must not be modified by any step in this transformation.
 | Align complete/timeout drop | Minimum altitude can return done without aligned hold; frame differs between normal/invalid/retry paths; zero-stop transition lacks end-to-end integration proof | Min altitude stops descent but continues horizontal alignment; done only after aligned hold; timeout zeroes then continues to release; all paths use consistent BODY_NED semantics | Step 15 |
 
 
-## Step 6 Web confirmation
+## Step 6 Web sampling and automatic freeze
 
-Schema v3 runtime GPS binding is controlled explicitly from the Web UI:
+Schema v3 runtime GPS binding is started from the Web UI and finalizes
+automatically after the sampling quality gates pass:
 
 1. select a valid Schema v3 profile;
 2. start sampling;
 3. observe live accepted/rejected/duplicate counts and GPS quality;
-4. explicitly finalize and freeze;
+4. automatic confirm, apply, and freeze after the sampling window passes;
 5. reset to clear an applied reference.
 
-Polling never automatically finalizes or starts a mission.
+Browser polling never starts a mission; runtime observation performs the
+automatic finalize only after the sampling quality gates pass.
 No flight command is emitted by these controls.
 Schema v2 bind-current remains available as a separate legacy path.

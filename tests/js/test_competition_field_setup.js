@@ -266,19 +266,20 @@ for (const stateName of ["sampling", "sampling_failed"]) {
   });
 }
 
-test("apply_failed exposes retry Finalize", () => {
+test("apply_failed exposes cancel and reset without manual finalize", () => {
   const h = makeHarness();
   h.window.UavFieldProfiles.init();
   h.window.UavFieldProfiles.onFieldReferenceStatus(status("apply_failed"));
-  assert.strictEqual(h.element("cfsFinalize").disabled, false);
-  assert.strictEqual(h.element("cfsFinalize").textContent, "重试确认并冻结");
+  assert.strictEqual(h.element("cfsCancel").disabled, false);
+  assert.strictEqual(h.element("cfsReset").disabled, false);
+  assert.strictEqual(h.element("cfsStart").disabled, true);
 });
 
 test("applied enables only Reset", () => {
   const h = makeHarness();
   h.window.UavFieldProfiles.init();
   h.window.UavFieldProfiles.onFieldReferenceStatus(status("applied"));
-  for (const id of ["cfsStart", "cfsFinalize", "cfsCancel"]) {
+  for (const id of ["cfsStart", "cfsCancel"]) {
     assert.strictEqual(h.element(id).disabled, true);
   }
   assert.strictEqual(h.element("cfsReset").disabled, false);

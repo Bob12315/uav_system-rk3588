@@ -136,16 +136,16 @@ class TestASTEndpoints:
                             found = True
         assert found, "cancel endpoint not found"
 
-    def test_no_auto_finalize(self):
-        src = Path("web_ui/server.py").read_text()
-        assert "auto_finalize" not in src
+    def test_runtime_sampling_auto_finalizes_in_orchestrator(self):
+        src = Path("app/runtime_binding_orchestrator.py").read_text()
+        assert "auto_finalized" in src
 
 
-def test_step6_web_confirmation_in_contract():
+def test_step6_web_automatic_freeze_in_contract():
     src = Path('docs/refactor/drop_v2_gps_first_contract.md').read_text()
-    assert 'Step 6 Web confirmation' in src
+    assert 'Step 6 Web sampling and automatic freeze' in src
     assert 'Schema v3 runtime GPS binding' in src
-    assert 'explicitly finalize and freeze' in src
+    assert 'automatic confirm, apply, and freeze' in src
 
 
 class TestAuditSafety:
@@ -191,7 +191,7 @@ class TestRealDOM:
                "fpRuntimeOrigin", "fpRuntimeMarker", "fpRuntimeHeading",
                "fpRuntimeBaseline", "fpRuntimeSpread", "fpRuntimeSampleCount",
                "fpRuntimeWarnings", "fpRuntimeGeometry",
-               "fpRuntimeStart", "fpRuntimeFinalize", "fpRuntimeCancel"]
+               "fpRuntimeStart", "fpRuntimeCancel"]
         for id_ in ids:
             count = html.count('id="' + id_ + '"')
             assert count == 1, f"DOM id '{id_}' found {count} times, expected 1"
@@ -207,10 +207,10 @@ class TestRealDOM:
 
 
 class TestJSFunctionScope:
-    def test_finalize_in_finalize_fn(self):
+    def test_primary_ui_omits_manual_finalize(self):
         src = Path("web_ui/static/js/field_profile.js").read_text()
-        assert "function onFinalize" in src
-        assert "runtime-sampling/finalize" in src
+        assert "function onFinalize" not in src
+        assert "cfsFinalize" not in src
 
     def test_polling_does_not_call_start(self):
         src = Path("web_ui/static/js/field_reference.js").read_text()

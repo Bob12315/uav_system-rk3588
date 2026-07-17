@@ -551,10 +551,22 @@ class SystemRunner:
             else:
                 snapshot = {}
             with self.action_runtime_lock:
-                self.field_reference_controller.observe_runtime_profile_sampling(
+                result = self.field_reference_controller.observe_runtime_profile_sampling(
                     snapshot,
                     observed_at_s=now_s,
                 )
+            if result.get("auto_finalized") is True:
+                if result.get("ok") is True:
+                    self._record_event(
+                        "FIELD_REFERENCE",
+                        "GPS sampling passed; field reference automatically confirmed and frozen",
+                    )
+                else:
+                    self._record_event(
+                        "FIELD_REFERENCE",
+                        "GPS sampling auto-confirm/freeze failed: "
+                        f"{result.get('error', 'unknown error')}",
+                    )
         except Exception:
             self.logger.warning("runtime field sampling observe failed", exc_info=True)
 
