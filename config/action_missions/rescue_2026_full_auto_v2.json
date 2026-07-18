@@ -335,10 +335,10 @@
       },
       "params": {
         "waypoints": [
-          {"x": -3.0, "y": 56.0, "altitude_m": 2.0},
-          {"x": 3.0, "y": 56.0, "altitude_m": 2.0},
-          {"x": 3.0, "y": 58.0, "altitude_m": 2.0},
-          {"x": -3.0, "y": 58.0, "altitude_m": 2.0}
+          {"x": -3.0, "y": 56.0, "altitude_m": 3.0},
+          {"x": 3.0, "y": 56.0, "altitude_m": 3.0},
+          {"x": -3.0, "y": 58.0, "altitude_m": 3.0},
+          {"x": -3.0, "y": 58.0, "altitude_m": 3.0}
         ],
         "waypoint_mode": "field",
         "target_frame": "global",
