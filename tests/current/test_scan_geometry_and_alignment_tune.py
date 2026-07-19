@@ -23,19 +23,23 @@ def test_recon_scan_waypoints_updated():
     assert [w["altitude_m"] for w in wps] == [3.0, 3.0, 3.0, 3.0]
 
 
-def test_complete_rescue_v2_uses_a_lower_recon_scan():
-    """The complete rescue mission scans at 2 m; standalone recon remains at 3 m."""
+def test_complete_rescue_v2_uses_its_dedicated_five_waypoint_route():
+    """The complete rescue mission uses a 4 m, no-scoring five-waypoint route."""
     recon = json.loads(open("config/action_missions/recon_gps_v2.json").read())
     rescue = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
     
     recon_scan = next(s for s in recon["steps"] if s["name"] == "gps_recon_area_scan")
     rescue_scan = next(s for s in rescue["steps"] if s["name"] == "gps_recon_area_scan")
     
-    assert [(wp["x"], wp["y"]) for wp in recon_scan["params"]["waypoints"]] == [
-        (wp["x"], wp["y"]) for wp in rescue_scan["params"]["waypoints"]
-    ]
     assert [wp["altitude_m"] for wp in recon_scan["params"]["waypoints"]] == [3.0] * 4
-    assert [wp["altitude_m"] for wp in rescue_scan["params"]["waypoints"]] == [2.0] * 4
+    assert rescue_scan["params"]["waypoints"] == [
+        {"x": -2.0, "y": 56.0, "altitude_m": 4.0},
+        {"x": 2.0, "y": 56.0, "altitude_m": 4.0},
+        {"x": 2.0, "y": 59.0, "altitude_m": 4.0},
+        {"x": -2.0, "y": 59.0, "altitude_m": 4.0},
+        {"x": 0.0, "y": 57.5, "altitude_m": 4.0},
+    ]
+    assert rescue_scan["params"]["scoring_target_indices"] == []
 
 
 def test_profile_drop_and_recce_zones_restored():

@@ -26,12 +26,12 @@ def test_complete_rescue_v2_has_its_intentional_aggressive_drop_overrides() -> N
     rp = dict(rescue_seq["params"])
     assert dp["approach_altitude_m"] == 2.5
     assert rp["approach_altitude_m"] == 3.5
-    assert rp["finish_altitude_m"] == 1.8
+    assert rp["finish_altitude_m"] == 1.2
     assert rp["single_target_climb_after_release_m"] == 3.5
     assert rp["no_target_strategy"] == "field_center_direct_dual_release"
     assert rp["align_descend_max_updates"] == rp["align_descend"]["max_updates"] == 150
     assert rp["align_descend"]["config"]["unaligned_descend_speed_mps"] == 0.0
-    assert rp["align_descend"]["config"]["min_altitude_m"] == 1.8
+    assert rp["align_descend"]["config"]["min_altitude_m"] == 1.2
     assert rp["align_descend"]["config"]["descent_speed_stages"] == [
         {"max_altitude_m": 2.4, "max_descend_speed_mps": 0.18},
         {"max_altitude_m": 3.2, "max_descend_speed_mps": 0.24},
@@ -70,10 +70,9 @@ def test_complete_rescue_v2_scopes_ground_speed_changes() -> None:
 
     assert labels.index("drop_speed_1mps") + 1 == labels.index("gps_drop_sequence")
     assert labels.index("gps_drop_sequence") + 1 == labels.index("restore_transition_speed_2mps")
-    assert labels.index("goto_recon_entry_4m") + 1 == labels.index("recon_speed_1mps")
-    assert labels.index("recon_speed_1mps") + 1 == labels.index("gps_recon_area_scan")
-    assert labels.index("gps_recon_area_scan") + 1 == labels.index("climb_recon_exit_4m")
-    assert labels.index("climb_recon_exit_4m") + 1 == labels.index("restore_return_speed_2mps")
+    assert labels.index("recon_speed_1mps") + 1 == labels.index("goto_recon_entry_4m")
+    assert labels.index("goto_recon_entry_4m") + 1 == labels.index("gps_recon_area_scan")
+    assert labels.index("gps_recon_area_scan") + 1 == labels.index("restore_return_speed_2mps")
     assert next(step for step in steps if step.get("label") == "gps_drop_sequence")["on_failed"]["target"] == "restore_return_speed_2mps"
 
 

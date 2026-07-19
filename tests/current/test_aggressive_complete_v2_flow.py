@@ -157,8 +157,8 @@ def test_complete_v2_descent_and_landing_parameters() -> None:
     assert config["descent_gate_policy"] == "aligned_or_slow"
     assert (config["deadband_ex_cam"], config["deadband_ey_cam"]) == (0.04, 0.04)
     assert (drop["align_descend"]["finish_alignment_max_ex_cam"], drop["align_descend"]["finish_alignment_max_ey_cam"], drop["align_descend"]["finish_alignment_hold_updates"]) == (0.18, 0.18, 2)
-    assert drop["align_descend"]["finish_alignment_timeout_s"] == 1.5
-    assert (drop["approach_altitude_m"], drop["finish_altitude_m"], config["min_altitude_m"]) == (3.5, 1.8, 1.8)
+    assert drop["align_descend"]["finish_alignment_timeout_s"] == 1.0
+    assert (drop["approach_altitude_m"], drop["finish_altitude_m"], config["min_altitude_m"]) == (3.5, 1.2, 1.2)
     assert drop["align_descend_max_updates"] == drop["align_descend"]["max_updates"] == 150
     assert config["height_scale_points"] == [{"altitude_m": 1.0, "scale": 0.4}, {"altitude_m": 1.3, "scale": 0.4}, {"altitude_m": 2.4, "scale": 0.65}, {"altitude_m": 3.5, "scale": 0.65}, {"altitude_m": 4.5, "scale": 0.65}]
     assert config["descent_speed_stages"] == [{"max_altitude_m": 2.4, "max_descend_speed_mps": 0.18}, {"max_altitude_m": 3.2, "max_descend_speed_mps": 0.24}, {"max_altitude_m": 3.5, "max_descend_speed_mps": 0.30}]

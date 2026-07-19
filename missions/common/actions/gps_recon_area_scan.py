@@ -16,7 +16,7 @@ DANGER_SIGN_CLASS_NAMES = [
 
 
 class GpsReconAreaScanAction(ActionModule):
-    """Fly a fixed FIELD route and rank permitted signs from unique scene frames."""
+    """Fly a fixed FIELD route, optionally ranking signs on selected legs."""
 
     def __init__(self) -> None:
         self.reset()
@@ -24,8 +24,8 @@ class GpsReconAreaScanAction(ActionModule):
     def start(self, params: dict[str, Any] | None = None) -> None:
         data = params or {}
         raw_waypoints = data.get("waypoints")
-        if not isinstance(raw_waypoints, list) or len(raw_waypoints) != 4:
-            raise ValueError("waypoints must contain exactly four FIELD waypoints")
+        if not isinstance(raw_waypoints, list) or not raw_waypoints:
+            raise ValueError("waypoints must contain at least one FIELD waypoint")
         self.waypoints = [self._waypoint(item, index) for index, item in enumerate(raw_waypoints)]
         self.waypoint_mode = str(data.get("waypoint_mode", "field")).strip().lower()
         self.target_frame = str(data.get("target_frame", "global")).strip().lower()
@@ -40,7 +40,7 @@ class GpsReconAreaScanAction(ActionModule):
         if not isinstance(raw_indices, list) or any(type(value) is not int for value in raw_indices):
             raise ValueError("scoring_target_indices must be a list of waypoint target indices")
         self.scoring_target_indices = list(raw_indices)
-        if not self.scoring_target_indices or any(index < 0 or index >= len(self.waypoints) for index in self.scoring_target_indices):
+        if any(index < 0 or index >= len(self.waypoints) for index in self.scoring_target_indices):
             raise ValueError("scoring_target_indices contains an invalid waypoint target index")
         self.detection_source = str(data.get("detection_source", "scene")).strip().lower()
         if self.detection_source != "scene":
@@ -78,10 +78,11 @@ class GpsReconAreaScanAction(ActionModule):
         if self.goto_action is None:
             return ActionResult(failed=True, reason="goto_not_initialized", detail=self._detail())
 
-        # Always consume a reliable scene identity, including approach and
-        # connector segments.  A frame first observed outside a scoring segment
-        # must never become scoreable merely because it remains on screen.
-        self._observe_scene(context or {}, scoring=self.waypoint_index in self.scoring_target_indices)
+        # When scoring is enabled, consume a reliable scene identity on every
+        # leg. A frame first observed outside a scoring leg must never become
+        # scoreable merely because it remains on screen.
+        if self.scoring_target_indices:
+            self._observe_scene(context or {}, scoring=self.waypoint_index in self.scoring_target_indices)
 
         self.goto_updates += 1
         if self.goto_updates > self.goto_max_updates:
@@ -221,7 +222,8 @@ class GpsReconAreaScanAction(ActionModule):
 
     def _detail(self, *, done: bool = False, extra: dict[str, Any] | None = None) -> dict[str, Any]:
         detail = {
-            "ranking_mode": True, "ranking": self._ranking(), "waypoints": list(self.waypoints),
+            "ranking_mode": bool(self.scoring_target_indices),
+            "ranking": self._ranking() if self.scoring_target_indices else [],
             "waypoint_index": self.waypoint_index, "current_scoring_segment": self.waypoint_index in self.scoring_target_indices,
             "scoring_target_indices": list(self.scoring_target_indices),
             "scan_summary": {

@@ -86,7 +86,6 @@ def test_action_mission_waypoint_frames_are_explicit_and_match_coordinate_source
 
 
 def test_v2_recon_templates_use_only_the_fixed_area_scan_and_match_sitl() -> None:
-    expected_waypoints = [(-3.0, 56.0, 3.0), (3.0, 56.0, 3.0), (3.0, 58.0, 3.0), (-3.0, 58.0, 3.0)]
     for relative in ("recon_gps_v2.json", "rescue_2026_full_auto_v2.json"):
         base = _template(Path("config/action_missions") / relative)
         sitl = _template(Path("config/profiles/rk3588-sitl/action_missions") / relative)
@@ -100,18 +99,31 @@ def test_v2_recon_templates_use_only_the_fixed_area_scan_and_match_sitl() -> Non
         if relative == "rescue_2026_full_auto_v2.json":
             assert names.count("gps_multi_view_localize") == 1  # drop localization only
             drop = next(step["params"] for step in base["steps"] if step["name"] == "gps_drop_sequence")
-            assert drop["no_target_field_center"] == {"x": 0.0, "y": 32.5, "altitude_m": 3.0}
+            assert drop["no_target_field_center"] == {"x": 0.0, "y": 32.5, "altitude_m": 3.5}
         entry_index = next(index for index, step in enumerate(base["steps"]) if step.get("label") == "goto_recon_entry_4m")
         scan_index = names.index("gps_recon_area_scan")
         if relative == "rescue_2026_full_auto_v2.json":
-            assert base["steps"][entry_index + 1].get("label") == "recon_speed_1mps"
-            assert entry_index == scan_index - 2
+            assert base["steps"][entry_index - 1].get("label") == "recon_speed_1mps"
+            assert entry_index == scan_index - 1
+            expected_entry = (-2.0, 56.0, 4.0)
+            expected_waypoints = [
+                (-2.0, 56.0, 4.0), (2.0, 56.0, 4.0),
+                (2.0, 59.0, 4.0), (-2.0, 59.0, 4.0),
+                (0.0, 57.5, 4.0),
+            ]
+            expected_scoring_indices = []
         else:
             assert entry_index == scan_index - 1
+            expected_entry = (-3.0, 56.0, 4.0)
+            expected_waypoints = [
+                (-3.0, 56.0, 3.0), (3.0, 56.0, 3.0),
+                (3.0, 58.0, 3.0), (-3.0, 58.0, 3.0),
+            ]
+            expected_scoring_indices = [1, 3]
         entry = base["steps"][entry_index]
         assert entry["name"] == "goto_waypoint"
         assert entry["params"] == {
-            "x": -3.0, "y": 56.0, "altitude_m": 4.0,
+            "x": expected_entry[0], "y": expected_entry[1], "altitude_m": expected_entry[2],
             "waypoint_mode": "field", "target_frame": "global", "yaw_mode": "field_heading",
             "tolerance_xy_m": 0.5, "tolerance_z_m": 0.35, "min_hold_updates": 2,
             "priority": 5, "key": "goto_recon_entry_4m",
@@ -124,7 +136,7 @@ def test_v2_recon_templates_use_only_the_fixed_area_scan_and_match_sitl() -> Non
         assert entry["on_failed"] == {"action": "jump_to", "target": expected_failure_target, "max_attempts": 1}
         params = scans[0]["params"]
         assert [(item["x"], item["y"], item["altitude_m"]) for item in params["waypoints"]] == expected_waypoints
-        assert params["scoring_target_indices"] == [1, 3]
+        assert params["scoring_target_indices"] == expected_scoring_indices
         assert params["waypoint_mode"] == "field"
         assert params["target_frame"] == "global"
         assert params["yaw_mode"] == "field_heading"
@@ -663,11 +675,18 @@ def test_recon_area_scan_v2_returns_home_on_failure() -> None:
     assert labels[labels.index("restore_return_speed_2mps") + 1] == "return_home_gps"
 
 
-def test_recon_area_scan_v2_has_fixed_gps_first_segments() -> None:
+def test_recon_area_scan_v2_has_fixed_five_waypoint_route_without_scoring() -> None:
     data = _template(FULL_V2_TEMPLATE_PATH)
     by_label = {step.get("label", ""): step for step in data["steps"]}
     params = by_label["gps_recon_area_scan"]["params"]
-    assert params["scoring_target_indices"] == [1, 3]
+    assert params["waypoints"] == [
+        {"x": -2.0, "y": 56.0, "altitude_m": 4.0},
+        {"x": 2.0, "y": 56.0, "altitude_m": 4.0},
+        {"x": 2.0, "y": 59.0, "altitude_m": 4.0},
+        {"x": -2.0, "y": 59.0, "altitude_m": 4.0},
+        {"x": 0.0, "y": 57.5, "altitude_m": 4.0},
+    ]
+    assert params["scoring_target_indices"] == []
     assert params["target_frame"] == "global"
     assert params["waypoint_mode"] == "field"
 

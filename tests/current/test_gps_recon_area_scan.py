@@ -115,6 +115,30 @@ def test_stop_stops_active_goto(action):
     assert action.update({}).done is True
 
 
+def test_five_waypoint_route_without_scoring_skips_scene_processing(monkeypatch):
+    import missions.common.actions.gps_recon_area_scan as module
+    FakeGoto.created = []
+    monkeypatch.setattr(module, "GotoWaypointAction", FakeGoto)
+    route = [
+        {"x": -2.0, "y": 56.0, "altitude_m": 4.0},
+        {"x": 2.0, "y": 56.0, "altitude_m": 4.0},
+        {"x": 2.0, "y": 59.0, "altitude_m": 4.0},
+        {"x": -2.0, "y": 59.0, "altitude_m": 4.0},
+        {"x": 0.0, "y": 57.5, "altitude_m": 4.0},
+    ]
+    value = GpsReconAreaScanAction()
+    value.start({"waypoints": route, "scoring_target_indices": []})
+    for index in range(len(route)):
+        assert FakeGoto.created[index].params["x"] == route[index]["x"]
+        value.goto_action.done = True
+        result = value.update(scene(f"route-{index}", [{"class_name": "baozha", "confidence": .9}]))
+
+    assert result.done
+    assert result.detail["ranking_mode"] is False
+    assert result.detail["ranking"] == []
+    assert result.detail["scan_summary"]["observed_unique_frame_count"] == 0
+
+
 def test_approach_frame_is_consumed_before_first_scoring_segment(action):
     frame_a = scene("approach-A", [{"class_name": "baozha", "confidence": .9}])
     action.update(frame_a)  # flying to P0: observe but do not score
