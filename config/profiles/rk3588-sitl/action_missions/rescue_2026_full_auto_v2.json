@@ -5,10 +5,10 @@
   "steps": [
     {
       "name": "takeoff",
-      "label": "takeoff_3_5m",
+      "label": "takeoff_4_5m",
       "params": {
         "mode": "GUIDED",
-        "altitude_m": 3.5,
+        "altitude_m": 4.5,
         "altitude_tolerance_m": 0.35,
         "require_armed": true,
         "max_updates": 150,
