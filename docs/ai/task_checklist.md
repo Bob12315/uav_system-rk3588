@@ -39,11 +39,6 @@ Action、Web UI Field Heading 代码和坐标测试。不得复制第三份转�
 追加：`web_ui/server.py`、`static/index.html`、`static/app.js`、`static/style.css`、
 `tests/test_web_ui.py`。不要把 terminal UI 当正式入口。
 
-## `uav_ui` 退场
-
-先检索所有 `uav_ui` import，迁出 app 共用 utilities，制作 Web 功能覆盖表；最后才
-删除 terminal/curses 文件和测试。
-
 ## YOLO
 
 追加：`yolo_app/README.md`、`config/yolo.yaml`、`yolo_app/config.py`、

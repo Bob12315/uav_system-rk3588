@@ -21,17 +21,16 @@
 ```yaml
 ui:
   web_enabled: true
-  terminal_enabled: false
 
 executor:
   send_commands: false
 ```
 
 - Web UI 是正式操作入口。
-- terminal/curses UI deprecated，虽然配置开关和代码尚待迁移清理。
+- terminal/curses UI deprecated；`config/app.yaml` 不再提供正式 terminal 开关。
 - `send_commands` 默认必须为 false；连接 telemetry 不等于允许实发。
-- `mission.name: visual_tracking` 是旧配置残留；当前依赖缺失时运行时降级为
-  `action_lab_only`。后续配置清理阶段再修改 YAML，本阶段只记录事实。
+- `mission.name: action_lab_only` 是旧 mission 配置表面的兼容标识；当前比赛任务不从
+  这里选择，而是由 Web UI 加载 `config/action_missions/*.json`。
 
 ## Action Mission JSON
 
@@ -56,16 +55,17 @@ python scripts/validate_action_missions.py
 当前部署模型是：
 
 ```text
-data/models/cuadc-fp16.rknn
+data/models/cuadc2026-fp16.rknn
 ```
 
 配置相对路径应为：
 
 ```yaml
-model_path: "../data/models/cuadc-fp16.rknn"
+model_path: "../data/models/cuadc2026-fp16.rknn"
 ```
 
-根 `config/yolo.yaml` 和各 profile 现已统一为 `cuadc-fp16.rknn`。
+根 `config/yolo.yaml` 和实机 profile 使用 `cuadc2026-fp16.rknn`；SITL profile 使用
+`gazebo_dataset-fp16.rknn`。
 
 RK3588/RKNN 可以支持 INT8，但本项目当前 INT8 模型已废弃。除非重新量化、校准并
 验证检测正常，否则不得切回 INT8 默认部署。

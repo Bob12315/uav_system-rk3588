@@ -9,13 +9,13 @@
 默认部署模型：
 
 ```text
-data/models/cuadc-fp16.rknn
+data/models/cuadc2026-fp16.rknn
 ```
 
 从 `config/yolo.yaml` 引用时，正确相对路径为：
 
 ```text
-../data/models/cuadc-fp16.rknn
+../data/models/cuadc2026-fp16.rknn
 ```
 
 RK3588/RKNN 本身可以支持 INT8，但本项目当前 INT8 模型已废弃。除非重新完成量化

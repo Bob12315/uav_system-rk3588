@@ -1,15 +1,15 @@
-# AI 快速接管
+# AI/开发者快速接管
 
-本项目只面向 Linux ARM64 RK3588。开始工作前按顺序阅读：
+本项目只面向 Linux ARM64 RK3588。修改前按顺序阅读：
 
-1. [current_architecture.md](current_architecture.md)
-2. [action_contracts.md](action_contracts.md)
-3. [deprecated_paths.md](deprecated_paths.md)
-4. [../reference/coordinate_frames.md](../reference/coordinate_frames.md)
-5. [../reference/field_origin_heading.md](../reference/field_origin_heading.md)
-6. [../reference/safety.md](../reference/safety.md)
-7. [task_checklist.md](task_checklist.md)
-8. [repo_trim_plan.md](repo_trim_plan.md)
+1. 根目录 `README.md` 和 `AGENTS.md`；
+2. [当前架构](current_architecture.md)；
+3. [Action 契约](action_contracts.md)；
+4. [废弃路径](deprecated_paths.md)；
+5. [坐标系](../reference/coordinate_frames.md)；
+6. [Field Reference](../reference/field_origin_heading.md)；
+7. [安全边界](../reference/safety.md)；
+8. [任务阅读清单](task_checklist.md)。
 
 当前主线：
 
@@ -18,19 +18,16 @@ Web UI → Action Lab / Action Mission → ActionRuntimeService → ActionRunner
 → missions/common/actions/* → ActionDispatcher → LinkManager → telemetry_link
 ```
 
-不要恢复旧 mission/stage/control 栈。不要删除整个 `uav_ui/`，其共用工具尚未迁出。
-不要让 Action 直接调用 MAVLink/LinkManager。不要使用 `release_payload` 或 RC override。
+核心规则：
 
-平台硬约束：
-
-- RKNNLite + RK3588 NPU。
-- 默认模型 `data/models/cuadc-fp16.rknn`。
-- 不新增 x86、CUDA、PyTorch 或 GPU 推理路径。
-- `executor.send_commands` 默认 false。
+- 不恢复旧 mission/stage/control 栈；
+- Action 不直接调用 pymavlink 或 `LinkManager`；
+- Web UI 是唯一正式人工操作入口；
+- RKNNLite + RK3588 NPU，实机模型为 `cuadc2026-fp16.rknn`；
+- 不新增 x86、CUDA、PyTorch 或 GPU 推理路径；
+- `executor.send_commands` 默认保持 false；
+- 投放只走 `payload_release → set_servo`；
 - 运行产物只进入 `runtime/`。
-
-文件分类参考：[repo_trim_plan.md](repo_trim_plan.md)（current/debug-only/legacy/archive）
-仓库盘点：[repo_file_inventory.txt](repo_file_inventory.txt)、[repo_loc_inventory.txt](repo_loc_inventory.txt)
 
 验证：
 
@@ -40,5 +37,4 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q tests/current tests/integra
 python scripts/validate_action_missions.py
 ```
 
-legacy 测试在 `tests/legacy/` 下，不作为主线 pytest 默认目标。
-已知测试基线见 [../refactor/phase0_baseline.md](../refactor/phase0_baseline.md)。
+主线测试说明见 `tests/README.md`。Git 历史中的设计计划和重构快照不是当前实现依据。

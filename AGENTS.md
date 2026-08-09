@@ -19,7 +19,7 @@ Do not restore or add the deprecated mission/stage/control stack, including
 
 - YOLO inference uses `RKNNLite` with an RKNN `.rknn` model on the RK3588 NPU.
 - Do not add x86, CUDA, PyTorch, or GPU inference paths.
-- The current deployment model is `data/models/cuadc-fp16.rknn`.
+- The current real-hardware deployment model is `data/models/cuadc2026-fp16.rknn`.
 - RK3588 can support INT8, but this project's current INT8 models are deprecated and must not become the default without new calibration and detection validation.
 - Runtime state, logs, SITL files, generated videos, and blackbox data belong under `runtime/`.
 

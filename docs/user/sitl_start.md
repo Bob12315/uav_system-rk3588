@@ -64,7 +64,7 @@ udp_port: 14550
 `config/yolo.yaml`：
 
 ```yaml
-model_path: "../data/models/cuadc-fp16.rknn"
+model_path: "../data/models/gazebo_dataset-fp16.rknn"
 source: 5600
 udp_ip: "127.0.0.1"
 udp_port: 5005

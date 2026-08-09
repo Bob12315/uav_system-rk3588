@@ -34,6 +34,5 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q tests/current/test_takeoff_
 
 - 已退役的 12 个 import-failing 旧架构测试记录见 [LEGACY_TEST_RETIREMENT.md](LEGACY_TEST_RETIREMENT.md)
 - Phase 2 主线失败基线见 [MAINLINE_FAILURE_BASELINE.md](MAINLINE_FAILURE_BASELINE.md)
-- 重构基线快照见 [../docs/refactor/phase0_baseline.md](../docs/refactor/phase0_baseline.md)
 
 不要通过忽略测试或隐藏旧失败来假装全绿。

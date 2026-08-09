@@ -47,5 +47,5 @@ print("numpy", numpy.__version__)
 print("rknnlite", RKNNLite)
 PY
 
-test -f "${REPO_ROOT}/data/models/cuadc-fp16.rknn"
+test -f "${REPO_ROOT}/data/models/cuadc2026-fp16.rknn"
 echo "YOLO environment '${YOLO_ENV_NAME}' is ready for RK3588."

@@ -141,11 +141,11 @@ class TestASTEndpoints:
         assert "auto_finalized" in src
 
 
-def test_step6_web_automatic_freeze_in_contract():
-    src = Path('docs/refactor/drop_v2_gps_first_contract.md').read_text()
-    assert 'Step 6 Web sampling and automatic freeze' in src
-    assert 'Schema v3 runtime GPS binding' in src
-    assert 'automatic confirm, apply, and freeze' in src
+def test_runtime_binding_automatic_freeze_in_current_contract():
+    src = Path("docs/reference/field_origin_heading.md").read_text()
+    assert "Schema v3：比赛现场初始化" in src
+    assert "自动 finalize、apply 并 freeze" in src
+    assert "is_ready_for_field_to_local=false" in src
 
 
 class TestAuditSafety:

@@ -31,7 +31,9 @@ Web UI
 | `telemetry_link/` | 飞控状态、命令队列、MAVLink 封装和发送 |
 | `fusion/` | 感知与飞控/云台状态融合，不发送命令 |
 | `yolo_app/` | RKNNLite/NPU 感知和 UDP 输出，不连接 MAVLink |
-| `uav_ui/` | deprecated terminal UI；部分共用工具尚待迁出 |
+
+旧 terminal/curses UI 已从仓库移除；相关仍在使用的共用逻辑位于 `app/`，不得重新建立
+独立 terminal 人工操作入口。
 
 ## 已废弃旧主线
 

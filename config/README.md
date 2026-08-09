@@ -1,107 +1,92 @@
-# Configuration
+# 比赛系统配置
 
-The active configuration files are tracked in Git and read directly by the
-application:
+程序直接读取 `config/` 下的生效配置。修改实机参数前应保存当前版本，并始终保持
+`config/app.yaml` 中 `executor.send_commands: false`，直到完成干跑和 SITL 验证。
 
-```text
-config/app.yaml         — 应用全局配置（executor、服务开关、系统参数）
-config/telemetry.yaml   — MAVLink 遥测链接配置（连接参数、设备、端口）
-config/yolo.yaml        — YOLO 感知配置（模型路径、阈值、视频源、输出）
-```
+## 生效配置
 
-## Action Mission Templates
-
-```text
-config/action_missions/*.json
-```
-
-`config/action_missions/` 存放 Action Mission JSON 模板。每个模板定义一组有序的
-Action 步骤及其参数，由 Action Mission 页面加载执行。
-
-当前模板：
-
-| 文件 | 用途 |
+| 路径 | 用途 |
 | --- | --- |
-| `drop_two_targets_v1.json` | 双目标投放任务 |
-| `recon_inspect_5_targets_stepwise_v1.json` | 五目标侦察检查（分步） |
-| `rescue_2026_full_auto.json` | 2026 救援比赛全自动任务 |
+| `config/app.yaml` | app 生命周期、服务、Web UI、blackbox 和系统 SEND |
+| `config/telemetry.yaml` | MAVLink 数据源、端点、频率和超时 |
+| `config/yolo.yaml` | RKNN 模型、摄像头、阈值、UDP 和视频流 |
+| `config/action_missions/*.json` | 完整比赛和分项 Action Mission 模板 |
+| `config/field_profiles/*.json` | 比赛场地、现场初始化模板和 SITL 场地 |
 
-模板由 `scripts/validate_action_missions.py` 校验。
+旧 `missions/<mission_name>/config.yaml` 属于 deprecated mission/stage 架构，不再是
+比赛任务配置入口，也不得新增以恢复旧任务栈。
 
-## Configuration Profiles
+## Action Mission 模板
 
-```text
-config/profiles/rk3588-real/   — 实机部署配置档案
-config/profiles/rk3588-sitl/   — SITL 仿真配置档案
+| 文件 | 定位 |
+| --- | --- |
+| `rescue_2026_full_auto_v2.json` | 当前完整 GPS-first 比赛流程 |
+| `drop_two_targets_v2.json` | 双目标投放分项流程 |
+| `recon_gps_v2.json` | GPS 危险标识侦察分项流程 |
+| `rescue_2026_full_auto.json` | 第一版完整任务，回归参考 |
+| `drop_two_targets_v1.json` | 第一版双目标投放，稳定性参考 |
+| `recon_sequence_v1.json` | 第一版侦察组合流程 |
+| `recon_inspect_5_targets_stepwise_v1.json` | 旧分步五目标检查流程 |
+| `recon_inspect_5_targets_stepwise_v2.json` | 第二版分步侦察与报告流程 |
+
+模板由 Web UI 加载并交给 `MissionOrchestrator`。修改后必须运行：
+
+```bash
+python scripts/validate_action_missions.py
 ```
 
-Profiles 保存不同部署环境的 `telemetry.yaml`、`yolo.yaml` 和
-`action_missions/*.json` 快照，通过 `scripts/config/apply_*.sh` 切换到工作区，
-通过 `scripts/config/save_*.sh` 从工作区保存更新。
+validator 只检查模板结构和引用，不代表通过 SITL 或实飞验证。
 
-Mission-specific settings remain under `missions/<mission_name>/config.yaml`.
-Generated logs, SITL state, and videos belong under `runtime/`.
+## Field Profile
+
+- `competition_runtime_v3.json`：比赛现场初始化模板；输入 forward marker GPS，并在
+  起飞点采样动态原点。
+- `XSYU.json`：已测绘的 schema v2 固定场地 profile。
+- `sitl_centerline_lane.json`：SITL 场地 profile。
+- `example_*.json`：格式示例，不作为正式比赛默认值。
+
+场地绑定完成前不得实发 FIELD 航点。详细契约见
+`docs/reference/field_origin_heading.md`。
 
 ## RK3588 Profiles
 
-Use one of the explicit scripts to replace the active telemetry and YOLO
-configuration:
+```text
+config/profiles/rk3588-real/   — 实机配置快照
+config/profiles/rk3588-sitl/   — SITL 配置快照
+```
+
+切换生效配置：
 
 ```bash
 bash scripts/config/apply_rk3588_real.sh
 bash scripts/config/apply_rk3588_sitl.sh
 ```
 
-After tuning the active files, save them back to a profile:
+保存当前调参结果到 profile：
 
 ```bash
 bash scripts/config/save_rk3588_real.sh
 bash scripts/config/save_rk3588_sitl.sh
 ```
 
-Both scripts refuse to switch profiles unless
-`config/app.yaml executor.send_commands` is strictly `false`.
+profile apply/save 脚本在 `executor.send_commands` 不是严格 `false` 时应拒绝执行。
+实机 profile 使用 `cuadc2026-fp16.rknn` 和实机 MAVLink/摄像头；SITL profile 使用
+`gazebo_dataset-fp16.rknn`、UDP 14550 和仿真视频源。
 
-The real profile uses MAVLink `eth / udpin / 0.0.0.0:15001` and `/dev/video41`.
-Update the camera source in `config/yolo.yaml` after applying the profile if
-the board exposes a stable `/dev/v4l/by-id/...` path.
+## 部署
 
-The SITL profile expects a PC to send MAVLink UDP to port `14550` and H264/RTP
-video to port `5600` on the RK3588 board.
-
-Profile save/apply manages:
-
-```text
-config/telemetry.yaml
-config/yolo.yaml
-config/action_missions/*.json
-missions/*/config.yaml, when those mission configs exist
-```
-
-Review and commit profile changes after saving:
-
-```bash
-git diff -- config/profiles
-git add config/profiles
-git commit -m "Update RK3588 profile parameters"
-```
-
-## Deployment
-
-Install or refresh the systemd user services:
+安装或刷新 systemd 用户服务：
 
 ```bash
 bash scripts/deploy/install_systemd_user_services.sh --dry-run
-bash scripts/deploy/install_systemd_user_services.sh
 bash scripts/deploy/install_systemd_user_services.sh --enable-now
 ```
 
-The installer renders the current repository path and Python paths into the
-user service files. Override `APP_PYTHON` or `YOLO_PYTHON` if the conda
-environments do not live under `~/anaconda3/envs/`.
-
-Run the read-only board check after installation or configuration changes:
+配置变化后执行只读板卡检查：
 
 ```bash
 bash scripts/healthcheck/check_rk3588.sh
 ```
+
+日志、录像、SITL 状态和 blackbox 数据属于 `runtime/`，不得写入配置目录或提交为
+正式配置。

@@ -69,7 +69,7 @@ ls -l /dev/v4l/by-id/
 在 `config/yolo.yaml` 中配置板端模型和实际摄像头。例如：
 
 ```yaml
-model_path: "../data/models/cuadc-fp16.rknn"
+model_path: "../data/models/cuadc2026-fp16.rknn"
 source: /dev/v4l/by-id/<usb-camera>-video-index0
 target_class: "bucket"
 ```

@@ -1,41 +1,48 @@
 # 文档索引
 
-## 当前权威入口
+本目录只保留当前比赛系统仍在使用的教程、操作手册和权威规范。已完成的设计计划、
+重构过程记录、仓库快照以及旧 mission/stage/terminal UI 文档已经删除，历史变化由 Git
+提交记录追溯。
+
+## 新手入口
 
 | 文档 | 用途 |
 | --- | --- |
-| [ai/README.md](ai/README.md) | AI/开发者接管入口 |
-| [ai/current_architecture.md](ai/current_architecture.md) | 当前 Action 主线与架构裁决 |
-| [ai/action_contracts.md](ai/action_contracts.md) | Action 边界和参数迁移方向 |
-| [ai/deprecated_paths.md](ai/deprecated_paths.md) | 禁止恢复的旧路径与删除前置条件 |
+| [../README.md](../README.md) | 项目介绍和完整学习路线 |
+| [beginner/README.md](beginner/README.md) | 从采购、组装到比赛操作的连续教程 |
+| [hardware/README.md](hardware/README.md) | BOM、接线、供电、相机、MAVLink 和投放记录 |
+
+## 比赛与用户操作
+
+| 文档 | 用途 |
+| --- | --- |
+| [mission/action_mission_rescue_2026.md](mission/action_mission_rescue_2026.md) | 当前完整比赛任务和分项模板 |
+| [user/README.md](user/README.md) | 已完成安装后的用户入口 |
+| [user/install.md](user/install.md) | RK3588 app/yolo 环境安装 |
+| [user/running.md](user/running.md) | 服务、配置、更新和日志 |
+| [user/sitl_start.md](user/sitl_start.md) | 当前 SITL/Gazebo 联调 |
+
+## 架构与开发
+
+| 文档 | 用途 |
+| --- | --- |
+| [ai/README.md](ai/README.md) | AI/开发者快速接管 |
+| [ai/current_architecture.md](ai/current_architecture.md) | 当前唯一 Action 主线和模块边界 |
+| [ai/action_contracts.md](ai/action_contracts.md) | Action、参数、速度和投放契约 |
+| [ai/interfaces.md](ai/interfaces.md) | Action/runtime/telemetry 总体接口 |
+| [ai/deprecated_paths.md](ai/deprecated_paths.md) | 禁止恢复的旧路径 |
+| [ai/task_checklist.md](ai/task_checklist.md) | 按修改类型追加阅读和验证 |
+
+## 权威参考
+
+| 文档 | 用途 |
+| --- | --- |
+| [reference/configuration.md](reference/configuration.md) | 当前配置文件和 profile |
 | [reference/coordinate_frames.md](reference/coordinate_frames.md) | 坐标系唯一规范源 |
-| [reference/field_origin_heading.md](reference/field_origin_heading.md) | Field Reference 与 GPS A/B 设计 |
-| [reference/safety.md](reference/safety.md) | 当前发送链路与安全边界 |
-| [refactor/phase0_baseline.md](refactor/phase0_baseline.md) | 重构分支基线快照 |
-| [ai/repo_trim_plan.md](ai/repo_trim_plan.md) | 仓库文件裁剪分类（current/debug-only/legacy/archive） |
+| [reference/field_origin_heading.md](reference/field_origin_heading.md) | Field Reference schema v2/v3 |
+| [reference/safety.md](reference/safety.md) | SEND、停止、断线和投放安全边界 |
+| [reference/telemetry_link_interfaces.md](reference/telemetry_link_interfaces.md) | LinkManager 公开接口 |
 
-## 用户文档
-
-| 文档 | 用途 |
-| --- | --- |
-| [user/README.md](user/README.md) | 用户入口 |
-| [user/install.md](user/install.md) | RK3588 安装 |
-| [user/running.md](user/running.md) | 运行和服务管理 |
-| [user/sitl_start.md](user/sitl_start.md) | SITL 联调 |
-| [user/rescue_competition_sitl.md](user/rescue_competition_sitl.md) | 历史比赛/SITL 资料；使用前核对 deprecated 清单 |
-
-## AI 与参考文档
-
-| 文档 | 用途 |
-| --- | --- |
-| [ai/architecture.md](ai/architecture.md) | 当前模块边界 |
-| [ai/interfaces.md](ai/interfaces.md) | 当前 Action/runtime/telemetry 接口 |
-| [ai/control_flow.md](ai/control_flow.md) | 当前数据和命令流 |
-| [ai/development_rules.md](ai/development_rules.md) | 开发规则 |
-| [ai/task_checklist.md](ai/task_checklist.md) | 按任务追加阅读 |
-| [reference/configuration.md](reference/configuration.md) | 当前配置说明 |
-
-**当前实现以根目录 `README.md`、`AGENTS.md` 和 `docs/ai/current_architecture.md` 为准。**
-
-`archive/` 和 `docs/refactor/` 保存历史材料，不是当前实现依据。旧 mission/stage 文档若未标注更新，均按
-[deprecated_paths.md](ai/deprecated_paths.md) 处理。`docs/ai/repo_trim_plan.md` 提供了全仓库文件的 current/debug-only/legacy/archive 分类。
+当前实现冲突时，以根 `AGENTS.md`、
+[current_architecture.md](ai/current_architecture.md)、实际代码和配置为准。不要根据 Git
+历史中的旧文档恢复 mission/stage/control、CommandShaper 或 FlightCommandExecutor。

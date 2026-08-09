@@ -1,183 +1,184 @@
-# Action Mission Rescue 2026
+# 2026 救援比赛 Action Mission
 
-## Overview
+本文描述当前比赛任务主线。正式完整流程以
+`config/action_missions/rescue_2026_full_auto_v2.json` 和实际代码为准。
 
-The current full rescue competition Action Mission runs this flow:
+## 比赛任务目标
+
+系统需要在同一次任务中完成：
+
+1. 建立并冻结比赛 FIELD 坐标；
+2. 起飞后在投放区多视角定位目标；
+3. 选择两个有效目标，依次视觉对准并投放载荷；
+4. 前往侦察区扫描危险标识并生成排名；
+5. 返回起飞点，执行视觉辅助降落和 LAND 兜底。
+
+FIELD 坐标中 `+Y` 为场地前方、`+X` 为场地右方，`altitude_m` 向上为正。
+投放区和侦察区几何来自当前 Field Profile，不应在运行时代码中另写一套坐标。
+
+## 当前完整流程
+
+`rescue_2026_full_auto_v2.json` 当前包含以下步骤：
 
 ```text
 takeoff
-multi_view_localize
-select_drop_targets
-drop target 0
-drop target 1
-recon_scan
-return_home
-land
+→ gps_multi_view_localize
+→ select_drop_targets
+→ change_speed (1 m/s)
+→ gps_drop_sequence
+→ change_speed (2 m/s)
+→ change_speed (1 m/s)
+→ goto_waypoint (recon entry)
+→ gps_recon_area_scan
+→ change_speed (2 m/s)
+→ goto_waypoint (return home)
+→ goto_waypoint (descend home)
+→ visual_land
+→ land
 ```
 
-The mission templates are:
+速度切换必须显式使用 `change_speed` Action。`goto_waypoint` 中的到点速度参数是完成
+判据，不是飞行限速。
 
-```text
-config/action_missions/drop_two_targets_v1.json
-config/action_missions/rescue_2026_full_auto.json
-```
+## 模板定位
 
-## Architecture
+| 模板 | 用途 |
+| --- | --- |
+| `rescue_2026_full_auto_v2.json` | 当前完整 GPS-first 比赛流程 |
+| `drop_two_targets_v2.json` | 双目标投放分项流程 |
+| `recon_gps_v2.json` | 危险标识侦察分项流程 |
+| `rescue_2026_full_auto.json` | 第一版完整流程，保留作回归参考 |
+| `drop_two_targets_v1.json` | 第一版双投放流程，偏稳定性验证 |
+| `recon_sequence_v1.json` | 第一版侦察组合流程 |
+| `recon_inspect_5_targets_stepwise_v1.json` | 旧分步五目标检查流程 |
+| `recon_inspect_5_targets_stepwise_v2.json` | 第二版分步侦察与报告流程 |
 
-The control chain is:
+模板存在不代表已经通过实飞验收。正式比赛前必须在 Web UI 核对当前模板内容、场地
+profile、速度、高度、SERVO 输出和失败恢复目标。
+
+## 运行架构
 
 ```text
 Action Mission JSON
-  -> MissionOrchestrator
-  -> MissionBlackboard
-  -> ActionRuntimeService
-  -> ActionRunner
-  -> Action.update()
-  -> ActionResult
-  -> ActionDispatcher
-  -> LinkManager
-  -> Flight Controller / YOLO / Servo
+  → MissionOrchestrator
+  → MissionBlackboard
+  → ActionRuntimeService
+  → ActionRunner
+  → Action.update()
+  → ActionResult
+  → ActionDispatcher
+  → LinkManager
+  → Flight Controller / YOLO / Servo
 ```
 
-Mission code does not call pymavlink directly. Mission code does not call `LinkManager` directly. Flight-controller commands only flow through `ActionDispatcher`. Payload drop commands only flow through `payload_release -> set_servo -> set_servo_output_pwm`.
-
-## Template Data Flow
-
-The blackboard data flow is:
+Mission 和 Action 不得直接调用 pymavlink 或 `LinkManager`。飞控请求只允许经由
+`ActionDispatcher` 派发；投放只允许走：
 
 ```text
-multi_view_localize save_as drop_scan
-  -> drop_scan.localized_objects
-
-select_drop_targets save_as drop_targets
-  -> drop_targets.selected_targets
-
-recon_scan save_as recon_scan
-  -> recon_scan.recon_report
+payload_release → set_servo → MAV_CMD_DO_SET_SERVO
 ```
 
-Example parameter references:
+## Blackboard 数据流
+
+Mission 步骤可用 `save_as` 保存 `ActionResult.detail`，后续参数使用完整字符串 `$path`
+读取。当前 v2 投放主线的主要数据流是：
+
+```text
+gps_multi_view_localize save_as drop_scan
+  → drop_scan.localized_objects
+
+select_drop_targets save_as drop_targets
+  → drop_targets.selected_targets
+
+gps_drop_sequence save_as drop_sequence
+  → 双目标执行结果
+```
+
+参数引用支持字典键和列表索引，例如：
 
 ```json
 {
-  "x": "$drop_targets.selected_targets.0.local_x",
-  "y": "$drop_targets.selected_targets.0.local_y"
+  "target": "$drop_targets.selected_targets.0"
 }
 ```
 
-## Mission Step Fields
+当前只支持整个字符串为 `$path`，不支持把路径插入到其他字符串中。
 
-Mission steps support these fields:
+## 步骤和失败策略
+
+步骤基本结构：
 
 ```json
 {
   "name": "action_name",
   "label": "optional_label",
   "save_as": "optional_blackboard_key",
-  "on_failed": {
-    "action": "retry_current"
-  },
-  "params": {}
-}
-```
-
-`name` is the registered Action name. `params` is passed to `Action.start`. `save_as` stores `ActionResult.detail` in the blackboard. `label` is a jump target for failure recovery. `on_failed` selects the failure policy for that step.
-
-## Failure Policies
-
-Supported policies are:
-
-```text
-fail
-retry_current
-jump_to
-continue
-```
-
-Retry the current step:
-
-```json
-{
-  "on_failed": {
-    "action": "retry_current",
-    "max_attempts": 2
-  }
-}
-```
-
-Jump to a labeled step:
-
-```json
-{
+  "params": {},
   "on_failed": {
     "action": "jump_to",
-    "target": "goto_target_0",
+    "target": "recovery_label",
     "max_attempts": 1
   }
 }
 ```
 
-Continue after a failed step:
+当前 orchestrator 支持 `fail`、`retry_current`、`retry_current_then_jump_to`、
+`jump_to` 和 `continue` 等模板已使用的策略。调整恢复路径时必须确认：
 
-```json
-{
-  "on_failed": {
-    "action": "continue"
-  }
-}
+- 失败 Action 的连续速度和 pending position 已停止、清除；
+- 跳转目标不会重复投放同一载荷；
+- 阶段限速在失败或跳转后得到恢复；
+- 侦察失败仍能进入返航/降落安全路径；
+- `payload_release` 失败不得被无条件忽略。
+
+## 场地初始化和起飞前检查
+
+当前完整 v2 模板使用 FIELD/GPS 派生坐标。任务启动前要求 Field Reference 已确认、
+同步并冻结。Web UI 的 `Competition Field Setup` 使用 schema v3 流程：输入场地前向
+标记点 GPS，在起飞点采集当前 GPS 样本，生成运行时原点和 heading，再冻结到本次任务。
+
+预采集的 schema v2 centerline profile 仍可用于固定场地和 SITL。两种流程的具体契约见
+`docs/reference/field_origin_heading.md`。
+
+## 安全门控
+
+配置或加载 Mission 不发送飞行命令。实发至少需要：
+
+1. `config/app.yaml` 中系统 `executor.send_commands` 已人工开启；
+2. Action `send_actions` 请求已开启；
+3. telemetry、Field Reference 和相关 Action preflight 条件有效。
+
+`SEND=OFF` 是默认状态。停止、跳过、失败或切换连续控制 Action 时必须明确发送
+zero/stop 并清理旧命令。实机急停和最终接管依赖遥控器或地面站，不能只依赖停止 app。
+
+## 验证顺序
+
+```text
+1. 当前主线单元/集成测试
+2. Action Mission 模板离线校验
+3. Web UI Configure 检查
+4. SEND=OFF 完整干跑
+5. SITL 低速 SEND=ON
+6. 实机无载荷飞行
+7. 挂载载荷但断开投放输出
+8. 空载验证 SERVO 通道和 PWM
+9. 正式载荷投放
 ```
 
-Recommended use:
-
-- Drop-zone scan failure can retry.
-- Target selection failure can jump back to scan.
-- `target_lock` or `align_descend` failure can jump back above the target.
-- `payload_release` failure must fail the mission.
-- `recon_scan` failure can continue to return home and land.
-
-## Safety Notes
-
-Configure does not send flight commands. Start and Tick advance the mission. `SEND=OFF` is dry-run mode. Commands may be sent only when `SEND=ON` and `send_actions` is enabled. Run SITL before real flight. Test without payload before mounting payload. The drop channel is flight-controller SERVO output, not RC input. `release_payload()` is forbidden for competition drops. Do not bypass the dispatcher with direct pymavlink calls.
-
-## Coordinates
-
-Mission `altitude_m` values are positive upward. Actions convert altitude to LOCAL_NED with `z_down_m = -altitude_m`. `x` and `y` are LOCAL_NED local coordinates. Do not infer flight-controller coordinates from the Web UI map display direction. Before real flight, verify the field coordinate directions with `goto_waypoint`.
-
-## Dry-run Validation
-
-Validate all templates offline:
+离线校验：
 
 ```bash
 python scripts/validate_action_missions.py
+python scripts/validate_action_missions.py \
+  config/action_missions/rescue_2026_full_auto_v2.json
 ```
 
-Validate one template:
+validator 不连接飞控，不验证识别精度、坐标标定、飞行安全或实机投放结果。
 
-```bash
-python scripts/validate_action_missions.py config/action_missions/rescue_2026_full_auto.json
-```
+## 当前限制
 
-The validator only performs offline checks. It does not connect to the flight controller and does not send commands.
-
-## Recommended Test Order
-
-```text
-1. pytest unit tests
-2. validate_action_missions.py offline template checks
-3. Web UI Configure dry-run
-4. Action Mission SEND=OFF dry-run
-5. SITL SEND=ON
-6. Real vehicle without payload
-7. Real vehicle with payload mounted but drop disconnected
-8. Real vehicle formal payload drop
-```
-
-## Known Limitations
-
-- There is no complex if/else DSL yet.
-- Parameter references only support a whole-string `$path`; string interpolation is not supported.
-- The first target-selection version ranks by class score and observation stability.
-- The first `recon_scan` version conservatively outputs blank when uncertain.
-- Paper report generation is not automated.
-- Coordinates still require calibration for the actual field.
-- `tests/test_action_lab_dispatch.py` still has an existing environment issue unrelated to the current Action Mission mainline.
+- Mission 还是顺序编排器，没有通用 if/else DSL。
+- 比赛参数仍需按正式场地、机体、相机和载荷进行现场标定。
+- 危险标识排名依赖当前模型、阈值和观察点覆盖，不能只凭模板校验判定有效。
+- Action 连续控制尚缺完整替代旧 CommandShaper 的 safety pipeline。
+- 报告结果可供 Web UI 和 blackboard 使用，但最终比赛交付形式仍需按规则确认。

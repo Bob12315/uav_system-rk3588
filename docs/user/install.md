@@ -16,7 +16,6 @@ bash scripts/install/install_app_env.sh
 - `missions`
 - `fusion`
 - `telemetry_link`
-- `uav_ui`
 - `tests`
 
 脚本会先检查：
@@ -59,13 +58,13 @@ bash scripts/install/install_yolo_env.sh
 仓库内已跟踪部署模型：
 
 ```text
-data/models/cuadc-fp16.rknn
+data/models/cuadc2026-fp16.rknn
 ```
 
 `config/yolo.yaml` 使用相对于配置文件的路径：
 
 ```yaml
-model_path: "../data/models/cuadc-fp16.rknn"
+model_path: "../data/models/cuadc2026-fp16.rknn"
 ```
 
 模型为 Rockchip 优化的 FP16 RKNN 文件，输入为 RGB uint8 `(1, 640, 640, 3)`，固定使用
