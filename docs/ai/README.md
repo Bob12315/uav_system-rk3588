@@ -11,6 +11,9 @@
 7. [安全边界](../developer/safety.md)；
 8. [任务阅读清单](task_checklist.md)。
 
+在 RK3588 实机上部署本项目时，还必须阅读
+[RK3588 AI 部署规范](DEPLOY_RK3588.md)。
+
 当前主线：
 
 ```text
