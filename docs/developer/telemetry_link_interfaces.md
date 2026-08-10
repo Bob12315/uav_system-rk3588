@@ -1,5 +1,7 @@
 # Telemetry Link Public API Reference
 
+本文面向维护飞控通信与命令派发接口的开发者。
+
 > **Status:** T2 document — maps the current code, no behavioural change.
 
 ## Principle

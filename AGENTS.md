@@ -47,8 +47,8 @@ Do not restore or add the deprecated mission/stage/control stack, including
 3. `docs/ai/current_architecture.md`
 4. `docs/ai/action_contracts.md`
 5. `docs/ai/deprecated_paths.md`
-6. `docs/reference/coordinate_frames.md`
-7. `docs/reference/field_origin_heading.md`
-8. `docs/reference/safety.md`
+6. `docs/developer/coordinate_frames.md`
+7. `docs/developer/field_origin_heading.md`
+8. `docs/developer/safety.md`
 
 Use `docs/ai/task_checklist.md` for task-specific files.

@@ -22,7 +22,7 @@ class LocalNedPoint:
     """A point in the LOCAL_NED frame.
 
     ``north_m`` / ``east_m`` / ``z_down_m`` follow the conventions in
-    ``docs/reference/coordinate_frames.md``.
+    ``docs/developer/coordinate_frames.md``.
     """
 
     north_m: float
@@ -68,7 +68,7 @@ def field_to_local_ned(
 ) -> LocalNedPoint:
     """Convert FIELD coordinates to LOCAL_NED.
 
-    Implements the formula from ``docs/reference/coordinate_frames.md``::
+    Implements the formula from ``docs/developer/coordinate_frames.md``::
 
         forward_N = cos(field_heading_yaw_rad)
         forward_E = sin(field_heading_yaw_rad)

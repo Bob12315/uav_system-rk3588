@@ -36,7 +36,7 @@
   → ArduPilot：姿态、位置、动力和舵机输出
 ```
 
-更详细的内部架构见 [比赛任务说明](docs/mission/action_mission_rescue_2026.md)；新手不需要
+更详细的内部架构见 [比赛任务说明](docs/developer/action_mission_rescue_2026.md)；新手不需要
 先理解全部代码才能开始组装。
 
 ## 新手完整学习路线
@@ -45,20 +45,12 @@
 
 | 顺序 | 教程 | 完成标志 |
 | ---: | --- | --- |
-| 0 | [新手教程总目录](docs/beginner/README.md) | 知道整个搭建顺序和安全边界 |
-| 1 | [认识项目](docs/beginner/01_project_overview.md) | 能说清 RK3588、飞控和相机各自负责什么 |
-| 2 | [准备硬件](docs/beginner/02_hardware_bom.md) | 完成硬件清单，所有未知型号已确认 |
-| 3 | [机械组装](docs/beginner/03_mechanical_assembly.md) | 机架、飞控、RK3588、相机和投放机构固定完成 |
-| 4 | [接线与供电](docs/beginner/04_wiring_and_power.md) | 完成断电检查、供电测量和接线复核 |
-| 5 | [准备 RK3588](docs/beginner/05_rk3588_preparation.md) | 能通过 SSH 登录，系统和 NPU 基础状态正常 |
-| 6 | [让 AI 部署软件](docs/beginner/06_ai_deployment.md) | app/yolo 环境、配置和服务安装完成 |
-| 7 | [第一次启动](docs/beginner/07_first_start.md) | Web UI、视频、YOLO 和 telemetry 状态可见 |
-| 8 | [无桨台架测试](docs/beginner/08_bench_test.md) | 方向、状态、相机和舵机均完成无动力验证 |
-| 9 | [SITL 仿真](docs/beginner/09_sitl_test.md) | 在仿真中完成低速 Action Mission 验证 |
-| 10 | [比赛场地初始化](docs/beginner/10_field_setup.md) | Field Reference 已确认、同步并冻结 |
-| 11 | [第一次实飞](docs/beginner/11_first_flight.md) | 无载荷、低速、分项任务验证完成 |
-| 12 | [比赛当天操作清单](docs/beginner/12_competition_runbook.md) | 可以按固定顺序完成赛前检查和任务启动 |
-| 13 | [故障排查](docs/beginner/13_troubleshooting.md) | 知道从电源、服务、端口和日志逐层定位问题 |
+| 1 | [前言](docs/beginner/01_preface.md) | 理解系统组成、比赛目标和安全边界 |
+| 2 | [配置清单](docs/beginner/02_hardware_bom.md) | 填完 BOM，硬件、工具和软件资料准备完成 |
+| 3 | [无人机组装](docs/beginner/03_drone_assembly.md) | 机械、接线、供电和无桨检查完成 |
+| 4 | [RK3588 环境配置](docs/beginner/04_rk3588_setup.md) | app、YOLO、Web UI 和只读遥测正常 |
+| 5 | [SITL 测试](docs/beginner/05_sitl_test.md) | 仿真中完成分项与完整任务验证 |
+| 6 | [实飞测试](docs/beginner/06_flight_test.md) | 台架、无载荷、分项和完整任务逐级验收 |
 
 ## 购买硬件前先看
 
@@ -76,9 +68,9 @@ RK3588 板卡和相机实物型号。因此硬件文档把尚未确认的项目�
 - 两路投放机构、舵机和独立验证过的 SERVO 输出；
 - 必要的 DC-DC、电源分配、保险和线材。
 
-详细表格见 [硬件清单](docs/beginner/02_hardware_bom.md) 和
-[硬件参考总目录](docs/hardware/README.md)。填写清单时必须记录准确型号、输入电压、
-接口、数量和实机验证状态。
+完整 BOM 表见 [配置清单](docs/beginner/02_hardware_bom.md)，接线、供电、相机和投放机构
+记录表已统一放入 [无人机组装](docs/beginner/03_drone_assembly.md)。填写时必须记录准确
+型号、输入电压、接口、数量和实机验证状态。
 
 ## 可以让 AI 帮你部署
 
@@ -101,7 +93,7 @@ RK3588 板卡和相机实物型号。因此硬件文档把尚未确认的项目�
 ```text
 请帮助我部署当前仓库，但先只做只读检查，不要安装或修改任何文件。
 请先阅读 README.md、AGENTS.md、docs/ai/current_architecture.md、
-docs/reference/safety.md 和 docs/beginner/06_ai_deployment.md。
+docs/developer/safety.md 和 docs/beginner/04_rk3588_setup.md。
 
 必须遵守：
 1. 始终保持 config/app.yaml 的 executor.send_commands=false。
@@ -112,7 +104,7 @@ docs/reference/safety.md 和 docs/beginner/06_ai_deployment.md。
    再给出分阶段部署计划。
 ```
 
-完整的可复制提示词见 [AI 部署教程](docs/beginner/06_ai_deployment.md)。
+完整的可复制提示词见 [RK3588 环境配置](docs/beginner/04_rk3588_setup.md)。
 
 ## 当前软件约束
 
@@ -143,17 +135,17 @@ payload_release → set_servo → MAV_CMD_DO_SET_SERVO
 ```
 
 禁止使用 RC override、旧 `release_payload` 接口或在 Action 中直接调用 pymavlink。
-实机前完整阅读 [安全边界](docs/reference/safety.md)。
+实机前完整阅读 [安全边界](docs/developer/safety.md)。
 
 ## 已经熟悉系统后
 
-- [比赛任务说明](docs/mission/action_mission_rescue_2026.md)
-- [运行和服务管理](docs/user/running.md)
-- [配置说明](docs/reference/configuration.md)
-- [坐标系规范](docs/reference/coordinate_frames.md)
-- [Field Reference](docs/reference/field_origin_heading.md)
+- [开发者文档入口](docs/developer/README.md)
+- [比赛任务说明](docs/developer/action_mission_rescue_2026.md)
+- [配置说明](docs/developer/configuration.md)
+- [坐标系规范](docs/developer/coordinate_frames.md)
+- [Field Reference](docs/developer/field_origin_heading.md)
 - [开发者/AI 接管入口](docs/ai/README.md)
 - [当前架构裁决](docs/ai/current_architecture.md)
 - [完整文档索引](docs/README.md)
 
-如果你正在第一次搭建，请回到 [新手教程总目录](docs/beginner/README.md)，按章节继续。
+如果你正在第一次搭建，请从 [前言](docs/beginner/01_preface.md) 开始按六章继续。

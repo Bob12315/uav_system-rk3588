@@ -26,7 +26,7 @@ FIELD 航点建议迁移为：
 
 LOCAL_NED 建议使用 `local_n_m/local_e_m/z_down_m`；BODY_NED 速度建议使用
 `vx_forward_mps/vy_right_mps/vz_down_mps`。完整符号约定见
-[../reference/coordinate_frames.md](../reference/coordinate_frames.md)。
+[坐标系规范](../developer/coordinate_frames.md)。
 
 ## 兼容现状
 

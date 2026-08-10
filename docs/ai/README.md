@@ -6,9 +6,9 @@
 2. [当前架构](current_architecture.md)；
 3. [Action 契约](action_contracts.md)；
 4. [废弃路径](deprecated_paths.md)；
-5. [坐标系](../reference/coordinate_frames.md)；
-6. [Field Reference](../reference/field_origin_heading.md)；
-7. [安全边界](../reference/safety.md)；
+5. [坐标系](../developer/coordinate_frames.md)；
+6. [Field Reference](../developer/field_origin_heading.md)；
+7. [安全边界](../developer/safety.md)；
 8. [任务阅读清单](task_checklist.md)。
 
 当前主线：

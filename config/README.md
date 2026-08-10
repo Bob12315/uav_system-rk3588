@@ -46,7 +46,7 @@ validator 只检查模板结构和引用，不代表通过 SITL 或实飞验证�
 - `example_*.json`：格式示例，不作为正式比赛默认值。
 
 场地绑定完成前不得实发 FIELD 航点。详细契约见
-`docs/reference/field_origin_heading.md`。
+`docs/developer/field_origin_heading.md`。
 
 ## RK3588 Profiles
 

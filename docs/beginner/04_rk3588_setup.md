@@ -1,14 +1,109 @@
-# 06：使用 AI 部署软件环境
+# 04：RK3588 环境配置
 
 ## 本章目标
 
-使用能够读取仓库、执行终端命令并展示改动的 AI 编程助手，分阶段完成环境检查、依赖
-安装、配置和 systemd 服务部署。
+从空白 RK3588 开始准备 Linux、网络、相机和 NPU，再使用能够读取仓库、执行终端命令并
+展示改动的 AI 编程助手，分阶段完成依赖安装、配置、服务部署和第一次只读启动。
 
-预计时间：1～4 小时，取决于网络、板卡镜像和 NPU 环境。需要准备：稳定 SSH、Conda、
-仓库地址、真实相机/MAVLink 信息。
+预计时间：2 小时到半天，取决于网络、板卡镜像和 NPU 环境。需要准备：已完成组装的
+RK3588、显示器或串口控制台、局域网、仓库地址、真实相机/MAVLink 信息。
 
-## 为什么要分阶段
+> 本章只做软件部署和只读联调。保持拆桨、无正式载荷和
+> `executor.send_commands: false`，不要运行 Action 或 Mission。
+
+## 一、准备板卡系统
+
+### 1. 确认架构和系统
+
+登录板卡后运行：
+
+```bash
+uname -a
+uname -m
+cat /etc/os-release
+```
+
+项目只支持 Linux ARM64 RK3588，架构应为 `aarch64` 或 `arm64`。如果是 x86_64，不要
+添加 CUDA、PyTorch 或模拟兼容路径。
+
+### 2. 建立网络和 SSH
+
+```bash
+ip address
+ip route
+hostname -I
+```
+
+从管理电脑测试：
+
+```bash
+ssh <用户名>@<RK3588-IP>
+```
+
+比赛现场应使用固定或可重复找到的地址，并准备离线操作方案。不要把 Wi-Fi 密码、SSH
+私钥或访问令牌写进仓库和 AI 提示词。
+
+### 3. 检查时间、存储和内存
+
+```bash
+date
+df -h
+free -h
+```
+
+日志、录像、SITL 文件和 blackbox 应写入 `runtime/`。预留足够空间，按板卡厂商方法检查
+温度和散热状态。
+
+### 4. 检查相机
+
+USB/V4L2 相机可先运行：
+
+```bash
+v4l2-ctl --list-devices
+ls -l /dev/v4l/by-id/ 2>/dev/null || true
+v4l2-ctl --device=<真实设备> --list-formats-ext
+```
+
+优先记录稳定的 `/dev/v4l/by-id/...`，不能假定 `/dev/video41` 在所有板卡上都存在。
+CSI 或网络相机按对应厂商文档检查真实画面。
+
+### 5. 确认 NPU 和 RKNNLite 来源
+
+NPU driver、runtime 和 RKNNLite 必须与当前板卡镜像匹配。先记录：
+
+- 板卡准确型号和系统镜像/BSP；
+- 内核版本；
+- NPU driver/runtime 版本；
+- 厂商确认可用的 `rknn-toolkit-lite2` 来源和版本。
+
+不能确认版本匹配时先停止，向板卡厂商或项目硬件负责人核对。部署后使用：
+
+```bash
+python -c "from rknnlite.api import RKNNLite; print(RKNNLite)"
+```
+
+### 6. 准备 Conda 和仓库
+
+安装适用于 aarch64 的 Conda 发行版，然后检查：
+
+```bash
+conda --version
+conda info --envs
+git --version
+```
+
+本项目使用两个独立 Python 3.10 环境：`app` 和 `yolo`。把仓库放到固定路径，执行：
+
+```bash
+cd <仓库绝对路径>
+git status --short --branch
+```
+
+不要在路径不明确时让 AI 假设 `~/uav_project/uav_system-rk3588` 一定存在。
+
+## 二、让 AI 分阶段部署
+
+### 为什么要分阶段
 
 无人机部署同时涉及系统包、Python、NPU、相机、网络和飞控。一个超长“全部装好”任务
 发生错误时很难定位，也容易让 AI 猜硬件。下面每个 Prompt 都有明确终点；确认结果后再
@@ -22,7 +117,7 @@ AI 可以执行软件操作，但以下事情必须由人确认：
 - 相机、串口、网口的真实设备；
 - 是否进入 SITL 或实机测试阶段。
 
-## 所有阶段的固定约束
+### 所有阶段的固定约束
 
 每次开始新对话时先发送：
 
@@ -42,7 +137,7 @@ AI 可以执行软件操作，但以下事情必须由人确认：
 10. 先阅读仓库的 README.md、AGENTS.md 和相关安全文档，再执行任务。
 ```
 
-## Prompt 0：只读环境检查
+### Prompt 0：只读环境检查
 
 ```text
 现在只做只读环境检查，不安装软件、不修改文件、不启动服务。
@@ -64,12 +159,12 @@ AI 可以执行软件操作，但以下事情必须由人确认：
 
 通过标准：确认 Linux ARM64/RK3588、仓库存在、SEND 为 false，并得到明确缺项列表。
 
-## Prompt 1：阅读仓库并制定部署计划
+### Prompt 1：阅读仓库并制定部署计划
 
 ```text
-请阅读 README.md、AGENTS.md、docs/beginner/README.md、
-docs/reference/safety.md、docs/ai/current_architecture.md、
-docs/ai/deprecated_paths.md、docs/user/install.md，以及 scripts/install 和
+请阅读 README.md、AGENTS.md、docs/beginner/04_rk3588_setup.md、
+docs/developer/safety.md、docs/ai/current_architecture.md、
+docs/ai/deprecated_paths.md，以及 scripts/install 和
 scripts/deploy 下本次会使用的脚本。
 
 只制定部署计划，不执行安装。计划必须分为 app 环境、yolo 环境、硬件配置、
@@ -79,7 +174,7 @@ systemd、只观察联调五个阶段。指出每阶段会修改什么、验证�
 
 通过标准：AI 的计划使用两个 Python 3.10 环境，没有提出 CUDA/PyTorch 或旧任务栈。
 
-## Prompt 2：安装 app 环境
+### Prompt 2：安装 app 环境
 
 ```text
 只完成 app 环境，不安装 yolo、不改硬件配置、不启动 systemd 服务。
@@ -96,7 +191,7 @@ systemd、只观察联调五个阶段。指出每阶段会修改什么、验证�
 如果需要 sudo 安装系统包，先说明将安装的包并等我确认。不要启动飞控连接或服务。
 ```
 
-## Prompt 3：安装 yolo 环境
+### Prompt 3：安装 yolo 环境
 
 ```text
 只完成 yolo 环境和离线导入检查，不启动持续摄像头服务。
@@ -113,7 +208,7 @@ rknn-toolkit-lite2 的来源是否明确。不能明确匹配版本时停止并�
 不要添加 PyTorch、CUDA、x86 或 GPU 后备路径，不要启动飞行动作。
 ```
 
-## Prompt 4：根据真实硬件配置
+### Prompt 4：根据真实硬件配置
 
 先把尖括号内容替换成你的真实信息：
 
@@ -136,7 +231,7 @@ rknn-toolkit-lite2 的来源是否明确。不能明确匹配版本时停止并�
 
 如果你没有真实设备路径或端口，返回硬件章节继续确认，不要让 AI试遍所有接口。
 
-## Prompt 5：安装 systemd 服务
+### Prompt 5：安装 systemd 服务
 
 ```text
 请安装 app 和 yolo 的 systemd 用户服务，但先进行 dry-run。
@@ -155,7 +250,7 @@ rknn-toolkit-lite2 的来源是否明确。不能明确匹配版本时停止并�
 
 确认 dry-run 后，可以让 AI 执行 `--enable-now`。此时仍应拆桨、无载荷、SEND=OFF。
 
-## Prompt 6：只观察联调
+### Prompt 6：只观察联调
 
 ```text
 现在只做观察联调。确认螺旋桨和载荷已移除，executor.send_commands=false。
@@ -173,7 +268,7 @@ rknn-toolkit-lite2 的来源是否明确。不能明确匹配版本时停止并�
 失败”整理结果。
 ```
 
-## Prompt 7：故障诊断
+### Prompt 7：故障诊断
 
 ```text
 请诊断当前部署问题，只做与故障相关的最小范围检查。先收集证据，不要直接重装环境、
@@ -188,7 +283,141 @@ rknn-toolkit-lite2 的来源是否明确。不能明确匹配版本时停止并�
 方案。修改前展示 diff；修复后只运行无动作验证。
 ```
 
-## AI 部署完成检查表
+## 三、不使用 AI 时的安装命令
+
+如果希望手动执行，先创建 app 环境：
+
+```bash
+conda create -n app python=3.10 -y
+conda activate app
+bash scripts/install/install_app_env.sh
+
+python -m app.main --help
+python -m telemetry_link.main --help
+```
+
+再创建 yolo 环境：
+
+```bash
+conda create -n yolo python=3.10 -y
+conda activate yolo
+bash scripts/install/install_yolo_env.sh
+
+python -c "import cv2, numpy, yaml; from rknnlite.api import RKNNLite; print('ready')"
+test -f data/models/cuadc2026-fp16.rknn
+```
+
+开发或运行测试时，在 `app` 环境额外安装：
+
+```bash
+python -m pip install -r requirements-dev.txt
+```
+
+## 四、第一次安全启动
+
+### 启动前确认
+
+```bash
+cd <仓库绝对路径>
+git status --short
+grep -n "send_commands" config/app.yaml
+bash scripts/healthcheck/check_rk3588.sh
+```
+
+必须看到 `executor.send_commands: false`。然后使用两个终端：
+
+```bash
+# 终端 1
+conda activate yolo
+python -m yolo_app.main
+
+# 终端 2
+conda activate app
+python -m app.main --connect-telemetry --send-commands false
+```
+
+若已安装用户服务：
+
+```bash
+systemctl --user restart uav-yolo.service uav-app.service
+systemctl --user --no-pager --full status uav-yolo.service uav-app.service
+```
+
+浏览器访问 `http://<RK3588-IP>:8080/`，第一次只观察：
+
+- Web UI 明确显示 SEND OFF；
+- link、GPS、姿态、高度和 LOCAL_NED 状态是否更新；
+- YOLO 视频、检测类别和检测框是否合理；
+- app/yolo 没有反复重启；
+- Action Mission 尚未运行。
+
+禁止点击起飞、航点、模式、投放或 Mission Start。
+
+### 端口与日志
+
+```bash
+ss -lntu | grep -E ':(5005|5006|8080|8081)\b'
+curl -fsS http://127.0.0.1:8080/api/status
+journalctl --user -u uav-app.service -n 100 --no-pager
+journalctl --user -u uav-yolo.service -n 100 --no-pager
+```
+
+| 端口 | 用途 |
+| --- | --- |
+| `8080/tcp` | Web UI 和 API |
+| `8081/tcp` | YOLO MJPEG 视频 |
+| `5005/udp` | app 接收检测结果 |
+| `5006/udp` | yolo 接收目标选择命令 |
+
+## 五、常见部署问题
+
+### Web UI 打不开
+
+```bash
+systemctl --user status uav-app.service
+curl -v http://127.0.0.1:8080/api/status
+ss -ltnp | grep ':8080'
+```
+
+本机可访问而管理电脑不可访问时，检查监听地址、RK3588 IP、路由和防火墙。
+
+### 没有 YOLO 画面或检测
+
+```bash
+systemctl --user status uav-yolo.service
+journalctl --user -u uav-yolo.service -n 150 --no-pager
+v4l2-ctl --list-devices
+curl -v http://127.0.0.1:8081/video/yolo.mjpeg
+```
+
+检查相机路径、权限、占用、分辨率、FourCC、NPU 初始化和模型路径。实机模型应为
+`data/models/cuadc2026-fp16.rknn`，不要切回历史 INT8 模型。
+
+### app 收不到 YOLO
+
+```bash
+ss -lunp | grep -E ':(5005|5006)\b'
+grep -En "udp_(ip|port)|command_(ip|port)" config/yolo.yaml config/app.yaml
+```
+
+### telemetry 不连接
+
+检查 `config/telemetry.yaml` 的数据源、连接类型、地址、端口或串口。串口还要核对设备
+权限、电平、TX/RX、GND 和波特率；网络还要核对 IP、路由、UDP 方向和 heartbeat。
+检查连接不需要开启 SEND。
+
+### 服务反复重启
+
+```bash
+systemctl --user cat uav-app.service uav-yolo.service
+journalctl --user -u uav-app.service -b --no-pager
+journalctl --user -u uav-yolo.service -b --no-pager
+```
+
+重点检查 `WorkingDirectory`、Python 绝对路径、依赖、模型/相机权限和端口占用。仓库或
+Conda 路径改变后重新运行服务安装脚本。
+
+## 环境配置验收
 
 - [ ] app 和 yolo 是两个独立 Python 3.10 环境。
 - [ ] RKNNLite 导入成功，模型路径存在。
@@ -198,5 +427,7 @@ rknn-toolkit-lite2 的来源是否明确。不能明确匹配版本时停止并�
 - [ ] Web UI、视频流和健康检查可用。
 - [ ] `executor.send_commands` 仍为 false。
 - [ ] Git diff 中没有秘密、未知硬件猜测或旧架构文件。
+- [ ] Web UI、视频流、YOLO 和 telemetry 只读状态可以观察。
+- [ ] 没有启动任何 Action 或 Mission。
 
-下一章：[第一次启动](07_first_start.md)。
+下一章：[SITL 测试](05_sitl_test.md)。

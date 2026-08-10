@@ -42,7 +42,7 @@ Action 时负责清理连续命令和 pending LOCAL_POSITION，并按路径需�
 
 context 包含 drone、gimbal、link、perception、scene、health、command，以及当前
 Field Reference 第一版字段。坐标和字段命名见
-[../reference/coordinate_frames.md](../reference/coordinate_frames.md) 和
+[坐标系规范](../developer/coordinate_frames.md) 和
 [action_contracts.md](action_contracts.md)。
 
 ## LinkManager

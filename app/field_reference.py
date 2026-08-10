@@ -66,7 +66,7 @@ class GpsMarker:
 class FieldReference:
     """Pure-data field reference with validation and lifecycle methods.
 
-    Coordinates use the conventions from ``docs/reference/coordinate_frames.md``:
+    Coordinates use the conventions from ``docs/developer/coordinate_frames.md``:
 
     * LOCAL_NED: ``north_m`` / ``east_m`` / ``z_down_m``
     * FIELD:     ``field_x_m`` (+X = right) / ``field_y_m`` (+Y = forward)

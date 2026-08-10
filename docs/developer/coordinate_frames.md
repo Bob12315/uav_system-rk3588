@@ -1,5 +1,7 @@
 # 坐标系规范
 
+本文面向需要处理飞控、场地或图像坐标的开发者。
+
 本文是项目坐标系的唯一规范源。不要再新增平行的 `coordinate_systems.md`。
 MAVLink frame 常量统一从 `telemetry_link/frames.py` 导入，不得在 Action 中硬编码整数。
 

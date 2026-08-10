@@ -29,7 +29,7 @@ conda create -n yolo python=3.10 -y && conda activate yolo
 bash scripts/install/install_yolo_env.sh
 ```
 
-完整说明见 [docs/user/install.md](../docs/user/install.md)。
+完整说明见 [RK3588 环境配置](../docs/beginner/04_rk3588_setup.md)。
 
 ## 部署
 

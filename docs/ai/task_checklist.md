@@ -8,9 +8,9 @@ AGENTS.md
 docs/ai/current_architecture.md
 docs/ai/action_contracts.md
 docs/ai/deprecated_paths.md
-docs/reference/coordinate_frames.md
-docs/reference/field_origin_heading.md
-docs/reference/safety.md
+docs/developer/coordinate_frames.md
+docs/developer/field_origin_heading.md
+docs/developer/safety.md
 ```
 
 ## Action 行为

@@ -142,7 +142,7 @@ class TestASTEndpoints:
 
 
 def test_runtime_binding_automatic_freeze_in_current_contract():
-    src = Path("docs/reference/field_origin_heading.md").read_text()
+    src = Path("docs/developer/field_origin_heading.md").read_text()
     assert "Schema v3：比赛现场初始化" in src
     assert "自动 finalize、apply 并 freeze" in src
     assert "is_ready_for_field_to_local=false" in src

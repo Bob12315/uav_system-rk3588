@@ -138,7 +138,7 @@ gps_drop_sequence save_as drop_sequence
 标记点 GPS，在起飞点采集当前 GPS 样本，生成运行时原点和 heading，再冻结到本次任务。
 
 预采集的 schema v2 centerline profile 仍可用于固定场地和 SITL。两种流程的具体契约见
-`docs/reference/field_origin_heading.md`。
+[场地原点与方向](field_origin_heading.md)。
 
 ## 安全门控
 

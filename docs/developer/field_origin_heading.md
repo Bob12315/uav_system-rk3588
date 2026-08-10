@@ -1,5 +1,7 @@
 # Field Reference：比赛场地原点与方向
 
+本文面向维护 Field Profile、场地绑定和相关 Web 流程的开发者。
+
 FIELD 是比赛任务使用的场地坐标系：`+Y` 指向场地前方，`+X` 指向场地右方。
 FIELD 原点和 heading 必须由用户显式建立；任务执行期间二者冻结，yaw、罗盘、GPS
 Home 或 EKF Origin 变化不得自动改写它们。
