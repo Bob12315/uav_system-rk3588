@@ -86,6 +86,13 @@ class TakeoffAction(ActionModule):
             return ActionResult(failed=True, reason="takeoff_timeout", detail=detail)
 
         if self.phase == "set_mode":
+            current_mode = self._context_mode(context_data)
+            if current_mode == self.mode:
+                self.phase = "arm" if self.require_armed else "takeoff"
+                return ActionResult(
+                    reason="mode_confirmed",
+                    detail=self._detail(altitude, phase="mode_confirmed", context=context_data),
+                )
             action = {
                 "action_type": "set_mode",
                 "params": {"mode": self.mode},
@@ -96,13 +103,15 @@ class TakeoffAction(ActionModule):
             self.mode_sent = True
             detail = self._detail(altitude, phase="set_mode", context=context_data)
             self.last_detail = detail
-            self.phase = "arm"
             return ActionResult(actions=[action], reason="set_mode_sent", detail=detail)
 
         if self.phase == "arm":
-            if not self.require_armed:
+            if self._context_armed(context_data) is True:
                 self.phase = "takeoff"
-                return self._takeoff_result(altitude, context_data)
+                return ActionResult(
+                    reason="armed_confirmed",
+                    detail=self._detail(altitude, phase="armed_confirmed", context=context_data),
+                )
             action = {
                 "action_type": "arm",
                 "params": {},
@@ -113,7 +122,6 @@ class TakeoffAction(ActionModule):
             self.arm_sent = True
             detail = self._detail(altitude, phase="arm", context=context_data)
             self.last_detail = detail
-            self.phase = "takeoff"
             return ActionResult(actions=[action], reason="arm_sent", detail=detail)
 
         if self.phase == "takeoff":
@@ -218,6 +226,24 @@ class TakeoffAction(ActionModule):
                 return sample
 
         return None
+
+    @staticmethod
+    def _context_mode(context: dict[str, Any]) -> str | None:
+        value = context.get("mode")
+        drone = context.get("drone")
+        if value is None and isinstance(drone, dict):
+            value = drone.get("mode")
+        if not isinstance(value, str) or not value.strip():
+            return None
+        return value.strip().upper()
+
+    @staticmethod
+    def _context_armed(context: dict[str, Any]) -> bool | None:
+        value = context.get("armed")
+        drone = context.get("drone")
+        if value is None and isinstance(drone, dict):
+            value = drone.get("armed")
+        return value if isinstance(value, bool) else None
 
     def _float_sample(self, data: dict[str, Any], name: str, source: str) -> _AltitudeSample | None:
         if name not in data:

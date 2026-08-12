@@ -450,19 +450,13 @@ class TestStatusPayload:
         assert status.accepted_samples == 5
 
 
-# ── schema v2 backward compat ────────────────────────────────────────────────
+# ── schema v2 retirement ────────────────────────────────────────────────────
 
 
-class TestSchemaV2Compat:
-    def test_bind_current_v2_guard(self):
+class TestSchemaV3Only:
+    def test_controller_has_no_v2_bind_current_entrypoint(self):
         ctl = _make_controller()
-        result = ctl.bind_profile_current("competition_runtime_v3")
-        assert result.get("ok") is False
-        assert "schema v2" in str(result.get("error", "")).lower()
-
-    def test_controller_has_legacy_methods(self):
-        ctl = _make_controller()
-        assert hasattr(ctl, "bind_profile_current")
+        assert not hasattr(ctl, "bind_profile_current")
         assert hasattr(ctl, "start_runtime_profile_sampling")
         assert hasattr(ctl, "start_competition_runtime_sampling")
 
@@ -501,6 +495,7 @@ def _make_http_app(tmp_path):
     args = build_arg_parser().parse_args(["--run-seconds", "0.1", "--no-yolo-udp"])
     config = load_app_config(args)
     config.ui.audit_log_path = str(tmp_path / "audit.jsonl")
+    config.ui.allowed_hosts = (*config.ui.allowed_hosts, "testserver")
     runner = SystemRunner(config)
     return create_app(runner, config.ui), runner
 
@@ -511,12 +506,12 @@ def _asgi_request(app, method, path, *, json_body=None, content=None):
         async with httpx.AsyncClient(
             transport=transport, base_url="http://testserver"
         ) as client:
-            kwargs = {}
+            kwargs = {"headers": {"authorization": "Bearer test-only-operator-password"}}
             if json_body is not None:
                 kwargs["json"] = json_body
             if content is not None:
                 kwargs["content"] = content
-                kwargs["headers"] = {"content-type": "application/json"}
+                kwargs["headers"]["content-type"] = "application/json"
             return await client.request(method, path, **kwargs)
 
     return asyncio.run(request())

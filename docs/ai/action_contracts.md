@@ -8,7 +8,8 @@
 - Action 可以读取 runtime context，并返回结构化 result 和 action request。
 - Action 不直接调用 pymavlink，不直接连接 `telemetry_link.LinkManager`。
 - `ActionRuntimeService` 把 result 交给 `ActionDispatcher`。
-- `ActionDispatcher` 执行 SEND 双门控并调用 `LinkManager` 的公开接口。
+- `ActionDispatcher` 执行系统 SEND + 本次 run 授权双门控；通过 `ActionSafetyPipeline`
+  裁决后才调用 `LinkManager` 的公开接口。
 - `config/action_missions/*.json` 只编排 Action，不包含 MAVLink message。
 
 ## 推荐坐标参数

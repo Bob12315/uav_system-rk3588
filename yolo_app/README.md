@@ -57,7 +57,7 @@ INT8 文档假设而修改后处理。
 使用匹配板端 Runtime/Driver 的 `rknn-toolkit-lite2`。安装：
 
 ```bash
-conda activate yolo
+conda activate uav-rk3588-yolo
 bash scripts/install/install_yolo_env.sh
 ```
 
@@ -66,7 +66,7 @@ bash scripts/install/install_yolo_env.sh
 ## 运行
 
 ```bash
-conda activate yolo
+conda activate uav-rk3588-yolo
 python -m yolo_app.main
 ```
 

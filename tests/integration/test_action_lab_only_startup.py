@@ -17,14 +17,13 @@ def test_system_runner_does_not_import_legacy_mission_or_stage_entrypoints() -> 
     assert "StageRegistry" not in source
 
 
-def test_app_config_falls_back_when_legacy_missions_are_unavailable():
+def test_app_config_uses_action_lab_only_without_legacy_mission_loading():
     args = build_arg_parser().parse_args(["--run-seconds", "0.1", "--no-yolo-udp"])
 
     config = load_app_config(args)
 
-    assert config.mission_enabled is False
-    assert config.mission_name == "action_lab_only"
-    assert config.mission_config_path is None
+    assert not hasattr(config, "mission_enabled")
+    assert not hasattr(config, "mission_name")
 
 
 def test_app_config_loads_current_web_and_terminal_ui_settings() -> None:
@@ -57,9 +56,10 @@ def test_system_runner_snapshot_works_without_mission_runtime():
     assert snapshot["mission_stage_selection"] == "NO_MISSION"
     assert snapshot["actions"] == []
     assert snapshot["action_lab"]["enabled"] is True
-    assert snapshot["action_lab"]["send_actions"] is False
-    assert snapshot["action_lab"]["requested_send_actions"] is False
-    assert snapshot["action_lab"]["dry_run_only"] is True
+    assert snapshot["action_lab"]["run_authorized"] is False
+    assert snapshot["action_lab"]["run_id"] is None
+    assert snapshot["action_lab"]["dispatch_effective"] is False
+    assert snapshot["action_lab"]["note"] == "action_dispatch_not_enabled"
     # PR F: action_mission is not_configured by default
     assert snapshot["action_mission"]["enabled"] is False
     assert snapshot["action_mission"]["reason"] == "not_configured"
@@ -94,7 +94,6 @@ def test_system_runner_run_starts_web_ui_without_mission_runtime(monkeypatch) ->
 
     runner.run()
 
-    assert runner.mission_enabled is False
     assert started == [True]
 
 
@@ -147,7 +146,7 @@ def test_action_mission_start_stop_reset_lifecycle() -> None:
 
     runner.configure_action_mission([MissionActionStep("goto_waypoint", {"x": 1.0})])
 
-    started = runner.action_mission_start()
+    started = runner.action_mission_start(authorize=True, target_source="sitl")
     assert started["enabled"] is True
     assert started["running"] is True
 
@@ -161,7 +160,12 @@ def test_action_mission_start_stop_reset_lifecycle() -> None:
 
 
 def test_action_mission_web_api_lifecycle() -> None:
-    from web_ui.server import ActionMissionConfigureRequest, ActionMissionStepRequest
+    from types import SimpleNamespace
+    from web_ui.server import (
+        ActionMissionConfigureRequest,
+        ActionMissionStepRequest,
+        RunStartRequest,
+    )
 
     args = build_arg_parser().parse_args(["--run-seconds", "0.1", "--no-yolo-udp"])
     config = load_app_config(args)
@@ -185,7 +189,10 @@ def test_action_mission_web_api_lifecycle() -> None:
     assert configured["ok"] is True
     assert configured["action_mission"]["enabled"] is True
 
-    started = endpoint("/api/action-mission/start")()
+    started = endpoint("/api/action-mission/start")(
+        RunStartRequest(authorize=True, target_source="real"),
+        SimpleNamespace(state=SimpleNamespace(identity=SimpleNamespace(operator="test"))),
+    )
     assert started["action_mission"]["running"] is True
 
     stopped = endpoint("/api/action-mission/stop")()
@@ -221,7 +228,7 @@ def test_action_mission_step_request_accepts_label_and_on_failed() -> None:
     assert request.on_failed == {"action": "retry_current", "max_attempts": 2}
 
 
-def test_action_lab_api_status_reports_dry_run_only():
+def test_action_lab_api_status_reports_missing_run_authorization():
     args = build_arg_parser().parse_args(["--run-seconds", "0.1", "--no-yolo-udp"])
     config = load_app_config(args)
     runner = SystemRunner(config)
@@ -232,9 +239,9 @@ def test_action_lab_api_status_reports_dry_run_only():
 
     assert response["ok"] is True
     assert response["action_lab"]["enabled"] is True
-    assert response["action_lab"]["send_actions"] is False
-    assert response["action_lab"]["requested_send_actions"] is False
-    assert response["action_lab"]["dry_run_only"] is True
+    assert response["action_lab"]["run_authorized"] is False
+    assert response["action_lab"]["run_id"] is None
+    assert response["action_lab"]["dispatch_effective"] is False
 
 
 def test_no_uav_ui_imports_in_app_startup() -> None:

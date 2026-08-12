@@ -1,6 +1,7 @@
 # AI Development Entry
 
-This repository targets Linux ARM64 RK3588 boards only.
+The generic app (Action Mission, telemetry, and Web UI) supports Linux x86_64
+and Linux ARM64. Local YOLO inference remains Linux ARM64 RK3588 only.
 
 ## Current Architecture
 

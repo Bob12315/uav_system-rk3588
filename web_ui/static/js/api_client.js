@@ -3,6 +3,24 @@
 // semantics are preserved exactly as they were in the original app.js.
 window.UavApi = (function () {
   "use strict";
+  const sessionStore = typeof sessionStorage !== "undefined" ? sessionStorage : null;
+  let csrfToken = sessionStore ? (sessionStore.getItem("uav_csrf_token") || "") : "";
+
+  async function login() {
+    const password = window.prompt("请输入 UAV Web operator 口令");
+    if (!password) throw new Error("authentication required");
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      credentials: "same-origin",
+      body: JSON.stringify({password: password}),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "login failed");
+    csrfToken = data.csrf_token || "";
+    if (sessionStore) sessionStore.setItem("uav_csrf_token", csrfToken);
+    return data;
+  }
 
   // ------------------------------------------------------------------
   // generic fetch + JSON wrapper (was `json()` in app.js)
@@ -10,6 +28,12 @@ window.UavApi = (function () {
   async function request(url, options) {
     if (options === undefined) options = {};
     const fetchOptions = Object.assign({headers: {"Content-Type": "application/json"}}, options);
+    fetchOptions.headers = Object.assign({}, fetchOptions.headers || {});
+    fetchOptions.credentials = "same-origin";
+    const method = String(fetchOptions.method || "GET").toUpperCase();
+    if (["POST", "PUT", "PATCH", "DELETE"].includes(method) && csrfToken) {
+      fetchOptions.headers["X-UAV-CSRF"] = csrfToken;
+    }
     const timeoutMs = Number(fetchOptions.timeoutMs || 10000);
     delete fetchOptions.timeoutMs;
     const controller = !fetchOptions.signal && typeof AbortController !== "undefined"
@@ -20,7 +44,13 @@ window.UavApi = (function () {
       ? setTimeout(function () { controller.abort(); }, timeoutMs)
       : null;
     try {
-      const response = await fetch(url, fetchOptions);
+      let response = await fetch(url, fetchOptions);
+      if (response.status === 401 && url !== "/api/auth/login" && options._retriedAuth !== true) {
+        await login();
+        options._retriedAuth = true;
+        fetchOptions.headers["X-UAV-CSRF"] = csrfToken;
+        response = await fetch(url, fetchOptions);
+      }
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "request failed");
       return data;
@@ -47,12 +77,6 @@ window.UavApi = (function () {
   function getCommandCompletions() {
     return request("/api/commands/completions");
   }
-  function executeCommand(command, source) {
-    return request("/api/commands/execute", {
-      method: "POST",
-      body: JSON.stringify({command: command, source: source || "BUTTON"}),
-    });
-  }
 
   // ------------------------------------------------------------------
   // Missions (legacy — still available)
@@ -70,13 +94,14 @@ window.UavApi = (function () {
   function getActionStatus() {
     return request("/api/actions/status");
   }
-  function startAction(name, params, sendActions) {
+  function startAction(name, params, targetSource) {
     return request("/api/actions/start", {
       method: "POST",
       body: JSON.stringify({
         name: name,
         params: params,
-        send_actions: Boolean(sendActions),
+        authorize: true,
+        target_source: targetSource || null,
       }),
     });
   }
@@ -105,8 +130,11 @@ window.UavApi = (function () {
       body: JSON.stringify({steps: steps}),
     });
   }
-  function startActionMission() {
-    return request("/api/action-mission/start", {method: "POST", body: "{}"});
+  function startActionMission(targetSource) {
+    return request("/api/action-mission/start", {
+      method: "POST",
+      body: JSON.stringify({authorize: true, target_source: targetSource || null}),
+    });
   }
   function stopActionMission() {
     return request("/api/action-mission/stop", {method: "POST", body: "{}"});
@@ -141,12 +169,6 @@ window.UavApi = (function () {
   // ------------------------------------------------------------------
   // Manual / Localization
   // ------------------------------------------------------------------
-  function manualStepMove(direction, stepM) {
-    return request("/api/manual-step-move", {
-      method: "POST",
-      body: JSON.stringify({direction: direction, step_m: stepM}),
-    });
-  }
   function clearLocalization() {
     return request("/api/localization/clear", {method: "POST", body: "{}"});
   }
@@ -205,12 +227,12 @@ window.UavApi = (function () {
   // ------------------------------------------------------------------
   return {
     request: request,
+    login: login,
 
     getStatus: getStatus,
     getAudit: getAudit,
     getEvents: getEvents,
     getCommandCompletions: getCommandCompletions,
-    executeCommand: executeCommand,
 
     getMissions: getMissions,
 
@@ -235,7 +257,6 @@ window.UavApi = (function () {
     resetFieldReference: resetFieldReference,
     freezeFieldReference: freezeFieldReference,
 
-    manualStepMove: manualStepMove,
     clearLocalization: clearLocalization,
 
     getYoloStreamUrl: getYoloStreamUrl,

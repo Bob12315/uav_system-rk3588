@@ -12,6 +12,7 @@
 4. [场地原点与方向](field_origin_heading.md)
 5. [安全边界](safety.md)
 6. [Telemetry Link 接口](telemetry_link_interfaces.md)
+7. [平台与环境支持](platform_support.md)
 
 ## 内容边界
 

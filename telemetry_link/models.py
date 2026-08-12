@@ -12,6 +12,7 @@ class ControlType(str, Enum):
 
 
 class ActionType(str, Enum):
+    STOP_BODY_VELOCITY = "stop_body_velocity"
     ARM = "arm"
     DISARM = "disarm"
     SET_MODE = "set_mode"

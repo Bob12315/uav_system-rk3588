@@ -154,6 +154,73 @@ def test_reset_calls_clear_navigation_queue_with_stop_and_clear() -> None:
     assert "clear_continuous_commands" not in calls
 
 
+def test_switch_running_action_stops_old_action_and_clears_navigation() -> None:
+    """Starting a different Action characterizes the current switch ordering."""
+    from app.action_dispatcher import ActionDispatcher
+    from missions.common.actions.base import ActionModule
+    from missions.common.actions.registry import ActionRegistry
+    from missions.common.actions.result import ActionResult
+    from missions.common.actions.runner import ActionRunner
+
+    action_events: list[str] = []
+    link_events: list[str] = []
+
+    class FirstAction(ActionModule):
+        def start(self, params=None):
+            action_events.append("first.start")
+
+        def update(self, context=None):
+            return ActionResult()
+
+        def stop(self):
+            action_events.append("first.stop")
+
+        def reset(self):
+            action_events.append("first.reset")
+
+    class SecondAction(ActionModule):
+        def start(self, params=None):
+            action_events.append("second.start")
+
+        def update(self, context=None):
+            return ActionResult()
+
+        def stop(self):
+            action_events.append("second.stop")
+
+        def reset(self):
+            action_events.append("second.reset")
+
+    class FakeLink:
+        def stop_body_velocity_and_clear(self):
+            link_events.append("stop_body_velocity_and_clear")
+
+        def clear_pending_local_position_actions(self):
+            link_events.append("clear_pending_local_position_actions")
+
+    registry = ActionRegistry()
+    registry.register("first", FirstAction)
+    registry.register("second", SecondAction)
+    service = ActionRuntimeService(
+        runner=ActionRunner(registry),
+        dispatcher=ActionDispatcher(),
+    )
+    link = FakeLink()
+
+    service.start("first", link_manager=link)
+    service.start("second", link_manager=link)
+
+    assert action_events == ["first.start", "first.stop", "second.start"]
+    assert link_events == [
+        "stop_body_velocity_and_clear",
+        "clear_pending_local_position_actions",
+        "stop_body_velocity_and_clear",
+        "clear_pending_local_position_actions",
+    ]
+    assert service.action_name == "second"
+    assert service.runner.state == "running"
+
+
 def test_failed_gps_recon_area_scan_clears_global_navigation_and_holds_current() -> None:
     """Direct Action Lab failure uses the same queue clear + hold primitive as Mission."""
     from app.action_dispatcher import ActionDispatcher

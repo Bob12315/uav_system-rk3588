@@ -39,11 +39,8 @@ validator 只检查模板结构和引用，不代表通过 SITL 或实飞验证�
 
 ## Field Profile
 
-- `competition_runtime_v3.json`：比赛现场初始化模板；输入 forward marker GPS，并在
-  起飞点采样动态原点。
-- `XSYU.json`：已测绘的 schema v2 固定场地 profile。
-- `sitl_centerline_lane.json`：SITL 场地 profile。
-- `example_*.json`：格式示例，不作为正式比赛默认值。
+- `competition_runtime_v3.json`：唯一受支持的比赛/SITL 场地初始化模板；输入 forward
+  marker GPS，并在起飞点采样动态原点。
 
 场地绑定完成前不得实发 FIELD 航点。详细契约见
 `docs/developer/field_origin_heading.md`。

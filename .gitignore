@@ -15,6 +15,11 @@ __pycache__/
 *.avi
 *.mp4
 *.mov
+*.tlog
+*.ulg
+*.bag
+*.mavlink
+*.bin
 
 logs/
 yolo_app/logs/

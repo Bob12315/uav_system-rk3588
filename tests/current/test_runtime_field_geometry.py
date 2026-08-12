@@ -512,9 +512,8 @@ class TestProfileValidation:
                 {"name": "c4", "lat": 34.004, "lon": 108.004},
             ],
         }
-        p = parse_field_profile(data)
-        with pytest.raises(RuntimeFieldGeometryError, match="schema"):
-            build_runtime_field_geometry(p, origin_lat=34.0, origin_lon=108.0)
+        with pytest.raises(FieldProfileValidationError, match="schema v3"):
+            parse_field_profile(data)
 
     def test_rejects_missing_forward_marker(self):
         data = make_valid_v3_dict()

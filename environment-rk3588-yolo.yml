@@ -1,0 +1,8 @@
+name: uav-rk3588-yolo
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - -r requirements/rk3588-yolo.txt

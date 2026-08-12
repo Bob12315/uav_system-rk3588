@@ -12,7 +12,7 @@ import time
 import uuid
 from typing import Any
 
-from telemetry_link.frames import GLOBAL_RELATIVE_ALT_INT
+from .frames import GLOBAL_RELATIVE_ALT_INT
 
 from app.runtime_field_target_resolver import (
     RuntimeFieldTargetResolver,

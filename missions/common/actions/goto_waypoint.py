@@ -5,7 +5,7 @@ from typing import Any
 
 from app.coordinate_transform import field_to_gps, field_to_local_ned
 from app.field_reference import FieldReference
-from telemetry_link.frames import GLOBAL_RELATIVE_ALT_INT, LOCAL_NED
+from .frames import GLOBAL_RELATIVE_ALT_INT, LOCAL_NED
 
 from .base import ActionModule
 from .result import ActionResult
@@ -248,6 +248,7 @@ class GotoWaypointAction(ActionModule):
             action["field_origin_lat"] = self._float_context(context_data, "field_origin_lat")
             action["field_origin_lon"] = self._float_context(context_data, "field_origin_lon")
             action["field_heading_yaw_rad"] = field_heading_yaw_rad
+            action.update(self._field_safety_metadata(context_data, global_target=True))
             return action
 
         params: dict[str, Any] = {
@@ -275,7 +276,39 @@ class GotoWaypointAction(ActionModule):
         action["field_origin_local_x"] = self._float_context(context_data, "field_origin_local_x")
         action["field_origin_local_y"] = self._float_context(context_data, "field_origin_local_y")
         action["field_heading_yaw_rad"] = field_heading_yaw_rad
+        action.update(self._field_safety_metadata(context_data, global_target=False))
         return action
+
+    @staticmethod
+    def _field_safety_metadata(
+        context: dict[str, Any],
+        *,
+        global_target: bool,
+    ) -> dict[str, bool]:
+        reference = context.get("field_reference")
+        reference_data = reference if isinstance(reference, dict) else {}
+        confirmed = bool(
+            reference_data.get("is_confirmed", context.get("field_heading_confirmed", False))
+        )
+        synced = bool(reference_data.get("synced_to_runtime", False))
+        frozen = bool(reference_data.get("is_frozen", False))
+        return {
+            "field_reference_confirmed": confirmed,
+            "field_reference_synced": synced,
+            "field_reference_frozen": frozen,
+            "field_local_transform_ready": bool(
+                reference_data.get(
+                    "is_ready_for_field_to_local",
+                    context.get("field_origin_confirmed", False),
+                )
+            ),
+            "field_gps_transform_ready": bool(
+                reference_data.get(
+                    "is_ready_for_field_to_gps",
+                    context.get("field_gps_transform_confirmed", False),
+                )
+            ),
+        }
 
     def _detail(
         self,

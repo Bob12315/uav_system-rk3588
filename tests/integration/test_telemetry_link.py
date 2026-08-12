@@ -133,7 +133,7 @@ def test_source_runtime_start_returns_while_connect_retries_in_background() -> N
         runtime.stop()
 
 
-def test_source_runtime_stop_workers_clears_pending_actions() -> None:
+def test_source_runtime_stop_workers_clears_all_pending_commands() -> None:
     runtime = SourceRuntime(
         name="sitl",
         endpoint=_endpoint("sitl"),
@@ -144,10 +144,66 @@ def test_source_runtime_stop_workers_clears_pending_actions() -> None:
         stop_event=threading.Event(),
         worker_stop_event=threading.Event(),
     )
+    runtime.command_queue.put_control(
+        ControlCommand(command_type=ControlType.VELOCITY, vx=1.0)
+    )
+    runtime.command_queue.put_gimbal_rate(GimbalRateCommand(yaw_rate=0.2))
     runtime.command_queue.put_action(ActionCommand(action_type=ActionType.ARM))
+    runtime.command_queue.put_action(
+        ActionCommand(action_type=ActionType.LOCAL_POSITION)
+    )
+    runtime.command_queue.put_action(
+        ActionCommand(action_type=ActionType.GLOBAL_GOTO)
+    )
 
     runtime._stop_workers(close_client=False)
 
+    assert runtime.command_queue.peek_control() is None
+    assert runtime.command_queue.peek_gimbal_rate() is None
+    assert runtime.command_queue.get_next_action() is None
+
+
+def test_stale_link_monitor_clears_continuous_and_pending_commands() -> None:
+    """Heartbeat/RX expiry is characterized as a reconnect plus full queue clear."""
+
+    class _StopAfterFirstWait:
+        def is_set(self) -> bool:
+            return False
+
+        def wait(self, _timeout: float) -> bool:
+            return True
+
+        def set(self) -> None:
+            pass
+
+    stale_at = time.time() - 1.0
+    runtime = SourceRuntime(
+        name="sitl",
+        endpoint=_endpoint("sitl"),
+        cfg=_config(data_source="sitl", active_source="sitl"),
+        state_cache=StateCache(heartbeat_timeout_sec=0.05, rx_timeout_sec=0.05),
+        command_queue=CommandQueue(),
+        client=_FailingClient(),
+        stop_event=_StopAfterFirstWait(),
+        worker_stop_event=threading.Event(),
+    )
+    runtime.state_cache.mark_connected(
+        target_system=1,
+        target_component=1,
+        transport="tcp",
+        now=stale_at,
+    )
+    runtime.command_queue.put_control(
+        ControlCommand(command_type=ControlType.VELOCITY, vx=1.0)
+    )
+    runtime.command_queue.put_gimbal_rate(GimbalRateCommand(yaw_rate=0.2))
+    runtime.command_queue.put_action(ActionCommand(action_type=ActionType.ARM))
+
+    runtime._monitor_loop(logging.getLogger("test"))
+
+    assert runtime.state_cache.get_link_status().reconnecting is True
+    assert runtime.command_queue.peek_control() is None
+    assert runtime.command_queue.peek_gimbal_rate() is None
     assert runtime.command_queue.get_next_action() is None
 
 
@@ -466,6 +522,29 @@ def _sender_with_fake_client() -> tuple[CommandSender, _RawMessageClient]:
         stop_event=threading.Event(),
     )
     return sender, client
+
+
+def test_command_sender_disconnected_drops_continuous_and_pending_action(
+    monkeypatch,
+) -> None:
+    """A disconnected sender clears continuous state and drops queued actions."""
+    sender, _client = _sender_with_fake_client()
+    sender.command_queue.put_control(
+        ControlCommand(command_type=ControlType.VELOCITY, vx=1.0)
+    )
+    sender.command_queue.put_gimbal_rate(GimbalRateCommand(yaw_rate=0.2))
+    sender.command_queue.put_action(ActionCommand(action_type=ActionType.ARM))
+
+    monkeypatch.setattr(
+        "telemetry_link.command_sender.time.sleep",
+        lambda _seconds: sender.stop_event.set(),
+    )
+
+    sender.run()
+
+    assert sender.command_queue.peek_control() is None
+    assert sender.command_queue.peek_gimbal_rate() is None
+    assert sender.command_queue.get_next_action() is None
 
 
 def test_command_sender_set_servo_uses_mav_cmd_do_set_servo() -> None:

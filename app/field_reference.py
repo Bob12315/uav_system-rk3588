@@ -23,21 +23,21 @@ WGS84_POLE_COS_EPS = 1e-9
 # ---------------------------------------------------------------------------
 
 class OriginSource(str, Enum):
-    LOCAL_POSITION = "local_position"          # internal compatibility only
-    GPS_MARKER = "gps_marker"                  # deprecated — not API-reachable
-    MANUAL_GPS_INPUT = "manual_gps_input"      # deprecated — not API-reachable
-    PROFILE_GPS_BOUND = "profile_gps_bound"    # deprecated — replaced by PROFILE_CENTERLINE
-    PROFILE_CENTERLINE = "profile_centerline"  # current — centerline profile binding
-    RUNTIME_CURRENT_GPS = "runtime_current_gps"  # step 4+ — dynamic origin from stationary GPS samples
+    """Internal sources retained for pure-coordinate compatibility only."""
+
+    LOCAL_POSITION = "local_position"
+    GPS_MARKER = "gps_marker"
+    MANUAL_GPS_INPUT = "manual_gps_input"
+    RUNTIME_CURRENT_GPS = "runtime_current_gps"
 
 
 class HeadingSource(str, Enum):
-    COMPASS_YAW = "compass_yaw"                    # deprecated — not API-reachable
-    GPS_TWO_POINT = "gps_two_point"                # deprecated — not API-reachable
-    MANUAL_ANGLE = "manual_angle"                  # deprecated — not API-reachable
-    PROFILE_GPS_TWO_POINT = "profile_gps_two_point"  # deprecated — replaced by PROFILE_GPS_CENTERLINE
-    PROFILE_GPS_CENTERLINE = "profile_gps_centerline"  # current — centerline profile heading
-    RUNTIME_FORWARD_MARKER = "runtime_forward_marker"  # step 4+ — A→B heading from dynamic origin to forward marker
+    """Internal sources retained for pure-coordinate compatibility only."""
+
+    COMPASS_YAW = "compass_yaw"
+    MANUAL_ANGLE = "manual_angle"
+    GPS_TWO_POINT = "gps_two_point"
+    RUNTIME_FORWARD_MARKER = "runtime_forward_marker"
 
 
 # ---------------------------------------------------------------------------

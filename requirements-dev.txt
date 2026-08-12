@@ -1,2 +1,2 @@
--r requirements-app.txt
-pytest
+# Compatibility aggregator. Use requirements/dev.txt for new tooling.
+-r requirements/dev.txt

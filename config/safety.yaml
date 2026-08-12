@@ -1,0 +1,45 @@
+# Action-compatible safety pipeline limits.
+# These limits are shared by SITL and real; real is never less restrictive.
+version: 1
+
+request:
+  ttl_s: 0.5
+
+continuous_body_ned:
+  max_forward_mps: 0.4
+  max_reverse_mps: 0.4
+  max_right_mps: 0.4
+  max_left_mps: 0.4
+  max_down_mps: 0.35
+  max_up_mps: 0.35
+  max_yaw_rate_rad_s: 0.6
+  deadman_s: 0.5
+  watchdog_poll_s: 0.05
+  slew_rate_limit_enabled: false
+
+navigation:
+  min_altitude_m: 0.3
+  max_altitude_m: 6.0
+  max_single_waypoint_distance_m: 100.0
+  min_change_speed_mps: 0.1
+  max_change_speed_mps: 2.0
+  allowed_local_frames: [1, 7, 8, 9]
+  allowed_global_frames: [5, 6, 11]
+
+takeoff:
+  min_altitude_m: 0.5
+  max_altitude_m: 6.0
+  allowed_modes: [GUIDED]
+
+payload:
+  allowed_actions: [payload_release, drop_sequence, gps_drop_sequence]
+  outputs:
+    - servo_output: 8
+      min_pwm: 1200
+      max_pwm: 1750
+
+sources:
+  sitl:
+    enabled: true
+  real:
+    enabled: true

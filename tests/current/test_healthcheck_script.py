@@ -11,9 +11,8 @@ def test_healthcheck_discovers_environments_and_configured_model():
 
     assert '${APP_PYTHON:-}' in script
     assert '${YOLO_PYTHON:-}' in script
-    assert script.index('miniconda3/envs/${environment_name}') < script.index(
-        'anaconda3/envs/${environment_name}'
-    )
-    assert "command -v python3 || command -v python" in script
-    assert 'model_path="$(printf' in script
-    assert "data/models/cuadc-fp16.rknn" not in script
+    assert '"${CONDA_BIN}" run -n' in script
+    assert "rk3588" in script.lower()
+    assert "/dev/rknpu" in script
+    assert "data/models/cuadc2026-fp16.rknn" in script
+    assert "anaconda3/envs" not in script

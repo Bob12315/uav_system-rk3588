@@ -273,7 +273,11 @@ def test_dispatch_release_sends_servo_and_zero_velocity_same_result() -> None:
     action.start(_params())
     result = action.update({"field_heading_yaw_rad": 1.2}).to_dict()
     dispatcher = ActionDispatcher()
-    dispatcher.send_actions = True
+    from app.run_authorization import RunAuthorization
+    dispatcher.set_authorization(RunAuthorization.create(
+        operator="test", scope_type="action", scope_name="payload_release",
+        target_source="sitl", allowed_actions={"payload_release"},
+    ))
 
     dispatch = dispatcher.dispatch_result(
         result,

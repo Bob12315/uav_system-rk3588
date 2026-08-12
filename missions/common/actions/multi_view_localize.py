@@ -4,7 +4,7 @@ import time
 import uuid
 from typing import Any
 
-from telemetry_link.frames import GLOBAL_RELATIVE_ALT_INT, LOCAL_NED
+from .frames import GLOBAL_RELATIVE_ALT_INT, LOCAL_NED
 
 from .base import ActionModule
 from .goto_waypoint import GotoWaypointAction

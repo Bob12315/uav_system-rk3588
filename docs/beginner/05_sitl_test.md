@@ -127,8 +127,9 @@ python -m app.main --connect-telemetry --send-commands false
 
 ## 6. 建立 SITL Field Reference
 
-使用 `config/field_profiles/sitl_centerline_lane.json` 或当前 SITL 流程建立并冻结场地参考。
-确认 Web 地图上 `+Y` 前方、`+X` 右方与仿真运动一致。
+在 Web UI 的 Competition Field Setup 输入 SITL 场地的 forward marker B，并在起飞点完成
+schema v3 GPS runtime sampling。确认 `FIELD→GPS` 已就绪而 `FIELD→LOCAL_NED` 保持不可用，
+以及 Web 地图上 `+Y` 前方、`+X` 右方与仿真运动一致。
 
 ## 7. 从低风险 Action 开始
 
@@ -145,8 +146,8 @@ python -m app.main --connect-telemetry --send-commands false
 → 完整 rescue_2026_full_auto_v2
 ```
 
-只有在确认仿真场地、速度、高度和遥控接管后，才在 SITL 中开启系统 SEND 和 Action
-send_actions。一次只改变一个变量。
+只有在确认仿真场地、速度、高度和遥控接管后，才在 SITL 中开启系统 SEND，并为本次
+SITL Action/Mission 建立 run 授权。一次只改变一个变量。
 
 ## 8. 必测失败路径
 

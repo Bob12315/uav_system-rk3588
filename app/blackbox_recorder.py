@@ -9,10 +9,6 @@ from pathlib import Path
 from typing import Any
 
 from app.app_config import BlackboxConfig
-try:
-    from missions.common.control.types import FlightCommand
-except ModuleNotFoundError:
-    FlightCommand = Any
 from fusion.models import FusedState, PerceptionTarget
 from telemetry_link.models import DroneState, GimbalState, LinkStatus
 

@@ -53,9 +53,9 @@
         <div id="targetCurrent" class="current-target">当前锁定: --</div>
         <div id="detections" class="detections compact"></div>
         <div class="button-row">
-          <button data-command="target prev" data-origin="BUTTON">上一个</button>
-          <button data-command="target next" data-origin="BUTTON">下一个</button>
-          <button data-command="target unlock" data-origin="BUTTON">解除锁定</button>
+          <button data-yolo-action="prev">上一个</button>
+          <button data-yolo-action="next">下一个</button>
+          <button data-yolo-action="unlock">解除锁定</button>
         </div>
         <div class="mini-state">
           <div>Frame <strong id="frameId">--</strong></div>
@@ -120,7 +120,7 @@
 
   <main id="actionsPage" class="page">
     <section class="panel action-lab">
-      <div class="panel-title">Actions <span id="actionDryRun">等待 Action 状态</span></div>
+      <div class="panel-title">Actions <span id="actionRunStatus">等待 Action 状态</span></div>
       <div class="action-lab-layout">
         <div>
           <div id="actionButtons" class="action-buttons"></div>
@@ -129,8 +129,7 @@
         <div>
           <textarea id="actionParams" spellcheck="false"></textarea>
           <div class="button-row action-run-row">
-            <button id="actionDryRunStart">Dry Run</button>
-            <button id="actionDispatchStart" class="warning">Dispatch</button>
+            <button id="actionDispatchStart" class="warning">Start Authorized Run</button>
             <button id="actionStop" class="stop">Stop</button>
             <button id="actionReset">Reset</button>
             <button id="actionRefresh">Refresh Status</button>
@@ -138,10 +137,10 @@
           </div>
           <div id="actionSafetyHint" class="action-safety-hint">选择一个 Action 查看安全提示。</div>
           <div class="action-gate-grid">
-            <div><span>Action requested</span><strong id="actionGateRequested">--</strong></div>
-            <div><span>Action effective</span><strong id="actionGateEffective">--</strong></div>
+            <div><span>Run authorized</span><strong id="actionGateAuthorized">--</strong></div>
+            <div><span>Dispatch effective</span><strong id="actionGateEffective">--</strong></div>
             <div><span>System SEND</span><strong id="actionGateSystemSend">--</strong></div>
-            <div><span>Dry-run only</span><strong id="actionGateDryRun">--</strong></div>
+            <div><span>Run ID</span><strong id="actionGateRunId">--</strong></div>
             <div><span>sent</span><strong id="actionGateSentCount">0</strong></div>
             <div><span>skipped</span><strong id="actionGateSkippedCount">0</strong></div>
             <div><span>errors</span><strong id="actionGateErrorCount">0</strong></div>
@@ -272,22 +271,18 @@
           <button id="takeoffButton" class="warning">起飞</button>
         </div>
         <div class="button-row flight-buttons">
-          <button data-confirm="确认切换到 GUIDED？" data-command="mode GUIDED" data-mode="GUIDED">GUIDED</button>
-          <button data-confirm="确认解锁飞行器？" data-command="arm" data-arm-state="armed" class="warning">解锁</button>
-          <button data-confirm="确认返航 RTL？" data-command="mode RTL" data-mode="RTL" class="warning">RTL</button>
-          <button data-confirm="确认降落？" data-command="land" class="warning">降落</button>
-          <button data-confirm="强制 Disarm 可能导致坠落，确认发送？" data-command="disarm" data-arm-state="disarmed" class="danger">Disarm</button>
+          <button id="landActionButton" class="warning">授权本次降落 Action</button>
         </div>
         <div class="send-gate">
-          <button id="sendToggle" class="switch-button danger-gate" data-confirm="确认切换自动控制命令发送状态？请确认链路、模式和参数安全。" data-command="control send toggle" data-origin="BUTTON">
+          <button id="sendToggle" class="switch-button danger-gate">
             <span>SEND</span><strong id="sendToggleState">OFF</strong>
           </button>
-          <div class="hint">SEND 是系统级连续控制发送门。Action send_actions 只是 Action 请求下发。</div>
+          <div class="hint">SEND 是系统级发送门；每次 Action/Mission 仍需独立 run 授权。</div>
         </div>
         <div class="source-actions">
           数据源:
-          <button data-confirm="切换到 SITL 将关闭自动发送，确认？" data-command="switch_source sitl" data-source="sitl">SITL</button>
-          <button data-confirm="切换到真实飞控将关闭自动发送，确认？" data-command="switch_source real" data-source="real" class="warning">REAL</button>
+          <button data-source="sitl">SITL</button>
+          <button data-source="real" class="warning">REAL</button>
         </div>
       </article>
 
@@ -365,187 +360,12 @@
         </div>
       </article>
 
-      <!-- ── Advanced / Legacy ────────────────────────────────────────── -->
-      <details id="cfsAdvancedLegacy">
-        <summary>Advanced / Legacy Field Profile</summary>
-
-      <article class="panel safety-panel field-reference-panel">
-        <div class="panel-title">Field Reference / 场地参考 (Legacy)</div>
-        <div class="field-reference-status-grid" id="fieldReferenceStatus">
-          <div><span>confirmed</span><strong id="frConfirmed">--</strong></div>
-          <div><span>frozen</span><strong id="frFrozen">--</strong></div>
-          <div><span>GPS ready</span><strong id="frGpsReady">--</strong></div>
-          <div><span>LOCAL ready</span><strong id="frLocalReady">--</strong></div>
-          <div><span>forward marker GPS</span><strong id="frForwardMarkerGps">--</strong></div>
-          <div><span>runtime state</span><strong id="frRuntimeState">--</strong></div>
-          <div><span>runtime profile</span><strong id="frRuntimeProfile">--</strong></div>
-          <div><span>runtime error</span><strong id="frRuntimeError">--</strong></div>
-          <div><span>origin source</span><strong id="frOriginSource">--</strong></div>
-          <div><span>heading source</span><strong id="frHeadingSource">--</strong></div>
-          <div><span>field heading deg</span><strong id="frHeadingDeg">--</strong></div>
-          <div><span>origin local N/E/Z</span><strong id="frOriginLocal">--</strong></div>
-          <div><span>origin GPS lat/lon</span><strong id="frOriginGps">--</strong></div>
-          <div><span>GPS fix / sats</span><strong id="frGpsFix">--</strong></div>
-          <div><span>EPH / EPV</span><strong id="frGpsEphEpv">--</strong></div>
-          <div><span>GPS valid</span><strong id="frGpsValid">--</strong></div>
-          <div><span>has local pos</span><strong id="frHasLocal">--</strong></div>
-          <div><span>active source</span><strong id="frActiveSource">--</strong></div>
-          <div><span>synced to runtime</span><strong id="frSynced">--</strong></div>
-          <div><span>start error</span><strong id="frStartError">--</strong></div>
-          <div><span>yaw error (display only)</span><strong id="frYawError">--</strong></div>
-          <div><span>max residual</span><strong id="frMaxResidual">--</strong></div>
-          <div><span>RMS residual</span><strong id="frRmsResidual">--</strong></div>
-          <div><span>warnings</span><strong id="frWarnings">--</strong></div>
-        </div>
-        <div id="frResidualTable" class="fr-residual-table"></div>
-        <div id="fpRuntimeSampling" class="field-reference-status-grid" style="display:none">
-          <div><span>Sampling State</span><strong id="fpSamplingState">--</strong></div>
-          <div><span>Elapsed / Window</span><strong id="fpSamplingElapsed">--</strong></div>
-          <div><span>Accepted / Min</span><strong id="fpSamplingAccepted">--</strong></div>
-          <div><span>Rejected</span><strong id="fpSamplingRejected">--</strong></div>
-          <div><span>Duplicate</span><strong id="fpSamplingDuplicate">--</strong></div>
-          <div><span>Window Complete</span><strong id="fpSamplingWindowComplete">--</strong></div>
-          <div><span>Can Finalize</span><strong id="fpSamplingCanFinalize">--</strong></div>
-          <div><span>Last Rejection</span><strong id="fpSamplingLastRejection">--</strong></div>
-          <div><progress id="fpSamplingProgress" value="0" max="1"></progress></div>
-        </div>
-        <div id="fpRuntimeResult" class="field-reference-status-grid" style="display:none">
-          <div><span>Origin GPS</span><strong id="fpRuntimeOrigin">--</strong></div>
-          <div><span>Forward Marker GPS</span><strong id="fpRuntimeMarker">--</strong></div>
-          <div><span>Heading deg</span><strong id="fpRuntimeHeading">--</strong></div>
-          <div><span>Baseline m</span><strong id="fpRuntimeBaseline">--</strong></div>
-          <div><span>Spread m</span><strong id="fpRuntimeSpread">--</strong></div>
-          <div><span>Sample Count</span><strong id="fpRuntimeSampleCount">--</strong></div>
-          <div><span>Warnings</span><strong id="fpRuntimeWarnings">--</strong></div>
-          <div><pre id="fpRuntimeGeometry"></pre></div>
-        </div>
-        <div class="button-row">
-          <button id="fpRuntimeStart">开始 GPS 采样</button>
-          <button id="fpRuntimeCancel">取消采样</button>
-          <button id="frReset">Reset</button>
-          <button id="frFreeze">Freeze</button>
-        </div>
-        <div id="frHint" class="hint">
-          Field Reference — supports Schema v2 Legacy Centerline and Schema v3 Runtime GPS.
-        </div>
-      </article>
-
-      <article class="panel safety-panel field-profile-panel">
-        <div class="panel-title">Field Profile / 场地配置 (Legacy)</div>
-        <div class="field-profile-select-row">
-          <select id="fpProfileSelect"><option value="">-- 选择 Profile --</option></select>
-          <button id="fpRefreshList">刷新列表</button>
-          <button id="fpValidateProfile">验证</button>
-          <button id="fpBindCurrent" class="warning" data-confirm="将使用当前无人机 GPS + LOCAL_NED 绑定所选 Field Profile。该操作不会启动 Mission，不会发送飞控命令，不会 freeze。">绑定当前位置</button>
-        </div>
-        <div id="fpProfileDetail" class="field-profile-detail" style="display:none">
-          <div class="field-profile-status-grid">
-            <div><span>Profile ID</span><strong id="fpProfileId">--</strong></div>
-            <div><span>Name</span><strong id="fpProfileName">--</strong></div>
-            <div><span>Source</span><strong id="fpProfileSource">--</strong></div>
-            <div><span>Schema</span><strong id="fpProfileSchema">--</strong></div>
-            <div><span>O Lat/Lon</span><strong id="fpOriginLatLon">--</strong></div>
-            <div><span>O Field</span><strong id="fpOriginField">--</strong></div>
-            <div><span>CL Points</span><strong id="fpClPoints">--</strong></div>
-            <div><span>CL Details</span><small id="fpClDetails" style="display:block;max-height:120px;overflow-y:auto">--</small></div>
-            <div><span>v3 Marker</span><strong id="fpV3Marker">--</strong></div>
-            <div><span>v3 Scan</span><small id="fpV3Scan" style="display:block;max-height:80px;overflow-y:auto">--</small></div>
-            <div><span>v3 Sampling</span><strong id="fpV3Sampling">--</strong></div>
-            <div><span>v3 Baseline</span><strong id="fpV3Baseline">--</strong></div>
-            <div><span>v3 Geometry</span><strong id="fpV3Geometry">--</strong></div>
-            <div><span>GPS Quality Fix/Sats</span><strong id="fpGpsQualityFixSats">--</strong></div>
-            <div><span>GPS Quality eph/epv</span><strong id="fpGpsQualityEphEpv">--</strong></div>
-          </div>
-        </div>
-        <div id="fpBindResult" class="field-profile-status-grid" style="display:none">
-          <div><span>Bind OK</span><strong id="fpBindOk">--</strong></div>
-          <div><span>Profile ID</span><strong id="fpBindProfileId">--</strong></div>
-          <div><span>Synced Runtime</span><strong id="fpBindSynced">--</strong></div>
-          <div><span>Heading deg</span><strong id="fpBindHeading">--</strong></div>
-          <div><span>Origin Local</span><strong id="fpBindOriginLocal">--</strong></div>
-          <div><span>Current Field</span><strong id="fpBindCurrentField">--</strong></div>
-          <div><span>Baseline</span><strong id="fpBindBaseline">--</strong></div>
-          <div><span>Start Error</span><strong id="fpBindStartError">--</strong></div>
-          <div><span>Yaw Error</span><strong id="fpBindYawError">--</strong></div>
-          <div><span>Max Residual</span><strong id="fpBindMaxResidual">--</strong></div>
-          <div><span>RMS Residual</span><strong id="fpBindRmsResidual">--</strong></div>
-          <div><span>CL Residuals</span><small id="fpBindResiduals" style="display:block;max-height:100px;overflow-y:auto">--</small></div>
-          <div><span>Warnings</span><strong id="fpBindWarnings">--</strong></div>
-          <div><span>Errors</span><strong id="fpBindErrors" class="danger-text">--</strong></div>
-          <div><span>Diagnostics</span><strong id="fpBindDiagnostics">--</strong></div>
-        </div>
-        <div id="fpHint" class="hint">
-          GPS Profile 绑定 ≠ start mission ≠ freeze。Freeze 后不能重新 bind，除非先 reset。绑定只建立 FIELD↔LOCAL_NED 坐标关系。
-        </div>
-      </article>
-
-      </details>
-
       <article class="panel safety-panel">
         <div class="panel-title">Payload Release Action</div>
         <div class="payload-release-zone">
           <button id="payloadReleaseSelect" class="danger">选择 payload_release</button>
           <button id="payloadReleaseRun" class="danger">执行 payload_release</button>
           <div class="hint">高风险投放动作集中在安全页；参数仍在 Actions 页编辑。</div>
-        </div>
-        <details class="legacy-controller-switches">
-          <summary>Advanced / Legacy Controller Switches</summary>
-          <div class="hint">这些开关主要用于旧 Mission/Stage controller 链路或调试。Action-first dispatch 主要受 Action send_actions 和系统 SEND 门控控制。</div>
-          <div class="controller-switches">
-            <div class="switch-row" data-controller-row="gimbal"><span>Gimbal</span><button data-command="controller gimbal on">ON</button><button data-command="controller gimbal off">OFF</button><button data-command="controller gimbal toggle">TOGGLE</button></div>
-            <div class="switch-row" data-controller-row="body"><span>Body</span><button data-command="controller body on">ON</button><button data-command="controller body off">OFF</button><button data-command="controller body toggle">TOGGLE</button></div>
-            <div class="switch-row" data-controller-row="approach"><span>Approach</span><button data-command="controller approach on">ON</button><button data-command="controller approach off">OFF</button><button data-command="controller approach toggle">TOGGLE</button></div>
-            <div class="switch-row" data-controller-row="all"><span>All</span><button data-command="controller all on">ON</button><button data-command="controller all off">OFF</button><button data-command="controller all toggle">TOGGLE</button></div>
-          </div>
-        </details>
-      </article>
-
-      <article class="panel manual-move safety-panel">
-        <div class="panel-title">手动步长移动</div>
-        <div class="manual-move-settings">
-          <label>移动步长 <input id="moveStep" type="number" value="1" min="0.1" step="0.1"> m</label>
-          <label>偏航角度 <input id="yawStep" type="number" value="15" min="1" max="180" step="1"> °</label>
-        </div>
-        <div class="manual-move-layout">
-          <div class="direction-pad">
-            <span></span>
-            <button data-manual-move="forward">前</button>
-            <span></span>
-            <button data-manual-move="left">左</button>
-            <span class="direction-center"></span>
-            <button data-manual-move="right">右</button>
-            <span></span>
-            <button data-manual-move="back">后</button>
-            <span></span>
-          </div>
-          <div class="manual-side-actions">
-            <button data-manual-move="up">上升</button>
-            <button data-manual-move="down">下降</button>
-            <button data-manual-yaw="left">左偏航</button>
-            <button data-manual-yaw="right">右偏航</button>
-          </div>
-        </div>
-        <div class="hint">机体系单步移动；后端读取当前 LOCAL_NED 和 yaw，换算为 LOCAL_NED 绝对位置目标，并保持当前 yaw。执行前会停止当前 Action 并清理连续控制。</div>
-      </article>
-
-      <article class="panel safety-panel flight-command-panel">
-        <div class="panel-title">Manual Command</div>
-        <div class="hint flight-command-warning">
-          手动命令会直接进入后端命令解析；飞控实发仍受 SEND / 模式 / 解锁状态影响。危险命令请确认后再发送。
-        </div>
-        <div class="command-line flight-command-line">
-          <label>&gt;</label>
-          <input id="flightCommandInput" autocomplete="off" placeholder="例如 mode GUIDED、arm、land">
-          <button id="flightSendCommand">发送</button>
-        </div>
-        <div id="flightCompletionHint" class="hint">支持与主命令行相同的命令；复杂命令可在 Config / Logs 页使用完整命令行。</div>
-        <div class="flight-command-quick-hints">
-          <span>常用命令：</span>
-          <code>mode GUIDED</code>
-          <code>arm</code>
-          <code>land</code>
-          <code>mode RTL</code>
-          <code>controller all off</code>
         </div>
       </article>
     </section>
@@ -584,15 +404,7 @@
         <div class="panel-title">用户输入记录</div>
         <div id="auditLog" class="scroll-list"></div>
       </article>
-      <article class="panel console">
-        <div class="panel-title">命令行</div>
-        <div class="command-line">
-          <label>&gt;</label>
-          <input id="commandInput" autocomplete="off" placeholder="输入命令，Tab 补全，↑ ↓ 历史">
-          <button id="sendCommand">发送</button>
-        </div>
-        <div id="completionHint" class="hint">Tab 补全 / ↑ ↓ 查看输入记录</div>
-      </article>
+      <article class="panel console"><div id="completionHint" class="hint">所有状态修改使用强类型 API 和本次 run 授权。</div></article>
     </section>
   </main>
     </section>

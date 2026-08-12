@@ -106,6 +106,15 @@ YOLO 使用 RKNNLite 在 RK3588 NPU 本地运行，减少对云端视觉服务�
 
 浏览器可用于查看状态、初始化比赛场地、测试 Action 和运行 Mission。
 
+Web 默认只监听 `127.0.0.1`，启动前必须通过环境变量提供单操作者口令：
+
+```bash
+export UAV_WEB_OPERATOR_PASSWORD='请替换为现场强口令'
+```
+
+也可以设置 `UAV_WEB_OPERATOR_PASSWORD_FILE` 指向仅当前用户可读的权限文件。不要把口令
+写入受 Git 跟踪的 YAML。非回环部署还必须同步配置 `allowed_hosts` 和 `allowed_origins`。
+
 ### SITL
 
 支持 ArduPilot + Gazebo 仿真验证，帮助团队在实飞前检查任务流程和异常路径。
@@ -139,6 +148,8 @@ ArduPilot
 
 - 主要围绕 CUADC 2026 比赛任务设计；
 - 当前机载部署主要面向 Linux ARM64 RK3588；
+- 通用 app 可在 Linux x86_64/ARM64 上用于开发、SITL 和 Web 操作；本地 RKNN YOLO
+  仍只支持 RK3588，见[平台与环境支持](docs/developer/platform_support.md)；
 - 部分视觉、投放和飞行参数需要根据不同飞机重新标定；
 - SITL 与真实飞行仍存在差异；
 - 部分大型 Action 后续仍可继续拆分；

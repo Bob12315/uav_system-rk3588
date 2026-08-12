@@ -11,13 +11,32 @@ class AuditLog:
         self.path = Path(path).expanduser()
         self._lock = threading.Lock()
 
-    def append(self, source: str, action: str, ok: bool, message: str) -> dict[str, object]:
+    def append(
+        self,
+        source: str,
+        action: str,
+        ok: bool,
+        message: str,
+        *,
+        operator: str = "unknown",
+        source_address: str = "",
+        run_id: str | None = None,
+        target_source: str | None = None,
+        reason: str = "",
+    ) -> dict[str, object]:
         record: dict[str, object] = {
             "timestamp": time.time(),
             "source": source,
             "action": action,
             "ok": bool(ok),
             "message": message,
+            "operator": operator,
+            "source_address": source_address,
+            "run_id": run_id,
+            "target_source": target_source,
+            "operation_type": action,
+            "result": "allowed" if ok else "rejected",
+            "reason": reason or message,
         }
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)

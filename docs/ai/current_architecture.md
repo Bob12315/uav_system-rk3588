@@ -11,6 +11,7 @@ Web UI
   → ActionRunner
   → missions/common/actions/*
   → ActionDispatcher
+  → ActionSafetyPipeline
   → LinkManager
   → telemetry_link / MAVLink
 ```
@@ -19,7 +20,7 @@ Web UI
 - Web UI 是当前唯一正式人工操作入口。
 - `missions/common/actions/` 是 Action 实现位置。
 - `config/action_missions/*.json` 是任务模板位置。
-- `ActionDispatcher → LinkManager` 是当前实际发送链路。
+- `ActionDispatcher → ActionSafetyPipeline → LinkManager` 是当前实际发送链路。
 
 ## 模块边界
 
@@ -42,9 +43,10 @@ FlightCommandExecutor` 不是当前可运行主线，其依赖的大量 mission/
 模块已经缺失。不得恢复或新增旧式 `missions/<mission>/mission.py`、
 `missions/<mission>/stages/<stage>`。详见 [deprecated_paths.md](deprecated_paths.md)。
 
-## 已知安全架构缺口
+## Action-compatible safety pipeline
 
-当前 Action 连续命令由 `ActionDispatcher` 送入 `LinkManager`。旧文档中的
-CommandShaper/FlightCommandExecutor 不再服务当前 Action 主线。后续需要明确新的
-Action-compatible safety pipeline，或正式记录 dispatcher 层的等价限幅、停止和
-门控方案；未经明确裁决不得恢复已删除的旧控制栈。
+当前所有允许到达 `LinkManager` 的 Action request 都先经过 `ActionSafetyPipeline`。
+它负责 run/source/telemetry/TTL 校验、安全包线、Field Reference 前置条件、payload
+白名单和独立 BODY_NED deadman；裁决保留 original/effective/rejected request。
+参数来源见 [`p0_security_decisions.md`](p0_security_decisions.md)。未经明确裁决不得恢复
+已删除的旧控制栈。

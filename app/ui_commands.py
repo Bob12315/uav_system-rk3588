@@ -16,9 +16,6 @@ def build_ui_command_handler(
     *,
     controller_switches: ControlRuntimeSwitches | None = None,
     yolo_client: YoloCommandClient | None = None,
-    mission_command_handler: Callable[[list[str]], CommandResult] | None = None,
-    stage_override_handler: Callable[[str | None], CommandResult] | None = None,
-    stage_config_reload_handler: Callable[[], CommandResult] | None = None,
 ) -> Callable[[str], CommandResult]:
     def _handle(command: str) -> CommandResult:
         own_result = _dispatch_ui_command(
@@ -26,9 +23,6 @@ def build_ui_command_handler(
             manager=manager,
             controller_switches=controller_switches,
             yolo_client=yolo_client,
-            mission_command_handler=mission_command_handler,
-            stage_override_handler=stage_override_handler,
-            stage_config_reload_handler=stage_config_reload_handler,
         )
         if own_result is not None:
             return own_result
@@ -49,9 +43,6 @@ def _dispatch_ui_command(
     manager: LinkManager,
     controller_switches: ControlRuntimeSwitches | None,
     yolo_client: YoloCommandClient | None,
-    mission_command_handler: Callable[[list[str]], CommandResult] | None,
-    stage_override_handler: Callable[[str | None], CommandResult] | None,
-    stage_config_reload_handler: Callable[[], CommandResult] | None,
 ) -> CommandResult | None:
     parts = command.strip().split()
     if not parts:
@@ -64,22 +55,6 @@ def _dispatch_ui_command(
         return _dispatch_control_command(parts, manager, controller_switches)
     if root == "target":
         return _dispatch_target_command(parts, yolo_client)
-    if root == "task":
-        return _dispatch_stage_override_command(parts, stage_override_handler)
-    if root == "mission":
-        mission_result = _dispatch_mission_command(parts, mission_command_handler)
-        if mission_result is not None:
-            return mission_result
-        return CommandResult(
-            False,
-            "format: mission list | mission switch <name> | mission start | mission reset | mission current",
-        )
-    if root == "pid":
-        return _dispatch_stage_config_command(parts, stage_config_reload_handler)
-    if root in {"stage", "stages"}:
-        if len(parts) >= 2 and parts[1].lower() in {"reload", "load", "config", "controllers"}:
-            return _dispatch_stage_config_command(parts, stage_config_reload_handler)
-        return _dispatch_stage_override_command(parts, stage_override_handler)
     return None
 
 
@@ -162,56 +137,6 @@ def _dispatch_target_command(
     return CommandResult(False, "target action must be next, prev, lock, or unlock")
 
 
-def _dispatch_mission_command(
-    parts: list[str],
-    mission_command_handler: Callable[[list[str]], CommandResult] | None,
-) -> CommandResult | None:
-    if len(parts) < 2:
-        if mission_command_handler is None:
-            return CommandResult(False, "mission switching is not available in this UI")
-        return mission_command_handler([])
-    action = parts[1].lower()
-    if action not in {"list", "ls", "switch", "select", "use", "stage", "start", "reset", "current", "status"}:
-        return None
-    if mission_command_handler is None:
-        return CommandResult(False, "mission switching is not available in this UI")
-    return mission_command_handler(parts[1:])
-
-
-def _dispatch_stage_override_command(
-    parts: list[str],
-    stage_override_handler: Callable[[str | None], CommandResult] | None,
-) -> CommandResult:
-    if stage_override_handler is None:
-        return CommandResult(False, "stage override is not available in this UI")
-    if len(parts) == 2 and parts[1].lower() in {"auto", "clear"}:
-        return stage_override_handler(None)
-    if len(parts) == 2:
-        return stage_override_handler(parts[1])
-    if len(parts) == 3 and parts[1].lower() == "mode":
-        if parts[2].lower() in {"auto", "clear"}:
-            return stage_override_handler(None)
-        return stage_override_handler(parts[2])
-    return CommandResult(False, "format: stage mode <APPROACH_TRACK|OVERHEAD_HOLD|auto>")
-
-
-def _dispatch_stage_config_command(
-    parts: list[str],
-    stage_config_reload_handler: Callable[[], CommandResult] | None,
-) -> CommandResult:
-    if stage_config_reload_handler is None:
-        return CommandResult(False, "mission stage config reload is not available in this UI")
-    if len(parts) == 2 and parts[1].lower() in {"reload", "load"}:
-        return stage_config_reload_handler()
-    if (
-        len(parts) == 3
-        and parts[1].lower() in {"config", "controllers"}
-        and parts[2].lower() in {"reload", "load"}
-    ):
-        return stage_config_reload_handler()
-    return CommandResult(False, "format: pid reload | stage reload | stage config reload")
-
-
 def format_controller_snapshot(snapshot: ControlSwitchSnapshot) -> str:
     return (
         f"G={'ON' if snapshot.gimbal else 'OFF'} "
@@ -241,60 +166,3 @@ def _clear_continuous_commands(manager: LinkManager) -> None:
     clear_sender = getattr(manager, "clear_continuous_commands", None)
     if callable(clear_sender):
         clear_sender()
-
-
-# ---------------------------------------------------------------------------
-# command autocomplete (extracted from uav_ui/terminal_ui.py)
-# ---------------------------------------------------------------------------
-
-from dataclasses import dataclass  # noqa: E402  (second import is intentional for autocomplete types)
-
-from app.completion_catalog import COMMAND_COMPLETIONS  # noqa: E402
-
-
-@dataclass(slots=True)
-class AutocompleteState:
-    seed: str = ""
-    matches: tuple[str, ...] = ()
-    index: int = -1
-
-
-@dataclass(slots=True)
-class AutocompleteResult:
-    buffer: str
-    cursor: int
-    state: AutocompleteState
-    message: str
-
-
-def complete_command_input(
-    buffer: str, cursor: int, state: AutocompleteState | None = None,
-) -> AutocompleteResult:
-    state = state or AutocompleteState()
-    cursor = max(0, min(cursor, len(buffer)))
-    prefix = buffer[:cursor]
-    suffix = buffer[cursor:]
-    current_match = (
-        state.matches[state.index]
-        if 0 <= state.index < len(state.matches)
-        else ""
-    )
-    if state.matches and prefix in {state.seed, current_match}:
-        matches = state.matches
-        index = (state.index + 1) % len(matches)
-    else:
-        lowered = prefix.lower()
-        matches = tuple(
-            c for c in COMMAND_COMPLETIONS if c.lower().startswith(lowered)
-        )
-        index = 0
-    if not matches:
-        return AutocompleteResult(buffer, cursor, AutocompleteState(), "no completion")
-    candidate = matches[index]
-    next_buffer = candidate + suffix
-    next_state = AutocompleteState(seed=prefix, matches=matches, index=index)
-    if len(matches) == 1:
-        message = f"completion 1/1: {candidate}"
-    else:
-        message = f"completion {index + 1}/{len(matches)}: {candidate}"
-    return AutocompleteResult(next_buffer, len(candidate), next_state, message)

@@ -30,14 +30,6 @@ class ActionRuntimeService:
     def action_name(self) -> str | None:
         return self.runner.action_name
 
-    @property
-    def send_actions_requested(self) -> bool:
-        return self.dispatcher.send_actions
-
-    @send_actions_requested.setter
-    def send_actions_requested(self, value: bool) -> None:
-        self.dispatcher.send_actions = bool(value)
-
     # ------------------------------------------------------------------
     # public API — mirrors SystemRunner.action_lab_*
     # ------------------------------------------------------------------
@@ -47,14 +39,11 @@ class ActionRuntimeService:
         action_name: str,
         params: dict[str, object] | None = None,
         *,
-        send_actions: bool | None = None,
         link_manager: object | None = None,
         clear_navigation: bool = True,
     ):
         if clear_navigation:
             self.clear_navigation_queue(link_manager)
-        if send_actions is not None:
-            self.dispatcher.send_actions = bool(send_actions)
         # Switch-running action: stop the current one first.
         if (
             self.runner.state == "running"

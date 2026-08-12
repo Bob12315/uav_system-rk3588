@@ -17,6 +17,8 @@ from app.dispatch.flight_mode_handler import (
     dispatch_set_mode, dispatch_arm, dispatch_takeoff, dispatch_land,
     dispatch_condition_yaw, dispatch_change_speed,
 )
+from app.run_authorization import RunAuthorization
+from app.safety_pipeline import ActionSafetyPipeline, SafetyDecision
 from telemetry_link.frames import BODY_NED, LOCAL_NED
 
 
@@ -33,14 +35,19 @@ class ActionDispatcher:
         policy: dict[str, DispatchRule] | None = None,
         logger: logging.Logger | None = None,
         yolo_client: object | None = None,
+        safety_pipeline: ActionSafetyPipeline | None = None,
     ) -> None:
         self._policy = policy or ACTION_DISPATCH_POLICY
         self._logger = logger or logging.getLogger(self.__class__.__name__)
         self.yolo_client = yolo_client
-        self.send_actions: bool = False
+        self.authorization: RunAuthorization | None = None
         self.dispatched_keys: set[str] = set()
         self.last_dispatch: dict[str, list[dict[str, object]]] = self.empty_dispatch()
         self.last_servo_command: dict[str, object] | None = None
+        self.safety_decisions: list[dict[str, object]] = []
+        self.safety_pipeline = safety_pipeline or ActionSafetyPipeline(
+            on_decision=self._record_safety_decision,
+        )
 
     # ------------------------------------------------------------------
     # gate — fully policy-driven (PR A)
@@ -62,6 +69,7 @@ class ActionDispatcher:
         send_commands: bool,
         action_type: str | None = None,
         action_name: str | None = None,
+        source: str | None = None,
     ) -> tuple[bool, str]:
         # When called with action_type, use the policy rule for that type.
         if action_type is not None:
@@ -71,9 +79,12 @@ class ActionDispatcher:
             if action_name is not None and action_name not in rule.allowed_actions:
                 return False, "action_dispatch_not_enabled"
             ok, note = SafetyGate.check(
-                send_actions=self.send_actions,
+                run_authorized=bool(
+                    self.authorization
+                    and self.authorization.permits(action_name, source)
+                ),
                 send_commands=send_commands,
-                requires_send_actions=rule.requires_send_actions,
+                requires_run_authorization=rule.requires_run_authorization,
                 requires_send_commands=rule.requires_send_commands,
             )
             if not ok:
@@ -85,9 +96,12 @@ class ActionDispatcher:
             for atype, rule in self._policy.items():
                 if action_name in rule.allowed_actions:
                     ok, note = SafetyGate.check(
-                        send_actions=self.send_actions,
+                        run_authorized=bool(
+                            self.authorization
+                            and self.authorization.permits(action_name, source)
+                        ),
                         send_commands=send_commands,
-                        requires_send_actions=rule.requires_send_actions,
+                        requires_run_authorization=rule.requires_run_authorization,
                         requires_send_commands=rule.requires_send_commands,
                     )
                     if not ok:
@@ -168,14 +182,17 @@ class ActionDispatcher:
         link_manager: object | None,
     ) -> dict[str, list[dict[str, object]]]:
         dispatch = self.empty_dispatch()
+        source = self._source_for(link_manager)
         effective, note = self.gate(
             send_commands=send_commands,
             action_name=action_name,
+            source=source,
         )
         self._logger.info(
-            "action_lab dispatch gate current_action=%s send_actions_requested=%s send_commands=%s effective=%s note=%s",
+            "action dispatch gate current_action=%s run_id=%s source=%s send_commands=%s effective=%s note=%s",
             action_name,
-            bool(self.send_actions),
+            self.authorization.run_id if self.authorization else None,
+            source,
             bool(send_commands),
             bool(effective),
             note,
@@ -192,6 +209,7 @@ class ActionDispatcher:
                 send_commands=send_commands,
                 action_type=action_type,
                 action_name=action_name,
+                source=source,
             )
             self._logger.info(
                 "action_lab dispatch decision current_action=%s action_type=%s dispatch_allowed=%s note=%s",
@@ -205,6 +223,26 @@ class ActionDispatcher:
                     {"action": action, "action_type": action_type, "reason": action_note}
                 )
                 continue
+            request = dict(action)
+            request.setdefault("generated_at_monotonic", time.monotonic())
+            decision = self.safety_pipeline.evaluate(
+                request,
+                action_name=action_name,
+                source=source,
+                authorization=self.authorization,
+                link_manager=link_manager,
+            )
+            if decision.status == "rejected" or decision.effective_request is None:
+                dispatch["skipped"].append(
+                    {
+                        "action": action,
+                        "action_type": action_type,
+                        "reason": decision.reason_code,
+                        "safety_decision": decision.to_dict(),
+                    }
+                )
+                continue
+            action = decision.effective_request
             key = str(action.get("key") or "")
             rule = self._policy.get(action_type)
             once_respected = rule.once_respected if rule is not None else True
@@ -214,6 +252,17 @@ class ActionDispatcher:
                     {"action": action, "action_type": action_type, "reason": "once_already_dispatched"}
                 )
                 continue
+            if action_type == "set_servo":
+                assert self.authorization is not None
+                if not self.safety_pipeline.mark_servo_sent(self.authorization.run_id, key):
+                    dispatch["skipped"].append(
+                        {"action": action, "action_type": action_type, "reason": "servo_duplicate_key"}
+                    )
+                    continue
+            if action_type in {"local_position", "global_goto", "land", "takeoff"}:
+                self.safety_pipeline.stop_continuous("transition_to_discrete_control")
+            elif action_type == "clear_continuous_commands":
+                self.safety_pipeline.stop_continuous("explicit_continuous_clear", emit=False)
             try:
                 outcome = self._dispatch_action(action, link_manager=link_manager)
             except Exception as exc:
@@ -235,7 +284,11 @@ class ActionDispatcher:
                     }
                 continue
             if outcome["status"] == "sent":
-                sent = {"action": action, **dict(outcome.get("detail") or {})}
+                sent = {
+                    "action": action,
+                    "safety_decision": decision.to_dict(),
+                    **dict(outcome.get("detail") or {}),
+                }
                 dispatch["sent"].append(sent)
                 self._logger.info("action_lab dispatch sent action_type=%s detail=%s", action_type, sent)
             elif outcome["status"] == "skipped":
@@ -256,6 +309,20 @@ class ActionDispatcher:
                 continue
             if once_enabled and key:
                 self.dispatched_keys.add(key)
+            if (
+                outcome["status"] == "sent"
+                and action_type in {"flight_command", "body_velocity"}
+                and self.authorization is not None
+                and action_name is not None
+                and link_manager is not None
+            ):
+                self.safety_pipeline.arm_continuous(
+                    request=action,
+                    action_name=action_name,
+                    source=source,
+                    authorization=self.authorization,
+                    link_manager=link_manager,
+                )
         return dispatch
 
     # ------------------------------------------------------------------
@@ -710,19 +777,20 @@ class ActionDispatcher:
         action_name: str | None,
         send_commands: bool,
     ) -> dict[str, object]:
-        requested = bool(self.send_actions)
+        source = self.authorization.target_source if self.authorization else None
         effective, note = self.gate(
             send_commands=send_commands,
             action_name=action_name,
+            source=source,
         )
         return {
-            "send_actions": requested,
-            "requested_send_actions": requested,
-            "send_actions_requested": requested,
-            "send_actions_effective": bool(effective),
-            "dry_run_only": not bool(effective),
+            "run_authorized": self.authorization is not None,
+            "run_id": self.authorization.run_id if self.authorization else None,
+            "run_authorization": self.authorization.to_dict() if self.authorization else None,
+            "dispatch_effective": bool(effective),
             "note": note,
             "dispatch": dict(self.last_dispatch),
+            "safety_decisions": list(self.safety_decisions[-50:]),
             "last_servo_command": self.last_servo_command,
             "status": status,
         }
@@ -739,3 +807,40 @@ class ActionDispatcher:
         self.dispatched_keys.clear()
         self.last_dispatch = self.empty_dispatch()
         self.last_servo_command = None
+
+    def set_authorization(self, authorization: RunAuthorization | None) -> None:
+        previous = self.authorization
+        if previous is not None and (
+            authorization is None or authorization.run_id != previous.run_id
+        ):
+            self.safety_pipeline.stop_continuous("run_authorization_revoked")
+            self.safety_pipeline.reset_run(previous.run_id)
+        self.authorization = authorization
+        self.reset_keys()
+
+    def clear_authorization(self, reason: str = "run_authorization_revoked") -> None:
+        previous = self.authorization
+        self.safety_pipeline.stop_continuous(reason)
+        if previous is not None:
+            self.safety_pipeline.reset_run(previous.run_id)
+        self.authorization = None
+
+    def _source_for(self, link_manager: object | None) -> str:
+        getter = getattr(link_manager, "get_active_source", None)
+        if callable(getter):
+            return str(getter())
+        return "test"
+
+    def _record_safety_decision(self, decision: SafetyDecision) -> None:
+        payload = decision.to_dict()
+        self.safety_decisions.append(payload)
+        if len(self.safety_decisions) > 200:
+            del self.safety_decisions[:-200]
+        self._logger.info(
+            "action safety decision status=%s reason=%s run_id=%s action=%s source=%s",
+            decision.status,
+            decision.reason_code,
+            decision.run_id,
+            decision.action,
+            decision.source,
+        )

@@ -22,7 +22,7 @@ def test_dispatcher_rejects_confirm_field_heading():
 
 
 def test_dispatcher_dispatches_set_servo():
-    """ActionDispatcher dispatches set_servo (no link_manager → dry-run)."""
+    """ActionDispatcher rejects set_servo when no LinkManager is available."""
     dispatcher = ActionDispatcher()
     result = dispatcher._dispatch_action(
         {"action_type": "set_servo", "params": {"channel": 9, "pwm": 1500}},

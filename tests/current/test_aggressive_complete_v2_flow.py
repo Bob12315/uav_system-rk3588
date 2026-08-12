@@ -99,8 +99,10 @@ def test_takeoff_reaching_height_before_duration_completes_normally() -> None:
     action = TakeoffAction()
     action.start({"altitude_m": 3.5, "altitude_tolerance_m": 0.35, "max_duration_s": 12.0})
     action.update({})
-    action.update({})
-    action.update({})
+    action.update({"drone": {"mode": "GUIDED", "armed": False}})
+    action.update({"drone": {"mode": "GUIDED", "armed": False}})
+    action.update({"drone": {"mode": "GUIDED", "armed": True}})
+    action.update({"drone": {"mode": "GUIDED", "armed": True}})
     result = action.update({"relative_altitude": 3.2})
     assert result.done and result.reason == "takeoff_altitude_reached"
 

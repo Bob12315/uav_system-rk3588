@@ -259,10 +259,6 @@ window.UavFieldProfiles = (function () {
 
         updateButtons();
 
-        // Also forward to legacy rendering for backward-compat
-        if (window.UavFieldRef && window.UavFieldRef.renderFieldReference) {
-            window.UavFieldRef.renderFieldReference(data);
-        }
     }
 
     // ── actions ────────────────────────────────────────────────────────
@@ -367,13 +363,9 @@ window.UavFieldProfiles = (function () {
     return {
         init: init,
         onFieldReferenceStatus: onFieldReferenceStatus,
-        // Legacy API compat (exposed for App.js destructuring)
         getRuntimeUiState: function () {
             return { requestBusy: requestBusy };
         },
-        updateRuntimeControls: updateButtons,
-        // v2 legacy compat placeholders
-        fetchProfileList: function () {},
-        loadAndRenderProfile: function () {}
+        updateRuntimeControls: updateButtons
     };
 })();

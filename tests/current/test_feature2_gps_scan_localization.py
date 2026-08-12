@@ -519,7 +519,11 @@ def test_dispatcher_allows_condition_yaw_for_gps_multi_view() -> None:
     from app.action_dispatcher import ActionDispatcher
     from app.dispatch.policy import ACTION_DISPATCH_POLICY
     dispatcher = ActionDispatcher()
-    dispatcher.send_actions = True
+    from app.run_authorization import RunAuthorization
+    dispatcher.set_authorization(RunAuthorization.create(
+        operator="test", scope_type="action", scope_name="gps_multi_view_localize",
+        target_source="sitl", allowed_actions={"gps_multi_view_localize"},
+    ))
     result = dispatcher.dispatch_actions(
         [{"action_type": "condition_yaw", "params": {"yaw_deg": 45.0, "yaw_speed_deg_s": 20.0,
                                                       "direction": 0, "relative": False},
@@ -538,7 +542,11 @@ def test_dispatcher_rejects_condition_yaw_for_unknown_action() -> None:
     """Dispatcher rejects condition_yaw for an action not in the whitelist."""
     from app.action_dispatcher import ActionDispatcher
     dispatcher = ActionDispatcher()
-    dispatcher.send_actions = True
+    from app.run_authorization import RunAuthorization
+    dispatcher.set_authorization(RunAuthorization.create(
+        operator="test", scope_type="action", scope_name="gps_drop_sequence",
+        target_source="sitl", allowed_actions={"gps_drop_sequence"},
+    ))
     result = dispatcher.dispatch_actions(
         [{"action_type": "condition_yaw", "params": {"yaw_deg": 45.0, "yaw_speed_deg_s": 20.0,
                                                       "direction": 0, "relative": False},

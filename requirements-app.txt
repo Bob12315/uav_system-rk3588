@@ -1,7 +1,2 @@
-pymavlink
-pyyaml
-numpy
-fastapi
-uvicorn
-websockets
-httpx
+# Compatibility aggregator. Use requirements/app.txt for new tooling.
+-r requirements/app.txt

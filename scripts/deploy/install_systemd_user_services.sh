@@ -5,8 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 SOURCE_DIR="${REPO_ROOT}/deploy/systemd"
 TARGET_DIR="${TARGET_DIR:-${HOME}/.config/systemd/user}"
-APP_PYTHON="${APP_PYTHON:-${HOME}/anaconda3/envs/app/bin/python}"
-YOLO_PYTHON="${YOLO_PYTHON:-${HOME}/anaconda3/envs/yolo/bin/python}"
+APP_ENV_NAME="${APP_ENV_NAME:-uav-app}"
+YOLO_ENV_NAME="${YOLO_ENV_NAME:-uav-rk3588-yolo}"
 
 ENABLE_NOW=false
 DRY_RUN=false
@@ -26,6 +26,15 @@ for arg in "$@"; do
   esac
 done
 
+resolve_conda_python() {
+  local override="$1" environment_name="$2"
+  if [[ -n "${override}" ]]; then printf '%s\n' "${override}"; return; fi
+  command -v conda >/dev/null 2>&1 || return 1
+  conda run -n "${environment_name}" python -c 'import sys; print(sys.executable)'
+}
+
+APP_PYTHON="$(resolve_conda_python "${APP_PYTHON:-}" "${APP_ENV_NAME}" || true)"
+YOLO_PYTHON="$(resolve_conda_python "${YOLO_PYTHON:-}" "${YOLO_ENV_NAME}" || true)"
 if [[ ! -x "${APP_PYTHON}" ]]; then
   echo "Missing app environment Python: ${APP_PYTHON}" >&2
   exit 1

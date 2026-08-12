@@ -183,10 +183,10 @@
     var errorCount = countDispatchItems(dispatch.errors);
     var runningAction = (status && status.running) ? (status.action_name || "") : "";
     var selectedIsRunning = Boolean(runningAction && runningAction === labState.selectedActionName);
-    if ($("actionDryRun")) {
-      $("actionDryRun").textContent = (payload && payload.send_actions_effective)
-        ? "Dispatch enabled" + (note ? ": " + note : "")
-        : "Dry-run" + (note ? ": " + note : "");
+    if ($("actionRunStatus")) {
+      $("actionRunStatus").textContent = (payload && payload.run_authorized)
+        ? "Run authorized" + (note ? ": " + note : "")
+        : "Run not authorized" + (note ? ": " + note : "");
     }
     $("actionState").textContent = (status && status.state) ? status.state : "--";
     $("actionSelected").textContent = actionNameWithZh(labState.selectedActionName);
@@ -203,10 +203,10 @@
     var set = _dom().setOptionalText;
     var st = _state();
     var ctrl = st.controllers || {};
-    set("actionGateRequested", String(Boolean(payload && payload.send_actions_requested)));
-    set("actionGateEffective", String(Boolean(payload && payload.send_actions_effective)));
+    set("actionGateAuthorized", String(Boolean(payload && payload.run_authorized)));
+    set("actionGateEffective", String(Boolean(payload && payload.dispatch_effective)));
     set("actionGateSystemSend", String(Boolean(ctrl.send_commands)));
-    set("actionGateDryRun", String(Boolean(payload && payload.dry_run_only)));
+    set("actionGateRunId", (payload && payload.run_id) || "--");
     set("actionGateSentCount", String(sentCount));
     set("actionGateSkippedCount", String(skippedCount));
     set("actionGateErrorCount", String(errorCount));
@@ -292,23 +292,28 @@
     }
   }
 
-  function startActionLabAction(sendActions) {
+  function activeSource() {
+    var st = _state() || {};
+    return String(st.active_source || (st.link && st.link.active_source) || "real").toLowerCase();
+  }
+
+  function startActionLabAction() {
     if (!labState.selectedActionName) return;
     var params = parseActionParams();
     if (params === null) return;
-    if (sendActions) {
-      var confirmed = window.confirm(
-        "这会请求 Action 实发。\n"
-        + "如果系统 SEND=OFF，飞控命令仍不会发送。\n"
-        + "如果系统 SEND=ON，local_position/body_velocity/set_servo 会实际发送到 vehicle/simulator。\n"
-        + "确认继续？"
-      );
-      if (!confirmed) return;
-    }
+    var source = activeSource();
+    var sourceLabel = source === "sitl" ? "SITL" : "REAL";
+    var confirmed = window.confirm(
+      "确认授权本次 " + sourceLabel + " Action run？\n"
+      + "授权只绑定本次 run，不会继承到下一次。\n"
+      + "系统 SEND=OFF 时仍不会实发。"
+    );
+    if (!confirmed) return;
     var requestBody = {
       name: labState.selectedActionName,
       params: params,
-      send_actions: Boolean(sendActions),
+      authorize: true,
+      target_source: source,
     };
     console.log("Action Lab start request body", requestBody);
     return _api()("/api/actions/start", {
@@ -316,7 +321,7 @@
       body: JSON.stringify(requestBody),
     }).then(function (result) {
       if (!result.ok) throw new Error(result.error || "action start failed");
-      _dom().$("completionHint").textContent = result.note || (sendActions ? "action dispatch requested" : "action dry-run started");
+      _dom().$("completionHint").textContent = result.note || (sourceLabel + " action run started");
       renderActionLabStatus(result.action_lab || result.status);
       if (cfg.renderFieldMap) cfg.renderFieldMap(_state());
     });

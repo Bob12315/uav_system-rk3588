@@ -66,7 +66,6 @@ class FakeRuntime:
         name,
         params=None,
         *,
-        send_actions=None,
         link_manager=None,
         clear_navigation=True,
     ):

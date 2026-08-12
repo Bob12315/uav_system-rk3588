@@ -28,23 +28,11 @@
 
 ## 2. 连接网络
 
-Wi-Fi 或网线都可以。目标是让 RK3588 能联网，并让笔记本能够访问 RK3588。
+首次配置时，可以给 RK3588 接上显示器和键盘，然后连接 Wi-Fi；也可以直接使用网线。
+这一阶段只需要确认两件事：
 
-在 RK3588 终端运行：
-
-```bash
-ip addr
-hostname -I
-ip route
-ping github.com
-```
-
-记录连接信息，不要把密码写进文档或仓库：
-
-```text
-RK3588 IP：
-RK3588 用户名：
-```
+- RK3588 可以访问互联网；
+- 笔记本和 RK3588 之间网络可达。
 
 ## 3. 安装并开启 SSH
 
@@ -52,15 +40,24 @@ RK3588 用户名：
 
 ```bash
 sudo apt update
-sudo apt install openssh-server -y
+sudo apt install openssh-server net-tools -y
 sudo systemctl enable ssh
 sudo systemctl start ssh
 ```
 
-检查服务：
+检查 SSH 服务并查看 RK3588 的 IP 地址：
 
 ```bash
 systemctl status ssh
+hostname -I
+ifconfig
+```
+
+记录连接信息，不要把密码写进文档或仓库：
+
+```text
+RK3588 用户名：
+RK3588 IP：
 ```
 
 然后在笔记本终端测试：
@@ -136,6 +133,7 @@ docs/ai/DEPLOY_RK3588.md
    - Web UI 是否正常；
    - MAVLink 是否能只读连接；
    - 哪些地方还需要人工处理。
+9. 如果软件下载较慢，可以在确认镜像来源可信后换用国内镜像源。
 ```
 
 ## 6. 验证部署结果
@@ -152,7 +150,7 @@ AI 完成后，至少确认：
 
 如果某项失败，把 AI 的完成报告和对应日志保留下来，不要立即重装系统。
 
-## 7. 配置仿真环境
+## 7. 在笔记本配置仿真环境
 
 这一部分用于安装后续 SITL 测试需要的：
 
@@ -161,9 +159,9 @@ AI 完成后，至少确认：
 - `ardupilot_gazebo`
 - 相关仿真依赖
 
-我已经有单独的视频教程，后续会补充到这里。
+仿真环境安装可以参考下面的视频：
 
-> 📹 仿真环境配置视频：待补
+> 📹 [仿真环境配置视频（Bilibili）](https://www.bilibili.com/video/BV18fzaB6E6q/)
 
 <!-- TODO:
 后续人工补充：
@@ -171,7 +169,6 @@ AI 完成后，至少确认：
 - ArduPilot 安装
 - Gazebo 安装
 - ardupilot_gazebo
-- 视频链接
 - 必要截图
 -->
 

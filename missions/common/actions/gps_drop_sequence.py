@@ -12,7 +12,7 @@ from typing import Any
 
 from app.coordinate_transform import field_to_gps_from_origin
 from app.field_reference import FieldReferenceError
-from telemetry_link.frames import GLOBAL_RELATIVE_ALT_INT
+from .frames import GLOBAL_RELATIVE_ALT_INT
 
 from .base import ActionModule
 from .goto_waypoint import GotoWaypointAction

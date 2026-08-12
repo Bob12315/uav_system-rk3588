@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from app.action_dispatcher import ActionDispatcher
+from app.run_authorization import RunAuthorization
 from missions.common.actions import gps_drop_sequence as sequence_module
 from missions.common.actions.gps_drop_sequence import GpsDropSequenceAction
 from missions.common.actions.result import ActionResult
@@ -100,7 +101,6 @@ def test_gps_action_dispatcher_sends_all_eight_required_paths() -> None:
     link = FakeLinkManager()
     yolo = FakeYoloClient()
     dispatcher = ActionDispatcher(yolo_client=yolo)
-    dispatcher.send_actions = True
 
     cases = [
         ("gps_multi_view_localize", _global("scan_global")),
@@ -129,6 +129,13 @@ def test_gps_action_dispatcher_sends_all_eight_required_paths() -> None:
             },
         ),
     ]
+    dispatcher.set_authorization(RunAuthorization.create(
+        operator="test",
+        scope_type="mission",
+        scope_name="gps",
+        target_source="sitl",
+        allowed_actions={name for name, _ in cases},
+    ))
 
     sent: list[dict[str, Any]] = []
     for action_name, action in cases:
@@ -165,13 +172,20 @@ def test_gps_action_dispatcher_sends_all_eight_required_paths() -> None:
     assert yolo.calls == [("lock_target", 41), ("lock_target", 42)]
 
 
-@pytest.mark.parametrize("send_actions,send_commands", [(False, True), (True, False)])
+@pytest.mark.parametrize("authorized,send_commands", [(False, True), (True, False)])
 def test_gps_motion_dispatch_still_requires_both_send_gates(
-    send_actions: bool, send_commands: bool
+    authorized: bool, send_commands: bool
 ) -> None:
     link = FakeLinkManager()
     dispatcher = ActionDispatcher()
-    dispatcher.send_actions = send_actions
+    if authorized:
+        dispatcher.set_authorization(RunAuthorization.create(
+            operator="test",
+            scope_type="action",
+            scope_name="gps_drop_sequence",
+            target_source="sitl",
+            allowed_actions={"gps_drop_sequence"},
+        ))
     result = dispatcher.dispatch_actions(
         [_velocity("gated", 0.2, 0.0, 0.0)],
         action_name="gps_drop_sequence",
@@ -258,7 +272,13 @@ def test_real_gps_sequence_align_matches_v1_yaw_hold_local_ned_dispatch(
 
     link = FakeLinkManager()
     dispatcher = ActionDispatcher()
-    dispatcher.send_actions = True
+    dispatcher.set_authorization(RunAuthorization.create(
+        operator="test",
+        scope_type="action",
+        scope_name="gps_drop_sequence",
+        target_source="sitl",
+        allowed_actions={"gps_drop_sequence"},
+    ))
     dispatch = dispatcher.dispatch_actions(
         [actual_action],
         action_name="gps_drop_sequence",

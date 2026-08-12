@@ -3,49 +3,24 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+YOLO_ENV_NAME="${YOLO_ENV_NAME:-uav-rk3588-yolo}"
 
-YOLO_ENV_NAME="${YOLO_ENV_NAME:-yolo}"
-YOLO_PYTHON_VERSION="${YOLO_PYTHON_VERSION:-3.10}"
-TUNA_PYPI_INDEX="${TUNA_PYPI_INDEX:-https://pypi.tuna.tsinghua.edu.cn/simple}"
+die() { echo "ERROR [rk3588-yolo]: $*" >&2; exit 1; }
+[[ "$(uname -s)" == Linux ]] || die "requires Linux; detected $(uname -s)"
+case "$(uname -m)" in aarch64|arm64) ;; *) die "requires aarch64/arm64 RK3588; detected $(uname -m)";; esac
+command -v conda >/dev/null || die "conda is required; create with environment-rk3588-yolo.yml"
 
-if [[ "$(uname -s)" != "Linux" ]]; then
-  echo "This RK3588 installer supports Linux only." >&2
-  exit 1
+compatible="$(tr -d '\0' </proc/device-tree/compatible 2>/dev/null || true)"
+if ! printf '%s' "${compatible}" | grep -qi 'rk3588'; then
+  die "requires RK3588 board identity in /proc/device-tree/compatible; ARM64 alone is not sufficient"
 fi
+[[ -e /dev/rknpu || -e /dev/rknpu0 || -d /sys/kernel/debug/rknpu ]] || die "requires RKNN NPU device/driver; check the RK3588 image and driver"
 
-case "$(uname -m)" in
-  aarch64|arm64) ;;
-  *)
-    echo "This RK3588 installer requires aarch64/arm64. Detected: $(uname -m)" >&2
-    exit 1
-    ;;
-esac
-
-if [[ "${CONDA_DEFAULT_ENV:-}" != "${YOLO_ENV_NAME}" ]]; then
-  echo "Activate conda env '${YOLO_ENV_NAME}' first." >&2
-  exit 1
+if ! conda env list | awk '{print $1}' | grep -Fxq "${YOLO_ENV_NAME}"; then
+  conda env create -f "${REPO_ROOT}/environment-rk3588-yolo.yml"
 fi
+conda run -n "${YOLO_ENV_NAME}" python -m pip install -r "${REPO_ROOT}/requirements/rk3588-yolo.txt"
+conda run -n "${YOLO_ENV_NAME}" bash -lc "cd '${REPO_ROOT}' && python -c 'import cv2; from rknnlite.api import RKNNLite; print(cv2.__version__, RKNNLite)'"
+test -f "${REPO_ROOT}/data/models/cuadc2026-fp16.rknn" || die "missing deployment model data/models/cuadc2026-fp16.rknn"
 
-actual_python="$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-if [[ "${actual_python}" != "${YOLO_PYTHON_VERSION}" ]]; then
-  echo "Python ${YOLO_PYTHON_VERSION}.x is required. Current: ${actual_python}" >&2
-  exit 1
-fi
-
-python -m pip install -i "${TUNA_PYPI_INDEX}" --upgrade pip
-python -m pip install -i "${TUNA_PYPI_INDEX}" -r "${REPO_ROOT}/requirements-yolo.txt"
-
-python - <<'PY'
-import cv2
-import numpy
-import yaml
-from rknnlite.api import RKNNLite
-
-print("YOLO environment import check passed")
-print("opencv", cv2.__version__)
-print("numpy", numpy.__version__)
-print("rknnlite", RKNNLite)
-PY
-
-test -f "${REPO_ROOT}/data/models/cuadc2026-fp16.rknn"
-echo "YOLO environment '${YOLO_ENV_NAME}' is ready for RK3588."
+echo "RK3588 YOLO environment '${YOLO_ENV_NAME}' is ready."

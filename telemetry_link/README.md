@@ -35,7 +35,7 @@ Serial / UDP / TCP / ETH
 ```
 
 ```text
-FlightCommandExecutor / UI / stdin
+ActionDispatcher / Web UI
   -> LinkManager
   -> CommandQueue
   -> CommandSender
@@ -220,6 +220,6 @@ switch_source sitl
 - 不在 `telemetry_link/` 中实现 YOLO、fusion 或 mission stage 控制公式。
 - 不让外部模块直接访问 `pymavlink` master 对象。
 - 不让 stage controller 直接调用 `LinkManager`。
-- 不绕过 `CommandShaper` 和 `FlightCommandExecutor` 发送自动控制命令。
+- 不绕过 `ActionDispatcher` 和 P0 Safety Pipeline 发送自动控制命令。
 - 不默认打开真实控制发送；`send_commands` 的安全开关属于 app executor 层。
 - 不把 `__pycache__`、日志或本地调试产物作为功能变更提交。

@@ -416,7 +416,6 @@ class MissionOrchestrator:
             start(
                 step.name,
                 resolved_params,
-                send_actions=True,
                 link_manager=link_manager,
                 clear_navigation=clear_navigation,
             )

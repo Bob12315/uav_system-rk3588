@@ -79,6 +79,11 @@ class YoloUdpReceiver(threading.Thread):
     def close(self) -> None:
         self.sock.close()
 
+    def packet_age(self, now: float) -> float | None:
+        with self._lock:
+            last_packet_time = self._last_packet_time
+        return None if last_packet_time <= 0 else max(0.0, now - last_packet_time)
+
     @staticmethod
     def _decode_target(data: dict[str, Any]) -> PerceptionTarget:
         target_data = data.get("target", data)
@@ -181,7 +186,7 @@ class ServiceManager:
             self.link_manager.start_background()
             self.logger.info("telemetry link manager starting in background")
         else:
-            self.logger.info("telemetry link manager disabled for dry-run")
+            self.logger.info("telemetry link manager disabled; running without a MAVLink link")
 
     def stop(self) -> None:
         if self.yolo_receiver is not None:
@@ -209,6 +214,22 @@ class ServiceManager:
             now,
             self.config.runtime.perception_timeout_sec,
         )
+
+    def perception_status(self, now: float) -> dict[str, object]:
+        """Expose whether the optional UDP perception input is usable.
+
+        The app deliberately runs without the board-local YOLO environment.
+        Visual Actions receive an invalid target in that mode and therefore
+        fail closed; nonvisual Actions remain available.
+        """
+        if self.yolo_receiver is None:
+            return {"perception_source": "disabled", "stale": True, "age_sec": None}
+        age = self.yolo_receiver.packet_age(now)
+        return {
+            "perception_source": "udp",
+            "stale": age is None or age > self.config.runtime.perception_timeout_sec,
+            "age_sec": age,
+        }
 
     def get_scene_detections(self, now: float) -> SceneDetections:
         if self.yolo_receiver is None:

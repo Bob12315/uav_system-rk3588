@@ -418,7 +418,7 @@ class TestControllerRuntimeLifecycle:
             "old", started_at_s=1.0
         )
         assert result["ok"] is False
-        assert "schema v2" in result["error"]
+        assert "schema v3" in result["error"]
 
     def test_frozen_reference_rejected(self, monkeypatch):
         controller, svc, _ = _controller_with_profile(monkeypatch)

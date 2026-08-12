@@ -1,0 +1,3 @@
+# The application process combines telemetry and Web UI, never RKNNLite/OpenCV.
+-r telemetry.txt
+-r web.txt

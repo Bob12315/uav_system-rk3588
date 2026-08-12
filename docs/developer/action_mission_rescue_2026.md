@@ -137,7 +137,7 @@ gps_drop_sequence save_as drop_sequence
 同步并冻结。Web UI 的 `Competition Field Setup` 使用 schema v3 流程：输入场地前向
 标记点 GPS，在起飞点采集当前 GPS 样本，生成运行时原点和 heading，再冻结到本次任务。
 
-预采集的 schema v2 centerline profile 仍可用于固定场地和 SITL。两种流程的具体契约见
+schema v3 是比赛与 SITL 唯一受支持的场地流程。具体契约见
 [场地原点与方向](field_origin_heading.md)。
 
 ## 安全门控
@@ -145,7 +145,7 @@ gps_drop_sequence save_as drop_sequence
 配置或加载 Mission 不发送飞行命令。实发至少需要：
 
 1. `config/app.yaml` 中系统 `executor.send_commands` 已人工开启；
-2. Action `send_actions` 请求已开启；
+2. 当前 Action Mission 已建立绑定目标 source 的本次 run 授权；
 3. telemetry、Field Reference 和相关 Action preflight 条件有效。
 
 `SEND=OFF` 是默认状态。停止、跳过、失败或切换连续控制 Action 时必须明确发送
@@ -180,5 +180,5 @@ validator 不连接飞控，不验证识别精度、坐标标定、飞行安全�
 - Mission 还是顺序编排器，没有通用 if/else DSL。
 - 比赛参数仍需按正式场地、机体、相机和载荷进行现场标定。
 - 危险标识排名依赖当前模型、阈值和观察点覆盖，不能只凭模板校验判定有效。
-- Action 连续控制尚缺完整替代旧 CommandShaper 的 safety pipeline。
+- Action 连续控制由 P0 Safety Pipeline 统一裁决。
 - 报告结果可供 Web UI 和 blackboard 使用，但最终比赛交付形式仍需按规则确认。

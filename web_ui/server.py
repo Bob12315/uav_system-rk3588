@@ -5,19 +5,20 @@ import json
 import logging
 import threading
 from pathlib import Path
+from typing import Literal
 
 import uvicorn
 import yaml
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StrictFloat
 
 from app.mission_orchestrator import MissionActionStep
 from app.app_config import ROOT_DIR, UiConfig
-from app.completion_catalog import COMMAND_COMPLETIONS
 from web_ui.audit import AuditLog
 from web_ui.config_store import ConfigStore
+from web_ui.security import CSRF_HEADER, SESSION_COOKIE, WebSecurity
 
 
 class CommandRequest(BaseModel):
@@ -27,7 +28,7 @@ class CommandRequest(BaseModel):
 
 class ConfigWriteRequest(BaseModel):
     content: str
-    action: str = "save"
+    action: Literal["save", "reconnect", "restart_app", "restart_yolo"] = "save"
 
 
 class ManualHeadingRequest(BaseModel):
@@ -37,7 +38,25 @@ class ManualHeadingRequest(BaseModel):
 class ActionStartRequest(BaseModel):
     name: str
     params: dict = Field(default_factory=dict)
-    send_actions: bool | None = None
+    authorize: bool = False
+    target_source: str | None = None
+
+
+class RunStartRequest(BaseModel):
+    authorize: bool = False
+    target_source: str | None = None
+
+
+class LoginRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=4096)
+
+
+class SendControlRequest(BaseModel):
+    enabled: bool
+
+
+class SourceSwitchRequest(BaseModel):
+    source: Literal["sitl", "real"]
 
 
 class ActionMissionStepRequest(BaseModel):
@@ -120,6 +139,9 @@ class WebUiServer:
 def create_app(runner, config: UiConfig) -> FastAPI:
     app = FastAPI(title="UAV Web Control")
     audit = AuditLog(config.audit_log_path)
+    security = WebSecurity(config, audit)
+    security.validate_startup()
+    app.middleware("http")(security.middleware(runner))
     def _append_field_reference_audit(action: str, result: dict, *, pid: str | None = None):
         try:
             st = result.get("state")
@@ -138,6 +160,39 @@ def create_app(runner, config: UiConfig) -> FastAPI:
     def index():
         return FileResponse(static_dir / "index.html")
 
+    @app.post("/api/auth/login")
+    def login(request: LoginRequest, http_request: Request):
+        source_address = http_request.client.host if http_request.client else ""
+        try:
+            result = security.login(request.password, source_address)
+        except RuntimeError as exc:
+            if str(exc) == "rate_limited":
+                raise HTTPException(status_code=429, detail="rate limited") from exc
+            raise
+        if result is None:
+            raise HTTPException(status_code=401, detail="invalid credentials")
+        session_id, csrf = result
+        response = JSONResponse(
+            {"ok": True, "operator": "operator", "role": "operator", "csrf_token": csrf}
+        )
+        response.set_cookie(
+            SESSION_COOKIE,
+            session_id,
+            httponly=True,
+            secure=http_request.url.scheme == "https",
+            samesite="strict",
+            max_age=int(security.session_ttl_sec),
+            path="/",
+        )
+        return response
+
+    @app.post("/api/auth/logout")
+    def logout(http_request: Request):
+        security.logout(http_request.cookies.get(SESSION_COOKIE))
+        response = JSONResponse({"ok": True})
+        response.delete_cookie(SESSION_COOKIE, path="/")
+        return response
+
     @app.get("/api/status")
     def status():
         return runner.web_status_snapshot()
@@ -148,7 +203,10 @@ def create_app(runner, config: UiConfig) -> FastAPI:
 
     @app.get("/api/commands/completions")
     def completions():
-        commands = set(COMMAND_COMPLETIONS)
+        commands = {
+            "action start", "action stop", "action reset", "mission start",
+            "mission stop", "mission reset", "field-reference reset",
+        }
         for mission in runner.web_missions():
             commands.add(f"mission switch {mission['name']}")
             for stage in mission.get("stage_modes", []):
@@ -157,9 +215,11 @@ def create_app(runner, config: UiConfig) -> FastAPI:
 
     @app.post("/api/commands/execute")
     def execute(request: CommandRequest):
-        result = runner.web_execute_command(request.command)
-        audit.append(request.source.upper(), request.command, result.ok, result.message)
-        return {"ok": result.ok, "message": result.message}
+        del request
+        raise HTTPException(
+            status_code=410,
+            detail="free-text command execution is disabled; use typed Action or management APIs",
+        )
 
     @app.get("/api/audit")
     def read_audit(limit: int = 100):
@@ -173,6 +233,8 @@ def create_app(runner, config: UiConfig) -> FastAPI:
     def action_list():
         try:
             return {"ok": True, "actions": list(getattr(runner, "action_lab_specs", []))}
+        except HTTPException:
+            raise
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -186,18 +248,33 @@ def create_app(runner, config: UiConfig) -> FastAPI:
             return {"ok": False, "error": str(exc)}
 
     @app.post("/api/actions/start")
-    def action_start(request: ActionStartRequest):
+    def action_start(request: ActionStartRequest, http_request: Request):
         try:
             logging.getLogger("WebUiServer").info(
-                "/api/actions/start action=%s send_actions=%s",
+                "/api/actions/start action=%s authorize=%s target_source=%s",
                 request.name,
-                request.send_actions,
+                request.authorize,
+                request.target_source,
             )
+            source = request.target_source or runner.active_telemetry_source()
+            if source not in {"sitl", "real"}:
+                raise HTTPException(status_code=400, detail="target_source must be sitl or real")
+            if request.target_source is not None and source != runner.active_telemetry_source():
+                raise HTTPException(status_code=409, detail="target_source is not the active telemetry source")
             result = runner.action_lab_start_action(
                 request.name,
                 dict(request.params or {}),
-                send_actions=request.send_actions,
+                authorize=request.authorize,
+                operator=http_request.state.identity.operator,
+                target_source=source,
             )
+            if result.failed:
+                return {
+                    "ok": False,
+                    "error": result.reason,
+                    "result": result.to_dict(),
+                    "action_lab": runner.action_lab_status_payload(),
+                }
             if not result.failed:
                 runner.action_lab_tick()
             action_lab = runner.action_lab_status_payload()
@@ -206,9 +283,11 @@ def create_app(runner, config: UiConfig) -> FastAPI:
                 "result": result.to_dict(),
                 "status": action_lab["status"],
                 "action_lab": action_lab,
-                "send_actions_effective": action_lab["send_actions_effective"],
+                "dispatch_effective": action_lab["dispatch_effective"],
                 "note": action_lab["note"],
             }
+        except HTTPException:
+            raise
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -222,7 +301,7 @@ def create_app(runner, config: UiConfig) -> FastAPI:
                 "result": result.to_dict(),
                 "status": action_lab["status"],
                 "action_lab": action_lab,
-                "send_actions_effective": action_lab["send_actions_effective"],
+                "dispatch_effective": action_lab["dispatch_effective"],
                 "note": action_lab["note"],
             }
         except Exception as exc:
@@ -238,7 +317,7 @@ def create_app(runner, config: UiConfig) -> FastAPI:
                 "result": result.to_dict(),
                 "status": action_lab["status"],
                 "action_lab": action_lab,
-                "send_actions_effective": action_lab["send_actions_effective"],
+                "dispatch_effective": action_lab["dispatch_effective"],
                 "note": action_lab["note"],
             }
         except Exception as exc:
@@ -290,9 +369,21 @@ def create_app(runner, config: UiConfig) -> FastAPI:
             return {"ok": False, "error": str(exc)}
 
     @app.post("/api/action-mission/start")
-    def action_mission_start():
+    def action_mission_start(request: RunStartRequest, http_request: Request):
         try:
-            return {"ok": True, "action_mission": runner.action_mission_start()}
+            source = request.target_source or runner.active_telemetry_source()
+            if source not in {"sitl", "real"}:
+                raise HTTPException(status_code=400, detail="target_source must be sitl or real")
+            if request.target_source is not None and source != runner.active_telemetry_source():
+                raise HTTPException(status_code=409, detail="target_source is not the active telemetry source")
+            result = runner.action_mission_start(
+                authorize=request.authorize,
+                operator=http_request.state.identity.operator,
+                target_source=source,
+            )
+            return {"ok": not result.get("failed", False), "action_mission": result}
+        except HTTPException:
+            raise
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -329,20 +420,26 @@ def create_app(runner, config: UiConfig) -> FastAPI:
 
     @app.post("/api/manual-step-move")
     def manual_step_move(request: ManualStepMoveRequest):
-        try:
-            result = runner.manual_step_move(request.direction, request.step_m)
-            audit.append("MANUAL_STEP", f"{request.direction} {request.step_m}", result.ok, result.message)
-            return {"ok": result.ok, "message": result.message}
-        except Exception as exc:
-            return {"ok": False, "message": str(exc)}
+        del request
+        raise HTTPException(
+            status_code=410,
+            detail="manual step bypass is disabled; use an authorized goto_waypoint Action",
+        )
 
-    # -- deprecated: legacy field-heading confirm (removed, centerline-only) ---
-    @app.post("/api/field-heading/confirm")
-    def confirm_field_heading():
-        raise HTTPException(status_code=410, detail="field-heading/confirm removed — use /api/field-profiles/{id}/bind-current")
+    @app.post("/api/control/send")
+    def set_system_send(request: SendControlRequest):
+        result = runner.set_system_send(request.enabled)
+        return {"ok": result.ok, "message": result.message}
+
+    @app.post("/api/telemetry/source")
+    def switch_source(request: SourceSwitchRequest):
+        if request.source not in {"sitl", "real"}:
+            raise HTTPException(status_code=400, detail="source must be sitl or real")
+        result = runner.switch_telemetry_source(request.source)
+        return {"ok": result.ok, "message": result.message}
 
     # ------------------------------------------------------------------
-    # Field Reference API — centerline only
+    # Field Reference API — schema-v3 runtime sampling only
     # ------------------------------------------------------------------
 
     @app.get("/api/field-reference/status")
@@ -351,27 +448,6 @@ def create_app(runner, config: UiConfig) -> FastAPI:
             return runner.field_reference_status()
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
-
-    # -- deprecated: marker/set/manual routes (removed, centerline-only) -----
-    @app.post("/api/field-reference/mark-origin")
-    def field_reference_mark_origin():
-        raise HTTPException(status_code=410, detail="mark-origin removed — use /api/field-profiles/{id}/bind-current")
-
-    @app.post("/api/field-reference/mark-forward")
-    def field_reference_mark_forward():
-        raise HTTPException(status_code=410, detail="mark-forward removed — use /api/field-profiles/{id}/bind-current")
-
-    @app.post("/api/field-reference/use-current-yaw")
-    def field_reference_use_current_yaw():
-        raise HTTPException(status_code=410, detail="use-current-yaw removed — yaw is display-only with centerline profiles")
-
-    @app.post("/api/field-reference/set-manual-heading")
-    def field_reference_set_manual_heading():
-        raise HTTPException(status_code=410, detail="set-manual-heading removed — heading comes from centerline profile only")
-
-    @app.post("/api/field-reference/confirm")
-    def field_reference_confirm():
-        raise HTTPException(status_code=410, detail="confirm removed — bind-current auto-confirms the reference")
 
     @app.post("/api/field-reference/reset")
     def field_reference_reset():
@@ -473,20 +549,6 @@ def create_app(runner, config: UiConfig) -> FastAPI:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
-    @app.post("/api/field-profiles/{profile_id}/bind-current")
-    def field_profiles_bind_current(profile_id: str):
-        try:
-            return runner.field_profile_bind_current(profile_id)
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
-
-    @app.get("/api/field-profiles/{profile_id}/map-preview")
-    def field_profiles_map_preview(profile_id: str):
-        try:
-            return runner.field_profile_map_preview(profile_id)
-        except Exception as exc:
-            return {"ok": False, "error": str(exc), "profile_id": profile_id}
-
     @app.post("/api/localization/clear")
     def clear_localization():
         clear = getattr(runner, "clear_localization_result", None)
@@ -536,7 +598,7 @@ def create_app(runner, config: UiConfig) -> FastAPI:
         command = f"target lock {track_id}" if action == "lock" and track_id is not None else commands.get(action)
         if command is None:
             raise HTTPException(status_code=400, detail="invalid target action or missing track_id")
-        result = runner.web_execute_command(command)
+        result = runner.yolo_target_command(command)
         audit.append("TARGET", command, result.ok, result.message)
         return {"ok": result.ok, "message": result.message}
 
@@ -585,6 +647,13 @@ def create_app(runner, config: UiConfig) -> FastAPI:
 
     @app.websocket("/ws/status")
     async def status_socket(websocket: WebSocket):
+        if security.auth_required and security.authenticate_websocket(websocket) is None:
+            await websocket.close(code=4401)
+            return
+        origin = websocket.headers.get("origin")
+        if origin and origin.rstrip("/") not in security.allowed_origins:
+            await websocket.close(code=4403)
+            return
         await websocket.accept()
         try:
             while True:

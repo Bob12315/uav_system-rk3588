@@ -1,0 +1,5 @@
+# Match this vendor package to the RK3588 image's NPU driver/runtime.
+rknn-toolkit-lite2==2.3.2
+opencv-python-headless==4.11.0.86
+numpy==2.5.1
+PyYAML==6.0.3

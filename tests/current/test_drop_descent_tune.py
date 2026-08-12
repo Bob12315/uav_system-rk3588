@@ -37,7 +37,7 @@ def test_complete_v2_finish_window_and_deadline():
     data = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
     a = next(step for step in data["steps"] if step["name"] == "gps_drop_sequence")["params"]["align_descend"]
     assert (a["finish_alignment_max_ex_cam"], a["finish_alignment_max_ey_cam"], a["finish_alignment_hold_updates"]) == (0.18, 0.18, 2)
-    assert a["finish_alignment_timeout_s"] == 1.5
+    assert a["finish_alignment_timeout_s"] == 1.0
 
 
 def test_low_scale_unchanged():
@@ -126,7 +126,7 @@ def test_complete_rescue_v2_drop_overrides_are_deliberate():
     rescue = json.loads(open("config/action_missions/rescue_2026_full_auto_v2.json").read())
     dp = dict(next(s for s in drop["steps"] if s["name"] == "gps_drop_sequence")["params"])
     rp = dict(next(s for s in rescue["steps"] if s["name"] == "gps_drop_sequence")["params"])
-    assert dp["approach_altitude_m"] == 2.5 and rp["approach_altitude_m"] == 3.0
+    assert dp["approach_altitude_m"] == 2.5 and rp["approach_altitude_m"] == 3.5
     assert dp["align_descend_max_updates"] == 35 and rp["align_descend_max_updates"] == 150
     assert rp["single_target_climb_after_release_m"] == 3.5
 

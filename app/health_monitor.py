@@ -4,11 +4,6 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-try:
-    from missions.common.control.types import MissionStageInput
-except ModuleNotFoundError:
-    MissionStageInput = Any
-
 
 @dataclass(slots=True)
 class HealthMonitorConfig:
@@ -32,7 +27,7 @@ class HealthMonitor:
     def __init__(self, config: HealthMonitorConfig | None = None) -> None:
         self.config = config or HealthMonitorConfig()
 
-    def update(self, inputs: MissionStageInput) -> HealthStatus:
+    def update(self, inputs: Any) -> HealthStatus:
         vision_fresh = inputs.vision_valid and self._age_fresh(
             inputs.vision_age_s,
             self.config.max_vision_age_s,

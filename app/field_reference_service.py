@@ -5,7 +5,6 @@ import time as _time
 from dataclasses import dataclass, fields
 from typing import Any, Optional
 
-from .field_profile_service import BindResult
 from .runtime_field_binding import (
     RuntimeFieldBindingCandidate,
     validate_runtime_field_binding_candidate,
@@ -35,8 +34,7 @@ class FieldReferenceService:
     internal state only — it does **not** read from the flight controller,
     Web UI, LinkManager, or MAVLink.
 
-    References can be populated by legacy centerline binding or by a validated
-    runtime GPS binding candidate.
+    References are populated only by validated runtime GPS binding candidates.
     """
 
     def __init__(self, reference: FieldReference | None = None) -> None:
@@ -67,52 +65,6 @@ class FieldReferenceService:
             setattr(self._ref, name, value)
         self._profile_id = snapshot.profile_id
         self._profile_name = snapshot.profile_name
-
-    # ------------------------------------------------------------------
-    # profile binding (centerline only)
-    # ------------------------------------------------------------------
-
-    def apply_profile_binding(
-        self,
-        bind_result: BindResult,
-        profile_id: str,
-        profile_name: str,
-        anchor_lat: float,
-        anchor_lon: float,
-        timestamp: float | None = None,
-    ) -> dict[str, Any]:
-        """Atomically apply a centerline profile bind result to this field reference.
-
-        Rejected if the reference is already frozen or the bind result is
-        not ``ok``.  On success the reference is marked confirmed with
-        PROFILE_CENTERLINE / PROFILE_GPS_CENTERLINE sources.
-        """
-        if self._ref.is_frozen:
-            return {"ok": False, "error": "field reference is frozen"}
-        if not bind_result.ok:
-            return {"ok": False, "error": "bind result is not ok",
-                    "errors": list(bind_result.errors)}
-
-        ts = timestamp if timestamp is not None else _time.time()
-
-        # Write all fields atomically.
-        self._ref.origin_source = OriginSource.PROFILE_CENTERLINE.value
-        self._ref.heading_source = HeadingSource.PROFILE_GPS_CENTERLINE.value
-        self._ref.origin_lat = anchor_lat
-        self._ref.origin_lon = anchor_lon
-        self._ref.forward_marker_lat = None
-        self._ref.forward_marker_lon = None
-        self._ref.origin_local_n_m = bind_result.origin_local_n_m
-        self._ref.origin_local_e_m = bind_result.origin_local_e_m
-        self._ref.origin_local_z_m = bind_result.origin_local_z_m
-        self._ref.field_heading_yaw_rad = bind_result.field_heading_yaw_rad
-        self._ref.is_confirmed = True
-        self._ref.confirmed_at_s = ts
-
-        self._profile_id = profile_id
-        self._profile_name = profile_name
-
-        return {"ok": True}
 
     # ------------------------------------------------------------------
     # runtime binding (5B.1)
@@ -222,11 +174,7 @@ class FieldReferenceService:
             "field_heading_yaw_rad": self._ref.field_heading_yaw_rad,
             "confirmed_at_s": self._ref.confirmed_at_s,
         }
-        if self._ref.origin_source in (
-            OriginSource.PROFILE_GPS_BOUND.value,
-            OriginSource.PROFILE_CENTERLINE.value,
-            OriginSource.RUNTIME_CURRENT_GPS.value,
-        ):
+        if self._ref.origin_source == OriginSource.RUNTIME_CURRENT_GPS.value:
             result["profile_id"] = self._profile_id
             result["profile_name"] = self._profile_name
         return result

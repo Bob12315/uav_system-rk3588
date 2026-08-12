@@ -2,7 +2,7 @@
 from __future__ import annotations
 import copy, math
 from typing import Any
-from telemetry_link.frames import GLOBAL_RELATIVE_ALT_INT
+from .frames import GLOBAL_RELATIVE_ALT_INT
 from .result import ActionResult
 
 class GpsTargetSequenceCore:

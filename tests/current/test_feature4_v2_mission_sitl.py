@@ -122,7 +122,7 @@ def test_gps_mission_preflight_rejections_do_not_start_takeoff(setup, reason) ->
     runner.configure_action_mission(_v2_steps())
     _set_gps_reference(runner, **setup)
 
-    payload = runner.action_mission_start()
+    payload = runner.action_mission_start(authorize=True, target_source="sitl")
 
     assert payload["running"] is False
     assert payload["failed"] is True
@@ -137,7 +137,7 @@ def test_gps_mission_preflight_rejects_service_builder_origin_mismatch() -> None
     _set_gps_reference(runner)
     runner.runtime_context_builder.field_origin_lat = 34.01
 
-    payload = runner.action_mission_start()
+    payload = runner.action_mission_start(authorize=True, target_source="sitl")
 
     assert payload["reason"] == "field_gps_reference_not_synced"
     assert runner.action_runtime.action_name is None
@@ -149,7 +149,7 @@ def test_gps_only_mission_starts_without_local_origin() -> None:
     _set_gps_reference(runner)
 
     assert runner._action_mission_field_requirements() == {"needs_gps": True, "needs_local": False}
-    payload = runner.action_mission_start()
+    payload = runner.action_mission_start(authorize=True, target_source="sitl")
 
     assert payload["running"] is True
     assert runner.action_runtime.action_name == "takeoff"
@@ -166,7 +166,7 @@ def test_local_field_mission_still_rejects_missing_local_origin() -> None:
     _set_gps_reference(runner)
 
     assert runner._action_mission_field_requirements() == {"needs_gps": False, "needs_local": True}
-    payload = runner.action_mission_start()
+    payload = runner.action_mission_start(authorize=True, target_source="sitl")
     assert payload["reason"] == "field_reference_not_ready"
 
 

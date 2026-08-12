@@ -115,7 +115,21 @@ class CommandSender(threading.Thread):
 
     def _send_action(self, command: ActionCommand) -> None:
         try:
-            if command.action_type == ActionType.ARM:
+            if command.action_type == ActionType.STOP_BODY_VELOCITY:
+                self.logger.info("sending safety barrier=stop_body_velocity")
+                stop = ControlCommand(
+                    command_type=ControlType.STOP,
+                    vx=0.0,
+                    vy=0.0,
+                    vz=0.0,
+                    yaw_rate=0.0,
+                    timestamp=time.time(),
+                    frame=int(command.params.get("frame", 8)),
+                )
+                self.client.send_raw_message(lambda master: self._send_velocity(master, stop))
+                self.command_queue.clear_control()
+                self._last_guided_setpoint_kind = "velocity"
+            elif command.action_type == ActionType.ARM:
                 self.logger.info("sending action command=arm")
                 self.client.send_raw_message(
                     lambda master: self._command_long(

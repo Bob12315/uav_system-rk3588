@@ -172,7 +172,7 @@ schema v3 生成 FIELD → GPS/GLOBAL 任务几何，不建立 LOCAL_NED 场地�
 测试动作和停止条件明确？
 Field Reference 正确？
 速度、高度和目标已复核？
-SEND 与 send_actions 状态明确？
+系统 SEND 与本次 REAL run 授权状态明确？
 日志正在记录？
 ```
 
@@ -234,7 +234,7 @@ SEND 与 send_actions 状态明确？
 
 - [ ] 飞手、操作员、观察员和复核员全部口头确认。
 - [ ] 场地净空，天气、空域和 GPS 条件允许。
-- [ ] 系统 SEND 和 Action send_actions 由指定操作员控制。
+- [ ] 系统 SEND 和本次 Action/Mission run 授权由指定操作员控制。
 - [ ] 任务后先关闭 SEND，再停止或重置 Mission。
 - [ ] 飞机断电后再处理载荷和接线。
 - [ ] 保存 app、yolo、blackbox、飞控和录像数据。

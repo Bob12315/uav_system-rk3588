@@ -18,7 +18,7 @@
 
 ```text
 Web UI → Action Lab / Action Mission → ActionRuntimeService → ActionRunner
-→ missions/common/actions/* → ActionDispatcher → LinkManager → telemetry_link
+→ missions/common/actions/* → ActionDispatcher → ActionSafetyPipeline → LinkManager → telemetry_link
 ```
 
 核心规则：

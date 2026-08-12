@@ -132,8 +132,8 @@ class TestConstruction:
                 {"name": "c4", "lat": 34.004, "lon": 108.004},
             ],
         }
-        with pytest.raises(RuntimeFieldBindingError, match="schema"):
-            RuntimeFieldBindingSampler(parse_field_profile(data))
+        with pytest.raises(Exception, match="schema v3"):
+            parse_field_profile(data)
 
     def test_rejects_non_fieldprofile(self):
         with pytest.raises(RuntimeFieldBindingError, match="FieldProfile"):

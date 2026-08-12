@@ -222,28 +222,23 @@ def test_stop_body_velocity_queues_stop_with_body_ned_frame() -> None:
 # ── stop_body_velocity_and_clear (atomic stop-and-clear) ─────────────
 
 
-def test_stop_body_velocity_and_clear_queues_stop_with_clear_after_send() -> None:
-    """stop_body_velocity_and_clear queues a STOP with clear_after_send=True."""
+def test_stop_body_velocity_and_clear_queues_priority_zero_action_barrier() -> None:
+    """The explicit stop cannot be erased by later continuous-queue clearing."""
     from telemetry_link.frames import BODY_NED
 
     manager = LinkManager(_config())
     manager.stop_body_velocity_and_clear()
 
-    cmd = _cq(manager).peek_control()
+    cmd = _cq(manager).get_next_action()
     assert cmd is not None
-    assert cmd.command_type == ControlType.STOP
-    assert cmd.vx == 0.0
-    assert cmd.vy == 0.0
-    assert cmd.vz == 0.0
-    assert cmd.yaw_rate == 0.0
-    assert cmd.frame == BODY_NED
-    assert getattr(cmd, "clear_after_send", False) is True, (
-        "stop_body_velocity_and_clear must set clear_after_send=True"
-    )
+    assert cmd.action_type == ActionType.STOP_BODY_VELOCITY
+    assert cmd.params["frame"] == BODY_NED
+    assert cmd.priority == 0
+    assert _cq(manager).peek_control() is None
 
 
 def test_stop_body_velocity_and_clear_replaces_old_nonzero_control() -> None:
-    """stop_body_velocity_and_clear replaces old non-zero control with STOP."""
+    """The barrier clears the old sample and remains queued as an action."""
     manager = LinkManager(_config())
     # First put a non-zero velocity control
     manager.send_velocity_command(1.0, 2.0, 3.0)
@@ -253,11 +248,10 @@ def test_stop_body_velocity_and_clear_replaces_old_nonzero_control() -> None:
     # Then call stop_body_velocity_and_clear
     manager.stop_body_velocity_and_clear()
 
-    cmd = _cq(manager).peek_control()
+    assert _cq(manager).peek_control() is None
+    cmd = _cq(manager).get_next_action()
     assert cmd is not None
-    assert cmd.command_type == ControlType.STOP
-    assert cmd.vx == 0.0
-    assert getattr(cmd, "clear_after_send", False) is True
+    assert cmd.action_type == ActionType.STOP_BODY_VELOCITY
 
 
 def test_stop_body_velocity_is_not_affected_by_stop_and_clear() -> None:

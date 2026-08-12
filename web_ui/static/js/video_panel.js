@@ -8,7 +8,7 @@
     dom: null,
     format: null,
     getState: null,
-    execute: null,
+    targetAction: null,
     loadAudit: null,
     setCompletionHint: null,
   };
@@ -23,7 +23,7 @@
     if (options.dom) cfg.dom = options.dom;
     if (options.format) cfg.format = options.format;
     if (options.getState) cfg.getState = options.getState;
-    if (options.execute) cfg.execute = options.execute;
+    if (options.targetAction) cfg.targetAction = options.targetAction;
     if (options.loadAudit) cfg.loadAudit = options.loadAudit;
     if (options.setCompletionHint) cfg.setCompletionHint = options.setCompletionHint;
   }
@@ -93,7 +93,11 @@
       return;
     }
     hits.sort(function (a, b) { return (a.w * a.h) - (b.w * b.h); });
-    if (cfg.execute) cfg.execute("target lock " + hits[0].track_id, "VIDEO");
+    if (cfg.targetAction) {
+      Promise.resolve(cfg.targetAction("lock", hits[0].track_id)).catch(function (error) {
+        _setHint(error.message || "目标锁定失败");
+      });
+    }
   }
 
   // Full video panel setup (URL, onload, onerror, retry, hit, recording)

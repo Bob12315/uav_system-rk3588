@@ -23,8 +23,6 @@ class WebStatusService:
         runtime_context_builder: RuntimeContextBuilder,
         get_snapshot: Callable[[], dict[str, object]],
         lock: threading.Lock,
-        mission_runner: Any = None,
-        mission_stage_selections: dict[str, str] | None = None,
         debug_runtime: Any = None,
         controller_switches: Any = None,
         control_command_log: deque | None = None,
@@ -55,8 +53,6 @@ class WebStatusService:
         self._builder = runtime_context_builder
         self._get_snapshot = get_snapshot
         self._lock = lock
-        self._mission_runner = mission_runner
-        self._mission_stage_selections = mission_stage_selections or {}
         self._debug_runtime = debug_runtime
         self._switches = controller_switches
         self._control_command_log = control_command_log or deque(maxlen=40)
@@ -239,34 +235,13 @@ class WebStatusService:
         }
 
     def _web_stage_modes(self) -> list[str]:
-        if self._mission_runner is None:
-            return ["NO_MISSION"]
-        name = self._mission_runner.mission.name
-        if name == "rescue_competition":
-            from missions.rescue_competition.mission import RescueStage
-            return list(dict.fromkeys(["AUTO", *[s.value for s in RescueStage]]))
-        if name == "visual_tracking":
-            return ["AUTO", "IDLE", "APPROACH_TRACK", "OVERHEAD_HOLD", "CORRIDOR_FOLLOW"]
-        return ["AUTO", "IDLE"]
+        return ["NO_MISSION"]
 
     def _active_mission_stage_selection(self) -> str:
-        if self._mission_runner is None:
-            return "NO_MISSION"
-        return self._mission_stage_selections.get(
-            self._mission_runner.mission.name, "AUTO",
-        )
+        return "NO_MISSION"
 
     def _mission_action_log_lines(self) -> list[str]:
-        if self._mission_runner is None:
-            return []
-        return self._mission_runner.get_action_log_lines()
+        return []
 
     def web_stage_modes_for_mission(self, mission_name: str) -> list[str]:
-        if self._mission_runner is None:
-            return ["NO_MISSION"]
-        if mission_name == "rescue_competition":
-            from missions.rescue_competition.mission import RescueStage
-            return list(dict.fromkeys([s.value for s in RescueStage]))
-        if mission_name == "visual_tracking":
-            return ["IDLE", "APPROACH_TRACK", "OVERHEAD_HOLD", "CORRIDOR_FOLLOW"]
-        return []
+        return ["NO_MISSION"]

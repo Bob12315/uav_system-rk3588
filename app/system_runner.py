@@ -33,6 +33,9 @@ from app.service_manager import ServiceManager
 from missions.common.actions.action_lab import action_lab_specs, create_action_lab_registry
 from missions.common.actions.runner import ActionRunner
 from app.control_switches import ControlRuntimeSwitches
+from app.dispatch.policy import action_requires_run_authorization
+from app.run_authorization import RunAuthorization
+from missions.common.actions.result import ActionResult
 
 from app.ui_commands import CommandResult, build_ui_command_handler, format_controller_snapshot
 from app.yolo_command_client import YoloCommandClient
@@ -194,6 +197,7 @@ class SystemRunner:
                     break
 
                 perception = self.services.get_perception(now)
+                perception_status = self.services.perception_status(now)
                 scene = self.services.get_scene_detections(now)
                 drone = self.services.get_drone_state()
                 self._observe_runtime_field_sampling(
@@ -234,6 +238,7 @@ class SystemRunner:
                     self.latest_hold_reason = "mission_disabled"
                     self.latest_snapshot = {
                         "perception": asdict(perception),
+                        "perception_status": perception_status,
                         "scene": asdict(scene),
                         "drone": asdict(drone),
                         "gimbal": asdict(gimbal),
@@ -346,7 +351,8 @@ class SystemRunner:
         action_payload: dict[str, object] = {
             "name": action_name,
             "state": runtime.runner.state,
-            "send_actions_requested": bool(runtime.send_actions_requested),
+            "run_id": dispatcher.authorization.run_id if dispatcher.authorization else None,
+            "run_authorized": dispatcher.authorization is not None,
             "last_result": last_result,
             "last_dispatch": getattr(dispatcher, "last_dispatch", {}),
         }
@@ -388,7 +394,7 @@ class SystemRunner:
         return self.runtime_context_builder.build_action_context(snapshot)
 
     # ------------------------------------------------------------------
-    # Field Reference API handlers — centerline only
+    # Field Reference API handlers — schema-v3 runtime GPS only
     # ------------------------------------------------------------------
 
     def _drone_snapshot_for_controller(self) -> dict[str, object]:
@@ -475,28 +481,9 @@ class SystemRunner:
                         "recce_area_y_min": p.field_geometry.recce_area_y_min,
                         "recce_area_y_max": p.field_geometry.recce_area_y_max,
                     },
-                    "binding_policy": {
-                        "max_start_error_m": p.binding_policy.max_start_error_m,
-                        "warn_start_error_m": p.binding_policy.warn_start_error_m,
-                        "max_centerline_residual_m": p.binding_policy.max_centerline_residual_m,
-                        "warn_centerline_residual_m": p.binding_policy.warn_centerline_residual_m,
-                        "min_baseline_m": p.binding_policy.min_baseline_m,
-                        "warn_baseline_below_m": p.binding_policy.warn_baseline_below_m,
-                    },
+                    "binding_policy": {"min_baseline_m": p.binding_policy.min_baseline_m, "warn_baseline_below_m": p.binding_policy.warn_baseline_below_m},
                 }
-                if sv == 2:
-                    resp["anchor"] = {"name": p.anchor.name, "lat": p.anchor.lat, "lon": p.anchor.lon,
-                                       "field_x_m": p.anchor.field_x_m, "field_y_m": p.anchor.field_y_m}
-                    resp["centerline_points"] = [
-                        {"name": pt.name, "lat": pt.lat, "lon": pt.lon, "expected_field_y_m": pt.expected_field_y_m}
-                        for pt in p.centerline_points
-                    ]
-                    resp["forward_marker"] = None
-                    resp["drop_scan"] = None
-                    resp["runtime_origin_sampling"] = None
-                elif sv == 3:
-                    resp["anchor"] = None
-                    resp["centerline_points"] = []
+                if sv == 3:
                     fm = p.forward_marker
                     resp["forward_marker"] = {"name": fm.name, "lat": fm.lat, "lon": fm.lon, "coordinate_system": fm.coordinate_system} if fm else None
                     ds = p.drop_scan
@@ -592,31 +579,6 @@ class SystemRunner:
                 started_at_s=time.time(),
             )
 
-    def field_profile_bind_current(self, profile_id: str) -> dict[str, object]:
-        with self.action_runtime_lock:
-            return self.field_reference_controller.bind_profile_current(profile_id)
-
-    def field_profile_map_preview(self, profile_id: str) -> dict[str, object]:
-        for d in self._PROFILE_DIRS:
-            try:
-                p = FieldProfileService.load_profile(profile_id, profile_dir=d)
-                if p.schema_version == 3:
-                    return {
-                        "ok": False,
-                        "profile_id": p.profile_id,
-                        "schema_version": 3,
-                        "reason": "runtime_reference_required",
-                        "error": "schema v3 GPS map preview requires an applied runtime reference",
-                    }
-                return FieldProfileService.build_map_preview(p)
-            except FileNotFoundError:
-                continue
-            except Exception as exc:
-                return self._field_profile_error(profile_id, str(exc))
-        return self._field_profile_error(
-            profile_id, f"profile not found: {profile_id}"
-        )
-
     @staticmethod
     def _field_profile_error(profile_id: str, error: str) -> dict[str, object]:
         return {
@@ -681,6 +643,10 @@ class SystemRunner:
                 link_manager=self.services.link_manager,
                 send_commands=bool(self.controller_switches.snapshot().send_commands),
             )
+            if not bool(status.get("running", False)):
+                self.action_runtime.dispatcher.clear_authorization(
+                    f"action_{status.get('state', 'ended')}"
+                )
             self._maybe_save_localization_result()
             self._maybe_save_drop_targets_result()
             self._publish_recon_ranking_from_action_result(
@@ -1320,29 +1286,50 @@ class SystemRunner:
         action_name: str,
         params: dict[str, object] | None = None,
         *,
-        send_actions: bool | None = None,
+        authorize: bool = False,
+        operator: str = "system",
+        target_source: str | None = None,
     ):
         with self.action_runtime_lock:
+            requires_authorization = action_requires_run_authorization(action_name)
+            if requires_authorization and not authorize:
+                self.action_runtime.dispatcher.clear_authorization("run_start_not_authorized")
+                return ActionResult(failed=True, reason="run_authorization_required")
+            if requires_authorization:
+                source = target_source or self.active_telemetry_source()
+                authorization = RunAuthorization.create(
+                    operator=operator,
+                    scope_type="action",
+                    scope_name=action_name,
+                    target_source=source,
+                    allowed_actions={action_name},
+                )
+                self.action_runtime.dispatcher.set_authorization(authorization)
+            else:
+                self.action_runtime.dispatcher.clear_authorization("pure_action_start")
             return self.action_runtime.start(
                 action_name,
                 params,
-                send_actions=send_actions,
                 link_manager=self.services.link_manager,
             )
 
     def action_lab_stop_action(self):
         with self.action_runtime_lock:
-            return self.action_runtime.stop(
+            result = self.action_runtime.stop(
                 link_manager=self.services.link_manager,
                 hold_current=True,
             )
+            self.action_runtime.dispatcher.clear_authorization("action_stopped")
+            return result
 
     def action_lab_reset_action(self):
         with self.action_runtime_lock:
-            return self.action_runtime.reset(
+            result = self.action_runtime.reset(
                 link_manager=self.services.link_manager,
                 hold_current=True,
             )
+            self.action_runtime.dispatcher.clear_authorization("action_reset")
+            return result
 
     # ------------------------------------------------------------------
     # action-mission orchestrator (PR F — lightweight, opt-in)
@@ -1382,7 +1369,13 @@ class SystemRunner:
             "detail": detail,
         }
 
-    def action_mission_start(self) -> dict[str, object]:
+    def action_mission_start(
+        self,
+        *,
+        authorize: bool = False,
+        operator: str = "system",
+        target_source: str | None = None,
+    ) -> dict[str, object]:
         if self.action_mission_orchestrator is None:
             return self.action_mission_status_payload()
         with self.action_runtime_lock:
@@ -1391,6 +1384,10 @@ class SystemRunner:
             self.latest_recon_localization_result = {}
             self.latest_recon_targets_result = {}
             self.latest_drop_workflow_result = {}
+            mission_actions = {step.name for step in self.action_mission_orchestrator.steps}
+            requires_authorization = any(
+                action_requires_run_authorization(name) for name in mission_actions
+            )
             requirements = self._action_mission_field_requirements()
             if requirements["needs_gps"]:
                 reason = self._field_gps_mission_preflight_reason()
@@ -1400,6 +1397,21 @@ class SystemRunner:
                 reason = self._field_mission_preflight_reason()
                 if reason is not None:
                     return self._reject_action_mission_start(reason)
+            if requires_authorization and not authorize:
+                return self._reject_action_mission_start("run_authorization_required")
+            if requires_authorization:
+                source = target_source or self.active_telemetry_source()
+                self.action_runtime.dispatcher.set_authorization(
+                    RunAuthorization.create(
+                        operator=operator,
+                        scope_type="mission",
+                        scope_name="action_mission",
+                        target_source=source,
+                        allowed_actions=mission_actions,
+                    )
+                )
+            else:
+                self.action_runtime.dispatcher.clear_authorization("pure_mission_start")
             self.action_mission_orchestrator.start(
                 link_manager=self.services.link_manager,
             )
@@ -1532,6 +1544,7 @@ class SystemRunner:
                 hold_current=True,
             )
             self._stop_action_mission_recording(trigger="action_mission_stop")
+            self.action_runtime.dispatcher.clear_authorization("mission_stopped")
             return self.action_mission_status_payload()
 
     def action_mission_reset(self) -> dict[str, object]:
@@ -1549,6 +1562,7 @@ class SystemRunner:
                 hold_current=True,
             )
             self._stop_action_mission_recording(trigger="action_mission_reset")
+            self.action_runtime.dispatcher.clear_authorization("mission_reset")
             return self.action_mission_status_payload()
 
     def action_mission_tick(self) -> dict[str, object]:
@@ -1604,6 +1618,9 @@ class SystemRunner:
                     pre_name, final_result,
                     step_index=pre_index, step_label=pre_label)
             if not mission_status.running:
+                self.action_runtime.dispatcher.clear_authorization(
+                    f"mission_{mission_status.reason}"
+                )
                 self._stop_action_mission_recording(
                     trigger=f"action_mission_{mission_status.reason}"
                 )
@@ -1642,6 +1659,9 @@ class SystemRunner:
                 reason="manual_web_skip",
             )
             if not mission_status.running:
+                self.action_runtime.dispatcher.clear_authorization(
+                    f"mission_{mission_status.reason}"
+                )
                 self._stop_action_mission_recording(
                     trigger=f"action_mission_{mission_status.reason}"
                 )
@@ -1663,16 +1683,46 @@ class SystemRunner:
             manager,
             controller_switches=self.controller_switches,
             yolo_client=YoloCommandClient(self.config.yolo_command),
-            mission_command_handler=self._handle_mission_command,
-            stage_override_handler=self._set_stage_override,
-            stage_config_reload_handler=self._reload_mission_stage_config,
         )
         result = handler(stripped)
         self._record_event("OK" if result.ok else "ERROR", result.message)
         return result
 
+    def active_telemetry_source(self) -> str:
+        manager = self.services.link_manager
+        getter = getattr(manager, "get_active_source", None)
+        if callable(getter):
+            return str(getter())
+        return str(getattr(self.config.telemetry, "active_source", "real"))
+
+    def set_system_send(self, enabled: bool) -> CommandResult:
+        snapshot = self.controller_switches.set_send_commands(bool(enabled))
+        if not snapshot.send_commands:
+            self.action_runtime.dispatcher.safety_pipeline.stop_continuous(
+                "system_send_disabled"
+            )
+            if self.services.link_manager is not None:
+                self.action_runtime.clear_navigation_queue(self.services.link_manager)
+        self._record_event("SAFETY", f"system SEND={'ON' if snapshot.send_commands else 'OFF'}")
+        return CommandResult(True, f"system SEND={'ON' if snapshot.send_commands else 'OFF'}")
+
+    def switch_telemetry_source(self, source: str) -> CommandResult:
+        manager = self.services.link_manager
+        if manager is None:
+            return CommandResult(False, "telemetry is not connected")
+        self.disable_automatic_sending("source_switch")
+        self.action_runtime.dispatcher.clear_authorization("source_switched")
+        if not manager.switch_active_source(source):
+            return CommandResult(False, f"source switch rejected: {source}")
+        return CommandResult(True, f"active telemetry source={source}; SEND remains OFF")
+
     def _execute_yolo_command(self, command: str) -> CommandResult:
         return self.command_pipeline.execute_yolo_command(command)
+
+    def yolo_target_command(self, command: str) -> CommandResult:
+        result = self.command_pipeline.execute_yolo_command(command)
+        self._record_event("OK" if result.ok else "ERROR", result.message)
+        return result
 
     # ------------------------------------------------------------------
     # action lab dispatch helpers
@@ -1750,6 +1800,7 @@ class SystemRunner:
         except Exception as exc:
             return CommandResult(False, f"telemetry configuration invalid: {exc}")
         self.disable_automatic_sending("telemetry_reconnect")
+        self.action_runtime.dispatcher.clear_authorization("telemetry_reconnect")
         self.services.reconnect_telemetry(config)
         self._record_event("LINK", "telemetry reconnect started; SEND remains OFF")
         return CommandResult(True, "telemetry reconnect started; SEND remains OFF")
@@ -1766,6 +1817,7 @@ class SystemRunner:
             return CommandResult(False, f"{service} restart command is not configured")
         if service == "app":
             self.disable_automatic_sending("app_restart")
+            self.action_runtime.dispatcher.clear_authorization("app_restart")
         return self.command_pipeline.restart_external_service(service, command)
 
     def _stop_external_processes(self) -> None:
@@ -1785,14 +1837,6 @@ class SystemRunner:
                 *list(self.control_command_log),
             ]
 
-    def _set_stage_override(self, mode_name: str | None) -> CommandResult:
-        del mode_name
-        return CommandResult(False, "legacy mission stages disabled; stage override unavailable")
-
-    def _handle_mission_command(self, parts: list[str]) -> CommandResult:
-        del parts
-        return CommandResult(False, "legacy mission runtime disabled; use Action Mission")
-
     def _reset_mission_runtime(self, *, clear_for_safety: bool) -> None:
         with self.control_command_log_lock:
             self.latest_mission_name = "action_lab_only"
@@ -1806,9 +1850,6 @@ class SystemRunner:
                 clear_sender = getattr(self.services.link_manager, "clear_continuous_commands", None)
                 if callable(clear_sender):
                     clear_sender()
-
-    def _reload_mission_stage_config(self) -> CommandResult:
-        return CommandResult(False, "legacy mission stages disabled; config reload unavailable")
 
     # ------------------------------------------------------------------
     # backward-compatible properties for Action Lab fields
@@ -1855,14 +1896,6 @@ class SystemRunner:
 
     # backward-compatible properties for Action Lab dispatch fields
     # ------------------------------------------------------------------
-
-    @property
-    def action_lab_send_actions(self) -> bool:
-        return self.action_runtime.dispatcher.send_actions
-
-    @action_lab_send_actions.setter
-    def action_lab_send_actions(self, value: bool) -> None:
-        self.action_runtime.dispatcher.send_actions = bool(value)
 
     @property
     def action_lab_dispatched_keys(self) -> set[str]:

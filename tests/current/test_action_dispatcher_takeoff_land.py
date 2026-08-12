@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 from app.action_dispatcher import ActionDispatcher
+from app.dispatch.policy import ACTION_REQUEST_CAPABILITIES
+from app.run_authorization import RunAuthorization
 
 class FakeLinkManager:
     def __init__(self) -> None:
@@ -43,21 +45,28 @@ class FakeLinkManager:
     ) -> None:
         self.calls.append(("global_goto", lat, lon, alt, frame, priority))
 
-def _dispatcher(send_actions: bool = True) -> ActionDispatcher:
+def _dispatcher(authorized: bool = True) -> ActionDispatcher:
     dispatcher = ActionDispatcher()
-    dispatcher.send_actions = send_actions
+    if authorized:
+        dispatcher.set_authorization(RunAuthorization.create(
+            operator="test",
+            scope_type="test",
+            scope_name="dispatcher",
+            target_source="sitl",
+            allowed_actions=set(ACTION_REQUEST_CAPABILITIES),
+        ))
     return dispatcher
 
 def _dispatch(
     action: dict[str, object],
     *,
     action_name: str,
-    send_actions: bool = True,
+    authorized: bool = True,
     send_commands: bool = True,
     link_manager: object | None = None,
 ) -> tuple[dict[str, list[dict[str, object]]], object | None]:
     fake_link = FakeLinkManager() if link_manager is None else link_manager
-    dispatcher = _dispatcher(send_actions=send_actions)
+    dispatcher = _dispatcher(authorized=authorized)
     dispatch = dispatcher.dispatch_actions(
         [action],
         action_name=action_name,
@@ -233,7 +242,7 @@ class FakeLinkManagerWithClear:
 def test_clear_continuous_commands_dispatch_calls_clear() -> None:
     """clear_continuous_commands action calls link_manager.clear_continuous_commands."""
     fake_link = FakeLinkManagerWithClear()
-    dispatcher = _dispatcher(send_actions=True)
+    dispatcher = _dispatcher(authorized=True)
     dispatch = dispatcher.dispatch_actions(
         [{
             "action_type": "clear_continuous_commands",
@@ -261,7 +270,7 @@ def test_clear_continuous_commands_dispatch_calls_clear() -> None:
 def test_zero_clear_dispatches_without_stop_body_velocity() -> None:
     """clear_continuous_commands dispatches without calling stop_body_velocity."""
     fake_link = FakeLinkManagerWithClear()
-    dispatcher = _dispatcher(send_actions=True)
+    dispatcher = _dispatcher(authorized=True)
 
     clear = {
         "action_type": "clear_continuous_commands",
@@ -286,7 +295,7 @@ def test_zero_clear_dispatches_without_stop_body_velocity() -> None:
 def test_clear_continuous_commands_with_pending_local_position() -> None:
     """clear_pending_local_position=True also clears navigation queue."""
     fake_link = FakeLinkManagerWithClear()
-    dispatcher = _dispatcher(send_actions=True)
+    dispatcher = _dispatcher(authorized=True)
     dispatch = dispatcher.dispatch_actions(
         [{
             "action_type": "clear_continuous_commands",
@@ -306,7 +315,7 @@ def test_clear_continuous_commands_with_pending_local_position() -> None:
 
 def test_clear_continuous_commands_no_link_manager_skipped() -> None:
     """clear_continuous_commands with None link_manager is skipped."""
-    dispatcher = _dispatcher(send_actions=True)
+    dispatcher = _dispatcher(authorized=True)
     dispatch = dispatcher.dispatch_actions(
         [{
             "action_type": "clear_continuous_commands",
@@ -329,7 +338,7 @@ def test_two_clear_actions_with_unique_keys_both_dispatch() -> None:
     the second action would be skipped with once_already_dispatched.
     """
     fake_link = FakeLinkManagerWithClear()
-    dispatcher = _dispatcher(send_actions=True)
+    dispatcher = _dispatcher(authorized=True)
     dispatch = dispatcher.dispatch_actions(
         [
             {
@@ -380,7 +389,7 @@ def test_recon_sequence_dispatch_policy_allows_all_required_types() -> None:
 def test_recon_sequence_clear_continuous_dispatch() -> None:
     """recon_sequence can dispatch clear_continuous_commands."""
     fake_link = FakeLinkManagerWithClear()
-    dispatcher = _dispatcher(send_actions=True)
+    dispatcher = _dispatcher(authorized=True)
     dispatch = dispatcher.dispatch_actions(
         [{
             "action_type": "clear_continuous_commands",
@@ -404,7 +413,7 @@ def test_recon_sequence_clear_continuous_dispatch() -> None:
 def test_clear_continuous_send_stop_first_calls_stop_and_clear() -> None:
     """send_stop_first=True → stop_body_velocity_and_clear, NOT clear_continuous_commands."""
     fake_link = FakeLinkManagerWithClear()
-    dispatcher = _dispatcher(send_actions=True)
+    dispatcher = _dispatcher(authorized=True)
     dispatch = dispatcher.dispatch_actions(
         [{
             "action_type": "clear_continuous_commands",

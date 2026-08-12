@@ -105,29 +105,9 @@ fused_state = manager.update(perception_target, drone_state, gimbal_state)
 
 控制层后续应只依赖 `FusedState`，而不是自己再去拼 `YOLO + telemetry_link`。
 
-当前工程里，`FusedState` 的下一跳已经明确为控制层输入适配器：
-
-```python
-from missions.common.control.input_adapter import StageInputAdapter
-
-adapter = StageInputAdapter()
-stage_input = adapter.adapt(fused_state)
-```
-
-这里的 `StageInputAdapter` 负责：
-
-- `dt` 计算
-- source age 计算
-- 跟踪连续性判断
-- 轻量一阶低通滤波
-- 将 `FusedState` 映射为 mission stage 统一输入 `MissionStageInput`
-
-它不是控制器，不负责：
-
-- 状态机
-- PID
-- 控制输出计算
-- fail-safe 策略
+当前 `FusedState` 由 Action Mission 运行时作为状态快照消费。它不进入旧
+mission/stage/control 适配器，也不直接形成飞行命令；Action 输出必须经过
+`ActionDispatcher` 与 P0 Safety Pipeline。
 
 ## 5. 终端 Debug
 

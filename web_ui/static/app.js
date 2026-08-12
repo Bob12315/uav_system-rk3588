@@ -104,13 +104,12 @@ const pointY = function () { return window.UavFieldMap.pointY.apply(window.UavFi
 const renderFieldMap = function (next) { return window.UavFieldMap.renderFieldMap(next); };
 const setupFieldMapInteractions = function () { window.UavFieldMap.setupFieldMapInteractions(); };
 
-async function execute(command, source = "BUTTON") {
-  if (!command) return;
-  const result = await json("/api/commands/execute", {
-    method: "POST", body: JSON.stringify({command, source})
+async function yoloTargetAction(action, trackId) {
+  const query = trackId === undefined ? "" : `?track_id=${encodeURIComponent(trackId)}`;
+  const result = await json(`/api/yolo/target/${encodeURIComponent(action)}${query}`, {
+    method: "POST", body: "{}",
   });
-  $("completionHint").textContent = result.message;
-  await loadAudit();
+  if (!result.ok) throw new Error(result.message || "YOLO target command failed");
   return result;
 }
 async function clearLocalization() {
@@ -145,51 +144,6 @@ function actionDisplayName(name, fallback = "") {
 function actionNameWithZh(name) {
   if (!name) return "--";
   return actionDisplayName(name, name);
-}
-function positiveStep(inputId, label) {
-  const value = Number($(inputId).value);
-  if (!Number.isFinite(value) || value <= 0) {
-    $("completionHint").textContent = `${label}必须大于 0`;
-    return null;
-  }
-  return value;
-}
-function commandNumber(value) {
-  const normalized = Math.abs(value) < 1e-9 ? 0 : value;
-  return Number(normalized.toFixed(6)).toString();
-}
-function bodyOffsetToLocalOffset(offset, yaw) {
-  const [forward, right, down] = offset;
-  const cosYaw = Math.cos(yaw);
-  const sinYaw = Math.sin(yaw);
-  return [
-    forward * cosYaw - right * sinYaw,
-    forward * sinYaw + right * cosYaw,
-    down,
-  ];
-}
-function executeManualMove(direction) {
-  const step = positiveStep("moveStep", "移动步长");
-  if (step === null) return;
-  const confirmed = window.confirm(
-    `确认手动${direction}移动 ${step} m？\n` +
-    "该操作会停止当前 Action/Action Mission，并发送 LOCAL_NED 绝对位置目标，yaw 保持当前值。"
-  );
-  if (!confirmed) return;
-  json("/api/manual-step-move", {
-    method: "POST",
-    body: JSON.stringify({direction, step_m: step}),
-  }).then(result => {
-    $("completionHint").textContent = result.message || (result.ok ? "manual step queued" : "manual step failed");
-  }).catch(() => {
-    $("completionHint").textContent = "manual step move failed";
-  });
-}
-function executeManualYaw(direction) {
-  const angle = positiveStep("yawStep", "偏航角度");
-  if (angle === null) return;
-  const turn = direction === "left" ? "ccw" : "cw";
-  execute(`condition_yaw ${angle} 20 ${turn} relative`, "MANUAL_MOVE");
 }
 function setButtonActive(selector, predicate) {
   document.querySelectorAll(selector).forEach(button => {
@@ -264,13 +218,10 @@ function renderMissionSteps(next) {
       : fallbackStageModes;
   $("stageOverride").textContent = selected;
   $("missionSteps").innerHTML = modes.map(mode => {
-    const command = `mission stage ${mode}`;
     const selectedMode = mode === selected;
     const currentMode = mode !== "AUTO" && mode === active;
-    return `<button class="${selectedMode ? "selected-mode" : ""} ${currentMode ? "current-mode" : ""}" data-stage-mode="${mode}" data-command="${command}" ${viewingActiveMission ? "" : "disabled"}>${mode}</button>`;
+    return `<span class="stage-status ${selectedMode ? "selected-mode" : ""} ${currentMode ? "current-mode" : ""}">${mode}</span>`;
   }).join("");
-  $("missionSteps").querySelectorAll("[data-stage-mode]").forEach(button => button.onclick = () =>
-    execute(button.dataset.command, "STAGE"));
 }
 function dispatchFromActionLab(actionLab) {
   const payload = actionLab || window.UavActionLab.getLatestActionLab() || {};
@@ -672,7 +623,7 @@ function renderDetections(scene, target) {
       <span>#${det.track_id} ${escapeHtml(det.class_name)}</span><span>${Number(det.confidence).toFixed(2)}</span></button>`;
   }).join("") || `<div class="hint">暂无目标</div>`;
   $("detections").querySelectorAll("[data-track]").forEach(button => button.onclick = () =>
-    execute(`target lock ${button.dataset.track}`, "LIST"));
+    yoloTargetAction("lock", button.dataset.track));
 }
 async function loadMissions() {
   missionCatalog = await json("/api/missions");
@@ -720,7 +671,7 @@ if (window.UavVideoPanel && window.UavVideoPanel.configure) {
     dom: window.UavDom,
     format: window.UavFormat,
     getState: function () { return state; },
-    execute: execute,
+    targetAction: yoloTargetAction,
     loadAudit: loadAudit,
     setCompletionHint: function (text) { $("completionHint").textContent = text; },
   });
@@ -819,12 +770,17 @@ async function configureActionMission() {
   renderActionMissionStatus(result.action_mission || null);
 }
 async function startActionMission() {
+  const source = String(state.active_source || state.link?.active_source || "real").toLowerCase();
+  const sourceLabel = source === "sitl" ? "SITL" : "REAL";
   const confirmed = window.confirm(
-    "确认启动 Action Mission？\n"
-    + "它会按 step 顺序运行 Action。Action 是否实发仍受 send_actions 和系统 SEND 门控控制。"
+    `确认授权并启动本次 ${sourceLabel} Action Mission？\n`
+    + "授权绑定本次 run；系统 SEND=OFF 时仍不会实发。"
   );
   if (!confirmed) return;
-  const result = await json("/api/action-mission/start", {method: "POST", body: "{}"});
+  const result = await json("/api/action-mission/start", {
+    method: "POST",
+    body: JSON.stringify({authorize: true, target_source: source}),
+  });
   if (!result.ok) throw new Error(result.error || "Action Mission 启动失败");
   $("completionHint").textContent = "Action Mission 已启动";
   lastActionMissionSummaryHtml = "";
@@ -955,7 +911,7 @@ function loadActionMissionPreset(name) {
 }
 var selectedActionIsRunning = function () { return window.UavActionLab.selectedActionIsRunning(); };
 var toggleActionLabRun = function () { return window.UavActionLab.toggleActionLabRun(); };
-var startActionLabAction = function (sendActions) { return window.UavActionLab.startActionLabAction(sendActions); };
+var startActionLabAction = function () { return window.UavActionLab.startActionLabAction(); };
 var stopActionLabAction = function () { return window.UavActionLab.stopActionLabAction(); };
 var resetActionLabAction = function () { return window.UavActionLab.resetActionLabAction(); };
 
@@ -1068,72 +1024,38 @@ async function init() {
   } else {
     console.warn("UavVideoPanel unavailable");
   }
-  document.querySelectorAll("[data-command]").forEach(button => button.onclick = () => {
-    if (button.dataset.confirm && !confirm(button.dataset.confirm)) return;
-    execute(button.dataset.command, button.dataset.origin || "BUTTON");
-  });
-  document.querySelectorAll("[data-manual-move]").forEach(button => button.onclick = () =>
-    executeManualMove(button.dataset.manualMove));
-  document.querySelectorAll("[data-manual-yaw]").forEach(button => button.onclick = () =>
-    executeManualYaw(button.dataset.manualYaw));
+  document.querySelectorAll("[data-yolo-action]").forEach(button => button.onclick = () =>
+    yoloTargetAction(button.dataset.yoloAction).catch(error => { $("completionHint").textContent = error.message; }));
   $("takeoffButton").onclick = () => {
-    const altitude = $("takeoffAltitude").value;
-    if (confirm(`确认起飞至 ${altitude} m？`)) execute(`takeoff ${altitude}`, "BUTTON");
+    const altitude = Number($("takeoffAltitude").value);
+    selectAction("takeoff");
+    $("actionParams").value = JSON.stringify({altitude_m: altitude}, null, 2);
+    if (confirm(`确认准备授权本次起飞至 ${altitude} m？`)) startActionLabAction();
   };
-  if ($("missionSwitch")) $("missionSwitch").onclick = () => execute(`mission switch ${$("missionSelect").value}`, "BUTTON").then(loadMissions);
+  if ($("landActionButton")) $("landActionButton").onclick = () => {
+    selectAction("land");
+    $("actionParams").value = "{}";
+    startActionLabAction().catch(error => { $("completionHint").textContent = error.message; });
+  };
+  if ($("sendToggle")) $("sendToggle").onclick = async () => {
+    const enabled = !Boolean((state.controllers || {}).send_commands);
+    const label = enabled ? "ON" : "OFF";
+    if (!confirm(`确认将系统 SEND 切换为 ${label}？`)) return;
+    const result = await json("/api/control/send", {
+      method: "POST", body: JSON.stringify({enabled: enabled}),
+    });
+    $("completionHint").textContent = result.message;
+  };
+  document.querySelectorAll("[data-source]").forEach(button => button.onclick = async () => {
+    const source = button.dataset.source;
+    if (!confirm(`切换到 ${source.toUpperCase()} 将关闭 SEND 并撤销 run 授权，确认？`)) return;
+    const result = await json("/api/telemetry/source", {
+      method: "POST", body: JSON.stringify({source: source}),
+    });
+    $("completionHint").textContent = result.message;
+  });
   if ($("missionSelect")) $("missionSelect").onchange = () => renderMissionSteps(state || {});
   window.UavFieldRef.init();
-  $("sendCommand").onclick = () => {
-    const input = $("commandInput");
-    execute(input.value, "CLI"); history.unshift(input.value); input.value = ""; historyIndex = -1;
-  };
-  $("commandInput").onkeydown = event => {
-    if (event.key === "Enter") { event.preventDefault(); $("sendCommand").click(); }
-    if (event.key === "Tab") {
-      event.preventDefault();
-      const match = completions.find(item => item.toLowerCase().startsWith(event.target.value.toLowerCase()));
-      if (match) { event.target.value = match; $("completionHint").textContent = `补全: ${match}`; }
-    }
-    if (event.key === "ArrowUp" && history.length) {
-      event.preventDefault(); historyIndex = Math.min(historyIndex + 1, history.length - 1); event.target.value = history[historyIndex];
-    }
-    if (event.key === "ArrowDown" && historyIndex >= 0) {
-      event.preventDefault(); historyIndex -= 1; event.target.value = historyIndex < 0 ? "" : history[historyIndex];
-    }
-  };
-
-  // Flight Safety command panel (PR F)
-  const flightInput = $("flightCommandInput");
-  const flightSend = $("flightSendCommand");
-  const flightHint = $("flightCompletionHint");
-  if (flightSend && flightInput) {
-    flightSend.onclick = () => {
-      const command = flightInput.value.trim();
-      if (!command) return;
-      execute(command, "FLIGHT_CLI").then(result => {
-        if (flightHint) flightHint.textContent = result.message || "command sent";
-      }).catch(error => {
-        if (flightHint) flightHint.textContent = `命令失败: ${error.message}`;
-      });
-      history.unshift(flightInput.value);
-      flightInput.value = "";
-      historyIndex = -1;
-    };
-    flightInput.onkeydown = event => {
-      if (event.key === "Enter") { event.preventDefault(); flightSend.click(); }
-      if (event.key === "Tab") {
-        event.preventDefault();
-        const match = completions.find(item => item.toLowerCase().startsWith(event.target.value.toLowerCase()));
-        if (match) { event.target.value = match; if (flightHint) flightHint.textContent = `补全: ${match}`; }
-      }
-      if (event.key === "ArrowUp" && history.length) {
-        event.preventDefault(); historyIndex = Math.min(historyIndex + 1, history.length - 1); event.target.value = history[historyIndex];
-      }
-      if (event.key === "ArrowDown" && historyIndex >= 0) {
-        event.preventDefault(); historyIndex -= 1; event.target.value = historyIndex < 0 ? "" : history[historyIndex];
-      }
-    };
-  }
   document.querySelectorAll(".tab").forEach(tab => tab.onclick = () => {
     document.querySelectorAll(".tab").forEach(item => item.classList.toggle("active", item === tab));
     document.querySelectorAll(".page").forEach(page => page.classList.toggle("active", page.id === `${tab.dataset.page}Page`));
@@ -1148,8 +1070,7 @@ async function init() {
   $("actionParams").oninput = () => cacheSelectedActionParams();
   setupActionStatusJsonCopyGuard();
   if ($("actionRunToggle")) $("actionRunToggle").onclick = () => toggleActionLabRun().catch(error => { $("completionHint").textContent = error.message; });
-  if ($("actionDryRunStart")) $("actionDryRunStart").onclick = () => startActionLabAction(false).catch(error => { $("completionHint").textContent = error.message; });
-  if ($("actionDispatchStart")) $("actionDispatchStart").onclick = () => startActionLabAction(true).catch(error => { $("completionHint").textContent = error.message; });
+  if ($("actionDispatchStart")) $("actionDispatchStart").onclick = () => startActionLabAction().catch(error => { $("completionHint").textContent = error.message; });
   if ($("actionStop")) $("actionStop").onclick = () => stopActionLabAction().catch(error => { $("completionHint").textContent = error.message; });
   $("actionReset").onclick = () => resetActionLabAction().catch(error => { $("completionHint").textContent = error.message; });
   $("actionRefresh").onclick = () => refreshActionStatus().catch(error => { $("completionHint").textContent = error.message; });

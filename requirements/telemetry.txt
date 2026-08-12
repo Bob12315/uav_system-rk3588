@@ -1,0 +1,4 @@
+-r core.txt
+
+# MAVLink is intentionally confined to telemetry_link/.
+pymavlink>=2.4.41,<3

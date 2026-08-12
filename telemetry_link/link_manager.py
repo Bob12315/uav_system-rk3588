@@ -720,26 +720,23 @@ class LinkManager:
         self.stop_control(frame=BODY_NED)
 
     def stop_body_velocity_and_clear(self) -> None:
-        """Atomically stop BODY_NED velocity and clear the continuous queue.
+        """Queue an explicit zero-velocity barrier before later actions.
 
-        Puts a STOP command with clear_after_send=True into the queue.
-        The CommandSender will:
-        1. Send the zero-velocity STOP to the flight controller.
-        2. Clear the queue entry only if no newer command replaced it.
-
-        This guarantees the STOP is actually transmitted before the
-        queue is cleared, unlike the previous zero-then-clear pattern.
+        The barrier lives in the one-shot action queue at safety priority 0,
+        so navigation/land handlers cannot erase it while clearing the latest
+        continuous sample.  The sender transmits zero BODY_NED velocity and
+        then clears any continuous sample that raced with the transition.
         """
-        self.submit_control_command(
-            ControlCommand(
-                command_type=ControlType.STOP,
-                vx=0.0,
-                vy=0.0,
-                vz=0.0,
-                yaw_rate=0.0,
-                timestamp=time.time(),
-                frame=BODY_NED,
-                clear_after_send=True,
+        runtime = self._active_runtime()
+        runtime.command_queue.clear_control()
+        self.submit_latest_action_command(
+            ActionCommand(
+                action_type=ActionType.STOP_BODY_VELOCITY,
+                params={"frame": BODY_NED},
+                priority=0,
+                retries_left=0,
+                retry_interval_sec=self.cfg.action_retry_interval_sec,
+                created_at=time.time(),
             )
         )
 
@@ -778,6 +775,7 @@ class LinkManager:
         vx_forward_mps: float,
         vy_right_mps: float,
         vz_down_mps: float,
+        yaw_rad: float | None = None,
         yaw_rate_rad_s: float | None = None,
     ) -> None:
         """Velocity command in BODY_NED (body-fixed) frame.
@@ -785,6 +783,7 @@ class LinkManager:
         vx_forward_mps – forward velocity (m/s)
         vy_right_mps   – right velocity (m/s)
         vz_down_mps    – down velocity (m/s)
+        yaw_rad         – optional absolute yaw hold in radians
         yaw_rate_rad_s – optional yaw-rate target in rad/s
         """
         self.send_velocity_command(
@@ -792,6 +791,7 @@ class LinkManager:
             vy=vy_right_mps,
             vz=vz_down_mps,
             frame=BODY_NED,
+            yaw_rad=yaw_rad,
             yaw_rate_rad_s=yaw_rate_rad_s,
         )
         return
