@@ -104,6 +104,22 @@ def _load_yaml_config(path: str) -> dict[str, Any]:
         data = yaml.safe_load(handle) or {}
     if not isinstance(data, dict):
         raise ValueError("config yaml must be a mapping")
+    allowed = {
+        "model_path", "source", "conf_thres", "iou_thres", "classes", "udp_ip", "udp_port",
+        "selection_mode", "target_class", "max_lost_frames", "show", "save_video", "save_path",
+        "line_width", "show_all_tracks", "command_enabled", "command_ip", "command_port",
+        "window_name", "class_names", "camera_width", "camera_height", "camera_fps", "camera_fourcc",
+        "latest_frame", "display", "web_stream", "recording_dir",
+    }
+    unknown = set(data) - allowed
+    if unknown:
+        raise ValueError(f"unknown YOLO config field(s): {', '.join(sorted(unknown))}")
+    nested = {"display": {"local_window_enabled", "fullscreen"},
+              "web_stream": {"enabled", "host", "port", "jpeg_quality", "max_fps", "width", "height"}}
+    for name, keys in nested.items():
+        value = data.get(name, {})
+        if isinstance(value, dict) and set(value) - keys:
+            raise ValueError(f"unknown {name} field(s): {', '.join(sorted(set(value) - keys))}")
     return data
 
 

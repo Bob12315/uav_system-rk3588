@@ -8,9 +8,9 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from app.app_config import build_arg_parser, load_app_config  # noqa: E402
-from app.mission_orchestrator import MissionActionStep  # noqa: E402
-from app.system_runner import SystemRunner  # noqa: E402
+from app.config import build_arg_parser, load_app_config  # noqa: E402
+from missions.engine import MissionActionStep  # noqa: E402
+from application.runner import SystemRunner  # noqa: E402
 
 
 def main() -> None:
@@ -22,7 +22,7 @@ def main() -> None:
         raise SystemExit("legacy mission/stage files remain")
     args = build_arg_parser().parse_args(["--no-yolo-udp", "--no-ui"])
     runner = SystemRunner(load_app_config(args))
-    controller = runner.field_reference_controller
+    controller = runner.field_service
     started = controller.start_competition_runtime_sampling(34.104189, 108.642674, started_at_s=1000.0)
     if started.get("ok") is not True:
         raise SystemExit(f"v3 sampling start failed: {started}")
@@ -33,9 +33,14 @@ def main() -> None:
             "satellites_visible": 12, "gps_eph": 1.0, "gps_epv": 1.0,
         }, observed_at_s=1000.0 + index * 0.26)
     status = controller.status()["field_reference"]
-    if not status["is_ready_for_field_to_gps"] or status["is_ready_for_field_to_local"]:
+    if not status["is_ready_for_field_to_gps"]:
         raise SystemExit(f"invalid v3 field capability status: {status}")
-    runner.configure_action_mission([MissionActionStep(name="gps_multi_view_localize")])
+    runner.configure_action_mission([MissionActionStep(
+        name="goto_waypoint",
+        params={"x": 0.0, "y": 5.0, "altitude_m": 3.0,
+                "waypoint_mode": "field", "target_frame": "global",
+                "yaw_mode": "field_heading"},
+    )])
     mission = runner.action_mission_start(
         authorize=True,
         operator="p2-validator",

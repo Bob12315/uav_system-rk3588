@@ -152,7 +152,7 @@ ArduPilot
   仍只支持 RK3588，见[平台与环境支持](docs/developer/platform_support.md)；
 - 部分视觉、投放和飞行参数需要根据不同飞机重新标定；
 - SITL 与真实飞行仍存在差异；
-- 部分大型 Action 后续仍可继续拆分；
+- 任务级流程已由原子 Action 和 Action Mission 模板表达；
 - 自动化测试覆盖仍需要提升；
 - 飞行安全、异常恢复和边界情况仍有继续完善空间；
 - 文档仍在持续整理。

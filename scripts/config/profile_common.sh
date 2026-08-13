@@ -35,8 +35,8 @@ profile_apply() {
   local repo_root="$1"
   local profile_dir="$2"
 
-  cp "${profile_dir}/telemetry.yaml" "${repo_root}/config/telemetry.yaml"
-  cp "${profile_dir}/yolo.yaml" "${repo_root}/config/yolo.yaml"
+  python "${repo_root}/scripts/config/render_profile.py" \
+    --repo-root "${repo_root}" --profile "${profile_dir}/profile.yaml" --write
 
   if [[ -d "${profile_dir}/action_missions" ]]; then
     mkdir -p "${repo_root}/config/action_missions"
@@ -59,9 +59,8 @@ profile_save() {
   local repo_root="$1"
   local profile_dir="$2"
 
-  mkdir -p "${profile_dir}"
-  cp "${repo_root}/config/telemetry.yaml" "${profile_dir}/telemetry.yaml"
-  cp "${repo_root}/config/yolo.yaml" "${profile_dir}/yolo.yaml"
+  echo "Profiles are reviewed delta files; automatic full-config snapshots are disabled." >&2
+  return 1
 
   rm -rf "${profile_dir}/action_missions"
   mkdir -p "${profile_dir}/action_missions"

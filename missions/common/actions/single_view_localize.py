@@ -5,7 +5,7 @@ from typing import Any
 
 from .base import ActionModule
 from .result import ActionResult
-from .target_localization import CameraProjectionConfig, TargetLocalization
+from guidance.target_localization import CameraProjectionConfig, TargetLocalization
 
 
 class SingleViewLocalizeAction(ActionModule):

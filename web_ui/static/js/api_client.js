@@ -74,17 +74,6 @@ window.UavApi = (function () {
   function getEvents() {
     return request("/api/events");
   }
-  function getCommandCompletions() {
-    return request("/api/commands/completions");
-  }
-
-  // ------------------------------------------------------------------
-  // Missions (legacy — still available)
-  // ------------------------------------------------------------------
-  function getMissions() {
-    return request("/api/missions");
-  }
-
   // ------------------------------------------------------------------
   // Action Lab
   // ------------------------------------------------------------------
@@ -153,7 +142,7 @@ window.UavApi = (function () {
   }
 
   // ------------------------------------------------------------------
-  // Field Heading (legacy)
+  // Field Reference
   // ------------------------------------------------------------------
 
   function getFieldReferenceStatus() {
@@ -232,10 +221,6 @@ window.UavApi = (function () {
     getStatus: getStatus,
     getAudit: getAudit,
     getEvents: getEvents,
-    getCommandCompletions: getCommandCompletions,
-
-    getMissions: getMissions,
-
     listActions: listActions,
     getActionStatus: getActionStatus,
     startAction: startAction,

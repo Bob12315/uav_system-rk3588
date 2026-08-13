@@ -44,9 +44,9 @@ class PayloadReleaseAction(ActionModule):
         if not self.started:
             return ActionResult(failed=True, reason="action_not_started")
         if self.stopped:
-            return ActionResult(done=True, reason="stopped", actions=[], detail=self._detail())
+            return ActionResult(done=True, reason="stopped", effects=ActionResult.typed([]), detail=self._detail())
         if self.done:
-            return ActionResult(done=True, reason="payload_released", actions=[], detail=self.last_detail)
+            return ActionResult(done=True, reason="payload_released", effects=ActionResult.typed([]), detail=self.last_detail)
 
         if self.state == "release":
             if self.release_time is None:
@@ -58,7 +58,7 @@ class PayloadReleaseAction(ActionModule):
             detail = self._detail(context)
             self.last_detail = detail
             return ActionResult(
-                actions=self._servo_actions("release"),
+                effects=ActionResult.typed(self._servo_actions("release")),
                 reason="release_sent",
                 detail=detail,
             )
@@ -69,13 +69,13 @@ class PayloadReleaseAction(ActionModule):
                 if elapsed_s < self.release_wait_s:
                     detail = self._detail(context)
                     self.last_detail = detail
-                    return ActionResult(actions=[], reason="release_waiting", detail=detail)
+                    return ActionResult(effects=ActionResult.typed([]), reason="release_waiting", detail=detail)
             else:
                 self.wait_updates += 1
                 if self.wait_updates < self.release_wait_updates:
                     detail = self._detail(context)
                     self.last_detail = detail
-                    return ActionResult(actions=[], reason="release_waiting", detail=detail)
+                    return ActionResult(effects=ActionResult.typed([]), reason="release_waiting", detail=detail)
 
             self.hold_sent = True
             self.state = "done"
@@ -83,14 +83,14 @@ class PayloadReleaseAction(ActionModule):
             detail = self._detail(context)
             self.last_detail = detail
             return ActionResult(
-                actions=self._servo_actions("hold"),
+                effects=ActionResult.typed(self._servo_actions("hold")),
                 done=True,
                 reason="payload_released",
                 detail=detail,
             )
 
         self.failed = True
-        return ActionResult(failed=True, reason="invalid_payload_release_state", actions=[], detail=self._detail())
+        return ActionResult(failed=True, reason="invalid_payload_release_state", effects=ActionResult.typed([]), detail=self._detail())
 
     def stop(self) -> None:
         self.stopped = True

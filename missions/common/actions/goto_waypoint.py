@@ -3,9 +3,9 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from app.coordinate_transform import field_to_gps, field_to_local_ned
-from app.field_reference import FieldReference
-from .frames import GLOBAL_RELATIVE_ALT_INT, LOCAL_NED
+from field.coordinates import field_to_gps
+from field.models import FieldReference
+from contracts.frames import GLOBAL_RELATIVE_ALT_INT, LOCAL_NED
 
 from .base import ActionModule
 from .result import ActionResult
@@ -24,7 +24,12 @@ class GotoWaypointAction(ActionModule):
         # GLOBAL lat/lon input support (new path)
         lat_raw = data.get("lat")
         lon_raw = data.get("lon")
-        target_frame = str(data.get("target_frame", "local")).strip().lower()
+        default_target_frame = (
+            "global"
+            if str(data.get("waypoint_mode", "absolute")).strip().lower() == "field"
+            else "local"
+        )
+        target_frame = str(data.get("target_frame", default_target_frame)).strip().lower()
         if target_frame not in {"local", "global"}:
             raise ValueError("target_frame must be local or global")
         use_global_latlon = target_frame == "global" and lat_raw is not None and lon_raw is not None
@@ -62,6 +67,8 @@ class GotoWaypointAction(ActionModule):
         waypoint_mode = str(data.get("waypoint_mode", "absolute")).strip().lower()
         if waypoint_mode not in {"absolute", "field"}:
             raise ValueError("waypoint_mode must be absolute or field")
+        if waypoint_mode == "field" and target_frame != "global":
+            raise ValueError("FIELD waypoints require target_frame=global in schema v3")
 
         yaw_mode = str(data.get("yaw_mode", "arm_heading")).strip().lower()
         if yaw_mode not in {"hold", "fixed", "arm_heading", "field_heading"}:
@@ -156,7 +163,7 @@ class GotoWaypointAction(ActionModule):
         if current is None:
             self.reached_updates = 0
             return ActionResult(
-                actions=[self._action_dict(target, arm_heading_yaw_rad, field_heading_yaw_rad, context_data)],
+                effects=ActionResult.typed([self._action_dict(target, arm_heading_yaw_rad, field_heading_yaw_rad, context_data)]),
                 reason="waiting_for_position",
                 detail=self._detail(None, None, None, context_data),
             )
@@ -177,7 +184,7 @@ class GotoWaypointAction(ActionModule):
         if self.reached_updates >= self.min_hold_updates:
             return ActionResult(done=True, reason="waypoint_reached", detail=detail)
         return ActionResult(
-            actions=[self._action_dict(target, arm_heading_yaw_rad, field_heading_yaw_rad, context_data)],
+            effects=ActionResult.typed([self._action_dict(target, arm_heading_yaw_rad, field_heading_yaw_rad, context_data)]),
             reason="goto_active",
             detail=detail,
         )
@@ -273,10 +280,6 @@ class GotoWaypointAction(ActionModule):
             "once": False,
             "priority": self.priority,
         }
-        action["field_origin_local_x"] = self._float_context(context_data, "field_origin_local_x")
-        action["field_origin_local_y"] = self._float_context(context_data, "field_origin_local_y")
-        action["field_heading_yaw_rad"] = field_heading_yaw_rad
-        action.update(self._field_safety_metadata(context_data, global_target=False))
         return action
 
     @staticmethod
@@ -296,12 +299,6 @@ class GotoWaypointAction(ActionModule):
             "field_reference_confirmed": confirmed,
             "field_reference_synced": synced,
             "field_reference_frozen": frozen,
-            "field_local_transform_ready": bool(
-                reference_data.get(
-                    "is_ready_for_field_to_local",
-                    context.get("field_origin_confirmed", False),
-                )
-            ),
             "field_gps_transform_ready": bool(
                 reference_data.get(
                     "is_ready_for_field_to_gps",
@@ -337,8 +334,6 @@ class GotoWaypointAction(ActionModule):
                 else ("global" if self.target_frame == "global" else "local_ned")
             ),
             "input_target": {"x": self.target_x, "y": self.target_y, "z": self.target_z},
-            "field_origin_local_x": self._float_context(context_data, "field_origin_local_x"),
-            "field_origin_local_y": self._float_context(context_data, "field_origin_local_y"),
             "field_origin_lat": self._float_context(context_data, "field_origin_lat"),
             "field_origin_lon": self._float_context(context_data, "field_origin_lon"),
             **self._velocity_status(context_data),
@@ -351,7 +346,6 @@ class GotoWaypointAction(ActionModule):
                 detail["local_target"] = target
             detail["note"] = (
                 "field -> GPS converted" if self.waypoint_mode == "field" and self.target_frame == "global"
-                else "field -> LOCAL_NED converted" if self.waypoint_mode == "field"
                 else "GPS input used directly" if self.target_frame == "global"
                 else "LOCAL_NED input used directly"
             )
@@ -435,36 +429,13 @@ class GotoWaypointAction(ActionModule):
     def _local_target(self, context: dict[str, Any]) -> dict[str, float] | None:
         if self.waypoint_mode == "absolute":
             return {"x": self.target_x, "y": self.target_y, "z": self.target_z}
-
-        if not bool(context.get("field_heading_confirmed", False)) or not bool(
-            context.get("field_origin_confirmed", False)
-        ):
-            return None
-        field_heading_yaw_rad = self._field_heading_yaw(context)
-        origin_x = self._float_context(context, "field_origin_local_x")
-        origin_y = self._float_context(context, "field_origin_local_y")
-        if field_heading_yaw_rad is None or origin_x is None or origin_y is None:
-            return None
-
-        ref = FieldReference()
-        ref.is_confirmed = True  # guarded by the checks above
-        ref.origin_local_n_m = origin_x
-        ref.origin_local_e_m = origin_y
-        ref.field_heading_yaw_rad = field_heading_yaw_rad
-
-        result = field_to_local_ned(
-            self.target_x, self.target_y, self.altitude_m, reference=ref,
-        )
-        return {"x": result.north_m, "y": result.east_m, "z": result.z_down_m}
+        return None
 
     def _global_target(self, context: dict[str, Any]) -> dict[str, float] | None:
         if self.waypoint_mode == "absolute":
             return {"lat": self.target_x, "lon": self.target_y, "alt": self.altitude_m}
 
-        gps_origin_confirmed = context.get("field_origin_gps_confirmed")
-        if gps_origin_confirmed is None:
-            # Compatibility for contexts produced before the GPS-specific flag.
-            gps_origin_confirmed = context.get("field_origin_confirmed", False)
+        gps_origin_confirmed = context.get("field_origin_gps_confirmed", False)
         if not bool(context.get("field_heading_confirmed", False)) or not bool(gps_origin_confirmed):
             return None
         field_heading_yaw_rad = self._field_heading_yaw(context)

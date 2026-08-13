@@ -41,7 +41,7 @@ class ChangeSpeedAction(ActionModule):
             return ActionResult(done=True, reason="speed_changed", detail=self._detail())
         self.done = True
         return ActionResult(
-            actions=[{
+            effects=ActionResult.typed([{
                 "action_type": "change_speed",
                 "params": {
                     "speed_mps": self.speed_mps,
@@ -50,7 +50,7 @@ class ChangeSpeedAction(ActionModule):
                 "key": self.key,
                 "once": True,
                 "priority": self.priority,
-            }],
+            }]),
             done=True,
             reason="speed_change_sent",
             detail=self._detail(),

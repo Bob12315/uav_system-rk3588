@@ -1,13 +1,12 @@
-"""ResolveGpsTargetsAction — resolve diverse target sources to GPS + LOCAL_NED.
+"""Resolve diverse target sources to schema-v3 global GPS targets.
 
 Supports three source types:
-- ``"field"``:  FIELD x/y/altitude → ``field_to_gps()`` → ``gps_to_local_ned()``
-- ``"home"``:   origin GPS from context → ``gps_to_local_ned()``
-- ``"vision"``: drone GPS + yaw + altitude + image ex/ey → target GPS → ``gps_to_local_ned()``
+- ``"field"``: FIELD x/y/altitude → ``field_to_gps()``
+- ``"home"``: runtime field origin GPS
+- ``"vision"``: drone GPS + yaw + altitude + image ex/ey → target GPS
 
 Output is saved to blackboard under ``resolved_targets`` (or the key given in
-``save_as``).  Each resolved target includes GPS, LOCAL_NED, and FIELD
-coordinates plus source metadata.
+``save_as``). Each resolved target contains global coordinates and source metadata.
 """
 
 from __future__ import annotations
@@ -15,12 +14,11 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from app.coordinate_transform import (
+from field.coordinates import (
     EARTH_RADIUS_M,
     field_to_gps,
-    gps_to_local_ned,
 )
-from app.field_reference import FieldReference, FieldReferenceError
+from field.models import FieldReference, FieldReferenceError
 
 from .base import ActionModule
 from .result import ActionResult
@@ -99,7 +97,10 @@ class ResolveGpsTargetsAction(ActionModule):
             )
 
         data = context or {}
-        ref = self._build_field_reference(data)
+        try:
+            ref = self._build_field_reference(data)
+        except FieldReferenceError as exc:
+            return ActionResult(failed=True, reason="field_reference_not_ready", detail={"error": str(exc)})
 
         resolved: list[dict[str, Any]] = []
         errors: list[dict[str, Any]] = []
@@ -207,23 +208,18 @@ class ResolveGpsTargetsAction(ActionModule):
         spec: dict[str, Any],
         ref: FieldReference,
     ) -> dict[str, Any] | None:
-        """Resolve a FIELD waypoint: field→GPS→LOCAL_NED."""
+        """Resolve a FIELD waypoint to global GPS."""
         field_x_m = self._required_float(spec, "field_x_m", "x")
         field_y_m = self._required_float(spec, "field_y_m", "y")
         altitude_m = self._required_float(spec, "altitude_m")
 
         gps = field_to_gps(field_x_m, field_y_m, altitude_m, reference=ref)
-        local = gps_to_local_ned(gps.lat, gps.lon, altitude_m, reference=ref)
-
         return self._build_output(
             spec=spec,
             source="field",
             lat=gps.lat,
             lon=gps.lon,
             altitude_m=altitude_m,
-            local_x=local.north_m,
-            local_y=local.east_m,
-            z_down_m=local.z_down_m,
             field_x=field_x_m,
             field_y=field_y_m,
             class_name=spec.get("class_name", ""),
@@ -236,7 +232,7 @@ class ResolveGpsTargetsAction(ActionModule):
         ref: FieldReference,
         context: dict[str, Any],
     ) -> dict[str, Any] | None:
-        """Resolve the home/origin position: origin GPS→LOCAL_NED."""
+        """Resolve the home/origin position from the global reference."""
         origin_lat = ref.origin_lat
         origin_lon = ref.origin_lon
         if origin_lat is None or origin_lon is None:
@@ -248,17 +244,12 @@ class ResolveGpsTargetsAction(ActionModule):
 
         altitude_m = self._optional_float(spec, "altitude_m", 5.0)
 
-        local = gps_to_local_ned(origin_lat, origin_lon, altitude_m, reference=ref)
-
         return self._build_output(
             spec=spec,
             source="home",
             lat=origin_lat,
             lon=origin_lon,
             altitude_m=altitude_m,
-            local_x=local.north_m,
-            local_y=local.east_m,
-            z_down_m=local.z_down_m,
             field_x=0.0,
             field_y=0.0,
             class_name="home",
@@ -271,7 +262,7 @@ class ResolveGpsTargetsAction(ActionModule):
         ref: FieldReference,
         context: dict[str, Any],
     ) -> dict[str, Any] | None:
-        """Resolve a vision target: per-estimate or context pose + ex/ey → target GPS → LOCAL_NED.
+        """Resolve a vision target from a captured pose to global GPS.
 
         Prefers pose from estimate.source (drone_lat/drone_lon/yaw_rad/altitude_m).
         Falls back to context only when allow_context_pose_fallback=True.
@@ -426,18 +417,12 @@ class ResolveGpsTargetsAction(ActionModule):
         target_lat = drone_lat + math.degrees(d_north / EARTH_RADIUS_M)
         target_lon = drone_lon + math.degrees(d_east / (EARTH_RADIUS_M * cos_lat))
 
-        # GPS → LOCAL_NED
-        local = gps_to_local_ned(target_lat, target_lon, altitude_m, reference=ref)
-
         result = self._build_output(
             spec=spec,
             source="vision",
             lat=target_lat,
             lon=target_lon,
             altitude_m=altitude_m,
-            local_x=local.north_m,
-            local_y=local.east_m,
-            z_down_m=local.z_down_m,
             field_x=None,  # computed below
             field_y=None,
             class_name=spec.get("class_name", ""),
@@ -463,9 +448,6 @@ class ResolveGpsTargetsAction(ActionModule):
         # GPS origin
         ref.origin_lat = self._float_context(context, "field_origin_lat")
         ref.origin_lon = self._float_context(context, "field_origin_lon")
-        # LOCAL origin
-        ref.origin_local_n_m = self._float_context(context, "field_origin_local_x")
-        ref.origin_local_e_m = self._float_context(context, "field_origin_local_y")
         # heading
         ref.field_heading_yaw_rad = self._float_context(context, "field_heading_yaw_rad")
         ref.is_confirmed = True
@@ -474,11 +456,10 @@ class ResolveGpsTargetsAction(ActionModule):
         if (
             ref.origin_lat is None
             or ref.origin_lon is None
-            or ref.origin_local_n_m is None
-            or ref.origin_local_e_m is None
+            or ref.field_heading_yaw_rad is None
         ):
             raise FieldReferenceError(
-                "context missing field origin GPS or LOCAL_NED for GPS resolution"
+                "context missing schema-v3 field origin GPS or heading"
             )
         return ref
 
@@ -490,9 +471,6 @@ class ResolveGpsTargetsAction(ActionModule):
         lat: float,
         lon: float,
         altitude_m: float,
-        local_x: float,
-        local_y: float,
-        z_down_m: float,
         field_x: float | None = None,
         field_y: float | None = None,
         class_name: str = "",
@@ -504,9 +482,6 @@ class ResolveGpsTargetsAction(ActionModule):
             "lat": lat,
             "lon": lon,
             "altitude_m": altitude_m,
-            "local_x": local_x,
-            "local_y": local_y,
-            "z_down_m": z_down_m,
             "class_name": class_name,
         }
         for name in ("id", "target_id", "track_id", "class_id"):

@@ -16,8 +16,9 @@ class ConfigStore:
             self.root / "config" / "app.yaml",
             self.root / "config" / "telemetry.yaml",
             self.root / "config" / "yolo.yaml",
+            self.root / "config" / "safety.yaml",
         ]
-        candidates.extend(sorted((self.root / "missions").glob("*/config.yaml")))
+        candidates.extend(sorted((self.root / "config" / "action_missions").glob("*.json")))
         return [str(path.relative_to(self.root)) for path in candidates if path.exists()]
 
     def resolve(self, relative_path: str) -> Path:

@@ -4,9 +4,9 @@ import math
 from typing import Any
 
 from .base import ActionModule
-from .multi_photo_fusion import MultiPhotoFusion, MultiPhotoFusionConfig
+from guidance.target_fusion import MultiPhotoFusion, MultiPhotoFusionConfig
 from .result import ActionResult
-from .target_localization import CameraProjectionConfig, TargetLocalization
+from guidance.target_localization import CameraProjectionConfig, TargetLocalization
 
 
 class FixedViewLocalizeAction(ActionModule):

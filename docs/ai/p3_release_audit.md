@@ -44,15 +44,16 @@ python scripts/audit_release_readiness.py --strict
 P0～P2 已提供以下可重复验证命令；发布候选必须在目标环境再次执行并保存结果：
 
 ```bash
-python -m pytest -q tests/current tests/integration
+python -m pytest -q tests/unit tests/contracts tests/integration tests/sitl
 python scripts/validate_architecture_boundaries.py
 python scripts/validate_action_missions.py
 python scripts/validate_p0_sitl.py
 python scripts/validate_p2_field_reference.py
 ```
 
-还缺少本发布候选的 Linux x86_64/ARM64 安装记录、RK3588 YOLO 硬件冒烟记录、Node/Web 测试
-环境和完整 SITL 失效场景记录。它们不得由旧的 P1 结果自动替代。
+2026-08-13 的架构收尾已在 Linux x86_64 和隔离的 RK3588 Linux aarch64 副本上
+各通过 708 项测试，RKNNLite 2.3.2 也成功加载当前 FP16 模型。这不等于完整的
+发布候选安装、摄像头/NPU 推理冒烟或全部 SITL 失效场景记录，这些仍需在正式发布前补齐。
 
 ## 维护者决策表
 

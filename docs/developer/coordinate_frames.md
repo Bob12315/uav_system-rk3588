@@ -80,8 +80,8 @@ local_E = origin_E + field_y_m * forward_E + field_x_m * right_E
 z_down = -altitude_m
 ```
 
-`app/coordinate_transform.py` 是 FIELD↔LOCAL_NED 转换的 **唯一实现源**。
-`app/runtime_context.py` 和 `missions/common/actions/goto_waypoint.py` 中的
+`field/coordinates.py` 是 FIELD↔LOCAL_NED 转换的 **唯一实现源**。
+`field/context.py` 和 `missions/common/actions/goto_waypoint.py` 中的
 历史公式在迁移完成前仍需保持行为一致；后续各 Action 必须通过
 `CoordinateTransform` 进行转换，不得继续复制公式。
 

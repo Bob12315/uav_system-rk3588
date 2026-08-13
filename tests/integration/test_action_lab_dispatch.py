@@ -1,7 +1,7 @@
 """Integration tests for Action dispatch — confirm_field_heading removed."""
 from __future__ import annotations
 
-from app.action_dispatcher import ActionDispatcher
+from execution.dispatcher import ActionDispatcher
 from missions.common.actions.takeoff import TakeoffAction
 
 

@@ -11,14 +11,18 @@
 7. [安全边界](../developer/safety.md)；
 8. [任务阅读清单](task_checklist.md)。
 
+进行全项目架构整理时，追加阅读并严格按单任务执行
+[全项目架构重构任务书](architecture_refactor_tasks.md)。
+
 在 RK3588 实机上部署本项目时，还必须阅读
 [RK3588 AI 部署规范](DEPLOY_RK3588.md)。
 
 当前主线：
 
 ```text
-Web UI → Action Lab / Action Mission → ActionRuntimeService → ActionRunner
-→ missions/common/actions/* → ActionDispatcher → ActionSafetyPipeline → LinkManager → telemetry_link
+Web UI → typed routers → WebServices → Action Mission → ActionRuntimeService
+→ thin Actions → guidance → ActionDispatcher → ActionSafetyPipeline → VehicleCommandPort
+→ telemetry_link
 ```
 
 核心规则：
@@ -35,8 +39,8 @@ Web UI → Action Lab / Action Mission → ActionRuntimeService → ActionRunner
 验证：
 
 ```bash
-python -m compileall app missions telemetry_link fusion yolo_app web_ui scripts
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q tests/current tests/integration
+python -m compileall app application contracts execution field guidance missions observability telemetry_link fusion yolo_app web_ui scripts
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q tests/unit tests/contracts tests/integration tests/sitl
 python scripts/validate_action_missions.py
 ```
 

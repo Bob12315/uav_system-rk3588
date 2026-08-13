@@ -32,11 +32,14 @@ takeoff:
   allowed_modes: [GUIDED]
 
 payload:
-  allowed_actions: [payload_release, drop_sequence, gps_drop_sequence]
+  allowed_actions: [payload_release]
   outputs:
     - servo_output: 8
       min_pwm: 1200
       max_pwm: 1750
+    - servo_output: 9
+      min_pwm: 1185
+      max_pwm: 1815
 
 sources:
   sitl:

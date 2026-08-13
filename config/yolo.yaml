@@ -97,4 +97,4 @@ save_video: false
 save_path: "../runtime/videos/track_output.mp4"
 
 # Web UI 原始摄像头录制目录。录制写入未标注的实际读取帧。
-recording_dir: "~/uav_recordings"
+recording_dir: "../runtime/videos"

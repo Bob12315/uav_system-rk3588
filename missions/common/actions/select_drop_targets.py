@@ -3,11 +3,10 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from typing import Any
+from guidance.waypoint_math import field_xy_to_enu
 
 from .base import ActionModule
 from .result import ActionResult
-from app.coordinate_transform import field_to_local_ned
-from app.field_reference import FieldReference
 
 
 DEFAULT_SCORE_TABLE = {
@@ -111,44 +110,13 @@ class SelectDropTargetsAction(ActionModule):
             return self._clone_result(self.last_result)
 
         self._effective_zone_center = self.zone_center
-        if self.zone_center_mode == "field":
-            ctx = context or {}
-            if not bool(ctx.get("field_heading_confirmed", False)) or not bool(
-                ctx.get("field_origin_confirmed", False)
-            ):
-                self.done = False
-                self.failed = True
-                self.last_result = ActionResult(
-                    failed=True, reason="missing_field_reference_for_zone_center"
-                )
-                return self.last_result
-            heading_yaw = self._float_context(ctx, "field_heading_yaw_rad")
-            origin_x = self._float_context(ctx, "field_origin_local_x")
-            origin_y = self._float_context(ctx, "field_origin_local_y")
-            if heading_yaw is None or origin_x is None or origin_y is None:
-                self.done = False
-                self.failed = True
-                self.last_result = ActionResult(
-                    failed=True, reason="missing_field_reference_for_zone_center"
-                )
-                return self.last_result
-            if self.zone_center is None:
-                self.done = False
-                self.failed = True
-                self.last_result = ActionResult(
-                    failed=True, reason="missing_field_reference_for_zone_center"
-                )
-                return self.last_result
-            ref = FieldReference()
-            ref.is_confirmed = True
-            ref.origin_local_n_m = origin_x
-            ref.origin_local_e_m = origin_y
-            ref.field_heading_yaw_rad = heading_yaw
-            local = field_to_local_ned(
-                self.zone_center[0], self.zone_center[1], 0.0, reference=ref,
-            )
-            self._effective_zone_center = (local.north_m, local.east_m)
-
+        if self.zone_center_mode == "field" and self.zone_center is not None:
+            if self.coordinate_mode != "gps_enu":
+                return ActionResult(failed=True, reason="field_zone_center_requires_gps_enu")
+            heading = self._float_context(context or {}, "field_heading_yaw_rad")
+            if not bool((context or {}).get("field_gps_transform_confirmed")) or heading is None:
+                return ActionResult(failed=True, reason="missing_field_reference_for_zone_center")
+            self._effective_zone_center = field_xy_to_enu(self.zone_center[0], self.zone_center[1], heading)
         # input_key fallback: read objects from context at runtime
         if self.input_key is not None and not self.objects:
             ctx = context or {}
@@ -555,7 +523,7 @@ class SelectDropTargetsAction(ActionModule):
         if result is None:
             return ActionResult(failed=True, reason="missing_cached_result")
         return ActionResult(
-            actions=list(result.actions),
+            effects=ActionResult.typed(list(result.actions)),
             done=result.done,
             failed=result.failed,
             reason=result.reason,

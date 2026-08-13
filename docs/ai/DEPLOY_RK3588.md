@@ -159,7 +159,7 @@ bash scripts/install/install_app_env.sh
 
 ```bash
 python -m app.main --help
-python -m telemetry_link.main --help
+python -m tools.telemetry_debug --help  # development diagnostic only
 ```
 
 验证后再次确认 `config/app.yaml` 中 `executor.send_commands` 为 `false`。

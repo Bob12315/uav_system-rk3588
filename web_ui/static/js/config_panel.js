@@ -64,10 +64,9 @@
     document.querySelectorAll("#configFiles button").forEach(function (b) {
       b.classList.toggle("active", b.dataset.path === path);
     });
-    var action = path.startsWith("missions/") ? "保存并应用" :
-      path === "config/telemetry.yaml" ? "保存并重连" :
+    var action = path === "config/telemetry.yaml" ? "保存并重连" :
       path === "config/yolo.yaml" ? "保存并重启 YOLO" :
-      path === "config/app.yaml" ? "保存并重启 App" : "保存并应用";
+      path === "config/app.yaml" ? "保存并重启 App" : "保存";
     $("applyConfig").textContent = action;
   }
 
@@ -92,7 +91,7 @@
 
   async function restoreConfig() {
     if (!configState.currentConfigPath || !confirm("确认恢复上一次保存前版本？")) return;
-    var action = configState.currentConfigPath.startsWith("missions/") ? "apply" : "save";
+    var action = "save";
     var result = await _api()("/api/config/restore?path=" + encodeURIComponent(configState.currentConfigPath) + "&action=" + encodeURIComponent(action), {method: "POST"});
     _setConfigStatus(result.message);
     var $ = _dom().$;
@@ -102,9 +101,9 @@
   }
 
   function actionForPath() {
-    if (configState.currentConfigPath.startsWith("missions/")) return "apply";
     if (configState.currentConfigPath === "config/telemetry.yaml") return "reconnect";
-    if (configState.currentConfigPath === "config/yolo.yaml" || configState.currentConfigPath === "config/app.yaml") return "restart";
+    if (configState.currentConfigPath === "config/yolo.yaml") return "restart_yolo";
+    if (configState.currentConfigPath === "config/app.yaml") return "restart_app";
     return "save";
   }
 

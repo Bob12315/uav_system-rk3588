@@ -1,23 +1,22 @@
 # app
 
-`app/` 是系统编排层，不写具体控制算法，也不直接构造 MAVLink 消息。
+`app/` 是薄启动层，不写业务用例、控制算法，也不直接构造 MAVLink 消息。
 
 ## 职责
 
 - 加载总配置。
-- 启动/停止服务。
-- 调用 fusion。
-- 适配 `FusedState -> MissionStageInput`。
-- 运行 Action Mission 编排与 P0 Safety Pipeline。
-- 挂接 UI。
+- 创建严格配置。
+- 调用 `application/` composition root。
+- 提供 `python -m app.main` 入口。
 
 ## 主要文件
 
-- `main.py`：入口。
-- `system_runner.py`：主循环。
-- `service_manager.py`：YOLO UDP、telemetry、fusion 服务管理。
-- `health_monitor.py`：数据健康状态。
-- `app_config.py`：加载 app、telemetry、Web UI 和安全默认配置。
+- `main.py`：模块入口。
+- `bootstrap.py`：composition root。
+- `config.py`：严格 app/telemetry/Web 配置。
+- `__init__.py`：包声明。
+
+主循环和用例服务位于 `application/`；执行、安全派发位于 `execution/`。
 
 ## 禁止事项
 

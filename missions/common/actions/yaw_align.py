@@ -99,7 +99,7 @@ class YawAlignAction(ActionModule):
         if not self.command_sent:
             self.command_sent = True
             return ActionResult(
-                actions=[self._condition_yaw_action(target_yaw)],
+                effects=ActionResult.typed([self._condition_yaw_action(target_yaw)]),
                 reason="yaw_align_sent",
                 detail=detail,
             )

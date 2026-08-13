@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import httpx
 
 from web_ui.server import create_app
+from application.web_services import WebServices
 
 
 class _Runner:
@@ -19,7 +20,7 @@ class _Runner:
     def active_telemetry_source(self):
         return "sitl"
 
-    def set_system_send(self, enabled: bool):
+    def set_send(self, enabled: bool):
         self.calls.append(("send", enabled))
         return SimpleNamespace(ok=True, message="ok")
 
@@ -35,6 +36,29 @@ def _config(tmp_path):
         session_ttl_sec=60,
         allowed_hosts=("testserver",),
         allowed_origins=("http://testserver",),
+    )
+
+
+def _services(runner):
+    unavailable = lambda *args: {"ok": False}
+    return WebServices(
+        system_control=runner,
+        mission_control=runner,
+        status_snapshot=runner.web_status_snapshot,
+        field_reference_status=unavailable,
+        field_reference_reset=unavailable,
+        field_reference_freeze=unavailable,
+        field_profile_list=unavailable,
+        field_profile_get=unavailable,
+        field_profile_validate=unavailable,
+        runtime_sampling_start=unavailable,
+        runtime_sampling_finalize=unavailable,
+        runtime_sampling_cancel=unavailable,
+        competition_sampling_start=unavailable,
+        clear_localization=unavailable,
+        action_specs=(),
+        action_lab_enabled=False,
+        authorization_snapshot=lambda: None,
     )
 
 
@@ -66,7 +90,7 @@ def _scenario(app):
 
 def test_modifying_requests_require_auth_csrf_and_allowed_origin(tmp_path) -> None:
     runner = _Runner()
-    app = create_app(runner, _config(tmp_path))
+    app = create_app(_services(runner), _config(tmp_path))
 
     unauthenticated, login, no_csrf, allowed, cross_origin = _scenario(app)
 

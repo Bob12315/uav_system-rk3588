@@ -11,16 +11,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.mission_orchestrator import MissionBlackboard
+from missions.engine import MissionBlackboard
 from missions.common.actions.action_lab import create_action_lab_registry
 
 
 DEFAULT_TEMPLATE_PATHS = [
-    ROOT / "config/action_missions/drop_two_targets_v1.json",
     ROOT / "config/action_missions/drop_two_targets_v2.json",
     ROOT / "config/action_missions/recon_gps_v2.json",
-    ROOT / "config/action_missions/recon_inspect_5_targets_stepwise_v1.json",
-    ROOT / "config/action_missions/rescue_2026_full_auto.json",
     ROOT / "config/action_missions/rescue_2026_full_auto_v2.json",
 ]
 ALLOWED_FAILURE_ACTIONS = {"fail", "retry_current", "retry_current_then_jump_to", "jump_to", "continue"}
@@ -154,6 +151,14 @@ def _validate_blackboard_refs(path: Path, steps: list[dict[str, Any]]) -> None:
             raise ValueError(
                 f"ERROR {_display_path(path)}: step {index} blackboard resolve failed: {exc}"
             ) from exc
+        save_as = step.get("save_as")
+        if save_as and save_as not in blackboard.data:
+            if step.get("name") == "gps_capture_view":
+                blackboard.set(save_as, {"raw_estimates": []})
+            elif step.get("name") == "recon_score_view":
+                blackboard.set(save_as, {"frames": [], "frame_count": 0})
+            else:
+                blackboard.set(save_as, {})
 
 
 def _blackboard_refs(value: Any) -> list[str]:
@@ -291,16 +296,6 @@ def _smoke_blackboard() -> MissionBlackboard:
         },
     )
     blackboard.set(
-        "recon_scan",
-        {
-            "localized_objects": [
-                {"id": "r1", "class_name": "bucket", "local_x": 1.0, "local_y": 5.0},
-                {"id": "r2", "class_name": "recon_bucket", "local_x": -1.0, "local_y": 51.0},
-                {"id": "r3", "class_name": "white_bucket", "local_x": 0.5, "local_y": 49.0},
-            ],
-        },
-    )
-    blackboard.set(
         "recon_targets",
         {
             "selected_targets": [
@@ -325,17 +320,6 @@ def _smoke_blackboard() -> MissionBlackboard:
     blackboard.set(
         "recon_report",
         {"recon_report": {"barrels": []}, "barrel_count": 5, "detected_count": 0, "blank_count": 5, "skipped_count": 0},
-    )
-    blackboard.set(
-        "recon_sequence",
-        {
-            "observations": [
-                {"target_index": 0, "target_id": "r1", "hazard_label": "", "status": "blank"},
-            ],
-            "recon_result_items": [
-                {"target_index": 0, "target_id": "r1", "content": "baozha", "confidence": 0.72, "status": "detected"},
-            ],
-        },
     )
     return blackboard
 

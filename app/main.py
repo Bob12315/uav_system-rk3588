@@ -6,8 +6,8 @@ import signal
 import threading
 from pathlib import Path
 
-from app.app_config import build_arg_parser, load_app_config
-from app.system_runner import SystemRunner
+from app.config import build_arg_parser, load_app_config
+from application.runner import SystemRunner
 
 
 def setup_logging(level: str, log_file: str | None = None) -> None:

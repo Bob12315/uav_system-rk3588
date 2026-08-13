@@ -17,5 +17,8 @@
 | `release_payload` 接口 | disabled/错误投放抽象 | `payload_release` Action → `set_servo` | 清理旧 runner/文档引用后可删 |
 | RC override 投放 | deprecated，通道语义和安全边界不合适 | `set_servo` | 可禁止；不得新增兼容路径 |
 | INT8 默认部署路径 | 当前模型已废弃/未验证 | `data/models/cuadc2026-fp16.rknn` | 可清理默认描述；硬件仍可支持未来经验证的 INT8 |
+| 复合 Action 状态机（`*_sequence`、`gps_multi_view_localize`、`gps_recon_area_scan`、`visual_land`） | 已从生产 registry 删除并归档 | 原子 Action + `config/action_missions/*.json` | 永久禁止恢复生产双路径 |
+| profile 内完整 Mission/config 副本 | 已删除 | 根配置 + `profile.yaml` 差异 | 不得恢复整份复制 |
+| Web 接收 `SystemRunner` / 单文件 routes | 已删除 | `WebServices` + `web_ui/routers/` | 不得以兼容 fallback 恢复 |
 
-旧测试的分类和删除必须在 Phase 2 单独完成，不能在文档阶段通过忽略测试掩盖。
+退役实现与历史行为锁只保存在 `examples/`，不进入生产导入、正式 validator 或 pytest 主线。

@@ -6,10 +6,12 @@
 
 ```text
 Web UI
+  → WebServices facade / typed routers
   → Action Lab / Action Mission
   → ActionRuntimeService
   → ActionRunner
-  → missions/common/actions/*
+  → thin missions/common/actions/* adapters
+  → guidance/* pure algorithms
   → ActionDispatcher
   → ActionSafetyPipeline
   → LinkManager
@@ -26,10 +28,13 @@ Web UI
 
 | 模块 | 当前职责 |
 | --- | --- |
-| `app/` | 启动、服务编排、Action runtime、任务编排、状态快照和 Web UI 挂接 |
-| `missions/common/actions/` | 可组合 Action 逻辑；输出结构化 action request，不构造 MAVLink |
-| `web_ui/` | 正式人工操作、Action Lab、Action Mission、状态和配置页面 |
-| `telemetry_link/` | 飞控状态、命令队列、MAVLink 封装和发送 |
+| `app/` | 4 个薄文件：入口、严格配置和 composition root |
+| `application/` | 用例服务、运行状态、Mission 编排、WebServices 门面 |
+| `missions/common/actions/` | 原子 Action 适配器；只管理生命周期和 typed effect |
+| `missions/common/lifecycle/` | Action 生命周期状态；不拥有任务级子流程 |
+| `guidance/` | 无全局状态、Web、telemetry 或发送依赖的纯算法 |
+| `web_ui/` | FastAPI router、静态模块和唯一正式人工入口；只依赖 WebServices |
+| `telemetry_link/` | VehicleStatePort/VehicleCommandPort、队列、MAVLink 封装和发送 |
 | `fusion/` | 感知与飞控/云台状态融合，不发送命令 |
 | `yolo_app/` | RKNNLite/NPU 感知和 UDP 输出，不连接 MAVLink |
 
@@ -50,3 +55,11 @@ FlightCommandExecutor` 不是当前可运行主线，其依赖的大量 mission/
 白名单和独立 BODY_NED deadman；裁决保留 original/effective/rejected request。
 参数来源见 [`p0_security_decisions.md`](p0_security_decisions.md)。未经明确裁决不得恢复
 已删除的旧控制栈。
+
+## 当前任务编排边界
+
+正式 catalog 只有 `drop_two_targets_v2`、`recon_gps_v2`、
+`rescue_2026_full_auto_v2`。多视角飞行、双目标投放、侦察航迹和视觉降落均由模板中的
+原子步骤表达；Action registry 不再发布复合 sequence/scan/visual-land Action。
+Mission engine 是受限顺序编排器，提供保存结果、失败重试、条件跳转和 finally 等价的
+明确返航/降落步骤，不是通用脚本语言。

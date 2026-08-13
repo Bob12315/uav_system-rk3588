@@ -314,7 +314,7 @@ def test_release_payload_not_called_by_action_dispatcher() -> None:
     import os
 
     dispatcher_path = os.path.join(
-        os.path.dirname(__file__), "..", "..", "app", "action_dispatcher.py"
+        os.path.dirname(__file__), "..", "..", "execution", "dispatcher.py"
     )
     with open(dispatcher_path, "r", encoding="utf-8") as fh:
         content = fh.read()
@@ -598,7 +598,7 @@ def test_hold_current_local_position_returns_false_when_position_invalid() -> No
 def test_clear_navigation_queue_with_hold_calls_both() -> None:
     """ActionRuntimeService.clear_navigation_queue with hold_current=True
     calls stop_and_clear -> clear_local_position -> hold in order."""
-    from app.action_runtime import ActionRuntimeService
+    from application.action_runtime import ActionRuntimeService
 
     calls: list[str] = []
 
@@ -621,7 +621,7 @@ def test_clear_navigation_queue_with_hold_calls_both() -> None:
 
 def test_clear_navigation_queue_without_hold_skips_hold() -> None:
     """Without hold_current, stop_and_clear + clear_local_position only."""
-    from app.action_runtime import ActionRuntimeService
+    from application.action_runtime import ActionRuntimeService
 
     calls: list[str] = []
 

@@ -391,7 +391,7 @@ evaluated_at_monotonic
 - [x] FIELD 请求必须要求 Field Reference confirmed、synced、frozen 和相应转换能力 ready；
 - [x] schema v3 只能提供其实际具备的 FIELD→GLOBAL 能力，禁止伪造 LOCAL origin；
 - [x] 航点安全包线和地理围栏策略必须配置化并有来源说明；
-- [x] 转换只使用 `app/coordinate_transform.py` 或已裁决的唯一实现源。
+- [x] 转换只使用 `field/coordinates.py` 或已裁决的唯一实现源。
 
 #### mode/arm/takeoff/land/yaw/speed
 

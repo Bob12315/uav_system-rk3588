@@ -1,13 +1,27 @@
 from pathlib import Path
 
-from app.app_config import build_arg_parser, load_app_config, load_telemetry_config
-from app.system_runner import SystemRunner
+from app.config import build_arg_parser, load_app_config, load_telemetry_config
+from application.runner import SystemRunner
+from application.web_services import WebServices
 from telemetry_link.config import DEFAULT_CONFIG_PATH, load_config_file
 from web_ui.server import create_app
 
 
+def _all_routes(app):
+    pending = list(app.routes)
+    while pending:
+        route = pending.pop(0)
+        children = getattr(route, "routes", None)
+        if children is None:
+            children = getattr(getattr(route, "original_router", None), "routes", None)
+        if children is not None:
+            pending[0:0] = list(children)
+        else:
+            yield route
+
+
 def test_system_runner_does_not_import_legacy_mission_or_stage_entrypoints() -> None:
-    source = (Path(__file__).parents[2] / "app" / "system_runner.py").read_text(
+    source = (Path(__file__).parents[2] / "application" / "runner.py").read_text(
         encoding="utf-8"
     )
 
@@ -52,8 +66,8 @@ def test_system_runner_snapshot_works_without_mission_runtime():
 
     assert snapshot["mission"] == "action_lab_only"
     assert snapshot["stage"] == "NO_MISSION"
-    assert snapshot["stage_modes"] == ["NO_MISSION"]
-    assert snapshot["mission_stage_selection"] == "NO_MISSION"
+    assert "stage_modes" not in snapshot
+    assert "mission_stage_selection" not in snapshot
     assert snapshot["actions"] == []
     assert snapshot["action_lab"]["enabled"] is True
     assert snapshot["action_lab"]["run_authorized"] is False
@@ -72,12 +86,12 @@ def test_system_runner_run_starts_web_ui_without_mission_runtime(monkeypatch) ->
     started = []
 
     class FakeWebUiServer:
-        def __init__(self, web_runner, ui_config) -> None:
-            assert web_runner.web_status_service is not None
-            app = create_app(web_runner, ui_config)
+        def __init__(self, web_services, ui_config) -> None:
+            assert isinstance(web_services, WebServices)
+            app = create_app(web_services, ui_config)
             status_route = next(
                 route
-                for route in app.routes
+                for route in _all_routes(app)
                 if getattr(route, "path", "") == "/api/status"
             )
             assert status_route.endpoint()["mission"] == "action_lab_only"
@@ -112,7 +126,7 @@ def test_action_mission_status_payload_not_configured_by_default() -> None:
 
 
 def test_configure_action_mission_sets_enabled() -> None:
-    from app.mission_orchestrator import MissionActionStep
+    from missions.engine import MissionActionStep
 
     args = build_arg_parser().parse_args(["--run-seconds", "0.1", "--no-yolo-udp"])
     config = load_app_config(args)
@@ -138,7 +152,7 @@ def test_action_mission_tick_does_not_call_when_not_configured() -> None:
 
 
 def test_action_mission_start_stop_reset_lifecycle() -> None:
-    from app.mission_orchestrator import MissionActionStep
+    from missions.engine import MissionActionStep
 
     args = build_arg_parser().parse_args(["--run-seconds", "0.1", "--no-yolo-udp"])
     config = load_app_config(args)
@@ -161,7 +175,7 @@ def test_action_mission_start_stop_reset_lifecycle() -> None:
 
 def test_action_mission_web_api_lifecycle() -> None:
     from types import SimpleNamespace
-    from web_ui.server import (
+    from web_ui.dto import (
         ActionMissionConfigureRequest,
         ActionMissionStepRequest,
         RunStartRequest,
@@ -170,10 +184,10 @@ def test_action_mission_web_api_lifecycle() -> None:
     args = build_arg_parser().parse_args(["--run-seconds", "0.1", "--no-yolo-udp"])
     config = load_app_config(args)
     runner = SystemRunner(config)
-    app = create_app(runner, config.ui)
+    app = create_app(WebServices.from_runner(runner), config.ui)
 
     def endpoint(path: str):
-        return next(route.endpoint for route in app.routes if getattr(route, "path", "") == path)
+        return next(route.endpoint for route in _all_routes(app) if getattr(route, "path", "") == path)
 
     status = endpoint("/api/action-mission/status")()
     assert status["ok"] is True
@@ -208,15 +222,15 @@ def test_action_mission_web_api_lifecycle() -> None:
 
 
 def test_action_mission_step_request_accepts_save_as() -> None:
-    from web_ui.server import ActionMissionStepRequest
+    from web_ui.dto import ActionMissionStepRequest
 
-    request = ActionMissionStepRequest(name="multi_view_localize", params={}, save_as="drop_scan")
+    request = ActionMissionStepRequest(name="gps_fuse_views", params={}, save_as="drop_scan")
 
     assert request.save_as == "drop_scan"
 
 
 def test_action_mission_step_request_accepts_label_and_on_failed() -> None:
-    from web_ui.server import ActionMissionStepRequest
+    from web_ui.dto import ActionMissionStepRequest
 
     request = ActionMissionStepRequest(
         name="target_lock",
@@ -232,8 +246,8 @@ def test_action_lab_api_status_reports_missing_run_authorization():
     args = build_arg_parser().parse_args(["--run-seconds", "0.1", "--no-yolo-udp"])
     config = load_app_config(args)
     runner = SystemRunner(config)
-    app = create_app(runner, config.ui)
-    route = next(route for route in app.routes if getattr(route, "path", "") == "/api/actions/status")
+    app = create_app(WebServices.from_runner(runner), config.ui)
+    route = next(route for route in _all_routes(app) if getattr(route, "path", "") == "/api/actions/status")
 
     response = route.endpoint()
 
@@ -249,8 +263,8 @@ def test_no_uav_ui_imports_in_app_startup() -> None:
     import subprocess, sys
 
     code = (
-        "from app.system_runner import SystemRunner; "
-        "from app.app_config import build_arg_parser, load_app_config; "
+        "from application.runner import SystemRunner; "
+        "from app.config import build_arg_parser, load_app_config; "
         "args = build_arg_parser().parse_args(['--run-seconds', '0.1', '--no-yolo-udp']); "
         "config = load_app_config(args); "
         "runner = SystemRunner(config); "

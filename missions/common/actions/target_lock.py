@@ -5,7 +5,7 @@ from typing import Any
 
 from .base import ActionModule
 from .result import ActionResult
-from .target_localization import CameraProjectionConfig, TargetLocalization
+from guidance.target_localization import CameraProjectionConfig, TargetLocalization
 
 
 class TargetLockAction(ActionModule):
@@ -150,7 +150,7 @@ class TargetLockAction(ActionModule):
             "priority": self.priority,
         }
         return ActionResult(
-            actions=[action],
+            effects=ActionResult.typed([action]),
             done=True,
             reason="target_locked",
             detail=self._detail(

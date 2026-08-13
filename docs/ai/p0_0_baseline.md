@@ -1,5 +1,8 @@
 # P0-0 可观察行为与控制入口基线
 
+> 历史快照：本页只记录 2026-08-12 重构前基线，所列复合 Action/权限已被当前原子
+> Action + Mission subflow 替代；当前事实以 `current_architecture.md` 和 execution policy 为准。
+
 ## 1. 记录范围
 
 | 项目 | 值 |
@@ -129,7 +132,7 @@ WebSocket `/ws/status` 当前只推送状态，但也没有认证；P0-1 需要�
 
 | 场景 | 当前行为 | 固化测试 |
 | --- | --- | --- |
-| Action stop/reset | `stop_body_velocity_and_clear()`，再 clear LOCAL/GLOBAL navigation；可 hold current | `tests/current/test_action_runtime.py` |
+| Action stop/reset | `stop_body_velocity_and_clear()`，再 clear LOCAL/GLOBAL navigation；可 hold current | `tests/unit/execution/test_action_runtime.py` |
 | stop 成功发送 | zero STOP 带 `clear_after_send=true`，成功发送后按对象身份清 queue | `tests/integration/test_telemetry_link.py` |
 | stop 发送失败 | STOP 留在 queue 中等待后续机会 | `tests/integration/test_telemetry_link.py` |
 | telemetry disconnected | `CommandSender` 清 control/gimbal rate，并逐个丢弃 pending action | `test_command_sender_disconnected_drops_continuous_and_pending_action` |
@@ -137,7 +140,7 @@ WebSocket `/ws/status` 当前只推送状态，但也没有认证；P0-1 需要�
 | source 切换 | 清所有 source 的 control/gimbal rate；SystemRunner 路径先强制 SEND OFF | `test_switch_active_source_clears_all_continuous_queues` |
 | 丢失目标/控制不允许 | 复合 Action 不继续输出旧 `flight_command`，改发 `send_stop_first=true` 清理请求 | `test_align_target_invalid_emits_zero_and_clear`, `test_align_control_allowed_false_emits_zero_and_clear` |
 | Action 切换 | start 新 Action 前先 stop/clear navigation，再 stop 旧 Action并启动新 Action | `test_switch_running_action_stops_old_action_and_clears_navigation` |
-| Mission 阶段切换 | orchestrator 调用 runtime clear；align→payload 特例 clear 后保留 persistent STOP 并 hold | `tests/current/test_mission_orchestrator.py` |
+| Mission 阶段切换 | orchestrator 调用 runtime clear；align→payload 特例 clear 后保留 persistent STOP 并 hold | `tests/unit/mission/test_mission_orchestrator.py` |
 
 当前缺口：没有独立于 Action tick 的统一 continuous watchdog/deadman；这属于 P0-2，而不是 P0-0
 可以改变的行为。
@@ -155,7 +158,7 @@ python -m compileall app missions telemetry_link fusion yolo_app web_ui scripts
 ### 6.2 主线 pytest 原始入口
 
 ```bash
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q tests/current tests/integration
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q tests/unit tests/contracts tests/integration tests/sitl
 ```
 
 结果：collection 中止，4 个环境缺失错误：`httpx`、`fastapi`、`uvicorn` 未安装。分类为
@@ -174,7 +177,7 @@ P0-0 新增/扩展的定向特征测试：
 
 ```bash
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q \
-  tests/current/test_action_runtime.py \
+  tests/unit/execution/test_action_runtime.py \
   tests/integration/test_telemetry_link.py
 ```
 

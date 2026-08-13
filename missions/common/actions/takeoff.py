@@ -103,7 +103,7 @@ class TakeoffAction(ActionModule):
             self.mode_sent = True
             detail = self._detail(altitude, phase="set_mode", context=context_data)
             self.last_detail = detail
-            return ActionResult(actions=[action], reason="set_mode_sent", detail=detail)
+            return ActionResult(effects=ActionResult.typed([action]), reason="set_mode_sent", detail=detail)
 
         if self.phase == "arm":
             if self._context_armed(context_data) is True:
@@ -122,7 +122,7 @@ class TakeoffAction(ActionModule):
             self.arm_sent = True
             detail = self._detail(altitude, phase="arm", context=context_data)
             self.last_detail = detail
-            return ActionResult(actions=[action], reason="arm_sent", detail=detail)
+            return ActionResult(effects=ActionResult.typed([action]), reason="arm_sent", detail=detail)
 
         if self.phase == "takeoff":
             return self._takeoff_result(altitude, context_data)
@@ -182,7 +182,7 @@ class TakeoffAction(ActionModule):
         detail = self._detail(altitude, phase="takeoff", context=context)
         self.last_detail = detail
         self.phase = "wait_altitude"
-        return ActionResult(actions=[action], reason="takeoff_sent", detail=detail)
+        return ActionResult(effects=ActionResult.typed([action]), reason="takeoff_sent", detail=detail)
 
     def _current_altitude(self, context: dict[str, Any]) -> _AltitudeSample | None:
         for name in ("relative_altitude", "relative_altitude_m", "altitude_m"):

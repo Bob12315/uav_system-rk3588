@@ -66,7 +66,7 @@ class LandAction(ActionModule):
             detail = self._detail(current_altitude_m, altitude_source, armed, phase="send_land")
             self.last_detail = detail
             self.phase = "wait_landed"
-            return ActionResult(actions=[action], reason="land_sent", detail=detail)
+            return ActionResult(effects=ActionResult.typed([action]), reason="land_sent", detail=detail)
 
         if self.phase == "wait_landed":
             landed = self._landed(current_altitude_m, armed)

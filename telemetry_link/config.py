@@ -131,6 +131,18 @@ def _load_yaml(path: str) -> dict[str, Any]:
         data = yaml.safe_load(handle) or {}
     if not isinstance(data, dict):
         raise ValueError("config yaml must be a mapping")
+    allowed = set(TelemetryConfig.__dataclass_fields__) - {"sitl", "real"} | {"sitl", "real"}
+    unknown = set(data) - allowed
+    if unknown:
+        raise ValueError(f"unknown telemetry config field(s): {', '.join(sorted(unknown))}")
+    endpoint_allowed = set(EndpointConfig.__dataclass_fields__) - {"name"}
+    for name in ("sitl", "real"):
+        value = data.get(name)
+        if not isinstance(value, dict):
+            raise ValueError(f"{name} must be a mapping")
+        nested_unknown = set(value) - endpoint_allowed
+        if nested_unknown:
+            raise ValueError(f"unknown {name} field(s): {', '.join(sorted(nested_unknown))}")
     return data
 
 

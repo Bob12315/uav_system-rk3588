@@ -35,7 +35,7 @@ LOCAL_NED 建议使用 `local_n_m/local_e_m/z_down_m`；BODY_NED 速度建议使
 语义模糊：新参数优先，旧参数最终应发出 deprecated 诊断。任何迁移必须同步更新
 Action Lab 说明、Action Mission JSON、validator 和回归测试，不能一次性破坏模板。
 
-FIELD 航点必须经过唯一的 `app/coordinate_transform.py` 进行转换；未确认
+FIELD 航点必须经过唯一的 `field/coordinates.py` 进行转换；未确认
 Field Reference 时必须拒绝实发。BODY_NED 速度不参与 FIELD 转换。
 
 ## 速度切换契约

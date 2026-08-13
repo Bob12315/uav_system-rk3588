@@ -5,7 +5,6 @@ import time
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
-from telemetry_link.models import DroneState, GimbalState
 
 from .models import FusedState, PerceptionTarget
 
@@ -78,8 +77,8 @@ def compute_state_valid(drone_state: DroneState) -> bool:
 
 def build_fused_state(
     perception_target: PerceptionTarget,
-    drone_state: DroneState,
-    gimbal_state: GimbalState,
+    drone_state: object,
+    gimbal_state: object,
     require_gimbal_feedback: bool,
 ) -> FusedState:
     ex_body, ey_body, gimbal_usable = compute_body_error(

@@ -22,18 +22,21 @@ FIELD 坐标中 `+Y` 为场地前方、`+X` 为场地右方，`altitude_m` 向�
 
 ```text
 takeoff
-→ gps_multi_view_localize
+→ 4 × (goto_waypoint → gps_capture_view)
+→ gps_fuse_views
 → select_drop_targets
 → change_speed (1 m/s)
-→ gps_drop_sequence
+→ 2 × (goto_waypoint → gps_target_lock → align_descend → payload_release → goto_waypoint climb)
 → change_speed (2 m/s)
 → change_speed (1 m/s)
 → goto_waypoint (recon entry)
-→ gps_recon_area_scan
+→ 5 × goto_waypoint（分项模板在指定航段插入 recon_score_view）
+→ recon_rank_views（有评分视图时）
 → change_speed (2 m/s)
 → goto_waypoint (return home)
 → goto_waypoint (descend home)
-→ visual_land
+→ target_lock (H)
+→ align_descend
 → land
 ```
 
@@ -47,11 +50,8 @@ takeoff
 | `rescue_2026_full_auto_v2.json` | 当前完整 GPS-first 比赛流程 |
 | `drop_two_targets_v2.json` | 双目标投放分项流程 |
 | `recon_gps_v2.json` | 危险标识侦察分项流程 |
-| `rescue_2026_full_auto.json` | 第一版完整流程，保留作回归参考 |
-| `drop_two_targets_v1.json` | 第一版双投放流程，偏稳定性验证 |
-| `recon_sequence_v1.json` | 第一版侦察组合流程 |
-| `recon_inspect_5_targets_stepwise_v1.json` | 旧分步五目标检查流程 |
-| `recon_inspect_5_targets_stepwise_v2.json` | 第二版分步侦察与报告流程 |
+
+历史模板已归档到 `examples/archived_missions/`，不参与正式运行 catalog 或默认 validator。
 
 模板存在不代表已经通过实飞验收。正式比赛前必须在 Web UI 核对当前模板内容、场地
 profile、速度、高度、SERVO 输出和失败恢复目标。
@@ -84,14 +84,16 @@ Mission 步骤可用 `save_as` 保存 `ActionResult.detail`，后续参数使用
 读取。当前 v2 投放主线的主要数据流是：
 
 ```text
-gps_multi_view_localize save_as drop_scan
+gps_capture_view save_as drop_scan_view_1..4
+  → gps_fuse_views save_as drop_scan
   → drop_scan.localized_objects
 
 select_drop_targets save_as drop_targets
   → drop_targets.selected_targets
 
-gps_drop_sequence save_as drop_sequence
-  → 双目标执行结果
+align_descend
+  → MissionOrchestrator 清理连续命令并保持位置
+  → payload_release save_as drop_release_1..2
 ```
 
 参数引用支持字典键和列表索引，例如：
@@ -122,8 +124,9 @@ gps_drop_sequence save_as drop_sequence
 }
 ```
 
-当前 orchestrator 支持 `fail`、`retry_current`、`retry_current_then_jump_to`、
-`jump_to` 和 `continue` 等模板已使用的策略。调整恢复路径时必须确认：
+当前 orchestrator 的受限控制机制是顺序步骤、`save_as` 数据传递，以及 `fail`、
+`retry_current`、`retry_current_then_jump_to`、`jump_to`、`continue`。循环展开为明确的有限
+步骤，安全收尾由显式返航/降落标签承担，不提供通用脚本或旧 stage 类。调整恢复路径时必须确认：
 
 - 失败 Action 的连续速度和 pending position 已停止、清除；
 - 跳转目标不会重复投放同一载荷；
@@ -177,7 +180,7 @@ validator 不连接飞控，不验证识别精度、坐标标定、飞行安全�
 
 ## 当前限制
 
-- Mission 还是顺序编排器，没有通用 if/else DSL。
+- Mission 刻意保持受限顺序/失败分支模型，不提供通用脚本 DSL。
 - 比赛参数仍需按正式场地、机体、相机和载荷进行现场标定。
 - 危险标识排名依赖当前模型、阈值和观察点覆盖，不能只凭模板校验判定有效。
 - Action 连续控制由 P0 Safety Pipeline 统一裁决。

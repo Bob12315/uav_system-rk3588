@@ -18,7 +18,7 @@ jobs:
       - run: python scripts/validate_architecture_boundaries.py
       - run: python scripts/validate_action_missions.py
       - run: bash scripts/healthcheck/check_app.sh
-      - run: python -m pytest -q tests/current tests/integration
+      - run: python -m pytest -q tests/unit tests/contracts tests/integration tests/sitl
       - run: python scripts/license_scan.py > runtime-license-report.txt
 
   linux-arm64-app:
@@ -33,4 +33,4 @@ jobs:
       - run: python -m mypy --follow-imports=skip scripts/validate_architecture_boundaries.py scripts/license_scan.py
       - run: python scripts/validate_architecture_boundaries.py
       - run: bash scripts/healthcheck/check_app.sh
-      - run: python -m pytest -q tests/current tests/integration -k 'not rknn and not camera'
+      - run: python -m pytest -q tests/unit tests/contracts tests/integration tests/sitl -k 'not rknn and not camera'

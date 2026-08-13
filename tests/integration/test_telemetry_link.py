@@ -12,7 +12,7 @@ from pymavlink import mavutil
 from telemetry_link.command_dispatcher import dispatch_text_command
 from telemetry_link.command_queue import CommandQueue
 from telemetry_link.command_sender import CommandSender
-from telemetry_link.config import DEFAULT_CONFIG_PATH, EndpointConfig, TelemetryConfig, build_arg_parser, load_config, load_config_file
+from telemetry_link.config import DEFAULT_CONFIG_PATH, EndpointConfig, TelemetryConfig, _build_config, build_arg_parser, load_config, load_config_file
 from telemetry_link.link_manager import LinkManager, SourceRuntime
 from telemetry_link.mavlink_client import MavlinkClient
 from telemetry_link.models import ActionCommand, ActionType, ControlCommand, ControlType, GimbalRateCommand
@@ -301,9 +301,10 @@ def test_load_config_file_uses_tracked_real_root_profile() -> None:
 
 
 def test_load_config_file_uses_explicit_sitl_profile() -> None:
-    profile = Path(__file__).resolve().parents[2] / "config" / "profiles" / "rk3588-sitl" / "telemetry.yaml"
-
-    cfg = load_config_file(profile)
+    from scripts.config.render_profile import render
+    root = Path(__file__).resolve().parents[2]
+    rendered = render(root, root / "config/profiles/rk3588-sitl/profile.yaml", write=False)
+    cfg = _build_config(rendered["telemetry"])
 
     assert cfg.data_source == "sitl"
     assert cfg.active_source == "sitl"

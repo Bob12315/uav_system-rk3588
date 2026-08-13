@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import socket
+import time
+from contracts.perception_protocol import COMMAND_SCHEMA_VERSION
 
 try:
     from .models import CommandMessage
@@ -25,6 +27,7 @@ class CommandReceiver:
     def __init__(self, ip: str, port: int, enabled: bool = True) -> None:
         self.enabled = enabled
         self.sock: socket.socket | None = None
+        self._last_sequence = -1
         if enabled:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock.bind((ip, port))
@@ -46,6 +49,15 @@ class CommandReceiver:
             except (UnicodeDecodeError, json.JSONDecodeError):
                 continue
 
+            if decoded.get("schema_version") != COMMAND_SCHEMA_VERSION:
+                continue
+            try:
+                sequence = int(decoded["sequence"])
+                sent_at = float(decoded["sent_at_monotonic"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if sequence <= self._last_sequence or time.monotonic() - sent_at > 2.0:
+                continue
             action = decoded.get("action")
             if action not in {
                 "lock_target",
@@ -56,6 +68,7 @@ class CommandReceiver:
                 "recording_stop",
             }:
                 continue
+            self._last_sequence = sequence
             track_id = decoded.get("track_id")
             if track_id is not None:
                 try:

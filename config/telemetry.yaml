@@ -136,7 +136,7 @@ state_udp_port: 5010
 
 # true：telemetry 独立运行时默认启用 curses 终端 UI。
 # app 总控进程使用 config/app.yaml 中的 ui 配置。
-ui_enabled: true
+ui_enabled: false
 
 # 可选值：DEBUG / INFO / WARNING / ERROR。
 log_level: INFO

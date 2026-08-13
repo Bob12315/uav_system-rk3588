@@ -9,11 +9,11 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from app.field_reference import gps_enu_deltas
+from field.models import gps_enu_deltas
 
 from .base import ActionModule
 from .result import ActionResult
-from .gps_target_projection import GpsProjectionCamera, GpsTargetProjector
+from guidance.target_projection import GpsProjectionCamera, GpsTargetProjector
 
 
 class GpsTargetLockAction(ActionModule):
@@ -126,7 +126,7 @@ class GpsTargetLockAction(ActionModule):
                 self.matched_detection_gps = best_gps
                 return ActionResult(
                     done=True, reason="gps_target_locked",
-                    actions=[{"action_type": "yolo_lock_target", "params": {"track_id": best_track_id}}],
+                    effects=ActionResult.typed([{"action_type": "yolo_lock_target", "params": {"track_id": best_track_id}}]),
                     detail={
                         "locked_track_id": best_track_id,
                         "best_distance_m": best_dist,
@@ -152,7 +152,7 @@ class GpsTargetLockAction(ActionModule):
                     detail["matched_without_track_id"] = True
                 return ActionResult(
                     done=True, reason="gps_target_locked",
-                    actions=actions,
+                    effects=ActionResult.typed(actions),
                     detail=detail,
                 )
 

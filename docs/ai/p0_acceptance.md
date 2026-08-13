@@ -1,6 +1,6 @@
 # P0 验收记录
 
-日期：2026-08-12
+最后复验：2026-08-13
 
 ## 实现结果
 
@@ -17,14 +17,12 @@
 执行：
 
 ```bash
-python -m compileall -q app telemetry_link web_ui missions/common/actions scripts
-python -m pytest -q tests/current tests/integration
+python -m compileall -q app application contracts execution field fusion guidance missions observability telemetry_link web_ui yolo_app scripts tools
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q tests/unit tests/contracts tests/integration tests/sitl
 ```
 
-结果：1916 passed，1 skipped；剩余 5 个失败与 P0 无关，且与 P0-0 基线一致：
-
-- 2 个 `test_drop_descent_tune.py` 为已有任务模板/测试预期漂移；
-- 3 个前端测试因为当前环境没有 Node.js，属于环境缺失。
+最终结果：708 passed，无失败。同一套件在 Linux x86_64 和隔离的 RK3588
+Linux aarch64 目录上均通过。
 
 P0 定向测试覆盖 Web 鉴权/CSRF/Origin、run 授权、TTL/stale/source、NaN/Inf/包线、Field
 Reference、SERVO 白名单/幂等、连续 deadman 和 transition stop。

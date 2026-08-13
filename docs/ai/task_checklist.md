@@ -16,28 +16,29 @@ docs/developer/safety.md
 ## Action 行为
 
 追加：目标 `missions/common/actions/*.py`、`base.py`、`result.py`、`runner.py`、
-`app/action_runtime.py`、相关 `tests/test_*_action.py`。
+`application/action_runtime.py`、`guidance/`、相关 `tests/unit/mission/` 与 `tests/unit/domain/`。
 
 ## Action Mission
 
-追加：`app/mission_orchestrator.py`、`config/action_missions/*.json`、
+追加：`missions/engine.py`、`config/action_missions/*.json`、
 `scripts/validate_action_missions.py` 和 orchestrator/template 测试。
 
 ## 派发和连续命令
 
-追加：`app/action_dispatcher.py`、`app/action_runtime.py`、`app/dispatch_policy.py`、
+追加：`execution/dispatcher.py`、`execution/policy.py`、`application/action_runtime.py`、
 `telemetry_link/link_manager.py`、`command_queue.py`、`command_sender.py`、相关测试。
 这是高风险边界；确认 stop/zero、双门控和断线清理。
 
 ## Field Reference/坐标
 
-追加：`app/runtime_context.py`、`missions/common/actions/goto_waypoint.py`、涉及 FIELD 的
+追加：`field/context.py`、`missions/common/actions/goto_waypoint.py`、涉及 FIELD 的
 Action、Web UI Field Heading 代码和坐标测试。不得复制第三份转换公式。
 
 ## Web UI
 
-追加：`web_ui/server.py`、`static/index.html`、`static/app.js`、`static/style.css`、
-`tests/test_web_ui.py`。不要把 terminal UI 当正式入口。
+追加：`application/web_services.py`、`web_ui/server.py`、`web_ui/api_routers.py`、
+`web_ui/routers/`、`static/index.html`、`static/app.js`、`static/js/` 和 Web contract/integration tests。
+不要把 terminal UI 当正式入口，也不要把 SystemRunner 注入 Web。
 
 ## YOLO
 

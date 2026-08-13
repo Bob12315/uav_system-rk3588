@@ -23,11 +23,8 @@
 | `rescue_2026_full_auto_v2.json` | 当前完整 GPS-first 比赛流程 |
 | `drop_two_targets_v2.json` | 双目标投放分项流程 |
 | `recon_gps_v2.json` | GPS 危险标识侦察分项流程 |
-| `rescue_2026_full_auto.json` | 第一版完整任务，回归参考 |
-| `drop_two_targets_v1.json` | 第一版双目标投放，稳定性参考 |
-| `recon_sequence_v1.json` | 第一版侦察组合流程 |
-| `recon_inspect_5_targets_stepwise_v1.json` | 旧分步五目标检查流程 |
-| `recon_inspect_5_targets_stepwise_v2.json` | 第二版分步侦察与报告流程 |
+
+历史参考模板已迁至 `examples/archived_missions/`，不参与正式 catalog 和 validator。
 
 模板由 Web UI 加载并交给 `MissionOrchestrator`。修改后必须运行：
 
@@ -48,8 +45,8 @@ validator 只检查模板结构和引用，不代表通过 SITL 或实飞验证�
 ## RK3588 Profiles
 
 ```text
-config/profiles/rk3588-real/   — 实机配置快照
-config/profiles/rk3588-sitl/   — SITL 配置快照
+config/profiles/rk3588-real/profile.yaml — 实机差异（当前仅安全声明）
+config/profiles/rk3588-sitl/profile.yaml — SITL 数据源、模型和视频差异
 ```
 
 切换生效配置：
@@ -59,14 +56,8 @@ bash scripts/config/apply_rk3588_real.sh
 bash scripts/config/apply_rk3588_sitl.sh
 ```
 
-保存当前调参结果到 profile：
-
-```bash
-bash scripts/config/save_rk3588_real.sh
-bash scripts/config/save_rk3588_sitl.sh
-```
-
-profile apply/save 脚本在 `executor.send_commands` 不是严格 `false` 时应拒绝执行。
+profile 只保存差异，通过受审 renderer 生成生效配置；不保存根配置或 Mission 模板副本。
+任何 profile 在 `executor.send_commands` 不是严格 `false` 时都拒绝应用。
 实机 profile 使用 `cuadc2026-fp16.rknn` 和实机 MAVLink/摄像头；SITL profile 使用
 `gazebo_dataset-fp16.rknn`、UDP 14550 和仿真视频源。
 

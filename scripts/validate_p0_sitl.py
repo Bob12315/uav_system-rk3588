@@ -10,10 +10,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from app.action_dispatcher import ActionDispatcher
-from app.run_authorization import RunAuthorization
+from execution.dispatcher import ActionDispatcher
+from execution.authorization import RunAuthorization
+from contracts.effects import effect_from_request
 from telemetry_link.config import DEFAULT_CONFIG_PATH, load_config_file
-from telemetry_link.frames import LOCAL_NED
+from contracts.frames import LOCAL_NED
 from telemetry_link.link_manager import LinkManager
 
 
@@ -47,13 +48,13 @@ def main() -> int:
         events.append({"time": time.time(), "name": name, **detail})
 
     def dispatch(action_name: str, action_type: str, params: dict[str, object], key: str):
-        result = dispatcher.dispatch_actions(
-            [{
+        result = dispatcher.dispatch_effects(
+            [effect_from_request({
                 "action_type": action_type,
                 "params": params,
                 "key": key,
                 "once": action_type not in {"flight_command", "body_velocity"},
-            }],
+            })],
             action_name=action_name,
             send_commands=True,
             link_manager=manager,
@@ -79,6 +80,17 @@ def main() -> int:
 
         dispatch("takeoff", "set_mode", {"mode": "GUIDED"}, "p0-mode")
         wait_for("GUIDED", lambda: state() if state().mode == "GUIDED" else None)
+        wait_for(
+            "EKF/home readiness",
+            lambda: state()
+            if state().local_position_valid and state().global_position_valid
+            else None,
+            40.0,
+        )
+        # ArduPilot may publish valid positions one scheduler cycle before its
+        # AHRS home flag becomes armable. This delay is SITL-only and sends no
+        # command.
+        time.sleep(2.0)
         dispatch("takeoff", "arm", {}, "p0-arm")
         wait_for("armed", lambda: state() if state().armed else None, 40.0)
         dispatch("takeoff", "takeoff", {"altitude_m": 2.0}, "p0-takeoff")

@@ -144,7 +144,7 @@ class WebSecurity:
         session = self._get_session(session_id) if session_id else None
         return session.identity if session else None
 
-    def middleware(self, runner: object):
+    def middleware(self, services: object):
         security = self
 
         async def _middleware(request: Request, call_next):
@@ -187,13 +187,14 @@ class WebSecurity:
                     security._audit_rejection(path, source_address, "rate_limited", operator=identity.operator)
                     return JSONResponse({"detail": "rate limited"}, status_code=429)
             request.state.identity = identity or Identity("anonymous", "observer")
-            dispatcher = getattr(getattr(runner, "action_runtime", None), "dispatcher", None)
-            before_auth = getattr(dispatcher, "authorization", None)
-            source_getter = getattr(runner, "active_telemetry_source", None)
+            authorization_getter = getattr(services, "authorization_snapshot", None)
+            before_auth = authorization_getter() if callable(authorization_getter) else None
+            mission_control = getattr(services, "mission_control", None)
+            source_getter = getattr(mission_control, "active_telemetry_source", None)
             before_source = source_getter() if callable(source_getter) else None
             response = await call_next(request)
             if modifying and not login_path:
-                after_auth = getattr(dispatcher, "authorization", None)
+                after_auth = authorization_getter() if callable(authorization_getter) else None
                 run_auth = after_auth or before_auth
                 target_source = source_getter() if callable(source_getter) else before_source
                 security.audit.append(

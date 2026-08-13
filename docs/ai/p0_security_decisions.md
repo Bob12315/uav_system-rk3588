@@ -21,8 +21,8 @@
   `0.6 rad/s`；TTL/deadman `0.5 s`。
 - 航点高度 `0.3–6.0 m`，单次航点距离最多 `100 m`，change-speed `0.1–2.0 m/s`。
 - 起飞仅允许 `GUIDED`，高度 `0.5–6.0 m`，并要求已解锁。
-- 投放只允许 `payload_release`、`drop_sequence`、`gps_drop_sequence` 使用 SERVO 8，PWM
-  `1200–1750`。这是现有任务模板已使用范围；不会增加新通道。
+- 投放只允许原子 `payload_release` 使用模板中明确配置的 SERVO 8（`1200–1750`）和
+  SERVO 9（`1185–1815`）；复合 Action 不再拥有投放权限。
 - SITL 和 real 共用同一保守包线，因此 real 不会比 SITL 更宽松。
 - slew/rate limit 暂不启用；独立 watchdog 和显式 zero/stop 已启用。
 

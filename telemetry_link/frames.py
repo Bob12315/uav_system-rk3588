@@ -1,14 +1,7 @@
-"""Canonical MAVLink frame constants used across telemetry_link.
-
-Re-exporting from pymavlink so that callers never need to import
-mavutil.mavlink directly for frame selection.
-"""
+"""Transport-facing re-export of dependency-free MAVLink frame constants."""
 
 from __future__ import annotations
 
-from pymavlink import mavutil
+from contracts.frames import BODY_NED, GLOBAL, GLOBAL_RELATIVE_ALT_INT, LOCAL_NED
 
-LOCAL_NED = mavutil.mavlink.MAV_FRAME_LOCAL_NED
-BODY_NED = mavutil.mavlink.MAV_FRAME_BODY_NED
-GLOBAL_RELATIVE_ALT_INT = mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT
-GLOBAL = mavutil.mavlink.MAV_FRAME_GLOBAL
+__all__ = ["BODY_NED", "GLOBAL", "GLOBAL_RELATIVE_ALT_INT", "LOCAL_NED"]

@@ -33,11 +33,12 @@
     "target_lock",
     "align_descend",
     "select_drop_targets",
-    "drop_sequence",
-    "gps_recon_area_scan",
     "select_recon_targets",
-    "recon_sequence",
-    "recon_descend_observe",
+    "gps_capture_view",
+    "gps_fuse_views",
+    "gps_target_lock",
+    "recon_score_view",
+    "recon_rank_views",
     "build_recon_report"
   ]);
 
@@ -143,7 +144,7 @@
     var hint = spec.description || spec.label || spec.name;
     if (spec.name === "payload_release") {
       hint = hint + " servo_outputs 是飞控 SERVO 输出通道配置，不是遥控器 RC 输入通道。舵机插在输出 8 就填 channel=8。";
-    } else if (["goto_waypoint", "survey_area", "multi_view_localize", "recon_scan"].indexOf(spec.name) >= 0) {
+    } else if (spec.name === "goto_waypoint") {
       var params = spec.default_params || {};
       try { params = JSON.parse(cache[spec.name]); } catch (e) { /* use default */ }
       var frame = params.waypoint_mode === "field" ? "FIELD 坐标（x=右侧，y=前方）" : "LOCAL_NED 坐标";

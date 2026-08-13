@@ -1,0 +1,10 @@
+profile: rk3588-sitl
+overrides:
+  telemetry:
+    data_source: sitl
+    active_source: sitl
+  yolo:
+    model_path: "../data/models/gazebo_dataset-fp16.rknn"
+    source: "5600"
+executor:
+  send_commands: false
