@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from urllib.request import urlopen
 
-import cv2
 import numpy as np
+import pytest
+
+cv2 = pytest.importorskip("cv2")
 
 from yolo_app.mjpeg_stream import MjpegStream
 

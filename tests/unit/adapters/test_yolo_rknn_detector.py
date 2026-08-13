@@ -3,6 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+pytest.importorskip("cv2")
+
 from yolo_app.rknn_detector import Detection, RknnDetector, letterbox, postprocess
 from yolo_app.tracker_runner import _IoUTracker
 
