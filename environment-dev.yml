@@ -1,0 +1,10 @@
+name: uav-dev
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - nodejs>=20,<23
+  # Canonical Python packages live in requirements/; do not duplicate them here.
+  - pip:
+      - -r requirements/dev.txt

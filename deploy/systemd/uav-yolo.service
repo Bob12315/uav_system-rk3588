@@ -1,0 +1,13 @@
+[Unit]
+Description=UAV YOLO vision and MJPEG stream
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=@REPO_ROOT@
+ExecStart=@YOLO_PYTHON@ -u -m yolo_app.main
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

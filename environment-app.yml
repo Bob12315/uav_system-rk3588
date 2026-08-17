@@ -1,0 +1,9 @@
+name: uav-app
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  # Canonical Python packages live in requirements/; do not duplicate them here.
+  - pip:
+      - -r requirements/app.txt

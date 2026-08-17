@@ -1,0 +1,6 @@
+{
+  "runtime": {"mission": "fixture", "armed": false},
+  "drone": {"connected": true},
+  "seq": 7,
+  "t": 1767323045.0
+}

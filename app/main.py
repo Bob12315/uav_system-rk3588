@@ -1,0 +1,58 @@
+from __future__ import annotations
+
+import logging
+from logging.handlers import RotatingFileHandler
+import signal
+import threading
+from pathlib import Path
+
+from app.config import build_arg_parser, load_app_config
+from application.runner import SystemRunner
+
+
+def setup_logging(level: str, log_file: str | None = None) -> None:
+    handlers: list[logging.Handler] | None = None
+    if log_file:
+        Path(log_file).parent.mkdir(parents=True, exist_ok=True)
+        handlers = [
+            RotatingFileHandler(
+                log_file,
+                maxBytes=10 * 1024 * 1024,
+                backupCount=5,
+                encoding="utf-8",
+            )
+        ]
+    logging.basicConfig(
+        level=getattr(logging, level.upper(), logging.INFO),
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=handlers,
+    )
+
+
+def main() -> int:
+    parser = build_arg_parser()
+    args = parser.parse_args()
+    config = load_app_config(args)
+    ui_log_file = (
+        str(Path(__file__).resolve().parent.parent / "runtime" / "logs" / "app" / "app_ui.log")
+        if config.runtime.ui_enabled
+        else None
+    )
+    setup_logging(config.runtime.log_level, ui_log_file)
+    logger = logging.getLogger("app.main")
+    stop_event = threading.Event()
+
+    def _handle_signal(signum, _frame) -> None:
+        logger.info("received signal %s, shutting down", signum)
+        stop_event.set()
+
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
+
+    runner = SystemRunner(config, stop_event=stop_event)
+    runner.run()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

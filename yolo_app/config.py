@@ -1,0 +1,214 @@
+from __future__ import annotations
+
+import argparse
+import ipaddress
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+
+@dataclass(slots=True)
+class AppConfig:
+    model_path: str
+    source: str
+    conf_thres: float
+    iou_thres: float
+    classes: list[int]
+    udp_ip: str
+    udp_port: int
+    max_datagram_bytes: int
+    max_detections: int
+    selection_mode: str
+    target_class: str
+    max_lost_frames: int
+    show: bool
+    save_video: bool
+    save_path: str
+    line_width: int
+    show_all_tracks: bool
+    command_enabled: bool
+    command_ip: str
+    command_port: int
+    window_name: str
+    class_names: list[str]
+    camera_width: int
+    camera_height: int
+    camera_fps: int
+    camera_fourcc: str
+    latest_frame: bool
+    fullscreen: bool
+    web_stream_enabled: bool
+    web_stream_host: str
+    web_stream_port: int
+    web_stream_jpeg_quality: int
+    web_stream_max_fps: float
+    web_stream_width: int
+    web_stream_height: int
+    recording_dir: str
+
+
+def _str_to_bool(value: str | bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    lowered = value.lower()
+    if lowered in {"1", "true", "yes", "y", "on"}:
+        return True
+    if lowered in {"0", "false", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"invalid boolean value: {value}")
+
+
+def _strict_bool(value: Any, path: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise ValueError(f"{path} must be a YAML bool (true/false), got {value!r}")
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Ground-side YOLO tracking app")
+    parser.add_argument(
+        "--config",
+        default=str(Path(__file__).resolve().parent.parent / "config" / "yolo.yaml"),
+    )
+    parser.add_argument("--model-path")
+    parser.add_argument("--source")
+    parser.add_argument("--conf-thres", type=float)
+    parser.add_argument("--iou-thres", type=float)
+    parser.add_argument("--classes", nargs="*", type=int)
+    parser.add_argument("--udp-ip")
+    parser.add_argument("--udp-port", type=int)
+    parser.add_argument("--selection-mode", choices=["center", "biggest", "class"])
+    parser.add_argument("--target-class")
+    parser.add_argument("--max-lost-frames", type=int)
+    parser.add_argument("--show", type=_str_to_bool)
+    parser.add_argument("--save-video", type=_str_to_bool)
+    parser.add_argument("--save-path")
+    parser.add_argument("--line-width", type=int)
+    parser.add_argument("--show-all-tracks", type=_str_to_bool)
+    parser.add_argument("--command-enabled", type=_str_to_bool)
+    parser.add_argument("--command-ip")
+    parser.add_argument("--command-port", type=int)
+    parser.add_argument("--window-name")
+    parser.add_argument("--class-names", nargs="*")
+    parser.add_argument("--camera-width", type=int)
+    parser.add_argument("--camera-height", type=int)
+    parser.add_argument("--camera-fps", type=int)
+    parser.add_argument("--camera-fourcc")
+    parser.add_argument("--latest-frame", type=_str_to_bool)
+    parser.add_argument("--fullscreen", type=_str_to_bool)
+    parser.add_argument("--recording-dir")
+    return parser
+
+
+def _load_yaml_config(path: str) -> dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+    if not isinstance(data, dict):
+        raise ValueError("config yaml must be a mapping")
+    allowed = {
+        "model_path", "source", "conf_thres", "iou_thres", "classes", "udp_ip", "udp_port",
+        "max_datagram_bytes", "max_detections",
+        "selection_mode", "target_class", "max_lost_frames", "show", "save_video", "save_path",
+        "line_width", "show_all_tracks", "command_enabled", "command_ip", "command_port",
+        "window_name", "class_names", "camera_width", "camera_height", "camera_fps", "camera_fourcc",
+        "latest_frame", "display", "web_stream", "recording_dir",
+    }
+    unknown = set(data) - allowed
+    if unknown:
+        raise ValueError(f"unknown YOLO config field(s): {', '.join(sorted(unknown))}")
+    nested = {"display": {"local_window_enabled", "fullscreen"},
+              "web_stream": {"enabled", "host", "port", "jpeg_quality", "max_fps", "width", "height"}}
+    for name, keys in nested.items():
+        value = data.get(name, {})
+        if isinstance(value, dict) and set(value) - keys:
+            raise ValueError(f"unknown {name} field(s): {', '.join(sorted(set(value) - keys))}")
+    return data
+
+
+def _expand_user_path(value: Any) -> str:
+    text = str(value)
+    if text.startswith("~"):
+        return str(Path(text).expanduser())
+    return text
+
+
+def _resolve_config_path(value: Any, config_path: str) -> str:
+    path = Path(_expand_user_path(value))
+    if path.is_absolute():
+        return str(path)
+    return str((Path(config_path).resolve().parent / path).resolve())
+
+
+def load_config() -> AppConfig:
+    parser = build_arg_parser()
+    args = parser.parse_args()
+    yaml_config = _load_yaml_config(args.config)
+    display_config = yaml_config.get("display", {})
+    web_stream_config = yaml_config.get("web_stream", {})
+    if not isinstance(display_config, dict) or not isinstance(web_stream_config, dict):
+        raise ValueError("display and web_stream config must be mappings")
+
+    merged = dict(yaml_config)
+    for key, value in vars(args).items():
+        if key == "config":
+            continue
+        if value is not None:
+            merged[key.replace("-", "_")] = value
+
+    command_ip = str(merged.get("command_ip", "127.0.0.1"))
+    try:
+        command_is_loopback = ipaddress.ip_address(command_ip).is_loopback
+    except ValueError:
+        command_is_loopback = command_ip == "localhost"
+    if _strict_bool(merged.get("command_enabled", True), "command_enabled") and not command_is_loopback:
+        raise ValueError("command_ip must be loopback unless an authenticated transport is configured")
+    max_datagram_bytes = int(merged.get("max_datagram_bytes", 60_000))
+    max_detections = int(merged.get("max_detections", 128))
+    if not 512 <= max_datagram_bytes <= 65_507 or not 1 <= max_detections <= 4096:
+        raise ValueError("YOLO UDP bounds are invalid")
+    return AppConfig(
+        model_path=_resolve_config_path(merged["model_path"], args.config),
+        source=_expand_user_path(merged["source"]),
+        conf_thres=float(merged["conf_thres"]),
+        iou_thres=float(merged["iou_thres"]),
+        classes=list(merged.get("classes", [])),
+        udp_ip=str(merged["udp_ip"]),
+        udp_port=int(merged["udp_port"]),
+        max_datagram_bytes=max_datagram_bytes,
+        max_detections=max_detections,
+        selection_mode=str(merged["selection_mode"]),
+        target_class=str(merged.get("target_class", "")),
+        max_lost_frames=int(merged["max_lost_frames"]),
+        show=_strict_bool(
+            display_config.get("local_window_enabled", merged["show"]),
+            "display.local_window_enabled",
+        ),
+        save_video=_strict_bool(merged["save_video"], "save_video"),
+        save_path=_resolve_config_path(merged["save_path"], args.config),
+        line_width=int(merged.get("line_width", 2)),
+        show_all_tracks=_strict_bool(merged.get("show_all_tracks", True), "show_all_tracks"),
+        command_enabled=_strict_bool(merged.get("command_enabled", True), "command_enabled"),
+        command_ip=command_ip,
+        command_port=int(merged.get("command_port", 5006)),
+        window_name=str(merged.get("window_name", "YOLO Tracking")),
+        class_names=list(merged.get("class_names", ["Target", "bucket", "class_2"])),
+        camera_width=int(merged.get("camera_width", 640)),
+        camera_height=int(merged.get("camera_height", 480)),
+        camera_fps=int(merged.get("camera_fps", 30)),
+        camera_fourcc=str(merged.get("camera_fourcc", "MJPG")),
+        latest_frame=_strict_bool(merged.get("latest_frame", False), "latest_frame"),
+        fullscreen=_strict_bool(
+            display_config.get("fullscreen", merged.get("fullscreen", False)),
+            "display.fullscreen",
+        ),
+        web_stream_enabled=_strict_bool(web_stream_config.get("enabled", False), "web_stream.enabled"),
+        web_stream_host=str(web_stream_config.get("host", "0.0.0.0")),
+        web_stream_port=int(web_stream_config.get("port", 8081)),
+        web_stream_jpeg_quality=int(web_stream_config.get("jpeg_quality", 75)),
+        web_stream_max_fps=float(web_stream_config.get("max_fps", 20.0)),
+        web_stream_width=int(web_stream_config.get("width", 0)),
+        web_stream_height=int(web_stream_config.get("height", 0)),
+        recording_dir=_expand_user_path(merged.get("recording_dir", "~/uav_recordings")),
+    )

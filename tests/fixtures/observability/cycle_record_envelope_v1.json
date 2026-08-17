@@ -1,0 +1,18 @@
+{
+  "schema": {"major": 1, "minor": 0},
+  "recorder_session_id": "fixture-session",
+  "sequence": 7,
+  "sampled_at_utc": "2026-01-02T03:04:05+00:00",
+  "sampled_at_monotonic_ns": 123456789,
+  "core_cycle_id": "fixture-cycle-7",
+  "correlation_id": "fixture-correlation",
+  "source_snapshot_ref": "fixture-snapshot-7",
+  "run_id": "fixture-run",
+  "payload_schema": {"major": 1, "minor": 0},
+  "payload": {
+    "runtime": {"mission": "fixture", "armed": false},
+    "drone": {"connected": true}
+  },
+  "referenced_event_ids": ["fixture-event"],
+  "debug_digest": "fixture-debug"
+}

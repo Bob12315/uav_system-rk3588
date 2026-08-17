@@ -1,0 +1,35 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+*.log
+
+*.pt
+*.onnx
+*.engine
+
+*.avi
+*.mp4
+*.mov
+*.tlog
+*.ulg
+*.bag
+*.mavlink
+*.bin
+
+logs/
+yolo_app/logs/
+
+# IDE internal state
+.reasonix/
+
+# Personal notes
+action调试.md
+
+# Local runtime state: SITL EEPROM, MAVLink logs, blackbox data, and videos.
+runtime/*
+!runtime/.gitkeep

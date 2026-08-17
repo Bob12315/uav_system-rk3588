@@ -1,0 +1,4 @@
+profile: rk3588-real
+overrides: {}
+executor:
+  send_commands: false

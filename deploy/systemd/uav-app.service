@@ -1,0 +1,13 @@
+[Unit]
+Description=UAV control application and Web UI
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=@REPO_ROOT@
+ExecStart=@APP_PYTHON@ -m app.main --send-commands false
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

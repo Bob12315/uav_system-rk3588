@@ -1,0 +1,66 @@
+# Action 契约与坐标参数迁移方向
+
+本文描述当前 Action 主线的边界和未来参数方向。Phase 1 不修改运行时 schema。
+
+## Action 边界
+
+- Action 位于 `missions/common/actions/`，由 `ActionRunner` 驱动。
+- Action 可以读取 runtime context，并返回结构化 result 和 action request。
+- Action 不直接调用 pymavlink，不直接连接 `telemetry_link.LinkManager`。
+- `ActionRuntimeService` 把 result 交给 `ActionDispatcher`。
+- `ActionDispatcher` 执行系统 SEND + 本次 run 授权双门控；通过 `ActionSafetyPipeline`
+  裁决后才调用 `LinkManager` 的公开接口。
+- `config/action_missions/*.json` 只编排 Action，不包含 MAVLink message。
+
+## 推荐坐标参数
+
+FIELD 航点建议迁移为：
+
+```json
+{
+  "frame": "FIELD",
+  "field_x_m": 0.0,
+  "field_y_m": 10.0,
+  "altitude_m": 3.0
+}
+```
+
+LOCAL_NED 建议使用 `local_n_m/local_e_m/z_down_m`；BODY_NED 速度建议使用
+`vx_forward_mps/vy_right_mps/vz_down_mps`。完整符号约定见
+[坐标系规范](../../developer/coordinate_frames.md)。
+
+## 兼容现状
+
+若干 Action 仍支持 `x/y/z/waypoint_mode/frame`。这些参数在迁移期保持兼容，但
+语义模糊：新参数优先，旧参数最终应发出 deprecated 诊断。任何迁移必须同步更新
+Action Lab 说明、Action Mission JSON、validator 和回归测试，不能一次性破坏模板。
+
+FIELD 航点必须经过唯一的 `field/coordinates.py` 进行转换；未确认
+Field Reference 时必须拒绝实发。BODY_NED 速度不参与 FIELD 转换。
+
+## 速度切换契约
+
+航点阶段的地速切换只能走正式发送链：
+
+```text
+change_speed Action → ActionDispatcher → LinkManager.change_speed
+→ MAV_CMD_DO_CHANGE_SPEED
+```
+
+`goto_waypoint.max_horizontal_speed_mps` 是到点速度门槛，不是飞行限速。需要限定
+任务阶段地速时，必须显式编排 `change_speed` Action，并在阶段结束或失败恢复路径中
+恢复后续阶段速度。`LinkManager` 会把当前速度目标附加到后续位置航点；发送线程检测到
+Guided 由速度控制切回位置控制时，必须先发送位置目标，再立即重发
+`MAV_CMD_DO_CHANGE_SPEED`，防止飞控位置控制初始化覆盖阶段限速。Action 不得直接调用
+`LinkManager` 或 pymavlink。
+
+## 投放契约
+
+投放主线只能是：
+
+```text
+payload_release Action → set_servo → MAV_CMD_DO_SET_SERVO
+```
+
+禁止 `release_payload()`、RC override 和 Action 内直接发送 MAVLink。舵机输出通道
+不是遥控器 RC 输入通道。

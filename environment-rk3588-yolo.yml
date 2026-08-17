@@ -1,0 +1,9 @@
+name: uav-rk3588-yolo
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  # Canonical Python packages live in requirements/; keep RKNN/OpenCV out of app/dev.
+  - pip:
+      - -r requirements/rk3588-yolo.txt

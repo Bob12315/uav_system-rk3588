@@ -1,0 +1,91 @@
+{
+  "schema_version": 3,
+  "profile_id": "competition_runtime_v3",
+  "name": "Competition Runtime Field Template",
+  "coordinate_convention": {
+    "field_x_positive": "right",
+    "field_y_positive": "forward",
+    "altitude_positive": "up"
+  },
+  "forward_marker": {
+    "name": "runtime_forward_marker_placeholder",
+    "lat": 34.0,
+    "lon": 108.0,
+    "coordinate_system": "WGS84"
+  },
+  "field_geometry": {
+    "lane_half_width_m": 4.0,
+    "drop_area_y_min_m": 30.0,
+    "drop_area_y_max_m": 35.0,
+    "drop_center_y_m": 32.5,
+    "recce_area_y_min_m": 55.0,
+    "recce_area_y_max_m": 60.0,
+    "recce_center_y_m": 57.5
+  },
+  "drop_scan": {
+    "waypoints": [
+      {
+        "x_m": -2.0,
+        "y_m": 31.25,
+        "altitude_m": 5.0
+      },
+      {
+        "x_m": 2.0,
+        "y_m": 31.25,
+        "altitude_m": 5.0
+      },
+      {
+        "x_m": 2.0,
+        "y_m": 33.75,
+        "altitude_m": 5.0
+      },
+      {
+        "x_m": -2.0,
+        "y_m": 33.75,
+        "altitude_m": 5.0
+      }
+    ]
+  },
+  "recon_scan": {
+    "waypoints": [
+      {
+        "x_m": -3.0,
+        "y_m": 56.0,
+        "altitude_m": 3.0
+      },
+      {
+        "x_m": 3.0,
+        "y_m": 56.0,
+        "altitude_m": 3.0
+      },
+      {
+        "x_m": 3.0,
+        "y_m": 58.0,
+        "altitude_m": 3.0
+      },
+      {
+        "x_m": -3.0,
+        "y_m": 58.0,
+        "altitude_m": 3.0
+      }
+    ]
+  },
+  "gps_quality": {
+    "min_fix_type": 3,
+    "min_satellites": 10,
+    "max_eph": 2.5,
+    "max_epv": 5.0
+  },
+  "runtime_origin_sampling": {
+    "min_samples": 20,
+    "sample_window_s": 12.0,
+    "max_horizontal_spread_m": 1.0,
+    "estimator": "median"
+  },
+  "binding_policy": {
+    "min_baseline_m": 30.0,
+    "warn_baseline_below_m": 50.0
+  },
+  "template_only": true,
+  "runtime_input_source": "web_ui_runtime"
+}

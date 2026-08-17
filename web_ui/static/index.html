@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026 无人机救援比赛控制台</title>
+  <link rel="stylesheet" href="/static/style.css?v=recon-web-status-20260712-1">
+</head>
+<body>
+  <header>
+    <div class="brand">2026 无人机救援比赛控制台</div>
+    <nav>
+      <button class="tab active" data-page="dashboard">Dashboard</button>
+      <button class="tab" data-page="actions">Actions</button>
+      <button class="tab" data-page="actionMission">Action Mission</button>
+      <button class="tab" data-page="flightSafety">Flight Safety</button>
+      <button class="tab" data-page="configLogs">Config / Logs</button>
+    </nav>
+    <div class="badges">
+      <span id="sourceBadge" class="badge">SOURCE --</span>
+      <span id="linkBadge" class="badge">LINK --</span>
+      <span id="sendBadge" class="badge danger">SEND OFF</span>
+      <span id="armBadge" class="badge">ARM --</span>
+      <span id="modeBadge" class="badge">MODE --</span>
+      <span id="batteryBadge" class="badge">BAT --</span>
+      <span id="altitudeBadge" class="badge">ALT --</span>
+      <span id="actionBadge" class="badge">ACTION --</span>
+      <span id="missionBadge" class="badge">MISSION --</span>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <aside class="global-video-sidebar">
+      <article class="panel video-panel global-video-panel">
+        <div class="panel-title">YOLO 视频 <span id="videoHint">点击目标框锁定</span></div>
+        <div class="video-wrap">
+          <img id="video" alt="YOLO 视频流">
+          <canvas id="hitCanvas"></canvas>
+          <div id="videoOffline" class="overlay-note">等待 YOLO Web 视频流</div>
+        </div>
+        <div class="button-row camera-recording-row">
+          <button id="cameraRecordToggle">开始录制</button>
+          <span id="cameraRecordStatus" class="camera-recording-status">未录制</span>
+        </div>
+      </article>
+
+      <article class="panel target-panel compact-target-panel">
+        <div class="panel-title">目标摘要</div>
+        <section class="target-info">
+          <div class="aircraft-info-title">目标信息</div>
+          <div id="targetInfo" class="aircraft-info-grid"></div>
+        </section>
+        <div id="targetCurrent" class="current-target">当前锁定: --</div>
+        <div id="detections" class="detections compact"></div>
+        <div class="button-row">
+          <button data-yolo-action="prev">上一个</button>
+          <button data-yolo-action="next">下一个</button>
+          <button data-yolo-action="unlock">解除锁定</button>
+        </div>
+        <div class="mini-state">
+          <div>Frame <strong id="frameId">--</strong></div>
+          <div>检测数 <strong id="detCount">0</strong></div>
+        </div>
+      </article>
+    </aside>
+
+    <section class="page-content">
+      <main id="dashboardPage" class="page active">
+        <section class="dashboard-grid">
+          <article class="panel field-map-panel">
+            <div class="panel-title">场地图
+              <span class="field-map-controls">
+                <button id="fieldMapZoomIn">+</button>
+                <button id="fieldMapZoomOut">−</button>
+                <button id="fieldMapReset">Reset</button>
+                <button id="clearLocalization">清空筒坐标</button>
+              </span>
+            </div>
+            <div class="field-map-wrap">
+              <canvas id="fieldMap"></canvas>
+              <div id="fieldMapEmpty" class="field-map-empty">等待 mission 坐标</div>
+              <div id="fieldMapInfoBox" class="field-map-info-box"></div>
+            </div>
+            <div id="fieldMapLegend" class="field-map-legend"></div>
+            <div id="fieldMapCoord" class="field-map-coord" style="font-size:12px;margin-top:4px;color:#aaa">FIELD x/y | lat/lon</div>
+          </article>
+
+          <article class="panel dashboard-summary-panel">
+            <div class="panel-title">飞机 / Action / Mission</div>
+            <section class="aircraft-info">
+              <div class="aircraft-info-title">飞机信息</div>
+              <div id="aircraftInfo" class="aircraft-info-grid"></div>
+            </section>
+            <div class="summary-stack">
+              <div class="panel-title minor">当前 Action</div>
+              <div id="dashboardActionSummary" class="summary-box"></div>
+              <div class="panel-title minor">Action Mission</div>
+              <div id="dashboardMissionSummary" class="summary-box"></div>
+              <div class="panel-title minor">最新 Dispatch</div>
+              <div id="dashboardDispatchSummary" class="summary-box"></div>
+              <div class="panel-title minor">危险标识扫描排名 / 侦察识别结果</div>
+              <div id="reconInspectionResults" class="summary-box recon-inspection-results"></div>
+            </div>
+          </article>
+        </section>
+
+        <section class="bottom-grid">
+          <article class="panel output-panel">
+            <div class="panel-title">系统状态</div>
+            <div id="statusCards" class="status-cards"></div>
+          </article>
+          <article class="panel output-panel">
+            <div class="panel-title">最新控制输出</div>
+            <div id="commandCards" class="command-cards"></div>
+            <div class="panel-title minor">重要事件</div>
+            <div id="events" class="scroll-list events"></div>
+          </article>
+        </section>
+      </main>
+
+  <main id="actionsPage" class="page">
+    <section class="panel action-lab">
+      <div class="panel-title">Actions <span id="actionRunStatus">等待 Action 状态</span></div>
+      <div class="action-lab-layout">
+        <div>
+          <div id="actionButtons" class="action-buttons"></div>
+          <div class="hint" id="actionParamHint">选择一个 Action 查看参数。</div>
+        </div>
+        <div>
+          <textarea id="actionParams" spellcheck="false"></textarea>
+          <div class="button-row action-run-row">
+            <button id="actionDispatchStart" class="warning">Start Authorized Run</button>
+            <button id="actionStop" class="stop">Stop</button>
+            <button id="actionReset">Reset</button>
+            <button id="actionRefresh">Refresh Status</button>
+            <button id="actionRunToggle" class="hidden-compat" aria-hidden="true" tabindex="-1">开始</button>
+          </div>
+          <div id="actionSafetyHint" class="action-safety-hint">选择一个 Action 查看安全提示。</div>
+          <div class="action-gate-grid">
+            <div><span>Run authorized</span><strong id="actionGateAuthorized">--</strong></div>
+            <div><span>Dispatch effective</span><strong id="actionGateEffective">--</strong></div>
+            <div><span>System SEND</span><strong id="actionGateSystemSend">--</strong></div>
+            <div><span>Run ID</span><strong id="actionGateRunId">--</strong></div>
+            <div><span>sent</span><strong id="actionGateSentCount">0</strong></div>
+            <div><span>skipped</span><strong id="actionGateSkippedCount">0</strong></div>
+            <div><span>errors</span><strong id="actionGateErrorCount">0</strong></div>
+            <div class="wide"><span>Gate note</span><strong id="actionGateNote">--</strong></div>
+          </div>
+        </div>
+        <div class="action-status-panel">
+          <dl class="action-status-summary">
+            <dt>State</dt><dd id="actionState">--</dd>
+            <dt>Selected</dt><dd id="actionSelected">--</dd>
+            <dt>Running Action</dt><dd id="actionRunningAction">--</dd>
+            <dt>Running</dt><dd id="actionRunning">--</dd>
+            <dt>Reason</dt><dd id="actionReason">--</dd>
+            <dt>Done</dt><dd id="actionDone">--</dd>
+            <dt>Failed</dt><dd id="actionFailed">--</dd>
+          </dl>
+          <div id="actionSwitchHint" class="hint"></div>
+          <div id="actionHighlights" class="action-highlights"></div>
+        </div>
+      </div>
+      <pre id="actionStatusJson" class="action-json"></pre>
+    </section>
+  </main>
+
+  <main id="actionMissionPage" class="page">
+    <section class="panel mission-action-panel">
+      <div class="panel-title">Action Mission 控制</div>
+      <div class="action-mission-grid">
+        <section class="action-mission-block action-mission-templates">
+          <div class="panel-title minor">任务模板</div>
+          <div class="action-mission-presets primary">
+            <button data-action-mission-template="drop_two_targets_v2">投放任务 v2</button>
+            <button data-action-mission-template="recon_gps_v2">GPS 侦察任务 v2</button>
+            <button data-action-mission-template="rescue_2026_full_auto_v2">完整流程 v2</button>
+          </div>
+        </section>
+
+        <section class="action-mission-block action-mission-controls">
+          <div class="panel-title minor">任务控制</div>
+          <div class="button-row">
+            <button id="actionMissionConfigure">配置</button>
+            <button id="actionMissionStart" class="warning">启动</button>
+            <button id="actionMissionTick" class="warning">推进一次（手动）</button>
+            <button id="actionMissionSkipCurrent" class="warning">跳过当前阶段</button>
+            <button id="actionMissionAutoTick" disabled>后台自动推进</button>
+            <button id="actionMissionStop" class="stop">停止</button>
+            <button id="actionMissionReset">重置</button>
+            <button id="actionMissionRefresh">刷新</button>
+          </div>
+          <div class="action-mission-control-note">仅配置任务步骤，不发送飞控命令。</div>
+          <div id="actionMissionSendWarning" class="action-mission-send-warning">System SEND=OFF</div>
+          <div class="action-mission-safety-note">
+            配置只加载步骤，不会发送命令。启动只创建任务运行器。
+            推进会执行下一轮 Action；当 System SEND=ON 时，推进可能下发 local_position/body_velocity/set_servo 命令。
+            跳过当前阶段会停止当前 Action、清理连续控制和 LOCAL_POSITION，并尝试保持当前位置，然后启动下一阶段；不会清空黑板。
+            切换模板前请先停止或重置。
+          </div>
+        </section>
+
+        <section class="action-mission-block action-mission-timeline-block">
+          <div class="panel-title minor">步骤时间线</div>
+          <div class="timeline-table-wrap">
+            <table class="action-mission-timeline">
+              <thead>
+                <tr>
+                  <th>序号</th>
+                  <th>状态</th>
+                  <th>标签</th>
+                  <th>动作</th>
+                  <th>save_as</th>
+                  <th>on_failed</th>
+                  <th>尝试次数</th>
+                  <th>用时</th>
+                  <th>原因</th>
+                </tr>
+              </thead>
+              <tbody id="actionMissionTimeline"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="action-mission-side">
+          <article class="action-mission-block">
+            <div class="panel-title minor">任务状态</div>
+            <dl class="mission-status action-mission-status">
+              <dt>System SEND</dt><dd id="actionMissionSystemSend">--</dd>
+              <dt>已配置</dt><dd id="actionMissionEnabled">--</dd>
+              <dt>运行中</dt><dd id="actionMissionRunning">--</dd>
+              <dt>已完成</dt><dd id="actionMissionDone">--</dd>
+              <dt>已失败</dt><dd id="actionMissionFailed">--</dd>
+              <dt>当前序号</dt><dd id="actionMissionIndex">--</dd>
+              <dt>当前动作</dt><dd id="actionMissionCurrent">--</dd>
+              <dt>任务用时</dt><dd id="actionMissionDuration">--</dd>
+              <dt>原因</dt><dd id="actionMissionReason">--</dd>
+            </dl>
+          </article>
+          <article class="action-mission-block">
+            <div class="panel-title minor">黑板键</div>
+            <div id="actionMissionBlackboardKeys" class="blackboard-keys"></div>
+          </article>
+          <article class="action-mission-block">
+            <div class="panel-title minor">任务结果摘要</div>
+            <div id="actionMissionResults" class="mission-results"></div>
+          </article>
+        </section>
+
+        <section class="action-mission-block action-mission-editor">
+          <div class="panel-title minor">任务 JSON 编辑器</div>
+          <textarea id="actionMissionSteps" spellcheck="false"></textarea>
+          <div class="button-row">
+            <button id="actionMissionFormatJson">格式化 JSON</button>
+            <button id="actionMissionCopyJson">复制 JSON</button>
+            <button id="actionMissionCopyStatus">复制状态</button>
+            <button id="actionMissionCopyResult">复制最后结果</button>
+          </div>
+          <pre id="actionMissionDetail" class="action-json mission-detail-json"></pre>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <main id="flightSafetyPage" class="page">
+    <section class="safety-grid">
+      <article class="panel safety-panel">
+        <div class="panel-title">飞行安全控制</div>
+        <div class="takeoff-row">
+          <label>起飞高度 <input id="takeoffAltitude" type="number" value="5" min="0" step="0.1"> m</label>
+          <button id="takeoffButton" class="warning">起飞</button>
+        </div>
+        <div class="button-row flight-buttons">
+          <button id="landActionButton" class="warning">授权本次降落 Action</button>
+        </div>
+        <div class="send-gate">
+          <button id="sendToggle" class="switch-button danger-gate">
+            <span>SEND</span><strong id="sendToggleState">OFF</strong>
+          </button>
+          <div class="hint">SEND 是系统级发送门；每次 Action/Mission 仍需独立 run 授权。</div>
+        </div>
+        <div class="source-actions">
+          数据源:
+          <button data-source="sitl">SITL</button>
+          <button data-source="real" class="warning">REAL</button>
+        </div>
+      </article>
+
+      <article class="panel safety-panel field-reference-panel">
+        <div class="panel-title">Competition Field Setup / 比赛场地初始化</div>
+
+        <!-- ── far point B ────────────────────────────────────────────── -->
+        <div class="field-reference-status-grid">
+          <div><span>远点 B 纬度</span><input id="cfsForwardLat" type="text" placeholder="WGS84 纬度" autocomplete="off" spellcheck="false"></div>
+          <div><span>远点 B 经度</span><input id="cfsForwardLon" type="text" placeholder="WGS84 经度" autocomplete="off" spellcheck="false"></div>
+          <div><span>坐标系</span><strong id="cfsCoordinateSystem">WGS84</strong></div>
+          <div id="cfsGcjWarning" class="hint danger-text">
+            ⚠ 只能输入 WGS84 坐标，不得输入高德、腾讯或手机地图直接显示的 GCJ-02 坐标。
+          </div>
+        </div>
+
+        <!-- ── current aircraft A ─────────────────────────────────────── -->
+        <div class="field-reference-status-grid">
+          <div><span>当前飞机 GPS</span><strong id="cfsCurrentGps">--</strong></div>
+          <div><span>Fix / Sats</span><strong id="cfsGpsFixSats">--</strong></div>
+          <div><span>EPH / EPV</span><strong id="cfsGpsEphEpv">--</strong></div>
+          <div><span>GPS 有效</span><strong id="cfsGpsValid">--</strong></div>
+          <div><span>GPS 时间</span><strong id="cfsGpsTimestamp">--</strong></div>
+        </div>
+
+        <!-- ── fixed template summary ─────────────────────────────────── -->
+        <div class="field-reference-status-grid">
+          <div><span>车道半宽</span><strong id="cfsLaneHalfWidth">--</strong></div>
+          <div><span>投放区 Y</span><strong id="cfsDropRange">--</strong></div>
+          <div><span>侦察区 Y</span><strong id="cfsRecceRange">--</strong></div>
+          <div><span>扫描航点</span><strong id="cfsDropScanPoints">--</strong></div>
+          <div><span>扫描高度</span><strong id="cfsScanAltitude">--</strong></div>
+          <div><span>采样策略</span><strong id="cfsSamplingPolicy">--</strong></div>
+          <div><span>基线策略</span><strong id="cfsBaselinePolicy">--</strong></div>
+        </div>
+
+        <!-- ── runtime status ─────────────────────────────────────────── -->
+        <div id="cfsRuntimePanel" class="field-reference-status-grid" style="display:none">
+          <div><span>采样状态</span><strong id="cfsSamplingState">--</strong></div>
+          <div><span>已接受</span><strong id="cfsSamplingAccepted">--</strong></div>
+          <div><span>已拒绝</span><strong id="cfsSamplingRejected">--</strong></div>
+          <div><span>重复</span><strong id="cfsSamplingDuplicate">--</strong></div>
+          <div><span>耗时 / 窗口</span><strong id="cfsSamplingElapsed">--</strong></div>
+          <div><span>离散度</span><strong id="cfsSamplingSpread">--</strong></div>
+          <div><span>最后拒绝原因</span><strong id="cfsSamplingLastRejection">--</strong></div>
+          <div><progress id="cfsSamplingProgress" value="0" max="1"></progress></div>
+        </div>
+
+        <!-- ── candidate preview ──────────────────────────────────────── -->
+        <div id="cfsCandidatePanel" class="field-reference-status-grid" style="display:none">
+          <div><span>起点 A</span><strong id="cfsOriginA">--</strong></div>
+          <div><span>远点 B</span><strong id="cfsForwardB">--</strong></div>
+          <div><span>基线距离</span><strong id="cfsBaseline">--</strong></div>
+          <div><span>场地方向</span><strong id="cfsHeading">--</strong></div>
+          <div><span>警告</span><strong id="cfsWarnings">--</strong></div>
+          <div><span>错误</span><strong id="cfsError" class="danger-text">--</strong></div>
+        </div>
+
+        <!-- ── confirmed state ────────────────────────────────────────── -->
+        <div id="cfsConfirmedPanel" class="field-reference-status-grid" style="display:none">
+          <div><span>已确认</span><strong id="cfsConfirmed">--</strong></div>
+          <div><span>已冻结</span><strong id="cfsFrozen">--</strong></div>
+          <div><span>GPS 就绪</span><strong id="cfsGpsReady">--</strong></div>
+          <div><span>已同步</span><strong id="cfsSynced">--</strong></div>
+        </div>
+
+        <!-- ── buttons ────────────────────────────────────────────────── -->
+        <div class="button-row">
+          <button id="cfsStart">开始 GPS 采样</button>
+          <button id="cfsCancel">取消采样</button>
+          <button id="cfsReset">完整重置</button>
+        </div>
+        <div id="cfsHint" class="hint">
+          输入 WGS84 远点 B → 开始采样。采样通过后将自动确认并冻结；该操作不会启动 Mission，不会发送飞控命令。
+        </div>
+      </article>
+
+      <article class="panel safety-panel">
+        <div class="panel-title">Payload Release Action</div>
+        <div class="payload-release-zone">
+          <button id="payloadReleaseSelect" class="danger">选择 payload_release</button>
+          <button id="payloadReleaseRun" class="danger">执行 payload_release</button>
+          <div class="hint">高风险投放动作集中在安全页；参数仍在 Actions 页编辑。</div>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <main id="configLogsPage" class="page">
+    <section class="config-grid">
+      <article class="panel file-list">
+        <div class="panel-title">配置文件</div>
+        <div id="configFiles"></div>
+      </article>
+      <article class="panel editor-panel">
+        <div class="panel-title" id="editingPath">选择配置文件</div>
+        <textarea id="yamlEditor" spellcheck="false"></textarea>
+        <div class="button-row">
+          <button id="previewConfig">差异预览</button>
+          <button id="saveConfig">保存</button>
+          <button id="applyConfig" class="warning">保存并应用</button>
+          <button id="restoreConfig">恢复上一次</button>
+        </div>
+        <pre id="configDiff" class="diff"></pre>
+      </article>
+      <article class="panel apply-panel">
+        <div class="panel-title">应用状态</div>
+        <div id="configStatus">尚未选择配置文件。</div>
+        <hr>
+        <div class="panel-title minor">服务操作</div>
+        <button id="reconnectTelemetry">立即重连通信服务</button>
+        <button id="restartYolo">重启 YOLO 服务</button>
+        <button id="restartApp" class="warning">重启 App 服务</button>
+      </article>
+    </section>
+
+    <section class="bottom-grid logs-grid">
+      <article class="panel log-panel">
+        <div class="panel-title">用户输入记录</div>
+        <div id="auditLog" class="scroll-list"></div>
+      </article>
+      <article class="panel console"><div id="completionHint" class="hint">所有状态修改使用强类型 API 和本次 run 授权。</div></article>
+    </section>
+  </main>
+    </section>
+  </main>
+
+  <script src="/static/js/api_client.js"></script>
+  <script src="/static/js/format_utils.js"></script>
+  <script src="/static/js/dom_utils.js"></script>
+  <script src="/static/js/app_state.js"></script>
+  <script src="/static/js/status.js?v=architecture-refactor-20260813-1"></script>
+  <script src="/static/js/mission.js?v=architecture-refactor-20260813-1"></script>
+  <script src="/static/js/field_reference.js?v=competition-field-20260710-1"></script>
+  <script src="/static/js/field_profile.js?v=competition-field-20260710-1"></script>
+  <script src="/static/js/action_lab.js?v=recon-area-ranking-20260714-1"></script>
+  <script src="/static/js/field/model.js?v=architecture-refactor-20260813-1"></script>
+  <script src="/static/js/field/render.js?v=architecture-refactor-20260813-1"></script>
+  <script src="/static/js/field/interaction.js?v=architecture-refactor-20260813-1"></script>
+  <script src="/static/js/video_panel.js"></script>
+  <script src="/static/js/log_panel.js"></script>
+  <script src="/static/js/config_panel.js"></script>
+  <script src="/static/js/control.js?v=architecture-refactor-20260813-1"></script>
+  <script src="/static/app.js?v=architecture-refactor-20260813-1"></script>
+</body>
+</html>
