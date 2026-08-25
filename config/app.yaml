@@ -11,9 +11,6 @@ runtime:
   # YOLO 进程通过 UDP 向 app 发布目标和场景检测结果。
   yolo_udp_ip: "127.0.0.1"
   yolo_udp_port: 5005
-  yolo_max_datagram_bytes: 60000
-  yolo_max_detections: 128
-  yolo_tombstone_capacity: 8
 
   # app 控制循环频率与状态日志输出频率，单位：Hz。
   loop_hz: 20.0
@@ -49,22 +46,20 @@ ui:
   # Web UI 为唯一正式操作入口。Terminal/curses UI 已退场。
   web_enabled: true
 
-  # 默认只监听回环。非回环部署必须显式修改并配置 UAV_WEB_OPERATOR_PASSWORD
-  # 或 UAV_WEB_OPERATOR_PASSWORD_FILE，否则启动失败关闭。
-  web_host: "127.0.0.1"
+  # Web UI 监听地址和端口。0.0.0.0 表示允许局域网访问。
+  web_host: "0.0.0.0"
   web_port: 8080
 
-  # 单操作者认证。秘密只从环境变量或环境变量指向的权限文件加载。
+  # Explicit LAN operator origin; do not use wildcard hosts or origins.
   auth_required: true
   credential_env: "UAV_WEB_OPERATOR_PASSWORD"
   credential_file_env: "UAV_WEB_OPERATOR_PASSWORD_FILE"
   session_ttl_sec: 28800
-  allowed_hosts: ["127.0.0.1", "localhost", "[::1]"]
-  allowed_origins: ["http://127.0.0.1:8080", "http://localhost:8080", "http://[::1]:8080"]
+  allowed_hosts: ["127.0.0.1", "localhost", "[::1]", "10.101.31.109"]
+  allowed_origins: ["http://127.0.0.1:8080", "http://localhost:8080", "http://[::1]:8080", "http://10.101.31.109:8080"]
 
   # 操作审计日志。运行产物统一写入 runtime/，不提交 Git。
   audit_log_path: "runtime/logs/web_ui/audit.jsonl"
-  security_event_log_path: "runtime/logs/web_ui/security.jsonl"
 
 # -----------------------------------------------------------------------------
 # Web UI 可调用的外部服务管理命令
