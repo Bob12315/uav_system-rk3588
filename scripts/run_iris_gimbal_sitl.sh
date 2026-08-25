@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-GCS_HOST="${GCS_HOST:-10.101.31.109}"
+# Default to the currently deployed RK3588.  It can still be overridden for
+# another ground station by setting GCS_HOST explicitly.
+GCS_HOST="${GCS_HOST:-10.101.31.108}"
 VIDEO_HOST="${VIDEO_HOST:-${GCS_HOST}}"
 MAVLINK_PORT="${MAVLINK_PORT:-14550}"
 VIDEO_PORT="${VIDEO_PORT:-5600}"
@@ -78,7 +80,7 @@ payload_bridge_command=(
 )
 relay_command=(
   bash -lc
-  "echo 'Waiting ${CAMERA_STREAM_DELAY}s for Gazebo to start...' && sleep '${CAMERA_STREAM_DELAY}' && gz topic -t '${CAMERA_STREAM_TOPIC}' -m gz.msgs.Boolean -p 'data: 1' && gst-launch-1.0 -v udpsrc port=${VIDEO_PORT} caps='application/x-rtp,media=video,encoding-name=H264,payload=96' ! rtph264depay ! h264parse ! rtph264pay config-interval=1 pt=96 ! udpsink host=${VIDEO_HOST} port=${VIDEO_PORT}"
+  "echo 'Waiting ${CAMERA_STREAM_DELAY}s for Gazebo to start...' && sleep '${CAMERA_STREAM_DELAY}' && gz topic -t '${CAMERA_STREAM_TOPIC}' -m gz.msgs.Boolean -p 'data: 1' && gst-launch-1.0 -v udpsrc port=${VIDEO_PORT} caps='application/x-rtp,media=video,encoding-name=H264,payload=96' ! rtpjitterbuffer latency=0 drop-on-latency=true ! rtph264depay ! h264parse ! rtph264pay config-interval=1 pt=96 ! udpsink host=${VIDEO_HOST} port=${VIDEO_PORT}"
 )
 
 if command -v gnome-terminal >/dev/null 2>&1; then

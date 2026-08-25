@@ -4,13 +4,14 @@ import json
 from dataclasses import fields, replace
 
 from contracts.platform.common import SchemaVersion
-from contracts.platform.field import ReferenceVersion
+from contracts.platform.field import GpsObservation, ReferenceVersion
 from contracts.platform.vehicle_commands import *
 from field._reference_store import _ReferenceStore
 from field.calibration import RuntimeFieldBindingCandidate
 from field.geometry import build_runtime_field_geometry
 from field.models import HeadingSource, OriginSource
 from field.profile_service import FieldProfileService, ReadOnlyFieldProfileRepository
+from field.calibration_transaction import FieldCalibrationTransactionAdapter
 from telemetry_link.command_broker import CommandBroker
 
 
@@ -76,3 +77,25 @@ def test_field_command_guard_checks_admission_and_prewrite() -> None:
     missing=CommandBroker(writer=writes.append, source=lambda:"sitl", link_session=lambda:"s",
         authorization_generation=lambda:1, send_generation=lambda:1, monotonic_ns=lambda:1)
     assert missing.submit(_envelope(current[0])).reason_code == "field_version_checker_unavailable"
+
+
+def test_calibration_adapter_preserves_global_position_timestamp() -> None:
+    class CaptureSession:
+        _session_id = "session-1"
+        _session_revision = 4
+        state = "sampling"
+
+        def observe(self, snapshot, **_kwargs):
+            self.snapshot = snapshot
+            return {"ok": True, "state": "sampling", "session_id": self._session_id,
+                    "session_revision": self._session_revision}
+
+    session = CaptureSession()
+    adapter = FieldCalibrationTransactionAdapter(session, profiles=None)  # type: ignore[arg-type]
+    result = adapter.observe(GpsObservation(
+        observation_id="vehicle:123.5", observed_at_s=124.0, global_position_valid=True,
+        lat=34.0, lon=108.0, gps_fix_type=6, satellites_visible=12, gps_eph=0.5, gps_epv=0.7,
+        last_global_position_time=123.5,
+    ))
+    assert result.accepted
+    assert session.snapshot["last_global_position_time"] == 123.5
