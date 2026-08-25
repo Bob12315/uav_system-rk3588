@@ -125,7 +125,8 @@ docs/ai/guides/DEPLOY_RK3588.md
 4. 每完成一个阶段都验证结果。
 5. 遇到错误时先定位原因，不要直接重装系统或覆盖配置。
 6. 保留我已有的 Git 改动。
-7. 不输出或记录密码、SSH 私钥、Token 等秘密信息。
+7. 可以执行部署所需的 sudo 命令并触发终端密码提示；密码由我在安全提示中输入，
+   不要从对话读取、保存或回显密码，也不要把密码拼进命令。
 8. 最后告诉我：
    - 哪些环境已经配置完成；
    - app 是否正常；
@@ -159,18 +160,32 @@ AI 完成后，至少确认：
 - `ardupilot_gazebo`
 - 相关仿真依赖
 
-仿真环境安装可以参考下面的视频：
+笔记本安装由 AI Agent 按
+[`SETUP_LAPTOP_SITL.md`](../ai/guides/SETUP_LAPTOP_SITL.md) 自主完成。
+将下面的提示词复制给能够执行本地终端命令的 AI Agent。执行过程中出现 sudo 密码提示时，
+直接在终端提示中输入密码，不要把密码写入提示词：
+
+```text
+请帮我在当前笔记本上自主安装本项目的 SITL 仿真环境。
+
+请先阅读仓库中的：
+
+docs/ai/guides/SETUP_LAPTOP_SITL.md
+
+严格按该文件完成环境预检、Conda 项目环境、Gazebo Harmonic、ArduPilot Copter SITL、
+ardupilot_gazebo、GStreamer、联调验证和最终报告。已有环境只检查并补齐，不覆盖现有
+Conda、Git 改动、代理配置或 shell 配置。
+除必须由我决定的冲突或风险外，请自行执行安装并逐阶段验证，不要只给我命令清单。
+允许直接执行所需的 sudo 命令；需要认证时触发终端密码提示让我输入，
+不要读取、保存、回显密码，也不要把密码放进命令、日志或文件。
+```
+
+也可以参考下面的视频了解安装过程：
 
 > 📹 [仿真环境配置视频（Bilibili）](https://www.bilibili.com/video/BV18fzaB6E6q/)
 
-<!-- TODO:
-后续人工补充：
-- 推荐 Ubuntu 版本
-- ArduPilot 安装
-- Gazebo 安装
-- ardupilot_gazebo
-- 必要截图
--->
+安装提示词以官方 Gazebo、ArduPilot 文档和实际系统检查结果为准；视频中的版本或命令可能已经
+变化。
 
 环境安装完成后，下一章会介绍怎样真正启动和测试 SITL。
 
@@ -181,6 +196,7 @@ AI 完成后，至少确认：
 - [ ] RK3588 可以正常联网
 - [ ] 笔记本可以通过 SSH 登录 RK3588
 - [ ] 笔记本已经准备好 AI Coding Agent
+- [ ] 笔记本已按 `docs/ai/guides/SETUP_LAPTOP_SITL.md` 配置 SITL 环境
 - [ ] AI 已按照 `docs/ai/guides/DEPLOY_RK3588.md` 完成部署
 - [ ] app 可以正常运行
 - [ ] YOLO / RKNN 可以正常运行

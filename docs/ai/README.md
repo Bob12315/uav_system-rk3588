@@ -46,6 +46,7 @@ docs/ai/
 | Action、Mission、Effect、Run、scheduler 稳定核心 | [稳定核心层计划](plans/stable_core_refactor_plan.md) |
 | 开源、跨平台、安全和发布工作 | [开源与安全改造计划](plans/open_source_refactor_plan.md)及对应 `records/` 证据 |
 | RK3588 实机部署 | [RK3588 部署规范](guides/DEPLOY_RK3588.md) |
+| 笔记本 SITL 环境安装 | [笔记本 SITL 安装规范](guides/SETUP_LAPTOP_SITL.md) |
 
 证据记录按主题读取：
 

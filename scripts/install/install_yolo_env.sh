@@ -14,7 +14,9 @@ compatible="$(tr -d '\0' </proc/device-tree/compatible 2>/dev/null || true)"
 if ! printf '%s' "${compatible}" | grep -qi 'rk3588'; then
   die "requires RK3588 board identity in /proc/device-tree/compatible; ARM64 alone is not sufficient"
 fi
-[[ -e /dev/rknpu || -e /dev/rknpu0 || -d /sys/kernel/debug/rknpu ]] || die "requires RKNN NPU device/driver; check the RK3588 image and driver"
+# Some RK3588 BSPs expose the loaded NPU driver through DRM while debugfs is
+# root-only, so an unprivileged deployment user cannot probe debugfs directly.
+[[ -e /dev/rknpu || -e /dev/rknpu0 || -d /sys/kernel/debug/rknpu || -d /sys/module/rknpu ]] || die "requires RKNN NPU device/driver; check the RK3588 image and driver"
 
 cd "${REPO_ROOT}"
 if conda env list | awk '{print $1}' | grep -Fxq "${YOLO_ENV_NAME}"; then

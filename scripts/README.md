@@ -19,6 +19,18 @@
 | `scripts/audit_release_readiness.py` | P3 当前工作树与所有 Git refs 的只读发布阻塞审计 |
 | `scripts/smoke_test_envs.sh` | app 和 yolo conda 环境冒烟测试 |
 | `scripts/run_iris_gimbal_sitl.sh` | 启动 Iris + gimbal SITL 仿真 |
+| `scripts/find_ssh_hosts.py` | 在本机私有 `/24` 网段中查找能使用指定账户 SSH 登录的设备 |
+
+## 查找同网段 SSH 设备
+
+仅对自己有授权的私有网络使用。直接编辑 `scripts/find_ssh_hosts.py` 顶部的 `SSH_USERNAME`、`SSH_PASSWORD` 和 `TARGET_NETWORK`，无需另建配置文件。密码会明文保存在脚本中，提交 Git 前应清掉。
+
+```bash
+# 编辑脚本顶部配置后直接运行，无需再输入用户名或密码
+python3 scripts/find_ssh_hosts.py
+```
+
+默认端口是 22、并发数是 16、单次网络超时是 1 秒，也可在脚本顶部改。脚本会列出可确认在线的设备：SSH 端口开放，或 ping 有回应；并单独标明 SSH 登录成功的设备。禁用 ping 且未开放 SSH 的在线设备不会显示。脚本只支持一个私有 IPv4 `/24` 网段，避免误扩大探测范围。运行中密码会在一个仅当前用户可读的临时文件中传给 OpenSSH，并在结束后清除。
 
 ## 安装
 
