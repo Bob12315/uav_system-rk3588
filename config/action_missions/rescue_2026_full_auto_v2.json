@@ -12,13 +12,13 @@
         "altitude_tolerance_m": 0.35,
         "require_armed": true,
         "max_updates": 150,
-        "max_duration_s": 12,
+        "max_duration_s": 45,
         "priority": 2,
         "arm_priority": 1,
         "mode_priority": 2
       },
       "on_failed": {
-        "action": "continue"
+        "action": "fail"
       }
     },
     {

@@ -121,6 +121,27 @@ def test_takeoff_times_out_after_max_updates() -> None:
     assert result.reason == "takeoff_timeout"
 
 
+def test_takeoff_duration_starts_after_takeoff_effect(monkeypatch) -> None:
+    clock = [0.0]
+    monkeypatch.setattr("missions.common.actions.takeoff.time.monotonic", lambda: clock[0])
+    action = TakeoffAction()
+    action.start({"max_updates": 20, "max_duration_s": 1.0})
+    action.update({})
+    clock[0] = 5.0
+    action.update(GUIDED)
+    clock[0] = 10.0
+    action.update(GUIDED)
+    clock[0] = 15.0
+    action.update(GUIDED_ARMED)
+    clock[0] = 20.0
+    sent = action.update(GUIDED_ARMED)
+    assert sent.reason == "takeoff_sent"
+    clock[0] = 20.5
+    assert action.update({"relative_altitude": 0.0}).reason == "waiting_for_takeoff_altitude"
+    clock[0] = 21.1
+    assert action.update({"relative_altitude": 0.0}).reason == "takeoff_timeout"
+
+
 def test_takeoff_rejects_invalid_altitude() -> None:
     action = TakeoffAction()
     with pytest.raises(ValueError):

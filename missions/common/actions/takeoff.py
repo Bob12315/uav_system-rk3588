@@ -74,9 +74,13 @@ class TakeoffAction(ActionModule):
         self.update_count += 1
         context_data = context or {}
         altitude = self._current_altitude(context_data)
+        # Mode switching and arming are asynchronous MAVLink state changes.
+        # Their confirmation can be delayed by a slow SITL clock, so the
+        # altitude timeout must start only after the takeoff effect is issued.
+        # max_updates remains the bounded pre-takeoff guard.
         timed_out = self.update_count > self.max_updates
-        if self.max_duration_s is not None:
-            timed_out = time.monotonic() - self.started_monotonic_s >= self.max_duration_s
+        if self.max_duration_s is not None and self.takeoff_started_monotonic_s is not None:
+            timed_out = time.monotonic() - self.takeoff_started_monotonic_s >= self.max_duration_s
         if timed_out:
             self.phase = "failed"
             self.failed = True
@@ -164,6 +168,7 @@ class TakeoffAction(ActionModule):
         self.max_updates = 120
         self.max_duration_s: float | None = None
         self.started_monotonic_s: float | None = None
+        self.takeoff_started_monotonic_s: float | None = None
         self.priority = 2
         self.arm_priority = 1
         self.mode_priority = 2
@@ -179,6 +184,7 @@ class TakeoffAction(ActionModule):
             "priority": self.priority,
         }
         self.takeoff_sent = True
+        self.takeoff_started_monotonic_s = time.monotonic()
         detail = self._detail(altitude, phase="takeoff", context=context)
         self.last_detail = detail
         self.phase = "wait_altitude"

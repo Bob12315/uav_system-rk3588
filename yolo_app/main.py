@@ -91,9 +91,16 @@ def main() -> int:
             image_height, image_width = frame.shape[:2]
 
             tracks = tracker.run(frame)
+            inference_metrics = tracker.last_metrics_ms
             frame_count += 1
             fps = frame_count / max(time.perf_counter() - start_time, 1e-9)
-            latency_ms = max(0.0, (time.time() - packet.timestamp) * 1000.0)
+            # Producer and consumer run on the same board.  Use the monotonic
+            # capture timestamp so NTP wall-clock corrections cannot turn into
+            # fake video latency.
+            frame_age_ms = max(
+                0.0,
+                (time.monotonic_ns() - packet.captured_at_monotonic_ns) / 1_000_000.0,
+            )
             commands = command_receiver.poll()
             for command in commands:
                 if command_receiver.is_expired(command):
@@ -149,7 +156,10 @@ def main() -> int:
                     current_target=current_target,
                     locked_track_id=target_manager.locked_track_id,
                     fps=fps,
-                    latency_ms=latency_ms,
+                    frame_age_ms=frame_age_ms,
+                    wait_frame_ms=packet.wait_frame_ms,
+                    source_read_ms=packet.source_read_ms,
+                    npu_ms=inference_metrics["npu"],
                 )
                 if cfg.show:
                     cv2.imshow(cfg.window_name, annotated)
@@ -165,7 +175,12 @@ def main() -> int:
                     writer.write(annotated)
             if frame_count == 1 or frame_count % 60 == 0:
                 print(
-                    f"frame={frame_count} fps={fps:.1f} pipeline_ms={latency_ms:.1f} tracks={len(tracks)}",
+                    f"frame={frame_count} fps={fps:.1f} wait_frame_ms={packet.wait_frame_ms:.1f} "
+                    f"source_read_decode_ms={packet.source_read_ms:.1f} "
+                    f"preprocess_ms={inference_metrics['preprocess']:.1f} "
+                    f"npu_ms={inference_metrics['npu']:.1f} "
+                    f"postprocess_ms={inference_metrics['postprocess']:.1f} "
+                    f"frame_age_ms={frame_age_ms:.1f} tracks={len(tracks)}",
                     flush=True,
                 )
     except KeyboardInterrupt:

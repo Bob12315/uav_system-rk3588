@@ -89,6 +89,9 @@ class GpsObservation:
     satellites_visible: int
     gps_eph: float
     gps_epv: float
+    # Source timestamp from GLOBAL_POSITION_INT.  This is distinct from the
+    # local observation time and lets calibration reject stale GPS samples.
+    last_global_position_time: float | None = None
 
 
 class CalibrationMode(str, Enum):
