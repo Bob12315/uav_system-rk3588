@@ -11,12 +11,12 @@
 # - real：只连接真机。
 # - sitl：只连接 SITL。
 # - dual：同时连接真机与 SITL。
-data_source: sitl
+data_source: real
 
 # 当前向上层暴露状态、接收控制命令的数据源。
 # 可选值：real / sitl。
 # data_source=dual 时可以在运行期间切换 active_source。
-active_source: sitl
+active_source: real
 
 # -----------------------------------------------------------------------------
 # SITL 端点
@@ -86,23 +86,30 @@ action_retry_interval_sec: 0.5
 
 # 超过 heartbeat_timeout_sec 未收到心跳，则认为链路中断。
 # 超过 rx_timeout_sec 未收到任何消息，则认为链路异常。
-heartbeat_timeout_sec: 10.0
-rx_timeout_sec: 5.0
+heartbeat_timeout_sec: 3.0
+rx_timeout_sec: 2.0
 
 # 断线重连间隔与收发线程空闲轮询间隔，单位：秒。
 reconnect_interval_sec: 2.0
 receiver_idle_sleep_sec: 0.01
 sender_idle_sleep_sec: 0.01
 
+# Exactly one command writer backend must be enabled. The v2 broker owns all
+# one-shot and continuous production writes; legacy remains an offline rollback option.
+legacy_writer_enabled: false
+v2_writer_enabled: true
+ack_quarantine_ms: 250
+
 # -----------------------------------------------------------------------------
 # MAVLink 消息频率
 # -----------------------------------------------------------------------------
 # true：启动后通过 MAV_CMD_SET_MESSAGE_INTERVAL 请求常用消息频率。
-request_message_intervals: false
+request_message_intervals: true
 
 # 各 MAVLink 消息的目标接收频率，单位：Hz。
 message_interval_hz:
   HEARTBEAT: 1
+  EXTENDED_SYS_STATE: 2
   ATTITUDE: 10
   GLOBAL_POSITION_INT: 10
   LOCAL_POSITION_NED: 10
@@ -136,7 +143,7 @@ state_udp_port: 5010
 
 # true：telemetry 独立运行时默认启用 curses 终端 UI。
 # app 总控进程使用 config/app.yaml 中的 ui 配置。
-ui_enabled: true
+ui_enabled: false
 
 # 可选值：DEBUG / INFO / WARNING / ERROR。
 log_level: INFO

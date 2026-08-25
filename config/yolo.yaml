@@ -27,7 +27,7 @@ classes: []
 # - 本地摄像头：/dev/videoX 或 /dev/v4l/by-id/<device>
 # - UDP H264/RTP：端口号字符串，例如 "5600"
 # - RTSP、本地视频文件或完整 GStreamer pipeline
-source: "5600"
+source: /dev/video41
 
 # 本地摄像头采集参数。
 camera_width: 640
@@ -56,6 +56,8 @@ max_lost_frames: 5
 # 向 app 发布当前目标与场景检测结果。
 udp_ip: "127.0.0.1"
 udp_port: 5005
+max_datagram_bytes: 60000
+max_detections: 128
 
 # true：接收 Web UI 或终端 UI 发出的目标切换、锁定、解锁命令。
 command_enabled: true
@@ -97,4 +99,4 @@ save_video: false
 save_path: "../runtime/videos/track_output.mp4"
 
 # Web UI 原始摄像头录制目录。录制写入未标注的实际读取帧。
-recording_dir: "~/uav_recordings"
+recording_dir: "../runtime/videos"
