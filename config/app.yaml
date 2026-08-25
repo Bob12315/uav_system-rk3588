@@ -51,7 +51,7 @@ ui:
 
   # 默认只监听回环。非回环部署必须显式修改并配置 UAV_WEB_OPERATOR_PASSWORD
   # 或 UAV_WEB_OPERATOR_PASSWORD_FILE，否则启动失败关闭。
-  web_host: "127.0.0.1"
+  web_host: "0.0.0.0"
   web_port: 8080
 
   # 单操作者认证。秘密只从环境变量或环境变量指向的权限文件加载。
@@ -59,8 +59,8 @@ ui:
   credential_env: "UAV_WEB_OPERATOR_PASSWORD"
   credential_file_env: "UAV_WEB_OPERATOR_PASSWORD_FILE"
   session_ttl_sec: 28800
-  allowed_hosts: ["127.0.0.1", "localhost", "[::1]"]
-  allowed_origins: ["http://127.0.0.1:8080", "http://localhost:8080", "http://[::1]:8080"]
+  allowed_hosts: ["127.0.0.1", "localhost", "[::1]", "10.101.31.108"]
+  allowed_origins: ["http://127.0.0.1:8080", "http://localhost:8080", "http://[::1]:8080", "http://10.101.31.108:8080"]
 
   # 操作审计日志。运行产物统一写入 runtime/，不提交 Git。
   audit_log_path: "runtime/logs/web_ui/audit.jsonl"

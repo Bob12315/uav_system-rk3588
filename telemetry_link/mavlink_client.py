@@ -33,8 +33,10 @@ class MavlinkClient:
         self.local_component = 0
         self.connection_string = ""
         self.is_sitl = endpoint.name == "sitl"
+        self.bootstrap_heartbeat: Any | None = None
 
     def connect(self) -> None:
+        self.bootstrap_heartbeat = None
         if self.endpoint.connection_type == "serial":
             connection_string = self.endpoint.serial_port
             baud = self.endpoint.baudrate
@@ -89,6 +91,7 @@ class MavlinkClient:
             heartbeat = None
         if heartbeat is None:
             raise TimeoutError(f"heartbeat timeout after {timeout:.1f}s")
+        self.bootstrap_heartbeat = heartbeat
         self.target_system = int(heartbeat.get_srcSystem())
         self.autopilot_component = int(heartbeat.get_srcComponent())
         self.target_component = 0
@@ -104,6 +107,30 @@ class MavlinkClient:
             self.target_system,
             self.target_component,
         )
+
+    def bootstrap_vehicle_state(self) -> dict[str, object] | None:
+        """Return the autopilot state learned while establishing the link.
+
+        ``wait_heartbeat`` consumes the first heartbeat before the receiver
+        thread is running.  Preserve that observation so a newly connected
+        action runtime does not start in ``UNKNOWN`` mode until the next
+        heartbeat arrives.
+        """
+        heartbeat = self.bootstrap_heartbeat
+        if heartbeat is None:
+            return None
+        mode_map = {
+            0: "STABILIZE", 1: "ACRO", 2: "ALT_HOLD", 3: "AUTO", 4: "GUIDED",
+            5: "LOITER", 6: "RTL", 7: "CIRCLE", 9: "LAND", 17: "BRAKE",
+            20: "GUIDED_NOGPS", 21: "SMART_RTL",
+        }
+        mode = mode_map.get(int(getattr(heartbeat, "custom_mode", 0)),
+                            f"MODE_{int(getattr(heartbeat, 'custom_mode', 0))}")
+        return {
+            "armed": bool(int(getattr(heartbeat, "base_mode", 0)) & 128),
+            "mode": mode,
+            "control_allowed": mode in {"GUIDED", "GUIDED_NOGPS", "OFFBOARD"},
+        }
 
     def _is_autopilot_heartbeat(self, message) -> bool:
         autopilot = int(getattr(message, "autopilot", mavutil.mavlink.MAV_AUTOPILOT_INVALID))

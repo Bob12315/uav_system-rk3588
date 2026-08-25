@@ -559,6 +559,7 @@ class SystemRunner:
                     satellites_visible=int(snapshot.get("satellites_visible", 0)),
                     gps_eph=self._float_or_none(snapshot.get("gps_eph")) or -1.0,
                     gps_epv=self._float_or_none(snapshot.get("gps_epv")) or -1.0,
+                    last_global_position_time=self._float_or_none(snapshot.get("last_global_position_time")),
                 ))
             if result.get("auto_finalized") is True:
                 if result.get("ok") is True:

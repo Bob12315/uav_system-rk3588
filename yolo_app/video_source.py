@@ -35,11 +35,15 @@ class VideoSource:
         self.cap: cv2.VideoCapture | None = None
         self.udp_process: subprocess.Popen | None = None
         self.udp_frame_shape: tuple[int, int, int] | None = None
-        self.latest_frame = latest_frame and source.startswith("/dev/video")
+        # Keep the producer draining both a V4L2 camera and the UDP bridge.
+        # The consumer always receives one copy of the most recently completed
+        # frame, so a slow detector cannot accumulate old video in Python.
+        self.latest_frame = latest_frame and (source.startswith("/dev/video") or source.isdigit())
         self.condition = threading.Condition()
         self.camera_frame = None
         self.camera_timestamp = 0.0
         self.camera_monotonic_ns = 0
+        self.camera_source_read_ms = 0.0
         self.camera_sequence = 0
         self.consumed_sequence = 0
         self.stopped = False
@@ -54,27 +58,39 @@ class VideoSource:
             if self.latest_frame:
                 self.reader_thread = threading.Thread(target=self._camera_reader, daemon=True)
                 self.reader_thread.start()
+        if source.isdigit() and self.latest_frame:
+            self.reader_thread = threading.Thread(target=self._udp_reader, daemon=True)
+            self.reader_thread.start()
 
     def read(self) -> FramePacket | None:
-        timestamp = time.time()
-        captured_at_monotonic_ns = time.monotonic_ns()
+        wait_started = time.perf_counter()
         if self.latest_frame:
-            frame, timestamp, captured_at_monotonic_ns = self._read_latest_frame()
+            frame, timestamp, captured_at_monotonic_ns, source_read_ms = self._read_latest_frame()
             if frame is None:
                 return None
         elif self.udp_process is not None:
+            source_read_started = time.perf_counter()
             frame = self._read_udp_frame()
             if frame is None:
                 return None
+            source_read_ms = (time.perf_counter() - source_read_started) * 1000.0
+            timestamp = time.time()
+            captured_at_monotonic_ns = time.monotonic_ns()
         else:
             if self.cap is None:
                 return None
+            source_read_started = time.perf_counter()
             ok, frame = self.cap.read()
             if not ok or frame is None:
                 return None
+            source_read_ms = (time.perf_counter() - source_read_started) * 1000.0
+            timestamp = time.time()
+            captured_at_monotonic_ns = time.monotonic_ns()
 
         packet = FramePacket(frame=frame, frame_id=self.frame_id, timestamp=timestamp,
-                             captured_at_monotonic_ns=captured_at_monotonic_ns)
+                             captured_at_monotonic_ns=captured_at_monotonic_ns,
+                             wait_frame_ms=(time.perf_counter() - wait_started) * 1000.0,
+                             source_read_ms=source_read_ms)
         self.frame_id += 1
         return packet
 
@@ -122,6 +138,7 @@ class VideoSource:
 
     def _camera_reader(self) -> None:
         while not self.stopped and self.cap is not None:
+            read_started = time.perf_counter()
             ok, frame = self.cap.read()
             if not ok or frame is None:
                 continue
@@ -129,6 +146,23 @@ class VideoSource:
                 self.camera_frame = frame
                 self.camera_timestamp = time.time()
                 self.camera_monotonic_ns = time.monotonic_ns()
+                self.camera_source_read_ms = (time.perf_counter() - read_started) * 1000.0
+                self.camera_sequence += 1
+                self.condition.notify_all()
+
+    def _udp_reader(self) -> None:
+        while not self.stopped:
+            read_started = time.perf_counter()
+            frame = self._read_udp_frame()
+            if frame is None:
+                if not self.stopped:
+                    time.sleep(0.01)
+                continue
+            with self.condition:
+                self.camera_frame = frame
+                self.camera_timestamp = time.time()
+                self.camera_monotonic_ns = time.monotonic_ns()
+                self.camera_source_read_ms = (time.perf_counter() - read_started) * 1000.0
                 self.camera_sequence += 1
                 self.condition.notify_all()
 
@@ -139,9 +173,10 @@ class VideoSource:
             ):
                 self.condition.wait(timeout=1.0)
             if self.camera_frame is None:
-                return None, time.time(), time.monotonic_ns()
+                return None, time.time(), time.monotonic_ns(), 0.0
             self.consumed_sequence = self.camera_sequence
-            return self.camera_frame.copy(), self.camera_timestamp, self.camera_monotonic_ns
+            return (self.camera_frame.copy(), self.camera_timestamp,
+                    self.camera_monotonic_ns, self.camera_source_read_ms)
 
     def _open_udp_port_source(self, udp_port: int) -> None:
         helper_path = Path(__file__).with_name("udp_gst_bridge_helper.py")

@@ -28,6 +28,10 @@ class TrackerRunner:
     def run(self, frame) -> list[Track]:
         return self.iou_tracker.update(self.detector.detect(frame))
 
+    @property
+    def last_metrics_ms(self) -> dict[str, float]:
+        return self.detector.last_metrics_ms
+
     def release(self) -> None:
         self.detector.release()
 

@@ -8,10 +8,15 @@ import cv2
 
 
 def build_pipeline(port: int) -> str:
+    # This is a control/perception input: displaying the newest frame is more
+    # useful than preserving every delayed RTP packet.  Keep the jitter buffer
+    # bounded and let the downstream appsink discard stale decoded frames.
     return (
         f"udpsrc port={port} "
         "! application/x-rtp,media=video,encoding-name=H264,payload=96 "
+        "! rtpjitterbuffer latency=0 drop-on-latency=true "
         "! rtph264depay "
+        "! queue leaky=downstream max-size-buffers=1 max-size-bytes=0 max-size-time=0 "
         "! avdec_h264 "
         "! videoconvert "
         "! video/x-raw,format=BGR "

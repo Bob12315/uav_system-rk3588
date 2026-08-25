@@ -21,7 +21,10 @@ class Annotator:
         current_target: CurrentTarget,
         locked_track_id: int | None,
         fps: float = 0.0,
-        latency_ms: float = 0.0,
+        frame_age_ms: float = 0.0,
+        wait_frame_ms: float = 0.0,
+        source_read_ms: float = 0.0,
+        npu_ms: float = 0.0,
     ):
         image = frame.copy()
         h, w = image.shape[:2]
@@ -34,7 +37,8 @@ class Annotator:
                 if is_locked:
                     self._draw_target_vector(image, w, h, track)
 
-        self._draw_status(image, current_target, locked_track_id, fps, latency_ms)
+        self._draw_status(image, current_target, locked_track_id, fps, frame_age_ms,
+                          wait_frame_ms, source_read_ms, npu_ms)
         return image
 
     def _draw_track(self, image, track: Track, is_locked: bool) -> None:
@@ -55,10 +59,14 @@ class Annotator:
         current_target: CurrentTarget,
         locked_track_id: int | None,
         fps: float,
-        latency_ms: float,
+        frame_age_ms: float,
+        wait_frame_ms: float,
+        source_read_ms: float,
+        npu_ms: float,
     ) -> None:
         rows = [
-            f"NPU RKNN: {fps:.1f} FPS  {latency_ms:.1f} ms",
+            f"NPU RKNN: {fps:.1f} FPS  frame age {frame_age_ms:.1f} ms",
+            f"wait {wait_frame_ms:.1f}  source read/decode {source_read_ms:.1f}  NPU {npu_ms:.1f} ms",
             f"state: {current_target.tracking_state}",
             f"locked_track_id: {locked_track_id if locked_track_id is not None else -1}",
             f"lost_count: {current_target.lost_count}",

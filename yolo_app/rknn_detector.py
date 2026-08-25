@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import time
 
 import cv2
 import numpy as np
@@ -47,10 +48,14 @@ class RknnDetector:
         if self.rknn.init_runtime(core_mask=RKNNLite.NPU_CORE_0_1_2) != 0:
             self.rknn.release()
             raise RuntimeError("failed to initialize RKNN runtime on NPU_CORE_0_1_2")
+        self.last_metrics_ms = {"preprocess": 0.0, "npu": 0.0, "postprocess": 0.0}
 
     def detect(self, frame) -> list[Detection]:
+        started = time.perf_counter()
         data, scale, pad_x, pad_y = letterbox(frame)
+        preprocessed = time.perf_counter()
         outputs = self.rknn.inference(inputs=[data])
+        inferred = time.perf_counter()
         if outputs is None:
             raise KeyboardInterrupt
         detections = postprocess(
@@ -63,6 +68,12 @@ class RknnDetector:
             iou=self.iou_thres,
             class_names=self.class_names,
         )
+        postprocessed = time.perf_counter()
+        self.last_metrics_ms = {
+            "preprocess": (preprocessed - started) * 1000.0,
+            "npu": (inferred - preprocessed) * 1000.0,
+            "postprocess": (postprocessed - inferred) * 1000.0,
+        }
         if not self.classes:
             return detections
         return [detection for detection in detections if detection.class_id in self.classes]

@@ -140,6 +140,10 @@ class FramePacket:
     frame_id: int
     timestamp: float
     captured_at_monotonic_ns: int = 0
+    # Time spent by the consumer waiting for a fresh frame.  For a UDP source
+    # this is deliberately separate from the producer's GStreamer read/decode.
+    wait_frame_ms: float = 0.0
+    source_read_ms: float = 0.0
 
 
 def _normalize_error(value: float, extent: int) -> float:

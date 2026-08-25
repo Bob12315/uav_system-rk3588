@@ -133,6 +133,17 @@ class SourceRuntime:
                     transport=self.endpoint.connection_type,
                     now=time.time(),
                 )
+                bootstrap_state = getattr(self.client, "bootstrap_vehicle_state", lambda: None)()
+                if isinstance(bootstrap_state, dict):
+                    bootstrap_now = time.time()
+                    self.state_cache.update_drone_state(
+                        connected=True, stale=False, last_heartbeat_time=bootstrap_now,
+                        **bootstrap_state,
+                    )
+                    self.state_cache.update_link(
+                        connected=True, reconnecting=False, last_rx_time=bootstrap_now,
+                        last_heartbeat_time=bootstrap_now, status_text="connected",
+                    )
                 if self.cfg.v2_writer_enabled:
                     self.sender = CommandSender(
                         self.client, self.command_queue, self.state_cache, self.cfg,

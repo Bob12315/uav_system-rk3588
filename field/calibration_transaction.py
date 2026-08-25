@@ -53,6 +53,7 @@ class FieldCalibrationTransactionAdapter:
             "lon": observation.lon, "gps_fix_type": observation.gps_fix_type,
             "satellites_visible": observation.satellites_visible, "gps_eph": observation.gps_eph,
             "gps_epv": observation.gps_epv,
+            "last_global_position_time": observation.last_global_position_time,
         }, observed_at_s=observation.observed_at_s, observation_id=observation.observation_id,
            expected_session_revision=expected_session_revision)
         return self._from_result(observation.observation_id, result)

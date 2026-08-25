@@ -11,12 +11,12 @@
 # - real：只连接真机。
 # - sitl：只连接 SITL。
 # - dual：同时连接真机与 SITL。
-data_source: real
+data_source: sitl
 
 # 当前向上层暴露状态、接收控制命令的数据源。
 # 可选值：real / sitl。
 # data_source=dual 时可以在运行期间切换 active_source。
-active_source: real
+active_source: sitl
 
 # -----------------------------------------------------------------------------
 # SITL 端点
@@ -86,7 +86,7 @@ action_retry_interval_sec: 0.5
 
 # 超过 heartbeat_timeout_sec 未收到心跳，则认为链路中断。
 # 超过 rx_timeout_sec 未收到任何消息，则认为链路异常。
-heartbeat_timeout_sec: 3.0
+heartbeat_timeout_sec: 10.0
 rx_timeout_sec: 2.0
 
 # 断线重连间隔与收发线程空闲轮询间隔，单位：秒。
@@ -104,7 +104,7 @@ ack_quarantine_ms: 250
 # MAVLink 消息频率
 # -----------------------------------------------------------------------------
 # true：启动后通过 MAV_CMD_SET_MESSAGE_INTERVAL 请求常用消息频率。
-request_message_intervals: true
+request_message_intervals: false
 
 # 各 MAVLink 消息的目标接收频率，单位：Hz。
 message_interval_hz:
