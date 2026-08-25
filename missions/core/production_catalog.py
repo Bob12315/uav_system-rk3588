@@ -27,18 +27,14 @@ from .native_one_shot_actions import (
     speed_params_codec,
     takeoff_factory,
     takeoff_params_codec,
-    yaw_factory,
-    yaw_params_codec,
 )
 
 
 _EFFECTS_BY_ACTION = {
     "takeoff": frozenset({EffectKind.SET_FLIGHT_MODE, EffectKind.ARM, EffectKind.TAKEOFF}),
     "land": frozenset({EffectKind.LAND}),
-    "yaw_align": frozenset({EffectKind.CONDITION_YAW}),
     "change_speed": frozenset({EffectKind.CHANGE_SPEED}),
-    "goto_waypoint": frozenset({EffectKind.LOCAL_POSITION_TARGET, EffectKind.GLOBAL_POSITION_TARGET}),
-    "manual_step": frozenset({EffectKind.LOCAL_POSITION_TARGET}),
+    "goto_waypoint": frozenset({EffectKind.GLOBAL_POSITION_TARGET}),
     "align_descend": frozenset({EffectKind.BODY_VELOCITY_TARGET}),
     "payload_release": frozenset({EffectKind.SET_SERVO}),
     "target_lock": frozenset({EffectKind.SET_VISION_TARGET}),
@@ -49,7 +45,6 @@ _EFFECTS_BY_ACTION = {
 _NATIVE_ONE_SHOT = {
     "takeoff": (takeoff_factory, takeoff_params_codec),
     "land": (land_factory, empty_params_codec),
-    "yaw_align": (yaw_factory, yaw_params_codec),
     "change_speed": (speed_factory, speed_params_codec),
 }
 

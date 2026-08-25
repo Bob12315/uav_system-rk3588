@@ -30,8 +30,7 @@ takeoff
 → change_speed (2 m/s)
 → change_speed (1 m/s)
 → goto_waypoint (recon entry)
-→ 5 × goto_waypoint（分项模板在指定航段插入 recon_score_view）
-→ recon_rank_views（有评分视图时）
+→ 5 × goto_waypoint
 → change_speed (2 m/s)
 → goto_waypoint (return home)
 → goto_waypoint (descend home)

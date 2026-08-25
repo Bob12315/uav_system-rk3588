@@ -83,16 +83,6 @@
       }
     },
     {
-      "name": "recon_score_view",
-      "label": "recon_scan_score_2",
-      "save_as": "recon_scan_view_2",
-      "params": {
-        "capture_updates": 4,
-        "max_updates": 40,
-        "min_sign_confidence": 0.35
-      }
-    },
-    {
       "name": "goto_waypoint",
       "label": "recon_scan_goto_3",
       "on_failed": {
@@ -136,27 +126,6 @@
         "require_velocity_valid": false,
         "key": "recon_scan_goto_4",
         "priority": 5
-      }
-    },
-    {
-      "name": "recon_score_view",
-      "label": "recon_scan_score_4",
-      "save_as": "recon_scan_view_4",
-      "params": {
-        "capture_updates": 4,
-        "max_updates": 40,
-        "min_sign_confidence": 0.35
-      }
-    },
-    {
-      "name": "recon_rank_views",
-      "label": "recon_scan_ranking",
-      "save_as": "recon_scan_ranking",
-      "params": {
-        "views": [
-          "$recon_scan_view_2",
-          "$recon_scan_view_4"
-        ]
       }
     },
     {

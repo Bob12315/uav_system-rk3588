@@ -76,45 +76,6 @@ class MissionApplicationService:
             )
             return status
 
-    def manual_step_move(
-        self,
-        direction: str,
-        step_m: float,
-        *,
-        authorize: bool = False,
-        operator: str = "system",
-        target_source: str | None = None,
-    ) -> ActionResult:
-        """Start and tick the formal manual_step Action through all safety gates."""
-        manager = None
-        with self.action_runtime_lock:
-            if self.action_runtime.runner.state == "running":
-                self.action_runtime.stop(link_manager=manager, hold_current=False)
-            if self.action_mission_orchestrator is not None and self.action_mission_orchestrator.running:
-                self.action_mission_orchestrator.stop(link_manager=manager, hold_current=False)
-                self._stop_action_mission_recording(trigger="manual_step_interruption")
-            self.action_runtime.dispatcher.clear_authorization("manual_step_replaces_previous_run")
-        result = self.action_lab_start_action(
-            "manual_step",
-            {"direction": direction, "step_m": step_m},
-            authorize=authorize,
-            operator=operator,
-            target_source=target_source,
-        )
-        if result.failed:
-            return result
-        self.action_lab_tick()
-        payload = self.action_runtime.last_result
-        if not isinstance(payload, dict):
-            return ActionResult(failed=True, reason="manual_step_did_not_produce_result")
-        return ActionResult(
-            effects=ActionResult.typed(list(payload.get("actions") or [])),
-            done=bool(payload.get("done", False)),
-            failed=bool(payload.get("failed", False)),
-            reason=str(payload.get("reason", "")),
-            detail=dict(payload.get("detail") or {}),
-        )
-
     def action_lab_status_payload(self) -> dict[str, object]:
         return self.action_runtime.status_payload(
             send_commands=bool(self.controller_switches.snapshot().send_commands),
@@ -273,10 +234,8 @@ class MissionApplicationService:
         if orchestrator is None:
             return requirements
         for step in orchestrator.steps:
-            waypoint_mode = str(step.params.get("waypoint_mode", "")).strip().lower()
-            if waypoint_mode != "field":
-                continue
-            requirements["needs_gps"] = True
+            if step.name == "goto_waypoint":
+                requirements["needs_gps"] = True
         return requirements
 
     def _field_gps_mission_preflight_reason(self) -> str | None:

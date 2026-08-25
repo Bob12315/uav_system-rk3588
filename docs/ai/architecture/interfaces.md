@@ -7,7 +7,7 @@ snapshot capture、一次 RunCoordinator advance、driver 外部 Port 调用、�
 publication。Action 只返回 typed Effect；Mission reducer 只返回 typed intent；Coordinator 不调用硬件 Port；
 CoreScheduler 是新路径唯一允许持有 CoreCycleDriver 的 cadence owner。
 
-`takeoff`、`land`、`yaw_align`、`change_speed` 已有原生 feedback-driven ActionModule。其余 Action 仍经过明确
+`takeoff`、`land`、`change_speed` 已有原生 feedback-driven ActionModule。其余 Action 仍经过明确
 compatibility adapter，所以下列 legacy 接口仍描述当前 production，而不是最终冻结接口。
 
 ## ActionModule

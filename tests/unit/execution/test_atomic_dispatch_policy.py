@@ -5,7 +5,6 @@ from execution.policy import ACTION_DISPATCH_POLICY
 
 def test_atomic_actions_own_the_minimum_required_capabilities() -> None:
     expected = {
-        "local_position": {"goto_waypoint", "manual_step"},
         "global_goto": {"goto_waypoint"},
         "flight_command": {"align_descend", "payload_release"},
         "body_velocity": {"align_descend"},
@@ -14,7 +13,6 @@ def test_atomic_actions_own_the_minimum_required_capabilities() -> None:
         "arm": {"takeoff"},
         "takeoff": {"takeoff"},
         "land": {"land"},
-        "condition_yaw": {"yaw_align"},
         "change_speed": {"change_speed"},
         "yolo_lock_target": {"target_lock", "gps_target_lock"},
         "clear_continuous_commands": {"align_descend"},

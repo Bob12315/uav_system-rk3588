@@ -3,576 +3,239 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from contracts.frames import GLOBAL_RELATIVE_ALT_INT
 from field.coordinates import field_to_gps
-from field.models import FieldReference
-from contracts.frames import GLOBAL_RELATIVE_ALT_INT, LOCAL_NED
+from field.models import FieldReference, FieldReferenceError
 
 from .base import ActionModule
 from .result import ActionResult
 
 
 class GotoWaypointAction(ActionModule):
+    """Convert a FIELD target to GPS and fly at a fixed FIELD-relative yaw.
+
+    This Action emits only ``global_goto``. ``field_yaw_deg`` is clockwise from
+    FIELD +Y; it is converted to the north-referenced yaw used by MAVLink.
+    ``lat``/``lon`` are accepted only as a migration input for a target already
+    resolved by FIELD, and still use the frozen Field heading for yaw.
+    """
+
     def __init__(self) -> None:
         self.reset()
 
     def start(self, params: dict[str, Any] | None = None) -> None:
         data = params or {}
         self.skip_if_invalid_target = bool(data.get("skip_if_invalid_target", False))
-        x_raw = data.get("x")
-        y_raw = data.get("y")
-        altitude_raw = data.get("altitude_m")
-        # GLOBAL lat/lon input support (new path)
-        lat_raw = data.get("lat")
-        lon_raw = data.get("lon")
-        default_target_frame = (
-            "global"
-            if str(data.get("waypoint_mode", "absolute")).strip().lower() == "field"
-            else "local"
-        )
-        target_frame = str(data.get("target_frame", default_target_frame)).strip().lower()
-        if target_frame not in {"local", "global"}:
-            raise ValueError("target_frame must be local or global")
-        use_global_latlon = target_frame == "global" and lat_raw is not None and lon_raw is not None
-        # when skip enabled, check target validity before float conversion
-        if self.skip_if_invalid_target:
-            target = data.get("target")
-            if isinstance(target, dict) and target.get("valid") is False:
-                self._skipped = True
-                self.started = True
-                self.stopped = False
-                return
-            target_valid = data.get("target_valid")
-            if target_valid is False:
-                self._skipped = True
-                self.started = True
-                self.stopped = False
-                return
-            raw_x_check = lat_raw if use_global_latlon else x_raw
-            raw_y_check = lon_raw if use_global_latlon else y_raw
-            if self._is_invalid_coord(raw_x_check) or self._is_invalid_coord(raw_y_check) or self._is_invalid_coord(altitude_raw):
-                self._skipped = True
-                self.started = True
-                self.stopped = False
-                return
-
-        if use_global_latlon:
-            x = self._required_float({"v": lat_raw}, "v")
-            y = self._required_float({"v": lon_raw}, "v")
-        else:
-            x = self._required_float(data, "x")
-            y = self._required_float(data, "y")
-        altitude_m = self._required_float(data, "altitude_m")
-        if altitude_m <= 0.0:
+        self.altitude_m = self._required_float(data, "altitude_m")
+        if self.altitude_m <= 0.0:
             raise ValueError("altitude_m must be positive")
-        waypoint_mode = str(data.get("waypoint_mode", "absolute")).strip().lower()
-        if waypoint_mode not in {"absolute", "field"}:
-            raise ValueError("waypoint_mode must be absolute or field")
-        if waypoint_mode == "field" and target_frame != "global":
-            raise ValueError("FIELD waypoints require target_frame=global in schema v3")
+        if data.get("lat") is not None and data.get("lon") is not None:
+            self.input_kind = "resolved_gps"
+            self.lat = self._required_float(data, "lat")
+            self.lon = self._required_float(data, "lon")
+            if not -90.0 <= self.lat <= 90.0 or not -180.0 <= self.lon <= 180.0:
+                raise ValueError("GPS target is out of WGS84 range")
+            self.field_x_m = self.field_y_m = None
+        else:
+            self.input_kind = "field"
+            # x/y are temporary spelling compatibility; they mean FIELD, never LOCAL_NED.
+            self.field_x_m = self._required_float(data, "field_x_m", "x")
+            self.field_y_m = self._required_float(data, "field_y_m", "y")
+            self.lat = self.lon = None
 
-        yaw_mode = str(data.get("yaw_mode", "arm_heading")).strip().lower()
-        if yaw_mode not in {"hold", "fixed", "arm_heading", "field_heading"}:
-            raise ValueError("yaw_mode must be hold, fixed, arm_heading, or field_heading")
-        yaw_rad = None
-        if yaw_mode == "fixed":
-            yaw_rad = self._required_float(data, "yaw_rad")
-
-        tolerance_xy_m = float(data.get("tolerance_xy_m", 0.3))
-        tolerance_z_m = float(data.get("tolerance_z_m", 0.3))
-        if tolerance_xy_m <= 0.0:
-            raise ValueError("tolerance_xy_m must be positive")
-        if tolerance_z_m <= 0.0:
-            raise ValueError("tolerance_z_m must be positive")
-
-        min_hold_updates = int(data.get("min_hold_updates", 1))
-        if min_hold_updates < 1:
-            min_hold_updates = 1
-        require_velocity_valid = bool(data.get("require_velocity_valid", False))
-        max_horizontal_speed_mps = float(data.get("max_horizontal_speed_mps", 0.15))
-        max_vertical_speed_mps = float(data.get("max_vertical_speed_mps", 0.10))
-        for name, value in (
-            ("max_horizontal_speed_mps", max_horizontal_speed_mps),
-            ("max_vertical_speed_mps", max_vertical_speed_mps),
-        ):
-            if not math.isfinite(value) or value < 0.0:
-                raise ValueError(f"{name} must be finite and non-negative")
-
-        self.target_x = x
-        self.target_y = y
-        self.altitude_m = altitude_m
-        self.target_z = -altitude_m
-        self.waypoint_mode = waypoint_mode
-        self.target_frame = target_frame
-        self.yaw_mode = yaw_mode
-        self.yaw_rad = yaw_rad
-        default_frame = GLOBAL_RELATIVE_ALT_INT if target_frame == "global" else LOCAL_NED
-        self.frame = int(data.get("frame", default_frame))
-        self.tolerance_xy_m = tolerance_xy_m
-        self.tolerance_z_m = tolerance_z_m
-        self.min_hold_updates = min_hold_updates
-        self.require_velocity_valid = require_velocity_valid
-        self.max_horizontal_speed_mps = max_horizontal_speed_mps
-        self.max_vertical_speed_mps = max_vertical_speed_mps
+        self.field_yaw_deg = self._finite_float(
+            data.get("field_yaw_deg", data.get("yaw_deg", 0.0)), "field_yaw_deg"
+        )
+        self.tolerance_xy_m = self._positive_float(data.get("tolerance_xy_m", 0.3), "tolerance_xy_m")
+        self.tolerance_z_m = self._positive_float(data.get("tolerance_z_m", 0.3), "tolerance_z_m")
+        self.min_hold_updates = max(1, int(data.get("min_hold_updates", 1)))
+        self.require_velocity_valid = bool(data.get("require_velocity_valid", False))
+        self.max_horizontal_speed_mps = self._non_negative_float(data.get("max_horizontal_speed_mps", 0.15), "max_horizontal_speed_mps")
+        self.max_vertical_speed_mps = self._non_negative_float(data.get("max_vertical_speed_mps", 0.10), "max_vertical_speed_mps")
         self.priority = int(data.get("priority", 4))
-        self.key = str(data.get("key") or f"goto_waypoint_{x:.2f}_{y:.2f}_{altitude_m:.2f}")
-        self.started = True
-        self.stopped = False
-        self.reached_updates = 0
+        self.key = str(data.get("key") or "goto_field_gps").strip() or "goto_field_gps"
+        self.started, self.stopped, self.reached_updates = True, False, 0
+        target = data.get("target")
+        self._skipped = self.skip_if_invalid_target and (
+            (isinstance(target, dict) and target.get("valid") is False) or data.get("target_valid") is False
+        )
 
     def update(self, context: dict[str, Any] | None = None) -> ActionResult:
         if not self.started:
             return ActionResult(failed=True, reason="action_not_started")
         if self.stopped:
             return ActionResult(done=True, reason="stopped")
-        if getattr(self, "_skipped", False):
-            return ActionResult(done=True, reason="skipped_missing_target",
-                                detail={"status": "skipped_missing_target"})
-
+        if self._skipped:
+            return ActionResult(done=True, reason="skipped_missing_target")
         context_data = context or {}
-        arm_heading_yaw_rad = self._arm_heading_yaw(context_data)
-        field_heading_yaw_rad = self._field_heading_yaw(context_data)
-        if self.yaw_mode == "arm_heading" and arm_heading_yaw_rad is None:
-            detail = self._detail(None, None, None)
-            detail["note"] = "yaw_mode arm_heading requires arm_heading_yaw_rad from vehicle context"
-            return ActionResult(
-                failed=True,
-                reason="missing_arm_heading_yaw",
-                detail=detail,
-            )
-        if self.yaw_mode == "field_heading" and field_heading_yaw_rad is None:
-            detail = self._detail(None, None, None, context_data)
-            detail["note"] = "yaw_mode field_heading requires field_heading_yaw_rad from a confirmed field heading"
-            return ActionResult(
-                failed=True,
-                reason="missing_field_heading_yaw",
-                detail=detail,
-            )
-        target = self._target(context_data)
-        if target is None:
-            detail = self._detail(None, None, None, context_data)
-            detail["note"] = (
-                "field waypoint rejected: confirm field heading/origin before coordinate conversion"
-            )
-            return ActionResult(
-                failed=True,
-                reason="missing_field_origin",
-                detail=detail,
-            )
-
-        current = self._current_position(context_data)
+        reference = self._field_reference(context_data)
+        if reference is None:
+            return ActionResult(failed=True, reason="field_reference_not_ready")
+        try:
+            target = self._global_target(reference)
+        except FieldReferenceError as exc:
+            return ActionResult(failed=True, reason="field_to_gps_failed", detail={"error": str(exc)})
+        yaw_rad = self._normalize_yaw(float(reference.field_heading_yaw_rad) + math.radians(self.field_yaw_deg))
+        current = self._current_global_position(context_data)
         if current is None:
-            self.reached_updates = 0
             return ActionResult(
-                effects=ActionResult.typed([self._action_dict(target, arm_heading_yaw_rad, field_heading_yaw_rad, context_data)]),
-                reason="waiting_for_position",
-                detail=self._detail(None, None, None, context_data),
+                effects=ActionResult.typed([self._effect(target, yaw_rad, context_data)]),
+                reason="waiting_for_global_position",
+                detail=self._detail(target, yaw_rad, None, None, None),
             )
-
-        distance_xy_m, z_error_m = self._target_error(target, current)
-        velocity_gate_passed = self._velocity_status(context_data)["velocity_gate_passed"]
-        reached = (
-            distance_xy_m <= self.tolerance_xy_m
-            and z_error_m <= self.tolerance_z_m
-            and velocity_gate_passed
-        )
-        if reached:
-            self.reached_updates += 1
-        else:
-            self.reached_updates = 0
-
-        detail = self._detail(current, distance_xy_m, z_error_m, context_data)
+        distance = self._gps_distance_m(current["lat"], current["lon"], target["lat"], target["lon"])
+        z_error = abs(current["alt"] - target["alt"])
+        velocity = self._velocity_status(context_data)
+        reached = distance <= self.tolerance_xy_m and z_error <= self.tolerance_z_m and velocity["velocity_gate_passed"]
+        self.reached_updates = self.reached_updates + 1 if reached else 0
+        detail = self._detail(target, yaw_rad, current, distance, z_error, velocity)
         if self.reached_updates >= self.min_hold_updates:
             return ActionResult(done=True, reason="waypoint_reached", detail=detail)
         return ActionResult(
-            effects=ActionResult.typed([self._action_dict(target, arm_heading_yaw_rad, field_heading_yaw_rad, context_data)]),
-            reason="goto_active",
-            detail=detail,
+            effects=ActionResult.typed([self._effect(target, yaw_rad, context_data)]),
+            reason="goto_active", detail=detail,
         )
 
     def stop(self) -> None:
         self.stopped = True
 
     def reset(self) -> None:
-        self.started = False
-        self.stopped = False
-        self.skip_if_invalid_target = False
-        self._skipped = False
-        self.target_x = 0.0
-        self.target_y = 0.0
-        self.target_z = 0.0
-        self.altitude_m = 0.0
-        self.waypoint_mode = "absolute"
-        self.target_frame = "local"
-        self.yaw_mode = "arm_heading"
-        self.yaw_rad: float | None = None
-        self.frame = LOCAL_NED
-        self.tolerance_xy_m = 0.3
-        self.tolerance_z_m = 0.3
-        self.min_hold_updates = 1
-        self.require_velocity_valid = False
-        self.max_horizontal_speed_mps = 0.15
-        self.max_vertical_speed_mps = 0.10
-        self.priority = 4
-        self.key = ""
-        self.reached_updates = 0
+        self.started = self.stopped = self._skipped = False
+        self.input_kind = "field"
+        self.field_x_m = self.field_y_m = self.lat = self.lon = None
+        self.altitude_m = self.field_yaw_deg = 0.0
+        self.tolerance_xy_m = self.tolerance_z_m = 0.3
+        self.min_hold_updates, self.require_velocity_valid = 1, False
+        self.max_horizontal_speed_mps, self.max_vertical_speed_mps = 0.15, 0.10
+        self.priority, self.key, self.reached_updates = 4, "goto_field_gps", 0
 
-    def _action_dict(
-        self,
-        target: dict[str, float] | None = None,
-        arm_heading_yaw_rad: float | None = None,
-        field_heading_yaw_rad: float | None = None,
-        context: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        target_data = target or self._raw_target()
-        context_data = context or {}
-        if self.target_frame == "global":
-            params: dict[str, Any] = {
-                "lat": target_data["lat"],
-                "lon": target_data["lon"],
-                "alt": target_data["alt"],
-                "frame": self.frame,
-            }
-            if self.yaw_mode == "fixed":
-                params["yaw"] = self.yaw_rad
-            elif self.yaw_mode == "arm_heading":
-                params["yaw"] = arm_heading_yaw_rad
-            elif self.yaw_mode == "field_heading":
-                params["yaw"] = field_heading_yaw_rad
-            elif self.yaw_mode == "hold":
-                current_yaw = self._current_yaw_from_context(context_data)
-                if current_yaw is not None:
-                    params["yaw"] = current_yaw
-            action = {
-                "action_type": "global_goto",
-                "params": params,
-                "input_frame": "field" if self.waypoint_mode == "field" else "global",
-                "input_target": {"x": self.target_x, "y": self.target_y, "z": self.target_z},
-                "global_target": dict(target_data),
-                "key": self.key,
-                "once": False,
-                "priority": self.priority,
-            }
-            action["field_origin_lat"] = self._float_context(context_data, "field_origin_lat")
-            action["field_origin_lon"] = self._float_context(context_data, "field_origin_lon")
-            action["field_heading_yaw_rad"] = field_heading_yaw_rad
-            if self.waypoint_mode == "field" and isinstance(context_data.get("field_reference_version"), dict):
-                action["params"]["field_reference_version"] = dict(context_data["field_reference_version"])
-            action.update(self._field_safety_metadata(context_data, global_target=True))
-            return action
+    def _field_reference(self, context: dict[str, Any]) -> FieldReference | None:
+        if not bool(context.get("field_heading_confirmed")) or not bool(context.get("field_origin_gps_confirmed")):
+            return None
+        status = context.get("field_reference")
+        if not isinstance(status, dict) or not (
+            bool(status.get("is_confirmed"))
+            and bool(status.get("synced_to_runtime"))
+            and bool(status.get("is_frozen"))
+            and bool(status.get("is_ready_for_field_to_gps"))
+        ):
+            return None
+        heading = self._optional_float(context.get("field_heading_yaw_rad"))
+        lat = self._optional_float(context.get("field_origin_lat"))
+        lon = self._optional_float(context.get("field_origin_lon"))
+        if heading is None or lat is None or lon is None:
+            return None
+        ref = FieldReference()
+        ref.is_confirmed = ref.is_frozen = True
+        ref.origin_lat, ref.origin_lon, ref.field_heading_yaw_rad = lat, lon, heading
+        return ref
 
-        params: dict[str, Any] = {
-            "x": target_data["x"],
-            "y": target_data["y"],
-            "z": target_data["z"],
-            "frame": self.frame,
-        }
-        if self.yaw_mode == "fixed":
-            params["yaw"] = self.yaw_rad
-        elif self.yaw_mode == "arm_heading":
-            params["yaw"] = arm_heading_yaw_rad
-        elif self.yaw_mode == "field_heading":
-            params["yaw"] = field_heading_yaw_rad
-        action = {
-            "action_type": "local_position",
-            "params": params,
-            "input_frame": "field" if self.waypoint_mode == "field" else "local_ned",
-            "input_target": {"x": self.target_x, "y": self.target_y, "z": self.target_z},
-            "local_target": dict(target_data),
-            "key": self.key,
-            "once": False,
-            "priority": self.priority,
-        }
-        return action
+    def _global_target(self, reference: FieldReference) -> dict[str, float]:
+        if self.input_kind == "resolved_gps":
+            assert self.lat is not None and self.lon is not None
+            return {"lat": self.lat, "lon": self.lon, "alt": self.altitude_m}
+        assert self.field_x_m is not None and self.field_y_m is not None
+        point = field_to_gps(self.field_x_m, self.field_y_m, self.altitude_m, reference)
+        return {"lat": point.lat, "lon": point.lon, "alt": point.alt_m}
 
-    @staticmethod
-    def _field_safety_metadata(
-        context: dict[str, Any],
-        *,
-        global_target: bool,
-    ) -> dict[str, bool]:
-        reference = context.get("field_reference")
-        reference_data = reference if isinstance(reference, dict) else {}
-        confirmed = bool(
-            reference_data.get("is_confirmed", context.get("field_heading_confirmed", False))
-        )
-        synced = bool(reference_data.get("synced_to_runtime", False))
-        frozen = bool(reference_data.get("is_frozen", False))
+    def _effect(self, target: dict[str, float], yaw_rad: float, context: dict[str, Any]) -> dict[str, Any]:
+        ref = context.get("field_reference")
+        ref_data = ref if isinstance(ref, dict) else {}
+        params: dict[str, Any] = {"lat": target["lat"], "lon": target["lon"], "alt": target["alt"],
+                                  "frame": GLOBAL_RELATIVE_ALT_INT, "yaw": yaw_rad}
+        if isinstance(context.get("field_reference_version"), dict):
+            params["field_reference_version"] = dict(context["field_reference_version"])
         return {
-            "field_reference_confirmed": confirmed,
-            "field_reference_synced": synced,
-            "field_reference_frozen": frozen,
-            "field_gps_transform_ready": bool(
-                reference_data.get(
-                    "is_ready_for_field_to_gps",
-                    context.get("field_gps_transform_confirmed", False),
-                )
-            ),
+            "action_type": "global_goto", "params": params, "input_frame": "field",
+            "input_target": {"field_x_m": self.field_x_m, "field_y_m": self.field_y_m,
+                             "field_yaw_deg": self.field_yaw_deg},
+            "global_target": dict(target), "key": self.key, "once": False, "priority": self.priority,
+            "field_origin_lat": context.get("field_origin_lat"), "field_origin_lon": context.get("field_origin_lon"),
+            "field_heading_yaw_rad": context.get("field_heading_yaw_rad"),
+            "field_reference_confirmed": bool(ref_data.get("is_confirmed", True)),
+            "field_reference_synced": bool(ref_data.get("synced_to_runtime", True)),
+            "field_reference_frozen": bool(ref_data.get("is_frozen", True)),
+            "field_gps_transform_ready": bool(ref_data.get("is_ready_for_field_to_gps", True)),
         }
 
-    def _detail(
-        self,
-        current: dict[str, float] | None,
-        distance_xy_m: float | None,
-        z_error_m: float | None,
-        context: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        context_data = context or {}
-        detail = {
-            "target": {
-                "x": self.target_x,
-                "y": self.target_y,
-                "z": self.target_z,
-                "altitude_m": self.altitude_m,
-            },
-            "current": current,
-            "distance_xy_m": distance_xy_m,
-            "z_error_m": z_error_m,
-            "reached_updates": self.reached_updates,
-            "yaw_mode": self.yaw_mode,
-            "waypoint_mode": self.waypoint_mode,
-            "target_frame": self.target_frame,
-            "input_frame": (
-                "field" if self.waypoint_mode == "field"
-                else ("global" if self.target_frame == "global" else "local_ned")
-            ),
-            "input_target": {"x": self.target_x, "y": self.target_y, "z": self.target_z},
-            "field_origin_lat": self._float_context(context_data, "field_origin_lat"),
-            "field_origin_lon": self._float_context(context_data, "field_origin_lon"),
-            **self._velocity_status(context_data),
+    def _detail(self, target, yaw_rad, current, distance, z_error, velocity=None) -> dict[str, Any]:
+        return {
+            "input_frame": "field", "input_kind": self.input_kind, "field_x_m": self.field_x_m,
+            "field_y_m": self.field_y_m, "field_yaw_deg": self.field_yaw_deg,
+            "actual_yaw_deg": math.degrees(yaw_rad) % 360.0, "actual_yaw_rad": yaw_rad,
+            "global_target": target, "current": current, "distance_xy_m": distance, "z_error_m": z_error,
+            "reached_updates": self.reached_updates, "min_hold_updates": self.min_hold_updates, **(velocity or {}),
         }
-        target = self._target(context_data)
-        if target is not None:
-            if self.target_frame == "global":
-                detail["global_target"] = target
-            else:
-                detail["local_target"] = target
-            detail["note"] = (
-                "field -> GPS converted" if self.waypoint_mode == "field" and self.target_frame == "global"
-                else "GPS input used directly" if self.target_frame == "global"
-                else "LOCAL_NED input used directly"
-            )
-        arm_heading_yaw_rad = self._arm_heading_yaw(context_data)
-        if arm_heading_yaw_rad is not None:
-            detail["arm_heading_yaw_rad"] = arm_heading_yaw_rad
-        if context_data.get("arm_heading_fallback"):
-            detail["arm_heading_fallback"] = True
-        field_heading_yaw_rad = self._field_heading_yaw(context_data)
-        if field_heading_yaw_rad is not None:
-            detail["field_heading_yaw_rad"] = field_heading_yaw_rad
-        if "field_heading_confirmed" in context_data:
-            detail["field_heading_confirmed"] = bool(context_data.get("field_heading_confirmed"))
-        if "field_heading_source" in context_data:
-            detail["field_heading_source"] = context_data.get("field_heading_source")
-        return detail
 
     def _velocity_status(self, context: dict[str, Any]) -> dict[str, Any]:
-        required = self.target_frame == "global" and self.require_velocity_valid
         drone = context.get("drone")
-        velocity_valid = False
-        horizontal_speed_mps: float | None = None
-        vertical_speed_mps: float | None = None
+        valid = False
+        horizontal = vertical = None
         if isinstance(drone, dict) and drone.get("velocity_valid") is True:
             try:
-                vx = float(drone["vx"])
-                vy = float(drone["vy"])
-                vz = float(drone["vz"])
+                vx, vy, vz = float(drone["vx"]), float(drone["vy"]), float(drone["vz"])
+                if all(math.isfinite(v) for v in (vx, vy, vz)):
+                    valid, horizontal, vertical = True, math.hypot(vx, vy), abs(vz)
             except (KeyError, TypeError, ValueError):
                 pass
-            else:
-                if all(math.isfinite(value) for value in (vx, vy, vz)):
-                    velocity_valid = True
-                    horizontal_speed_mps = math.hypot(vx, vy)
-                    vertical_speed_mps = abs(vz)
-        gate_passed = not required or (
-            velocity_valid
-            and horizontal_speed_mps is not None
-            and vertical_speed_mps is not None
-            and horizontal_speed_mps <= self.max_horizontal_speed_mps
-            and vertical_speed_mps <= self.max_vertical_speed_mps
-        )
-        return {
-            "velocity_required": required,
-            "velocity_valid": velocity_valid,
-            "horizontal_speed_mps": horizontal_speed_mps,
-            "vertical_speed_mps": vertical_speed_mps,
-            "velocity_gate_passed": gate_passed,
-        }
-
-    def _raw_target(self) -> dict[str, float]:
-        if self.target_frame == "global":
-            return {"lat": self.target_x, "lon": self.target_y, "alt": self.altitude_m}
-        return {"x": self.target_x, "y": self.target_y, "z": self.target_z}
-
-    def _arm_heading_yaw(self, context: dict[str, Any]) -> float | None:
-        value = context.get("arm_heading_yaw_rad")
-        if value is None:
-            return None
-        try:
-            result = float(value)
-        except (TypeError, ValueError):
-            return None
-        return result if math.isfinite(result) else None
-
-    def _target(self, context: dict[str, Any]) -> dict[str, float] | None:
-        if self.target_frame == "global":
-            return self._global_target(context)
-        return self._local_target(context)
-
-    def _field_heading_yaw(self, context: dict[str, Any]) -> float | None:
-        value = context.get("field_heading_yaw_rad")
-        if value is None:
-            return None
-        try:
-            result = float(value)
-        except (TypeError, ValueError):
-            return None
-        return result if math.isfinite(result) else None
-
-    def _local_target(self, context: dict[str, Any]) -> dict[str, float] | None:
-        if self.waypoint_mode == "absolute":
-            return {"x": self.target_x, "y": self.target_y, "z": self.target_z}
-        return None
-
-    def _global_target(self, context: dict[str, Any]) -> dict[str, float] | None:
-        if self.waypoint_mode == "absolute":
-            return {"lat": self.target_x, "lon": self.target_y, "alt": self.altitude_m}
-
-        gps_origin_confirmed = context.get("field_origin_gps_confirmed", False)
-        if not bool(context.get("field_heading_confirmed", False)) or not bool(gps_origin_confirmed):
-            return None
-        field_heading_yaw_rad = self._field_heading_yaw(context)
-        origin_lat = self._float_context(context, "field_origin_lat")
-        origin_lon = self._float_context(context, "field_origin_lon")
-        if field_heading_yaw_rad is None or origin_lat is None or origin_lon is None:
-            return None
-
-        ref = FieldReference()
-        ref.is_confirmed = True
-        ref.origin_lat = origin_lat
-        ref.origin_lon = origin_lon
-        ref.field_heading_yaw_rad = field_heading_yaw_rad
-
-        result = field_to_gps(
-            self.target_x, self.target_y, self.altitude_m, reference=ref,
-        )
-        return {"lat": result.lat, "lon": result.lon, "alt": result.alt_m}
+        passed = not self.require_velocity_valid or bool(valid and horizontal is not None and vertical is not None and horizontal <= self.max_horizontal_speed_mps and vertical <= self.max_vertical_speed_mps)
+        return {"velocity_required": self.require_velocity_valid, "velocity_valid": valid,
+                "horizontal_speed_mps": horizontal, "vertical_speed_mps": vertical, "velocity_gate_passed": passed}
 
     @staticmethod
-    def _float_context(context: dict[str, Any], name: str) -> float | None:
-        value = context.get(name)
-        if value is None:
-            return None
-        try:
-            result = float(value)
-        except (TypeError, ValueError):
-            return None
-        return result if math.isfinite(result) else None
-
-    @staticmethod
-    def _current_yaw_from_context(context: dict[str, Any]) -> float | None:
-        """Extract the best available current yaw from context for yaw_mode=hold."""
-        for name in ("arm_heading_yaw_rad", "field_heading_yaw_rad", "yaw"):
-            value = context.get(name)
-            if value is not None:
-                try:
-                    result = float(value)
-                except (TypeError, ValueError):
-                    continue
-                if math.isfinite(result):
-                    return result
+    def _current_global_position(context: dict[str, Any]) -> dict[str, float] | None:
         drone = context.get("drone")
-        if isinstance(drone, dict):
-            try:
-                yaw = float(drone.get("yaw", float("nan")))
-                if math.isfinite(yaw):
-                    return yaw
-            except (TypeError, ValueError):
-                pass
-        return None
-
-    def _current_position(self, context: dict[str, Any]) -> dict[str, float] | None:
-        if self.target_frame == "global":
-            return self._current_global_position(context)
-        value = context.get("local_position")
-        if value is None:
-            drone = context.get("drone")
-            if isinstance(drone, dict):
-                value = drone.get("local_position")
-        if not isinstance(value, dict):
+        if not isinstance(drone, dict) or not bool(drone.get("global_position_valid")):
             return None
         try:
-            return {
-                "x": float(value["x"]),
-                "y": float(value["y"]),
-                "z": float(value["z"]),
-            }
-        except (KeyError, TypeError, ValueError):
+            lat, lon = float(drone["lat"]), float(drone["lon"])
+            alt = float(next(drone[name] for name in ("relative_altitude", "relative_altitude_m", "altitude_m") if name in drone))
+        except (KeyError, StopIteration, TypeError, ValueError):
             return None
-
-    def _current_global_position(self, context: dict[str, Any]) -> dict[str, float] | None:
-        drone = context.get("drone")
-        if not isinstance(drone, dict) or not bool(drone.get("global_position_valid", False)):
-            return None
-        try:
-            lat = float(drone["lat"])
-            lon = float(drone["lon"])
-        except (KeyError, TypeError, ValueError):
-            return None
-        alt = None
-        for name in ("relative_altitude", "relative_altitude_m", "altitude_m"):
-            if name not in drone:
-                continue
-            try:
-                alt = float(drone[name])
-                break
-            except (TypeError, ValueError):
-                continue
-        if alt is None or not (math.isfinite(lat) and math.isfinite(lon) and math.isfinite(alt)):
-            return None
-        return {"lat": lat, "lon": lon, "alt": alt}
-
-    def _target_error(
-        self,
-        target: dict[str, float],
-        current: dict[str, float],
-    ) -> tuple[float, float]:
-        if self.target_frame == "global":
-            distance_xy_m = self._gps_distance_m(
-                current["lat"], current["lon"], target["lat"], target["lon"]
-            )
-            return distance_xy_m, abs(target["alt"] - current["alt"])
-
-        dx = target["x"] - current["x"]
-        dy = target["y"] - current["y"]
-        dz = target["z"] - current["z"]
-        return math.sqrt(dx * dx + dy * dy), abs(dz)
+        return {"lat": lat, "lon": lon, "alt": alt} if all(math.isfinite(v) for v in (lat, lon, alt)) else None
 
     @staticmethod
-    def _gps_distance_m(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> float:
-        lat_a_rad = math.radians(lat_a)
-        d_north = (math.radians(lat_b) - lat_a_rad) * 6371000.0
-        d_east = (
-            (math.radians(lon_b) - math.radians(lon_a))
-            * 6371000.0
-            * math.cos(lat_a_rad)
-        )
-        return math.sqrt(d_north * d_north + d_east * d_east)
+    def _gps_distance_m(lat_a, lon_a, lat_b, lon_b) -> float:
+        north = math.radians(lat_b - lat_a) * 6_371_000.0
+        east = math.radians(lon_b - lon_a) * 6_371_000.0 * math.cos(math.radians(lat_a))
+        return math.hypot(north, east)
 
     @staticmethod
-    def _is_invalid_coord(value: Any) -> bool:
-        """Return True if value is None or not a finite float."""
-        if value is None:
-            return True
+    def _normalize_yaw(value: float) -> float:
+        return (value + math.pi) % (2.0 * math.pi) - math.pi
+
+    @staticmethod
+    def _optional_float(value: Any) -> float | None:
         try:
-            v = float(value)
+            result = float(value)
         except (TypeError, ValueError):
-            return True
-        return not math.isfinite(v)
+            return None
+        return result if math.isfinite(result) else None
 
-    def _required_float(self, params: dict[str, Any], name: str) -> float:
-        if name not in params:
+    @classmethod
+    def _finite_float(cls, value: Any, name: str) -> float:
+        result = cls._optional_float(value)
+        if result is None:
+            raise ValueError(f"{name} must be finite")
+        return result
+
+    @classmethod
+    def _required_float(cls, data: dict[str, Any], name: str, legacy: str | None = None) -> float:
+        value = data.get(name, data.get(legacy)) if legacy else data.get(name)
+        if value is None:
             raise ValueError(f"{name} is required")
-        try:
-            return float(params[name])
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"{name} must be a float") from exc
+        return cls._finite_float(value, name)
+
+    @classmethod
+    def _positive_float(cls, value: Any, name: str) -> float:
+        result = cls._finite_float(value, name)
+        if result <= 0:
+            raise ValueError(f"{name} must be positive")
+        return result
+
+    @classmethod
+    def _non_negative_float(cls, value: Any, name: str) -> float:
+        result = cls._finite_float(value, name)
+        if result < 0:
+            raise ValueError(f"{name} must be non-negative")
+        return result

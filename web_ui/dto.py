@@ -47,13 +47,6 @@ class ActionMissionConfigureRequest(BaseModel):
     steps: list[ActionMissionStepRequest]
 
 
-class ManualStepMoveRequest(BaseModel):
-    direction: str
-    step_m: float = Field(gt=0, le=5.0)
-    authorize: bool = False
-    target_source: str | None = None
-
-
 class RuntimeSamplingStartRequest(BaseModel):
     forward_marker_lat: StrictFloat
     forward_marker_lon: StrictFloat

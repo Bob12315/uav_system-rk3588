@@ -95,9 +95,6 @@ class MissionCompiler:
             return {}
         if action_name == "change_speed":
             return {"speed_mps": params.get("speed_mps", 1.0)}
-        if action_name == "yaw_align":
-            yaw = params.get("yaw_deg", params.get("heading_deg"))
-            return {"yaw_deg": yaw, "relative": params.get("relative", False)}
         return params
 
     @staticmethod

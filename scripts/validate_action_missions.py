@@ -155,8 +155,6 @@ def _validate_blackboard_refs(path: Path, steps: list[dict[str, Any]]) -> None:
         if save_as and save_as not in blackboard.data:
             if step.get("name") == "gps_capture_view":
                 blackboard.set(save_as, {"raw_estimates": []})
-            elif step.get("name") == "recon_score_view":
-                blackboard.set(save_as, {"frames": [], "frame_count": 0})
             else:
                 blackboard.set(save_as, {})
 

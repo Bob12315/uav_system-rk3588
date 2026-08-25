@@ -369,27 +369,21 @@ class ResultService:
                 "done": bool(result.get("done")),
                 "failed": bool(result.get("failed")),
                 "reason": str(result.get("reason", "")),
-                "enabled": detail.get("enabled"),
-                "aligned": detail.get("aligned"),
-                "hold_reason": detail.get("hold_reason"),
-                "height_m": detail.get("height_m"),
-                "current_altitude_m": detail.get("current_altitude_m"),
-                "finish_altitude_m": detail.get("finish_altitude_m"),
-                "min_altitude_m": detail.get("min_altitude_m"),
-                "ex_cam": detail.get("ex_cam"),
-                "ey_cam": detail.get("ey_cam"),
-                "raw_ex_cam": detail.get("raw_ex_cam"),
-                "raw_ey_cam": detail.get("raw_ey_cam"),
-                "desired_ex_cam": detail.get("desired_ex_cam"),
-                "desired_ey_cam": detail.get("desired_ey_cam"),
-                "corrected_ex_cam": detail.get("corrected_ex_cam"),
-                "corrected_ey_cam": detail.get("corrected_ey_cam"),
-                "update_count": detail.get("update_count"),
-                "hold_updates": detail.get("hold_updates"),
-                "lost_updates": detail.get("lost_updates"),
+                "aligned": detail.get("within_release_deadband"),
+                "height_m": detail.get("altitude_m"),
+                "target_altitude_m": detail.get("target_altitude_m"),
+                "ex": detail.get("ex"),
+                "ey": detail.get("ey"),
+                "target_track_id": detail.get("target_track_id"),
+                "yaw_deg": detail.get("yaw_deg"),
+                "vx_forward_mps": detail.get("vx_forward_mps"),
+                "vy_right_mps": detail.get("vy_right_mps"),
+                "vz_down_mps": detail.get("vz_down_mps"),
+                "within_descent_deadband": detail.get("within_descent_deadband"),
+                "within_release_deadband": detail.get("within_release_deadband"),
             }
             if target is not None and not bool(target.get("released")):
-                target["status"] = "aligned" if detail.get("aligned") else "aligning"
+                target["status"] = "aligned" if detail.get("within_release_deadband") else "aligning"
 
         elif action_name == "payload_release":
             release = {

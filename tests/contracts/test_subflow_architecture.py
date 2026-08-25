@@ -35,10 +35,11 @@ def test_production_actions_do_not_construct_child_actions() -> None:
     assert "Action()" not in source
 
 
-def test_align_descend_public_action_is_thin_adapter() -> None:
+def test_align_descend_is_a_self_contained_action() -> None:
     path = ROOT / "missions/common/actions/align_descend.py"
-    assert len(path.read_text().splitlines()) < 200
-    guidance = (ROOT / "guidance/align_descend.py").read_text()
-    assert "telemetry_link" not in guidance
-    assert "web_ui" not in guidance
-    assert "ActionResult" not in guidance
+    source = path.read_text()
+    assert len(source.splitlines()) < 350
+    assert "guidance.align_descend" not in source
+    assert "missions.common.lifecycle.align_descend" not in source
+    assert not (ROOT / "guidance/align_descend.py").exists()
+    assert not (ROOT / "missions/common/lifecycle/align_descend.py").exists()

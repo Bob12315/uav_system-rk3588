@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 
 from web_ui.context import WebContext
-from web_ui.dto import ActionStartRequest, ManualStepMoveRequest
+from web_ui.dto import ActionStartRequest
 
 
 def _source(mission, requested: str | None) -> str:
@@ -76,17 +76,5 @@ def build_router(ctx: WebContext) -> APIRouter:
     @router.post("/actions/reset")
     def action_reset():
         return action_transition("reset")
-
-    @router.post("/manual-step-move")
-    def manual_step_move(payload: ManualStepMoveRequest, request: Request):
-        if payload.authorize is not True:
-            raise HTTPException(status_code=400, detail="manual step requires authorize=true")
-        source = _source(mission, payload.target_source)
-        result = mission.manual_step_move(
-            payload.direction, payload.step_m, authorize=True,
-            operator=request.state.identity.operator, target_source=source,
-        )
-        return {"ok": not result.failed, "result": result.to_dict(),
-                "action_lab": mission.action_lab_status_payload()}
 
     return router

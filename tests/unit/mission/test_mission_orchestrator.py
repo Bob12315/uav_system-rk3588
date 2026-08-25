@@ -549,7 +549,7 @@ def test_continue_after_failure_advances_to_next_step() -> None:
     orch = MissionOrchestrator(
         runtime,
         [
-            MissionActionStep("recon_score_view", on_failed={"action": "continue"}),
+            MissionActionStep("fixed_view_localize", on_failed={"action": "continue"}),
             MissionActionStep("land"),
         ],
     )
@@ -560,7 +560,7 @@ def test_continue_after_failure_advances_to_next_step() -> None:
 
     assert continue_status.current_action == "land"
     assert done_status.done is True
-    assert runtime.runner.sent_actions == [("recon_score_view", {}), ("land", {})]
+    assert runtime.runner.sent_actions == [("fixed_view_localize", {}), ("land", {})]
 
 
 def test_default_failure_policy_still_fails_mission() -> None:

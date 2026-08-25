@@ -29,9 +29,9 @@ def test_action_definition_is_the_single_registry_and_web_catalog() -> None:
 def test_action_definition_defaults_keep_safe_global_field_and_send_boundaries() -> None:
     definitions = {definition.name: definition for definition in action_definitions()}
     goto = definitions["goto_waypoint"].default_params
-    assert goto["waypoint_mode"] == "field"
-    assert goto["target_frame"] == "global"
-    assert definitions["manual_step"].default_params["step_m"] <= 0.5
+    assert goto["field_x_m"] == 0.0
+    assert goto["field_yaw_deg"] == 0.0
+    assert "manual_step" not in definitions
     assert "payload_release" in definitions
     assert "set_servo" in ACTION_DISPATCH_POLICY
 

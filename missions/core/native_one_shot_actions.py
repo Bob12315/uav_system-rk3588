@@ -19,7 +19,6 @@ from contracts.core.common import FrozenJson, freeze_json, thaw_json
 from contracts.core.effects import (
     Arm,
     ChangeSpeed,
-    ConditionYaw,
     Effect,
     Land,
     SetFlightMode,
@@ -68,12 +67,6 @@ class TakeoffParams:
 
 
 @dataclass(frozen=True, slots=True)
-class YawAlignParams:
-    yaw_deg: float
-    relative: bool
-
-
-@dataclass(frozen=True, slots=True)
 class ChangeSpeedParams:
     speed_mps: float
 
@@ -103,18 +96,6 @@ def takeoff_params_codec() -> TypedObjectCodec[TakeoffParams]:
         if not mode:
             raise ValueError("empty mode")
         return TakeoffParams(mode, altitude, bool(raw.get("require_armed", True)))
-    return TypedObjectCodec(decode)
-
-
-def yaw_params_codec() -> TypedObjectCodec[YawAlignParams]:
-    def decode(raw: dict[str, object]) -> YawAlignParams:
-        allowed = {"yaw_deg", "relative"}
-        if set(raw) - allowed:
-            raise ValueError("unknown yaw parameter")
-        yaw = float(raw["yaw_deg"])
-        if not math.isfinite(yaw):
-            raise ValueError("invalid yaw")
-        return YawAlignParams(yaw, bool(raw.get("relative", False)))
     return TypedObjectCodec(decode)
 
 
@@ -198,13 +179,6 @@ def takeoff_factory() -> NativeSequentialEffectAction:
 
 def land_factory() -> NativeSequentialEffectAction:
     return NativeSequentialEffectAction(lambda value: (Land(),) if isinstance(value, EmptyParams) else ())
-
-
-def yaw_factory() -> NativeSequentialEffectAction:
-    return NativeSequentialEffectAction(
-        lambda value: (ConditionYaw(value.yaw_deg, value.relative),)
-        if isinstance(value, YawAlignParams) else (),
-    )
 
 
 def speed_factory() -> NativeSequentialEffectAction:

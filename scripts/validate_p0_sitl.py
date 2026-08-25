@@ -14,7 +14,7 @@ from execution.dispatcher import ActionDispatcher
 from execution.authorization import RunAuthorization
 from contracts.effects import effect_from_request
 from telemetry_link.config import DEFAULT_CONFIG_PATH, load_config_file
-from contracts.frames import LOCAL_NED
+from contracts.frames import GLOBAL_RELATIVE_ALT_INT
 from telemetry_link.link_manager import LinkManager
 
 
@@ -75,7 +75,7 @@ def main() -> int:
             scope_type="mission",
             scope_name="p0_acceptance",
             target_source="sitl",
-            allowed_actions={"takeoff", "goto_waypoint", "change_speed", "yaw_align", "align_descend", "land"},
+            allowed_actions={"takeoff", "goto_waypoint", "change_speed", "align_descend", "land"},
         ))
 
         dispatch("takeoff", "set_mode", {"mode": "GUIDED"}, "p0-mode")
@@ -97,30 +97,21 @@ def main() -> int:
         wait_for("takeoff altitude", lambda: state() if state().relative_altitude >= 1.6 else None, 45.0)
 
         dispatch("change_speed", "change_speed", {"speed_mps": 0.8, "speed_type": 1}, "p0-speed")
-        dispatch(
-            "yaw_align",
-            "condition_yaw",
-            {"yaw_deg": 15.0, "yaw_speed_deg_s": 15.0, "direction": 1, "relative": True},
-            "p0-yaw",
-        )
-
-        current = wait_for(
-            "local position",
-            lambda: state() if state().local_position_valid else None,
-        )
+        current = wait_for("global position", lambda: state() if state().global_position_valid else None)
+        target_lat = current.lat + 1.0 / 111_111.0
         dispatch(
             "goto_waypoint",
-            "local_position",
+            "global_goto",
             {
-                "x": current.local_x + 1.0,
-                "y": current.local_y,
-                "z": current.local_z,
-                "frame": LOCAL_NED,
+                "lat": target_lat,
+                "lon": current.lon,
+                "alt": current.relative_altitude,
+                "frame": GLOBAL_RELATIVE_ALT_INT,
+                "yaw": current.yaw,
             },
             "p0-goto",
         )
-        target_x = current.local_x + 1.0
-        wait_for("local goto", lambda: state() if abs(state().local_x - target_x) < 0.6 else None, 30.0)
+        wait_for("global goto", lambda: state() if abs(state().lat - target_lat) < 0.000006 else None, 30.0)
 
         dispatch(
             "align_descend",

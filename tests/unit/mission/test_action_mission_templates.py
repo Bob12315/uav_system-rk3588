@@ -49,14 +49,11 @@ def test_drop_flow_is_explicit_and_preserves_payload_order_and_stop_boundary() -
         assert steps[index + 1]["name"] == "goto_waypoint"
 
 
-def test_recon_flow_uses_stationary_capture_and_pure_ranking() -> None:
+def test_recon_flow_contains_only_navigation_actions() -> None:
     steps = _load(ROOT / "config/action_missions/recon_gps_v2.json")["steps"]
     names = [step["name"] for step in steps]
     assert "gps_recon_area_scan" not in names
-    assert names.count("recon_score_view") == 2
-    assert names.count("recon_rank_views") == 1
-    rank = next(step for step in steps if step["name"] == "recon_rank_views")
-    assert rank["params"]["views"] == ["$recon_scan_view_2", "$recon_scan_view_4"]
+    assert names == ["takeoff", "change_speed", "goto_waypoint", "goto_waypoint", "goto_waypoint", "goto_waypoint", "land"]
 
 
 def test_full_flow_replaces_visual_land_composite_with_atomic_steps() -> None:

@@ -47,11 +47,6 @@ class DispatchRule:
 
 
 ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
-    "local_position": DispatchRule(
-        allowed_actions={"goto_waypoint", "manual_step"},
-        requires_run_authorization=True,
-        requires_send_commands=True,
-    ),
     "global_goto": DispatchRule(
         allowed_actions={"goto_waypoint"},
         requires_run_authorization=True,
@@ -93,11 +88,6 @@ ACTION_DISPATCH_POLICY: dict[str, DispatchRule] = {
     ),
     "land": DispatchRule(
         allowed_actions={"land"},
-        requires_run_authorization=True,
-        requires_send_commands=True,
-    ),
-    "condition_yaw": DispatchRule(
-        allowed_actions={"yaw_align"},
         requires_run_authorization=True,
         requires_send_commands=True,
     ),

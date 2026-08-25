@@ -660,7 +660,8 @@ def _result_name_is_align_descend(result: object) -> bool:
         "descending_slow",
         "min_altitude_reached",
         "finish_altitude_reached",
+        "ready_to_release",
     }:
         return True
     detail = result.get("detail")
-    return isinstance(detail, dict) and "ex_cam" in detail and "ey_cam" in detail and "height_m" in detail
+    return isinstance(detail, dict) and "ex" in detail and "ey" in detail and "altitude_m" in detail
