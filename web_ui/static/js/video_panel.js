@@ -9,7 +9,6 @@
     format: null,
     getState: null,
     targetAction: null,
-    loadAudit: null,
     setCompletionHint: null,
   };
 
@@ -24,7 +23,6 @@
     if (options.format) cfg.format = options.format;
     if (options.getState) cfg.getState = options.getState;
     if (options.targetAction) cfg.targetAction = options.targetAction;
-    if (options.loadAudit) cfg.loadAudit = options.loadAudit;
     if (options.setCompletionHint) cfg.setCompletionHint = options.setCompletionHint;
   }
 
@@ -65,7 +63,6 @@
     var result = await _api()("/api/camera-recording/toggle", {method: "POST", body: "{}"});
     renderCameraRecordingStatus(result.recording || {message: result.message || "录制状态未知"});
     _setHint(result.message || (result.ok ? "camera recording toggled" : "camera recording failed"));
-    if (cfg.loadAudit) await cfg.loadAudit();
     return result;
   }
 

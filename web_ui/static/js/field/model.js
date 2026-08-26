@@ -30,12 +30,11 @@
 
   function pointForFieldMap(point) {
     if (!point || point.valid === false || point.status === "skipped_missing_target") return null;
-    const fieldX = finiteNumber(point.field_x);
-    const fieldY = finiteNumber(point.field_y);
-    if (fieldX !== null && fieldY !== null) return {...point, x: fieldX, y: fieldY, field: true};
-    const x = pointX(point);
-    const y = pointY(point);
-    return x === null || y === null ? null : {...point, x, y};
+    const fieldX = finiteNumber(point.field_x ?? point.field_x_m);
+    const fieldY = finiteNumber(point.field_y ?? point.field_y_m);
+    // Do not mix LOCAL_NED x/y with the FIELD map.  Callers must label
+    // legacy x/y data as FIELD before it can be rendered here.
+    return fieldX === null || fieldY === null ? null : {...point, x: fieldX, y: fieldY, field: true};
   }
 
   function targetsMatch(a, b, toleranceM) {

@@ -1,1242 +1,313 @@
-// field_map.js — Field Map panel logic for UAV Action Console
-// Extracted from app.js (WU-5 v2).  Uses configure() pattern.
+// FIELD map: a strict FIELD-only display with cached static rendering.
 (function () {
   "use strict";
 
-  var cfg = {
-    dom: null,
-    format: null,
-    getState: null,
-    getLatestActionLab: null,
-    onClearLocalization: null,
-    setCompletionHint: null,
-  };
+  const Model = window.UavFieldModel;
+  const Render = window.UavFieldRender;
+  const DEFAULT_BOUNDS = {xMin: -8, xMax: 8, yMin: -8, yMax: 62};
+  const MAP_DEMO_ENABLED = new URLSearchParams(window.location.search).get("demo-field-map") === "1";
+  const MAP_DEMO = Object.freeze({
+    drone: {x: 1.8, y: 8.4, zUp: 5.6, yaw: 0.62},
+    boxes: [
+      {label: "主跑道", color: "#93a8bf", points: [{x: -4, y: 0}, {x: 4, y: 0}, {x: 4, y: 55}, {x: -4, y: 55}]},
+      {label: "投放区", color: "#39c8bf", points: [{x: -4, y: 30}, {x: 4, y: 30}, {x: 4, y: 35}, {x: -4, y: 35}]},
+      {label: "侦察区", color: "#eda93d", points: [{x: -4, y: 55}, {x: 4, y: 55}, {x: 4, y: 60}, {x: -4, y: 60}]},
+    ],
+    startPoint: {x: 0, y: 1.5, label: "起点 A"},
+    localization: [
+      {id: "01", x: -1.35, y: 32.10},
+      {id: "02", x: 2.20, y: 33.45},
+    ],
+  });
+  const view = {centerX: 0, centerY: 27, scale: 16, minScale: 4, maxScale: 100, initialized: false};
+  const cfg = {dom: null, getState: null, onClearLocalization: null, setCompletionHint: null};
+  let runtimeGeometry = null;
+  let runtimeGeometryConfirmed = false;
+  let latestState = null;
+  let renderQueued = false;
+  let resizeDirty = true;
+  let baseCanvas = null;
+  let baseKey = "";
+  let canvasRect = null;
+  let pixelRatio = 1;
+  let infoKey = "";
 
-  function configure(options) {
-    if (!options) return;
-    if (options.dom) cfg.dom = options.dom;
-    if (options.format) cfg.format = options.format;
-    if (options.getState) cfg.getState = options.getState;
-    if (options.getLatestActionLab) cfg.getLatestActionLab = options.getLatestActionLab;
-    if (options.onClearLocalization) cfg.onClearLocalization = options.onClearLocalization;
-    if (options.setCompletionHint) cfg.setCompletionHint = options.setCompletionHint;
+  function configure(options) { if (options) Object.assign(cfg, options); }
+  function $(id) { return cfg.dom ? cfg.dom.$(id) : document.getElementById(id); }
+  function state() { return latestState || (cfg.getState ? cfg.getState() : {}); }
+  function finite(value) { return Model.finiteNumber(value); }
+  function fieldPoint(value) { return Model.pointForFieldMap(value); }
+  function fieldReady(reference) {
+    return Boolean(reference && reference.is_confirmed && reference.is_frozen
+      && reference.is_ready_for_field_to_gps && reference.synced_to_runtime);
+  }
+  function normalizeRadians(value) { return Math.atan2(Math.sin(value), Math.cos(value)); }
+
+  function setRuntimeGeometry(geometry, confirmed) {
+    runtimeGeometry = geometry || null;
+    runtimeGeometryConfirmed = Boolean(confirmed);
+    baseKey = "";
+    queueRender();
+  }
+  // Compatibility hook: geometry now comes exclusively from runtime Field Setup.
+  function setProfilePreview() { queueRender(); }
+
+  function geometryBoxes() {
+    if (!runtimeGeometry) return [];
+    return [
+      {label: "投放区", color: "#39c8bf", points: runtimeGeometry.drop_area_corners},
+      {label: "侦察区", color: "#eda93d", points: runtimeGeometry.recce_area_corners},
+    ].map(function (box) {
+      return {...box, points: Array.isArray(box.points) ? box.points.map(fieldPoint).filter(Boolean) : []};
+    }).filter(function (box) { return box.points.length >= 3; });
   }
 
-  function _state() { return cfg.getState ? cfg.getState() : {}; }
-  function _latestActionLab() { return cfg.getLatestActionLab ? cfg.getLatestActionLab() : null; }
-  function _setCompletionHint(text) { if (typeof cfg.setCompletionHint === "function") cfg.setCompletionHint(text); }
-  function _clearLocalization() { if (typeof cfg.onClearLocalization === "function") return cfg.onClearLocalization(); }
-
-const FieldModel = window.UavFieldModel;
-const FieldRender = window.UavFieldRender;
-
-const FIELD_DEFAULTS = {
-  bounds: {xMin: -8, xMax: 8, yMin: -8, yMax: 62},
-  takeoff: {x: 0, y: 0, xLen: 8, yLen: 8, label: "起降区"},
-  drop: {x: 0, y: 32.5, xLen: 8, yLen: 5, label: "投放区"},
-  recce: {x: 0, y: 57.5, xLen: 8, yLen: 5, label: "侦察区"},
-};
-
-const pointX = FieldModel.pointX;
-const pointY = FieldModel.pointY;
-
-// Convert FIELD coordinates to lat/lon using anchor + heading.
-// Requires next.field_reference with origin_lat, origin_lon, field_heading_yaw_rad.
-const fieldXYToLatLon = FieldModel.fieldXYToLatLon;
-const pointForFieldMap = FieldModel.pointForFieldMap;
-const isSelectedDropTarget = FieldModel.isSelectedDropTarget;
-
-function pointList(items, fallback, prefix) {
-  return Array.isArray(items) && items.length
-    ? items.map((item, index) => ({
-        name: item.name || `${prefix}${index + 1}`,
-        x: Number(item.x),
-        y: Number(item.y),
-      }))
-    : fallback;
-}
-
-var profilePreview = null;
-
-function setProfilePreview(data) {
-  profilePreview = data || null;
-  if (!data) fieldMapInfoBoxKey = "";
-  scheduleFieldMapRender();
-}
-
-var runtimeGeometry = null;
-var runtimeGeometryConfirmed = false;
-
-function setRuntimeGeometry(geometry, confirmed) {
-  if (!geometry) {
-    runtimeGeometry = null;
-    runtimeGeometryConfirmed = false;
-    profilePreview = null;
-    scheduleFieldMapRender();
-    return;
+  function fieldMapModel(next) {
+    next = next || state();
+    if (MAP_DEMO_ENABLED) return {
+      ready: true, reference: {}, drone: MAP_DEMO.drone, boxes: MAP_DEMO.boxes,
+      startPoint: MAP_DEMO.startPoint, localization: MAP_DEMO.localization, recon: [], stage: "DEMO", source: "DEMO 假数据（不连接飞控）",
+    };
+    const reference = next.field_reference || {};
+    const ready = fieldReady(reference);
+    const position = next.field_position || {};
+    const x = finite(position.x), y = finite(position.y), localZ = finite(position.local_z);
+    const yaw = finite(next.field_heading && next.field_heading.current_yaw_rad);
+    const fieldYaw = finite(reference.field_heading_yaw_rad);
+    const drone = ready && x !== null && y !== null && yaw !== null && fieldYaw !== null
+      ? {x, y, zUp: localZ === null ? null : -localZ, yaw: normalizeRadians(yaw - fieldYaw)} : null;
+    const localization = Array.isArray(next.drop_localization?.objects)
+      ? next.drop_localization
+      : (next.localization || {});
+    const recon = next.recon_localization || {};
+    const toField = function (items) { return ready && Array.isArray(items) ? items.map(fieldPoint).filter(Boolean) : []; };
+    return {
+      ready, reference, drone, boxes: geometryBoxes(),
+      startPoint: null, localization: toField(localization.objects), recon: toField(recon.objects),
+      stage: next.stage || "--", source: ready ? "FIELD via GPS" : "FIELD unavailable",
+    };
   }
-  runtimeGeometry = geometry;
-  runtimeGeometryConfirmed = Boolean(confirmed);
-  var labelSuffix = runtimeGeometryConfirmed ? " (CONFIRMED / FROZEN)" : " (UNCONFIRMED)";
-  // Convert to profilePreview-compatible format for rendering
-  var boxes = [];
-  // Drop area corners (D1-D4)
-  if (Array.isArray(geometry.drop_area_corners) && geometry.drop_area_corners.length === 4) {
-    boxes.push({
-      kind: "drop_area",
-      label: "Drop area" + labelSuffix,
-      corners: geometry.drop_area_corners.map(function (pt) {
-        return { field_x: pt.field_x_m, field_y: pt.field_y_m, lat: pt.lat, lon: pt.lon, name: pt.name };
-      })
+
+  function queueRender(next) {
+    latestState = next || latestState || (cfg.getState ? cfg.getState() : {});
+    if (renderQueued) return;
+    renderQueued = true;
+    requestAnimationFrame(function () { renderQueued = false; renderNow(latestState || {}); });
+  }
+  function renderFieldMap(next) { queueRender(next); }
+
+  function ensureCanvas(canvas) {
+    if (!resizeDirty && canvasRect) return;
+    const rect = canvas.getBoundingClientRect();
+    const rawRatio = window.devicePixelRatio || 1;
+    pixelRatio = Math.min(rawRatio, window.matchMedia && window.matchMedia("(pointer: coarse)").matches ? 1.25 : 2);
+    canvasRect = {width: Math.max(1, rect.width), height: Math.max(1, rect.height)};
+    const width = Math.round(canvasRect.width * pixelRatio), height = Math.round(canvasRect.height * pixelRatio);
+    if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
+    resizeDirty = false;
+    baseKey = "";
+  }
+  function toCanvas(x, y) { return Render.worldToCanvas(x, y, canvasRect, view); }
+  function toWorld(x, y) { return Render.canvasToWorld(x, y, canvasRect, view); }
+  function drawLabel(ctx, text, x, y, color, align) {
+    ctx.fillStyle = color || "#d7e6f5";
+    ctx.font = "11px Consolas, monospace";
+    ctx.textAlign = align || "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, x, y);
+  }
+  function baseCacheKey(model) {
+    return JSON.stringify({
+      w: Math.round(canvasRect.width), h: Math.round(canvasRect.height), dpr: pixelRatio,
+      cx: Number(view.centerX.toFixed(3)), cy: Number(view.centerY.toFixed(3)), scale: Number(view.scale.toFixed(3)),
+      boxes: model.boxes.map(function (box) { return [box.label, box.points.map(function (p) { return [p.x, p.y]; })]; }),
+      confirmed: runtimeGeometryConfirmed,
     });
   }
-  // Recce area corners (R1-R4)
-  if (Array.isArray(geometry.recce_area_corners) && geometry.recce_area_corners.length === 4) {
-    boxes.push({
-      kind: "recce_area",
-      label: "Recce area" + labelSuffix,
-      corners: geometry.recce_area_corners.map(function (pt) {
-        return { field_x: pt.field_x_m, field_y: pt.field_y_m, lat: pt.lat, lon: pt.lon, name: pt.name };
-      })
-    });
-  }
-  // Home point
-  var home = geometry.home;
-  // Forward marker
-  var fwd = geometry.forward_marker;
-  // Build reference
-  var heading = (geometry.heading || {});
-  profilePreview = {
-    ok: true,
-    profile_id: "runtime_geometry",
-    reference: {
-      origin_lat: home ? home.lat : null,
-      origin_lon: home ? home.lon : null,
-      field_heading_deg: heading.degrees,
-      field_heading_yaw_rad: heading.yaw_rad
-    },
-    boxes: boxes,
-    // Extra geometry points for rendering
-    _home: home,
-    _forward_marker: fwd,
-    _drop_scan_waypoints: geometry.drop_scan_waypoints || [],
-    _runtime_geometry: geometry,
-    _runtime: true,
-    _confirmed: runtimeGeometryConfirmed
-  };
-  fieldMapInfoBoxKey = "";
-  scheduleFieldMapRender();
-}
-
-var fieldMapRenderPending = false;
-var latestFieldMapState = null;
-var fieldMapInfoBoxKey = "";
-
-function scheduleFieldMapRender(next) {
-  latestFieldMapState = next || latestFieldMapState || _state();
-  if (fieldMapRenderPending) return;
-  fieldMapRenderPending = true;
-  requestAnimationFrame(function () {
-    fieldMapRenderPending = false;
-    renderFieldMapNow(latestFieldMapState || _state());
-  });
-}
-
-function renderFieldMap(next) {
-  scheduleFieldMapRender(next);
-}
-
-const fieldMapView = {
-  centerX: 0,
-  centerY: 27,
-  scale: 18,
-  minScale: 4,
-  maxScale: 120,
-  isDragging: false,
-  dragStartX: 0,
-  dragStartY: 0,
-  dragStartCenterX: 0,
-  dragStartCenterY: 0,
-  initialized: false,
-  interacting: false,
-};
-const worldToCanvas = FieldRender.worldToCanvas;
-const canvasToWorld = FieldRender.canvasToWorld;
-const finiteNumber = FieldModel.finiteNumber;
-
-function actionLocalizationDetail(actionLab) {
-  const payload = actionLab || _latestActionLab() || {};
-  const status = payload?.status || payload || {};
-  const candidates = [
-    status?.last_result?.detail,
-    status?.detail,
-  ];
-  for (const detail of candidates) {
-    if (!detail || typeof detail !== "object") continue;
-    if (Array.isArray(detail.raw_estimates)) {
-      return {detail, estimates: detail.raw_estimates};
+  function drawGrid(ctx) {
+    const step = Render.niceGridStep(view.scale);
+    const a = toWorld(0, 0), b = toWorld(canvasRect.width, canvasRect.height);
+    const minX = Math.min(a.x, b.x), maxX = Math.max(a.x, b.x), minY = Math.min(a.y, b.y), maxY = Math.max(a.y, b.y);
+    ctx.strokeStyle = "rgba(147,168,191,.18)"; ctx.lineWidth = 1;
+    for (let x = Math.floor(minX / step) * step; x <= maxX; x += step) {
+      const p = toCanvas(x, minY), q = toCanvas(x, maxY); ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke();
     }
-  }
-  for (const detail of candidates) {
-    if (!detail || typeof detail !== "object") continue;
-    if (Array.isArray(detail.localized_objects)) {
-      return {detail, estimates: detail.localized_objects};
+    for (let y = Math.floor(minY / step) * step; y <= maxY; y += step) {
+      const p = toCanvas(minX, y), q = toCanvas(maxX, y); ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke();
     }
+    ctx.strokeStyle = "rgba(147,168,191,.55)"; ctx.setLineDash([5, 5]);
+    let p = toCanvas(0, minY), q = toCanvas(0, maxY); ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke();
+    p = toCanvas(minX, 0); q = toCanvas(maxX, 0); ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke();
+    ctx.setLineDash([]);
+    drawLabel(ctx, "+X →", canvasRect.width - 16, 18, "#93a8bf", "right");
+    drawLabel(ctx, "+Y ↑", canvasRect.width - 16, 35, "#93a8bf", "right");
   }
-  return {detail: {}, estimates: []};
-}
-function actionLocalizationDrone(detail) {
-  const drone = detail?.drone && typeof detail.drone === "object" ? detail.drone : {};
-  const summary = detail?.summary && typeof detail.summary === "object" ? detail.summary : {};
-  const x = finiteNumber(drone.local_x ?? drone.x ?? summary.drone_x);
-  const y = finiteNumber(drone.local_y ?? drone.y ?? summary.drone_y);
-  if (x === null || y === null) return null;
-  return {x, y};
-}
-function actionLocalizationTargets(actionLab) {
-  const {detail, estimates} = actionLocalizationDetail(actionLab);
-  return {
-    drone: actionLocalizationDrone(detail),
-    targets: estimates
-      .map((estimate, index) => {
-        if (!estimate || typeof estimate !== "object") return null;
-        const x = finiteNumber(estimate.local_x ?? estimate.x);
-        const y = finiteNumber(estimate.local_y ?? estimate.y);
-        if (x === null || y === null) return null;
-        const source = estimate.source && typeof estimate.source === "object" ? estimate.source : {};
-        return {
-          index,
-          x,
-          y,
-          class_name: estimate.class_name,
-          confidence: finiteNumber(estimate.confidence),
-          ex: finiteNumber(source.ex),
-          ey: finiteNumber(source.ey),
-        };
-      })
-      .filter(Boolean),
-  };
-}
-const niceGridStep = FieldRender.niceGridStep;
-function fieldMapModel(next) {
-  next = next || _state();
-  const detail = next.mission_detail || {};
-  const route = detail.route || {};
-  const dropCenter = route.drop_area_center || {};
-  const recceCenter = route.recce_area_center || {};
-  const home = route.home || {};
-  const rawFieldPosition = next.field_position || null;
-  const fieldX = finiteNumber(rawFieldPosition?.x);
-  const fieldY = finiteNumber(rawFieldPosition?.y);
-  const fieldPosition = fieldX !== null && fieldY !== null ? {
-    x: fieldX,
-    y: fieldY,
-    z: finiteNumber(rawFieldPosition.z ?? rawFieldPosition.local_z),
-    local_x: finiteNumber(rawFieldPosition.local_x),
-    local_y: finiteNumber(rawFieldPosition.local_y),
-    field: true,
-  } : null;
-  const missionPosition = detail.mission_position || null;
-  const drone = next.drone || {};
-
-  // GPS field reference ready → forbid raw LOCAL_NED fallback
-  const fieldReference = next.field_reference || {};
-  const gpsFieldReady = Boolean(fieldReference.is_ready_for_field_to_gps);
-
-  const localFallback = !gpsFieldReady && drone.local_position_valid
-    ? {x: Number(drone.local_x), y: Number(drone.local_y), z: Number(drone.local_z), fallback: true}
-    : null;
-
-  const dronePosition = fieldPosition || missionPosition || localFallback;
-  const dropTargets = Array.isArray(detail.drop_targets) ? detail.drop_targets : [];
-  const recceTargets = Array.isArray(detail.recce_targets) ? detail.recce_targets : [];
-  const recceResults = Array.isArray(detail.recce_results) ? detail.recce_results : [];
-  const recceStatus = new Map(recceResults.map(item => [Number(item.target_id), item.status || "blank"]));
-  const localization = next.localization || {};
-  const dropLocalization = next.drop_localization || {};
-  const reconLocalization = next.recon_localization || {};
-  const localizationObjects = Array.isArray(dropLocalization.objects) ? dropLocalization.objects : (Array.isArray(localization.objects) ? localization.objects : []);
-  const reconLocalizationObjects = Array.isArray(reconLocalization.objects) ? reconLocalization.objects : [];
-  const singleViewLocalization = actionLocalizationTargets(next.action_lab || _latestActionLab());
-  const fieldLocalizationObjects = localizationObjects.map(item => pointForFieldMap(item, next)).filter(Boolean);
-  const fieldSingleViewTargets = singleViewLocalization.targets.map(item => pointForFieldMap(item, next)).filter(Boolean);
-  const fieldSingleViewDrone = singleViewLocalization.drone
-    ? pointForFieldMap(singleViewLocalization.drone, next)
-    : null;
-  const fieldReconLocalizationTargets = reconLocalizationObjects.map(item => pointForFieldMap(item, next)).filter(Boolean);
-
-  // selected drop targets — priority: drop_targets.status, localization.selected_targets, action_lab detail fallback
-  const dropTargetsStatus = next.drop_targets || {};
-  let dropTargetsFromSelection = Array.isArray(dropTargetsStatus.selected_targets)
-    ? dropTargetsStatus.selected_targets
-    : Array.isArray(localization.selected_targets)
-      ? localization.selected_targets
-      : [];
-  if (!dropTargetsFromSelection.length) {
-    const alDetail = actionLocalizationDetail(next.action_lab || _latestActionLab()).detail;
-    if (alDetail && Array.isArray(alDetail.selected_targets)) {
-      dropTargetsFromSelection = alDetail.selected_targets;
-    }
-  }
-  dropTargetsFromSelection = dropTargetsFromSelection.filter(item => pointX(item) !== null && pointY(item) !== null);
-
-  return {
-    bounds: FIELD_DEFAULTS.bounds,
-    profilePreview: profilePreview,
-    areas: {
-      takeoff: {...FIELD_DEFAULTS.takeoff, x: Number(home.x ?? FIELD_DEFAULTS.takeoff.x), y: Number(home.y ?? FIELD_DEFAULTS.takeoff.y)},
-      drop: {...FIELD_DEFAULTS.drop, x: Number(dropCenter.x ?? FIELD_DEFAULTS.drop.x), y: Number(dropCenter.y ?? FIELD_DEFAULTS.drop.y)},
-      recce: {...FIELD_DEFAULTS.recce, x: Number(recceCenter.x ?? FIELD_DEFAULTS.recce.x), y: Number(recceCenter.y ?? FIELD_DEFAULTS.recce.y)},
-    },
-    dropSurvey: pointList(detail.drop_survey_points, [], "D"),
-    recceSurvey: pointList(detail.recce_survey_points, [], "R"),
-    dropTargets: dropTargets.filter(item => Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y)) && Number(item.seen_count || 0) > 0),
-    recceTargets: recceTargets.filter(item => Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y)) && Number(item.seen_count || 0) > 0),
-    recceStatus,
-    drone: dronePosition,
-    stage: next.stage || "--",
-    dropCount: Number(detail.drop_count || 0),
-    requiredDrops: Math.max(1, Number(detail.drop_required_count || 0) || (detail.payload_slots || []).length || 2),
-    dropScanIndex: Number(detail.drop_scan_index || 0),
-    recceScanIndex: Number(detail.recce_scan_index || 0),
-    dropTargetIndex: Number(detail.drop_target_index || 0),
-    recceTargetIndex: Number(detail.recce_target_index || 0),
-    confirmedCount: recceResults.filter(item => item.status === "confirmed").length,
-    requiredConfirmed: Math.max(1, Number(detail.recce_required_confirmed_count || 3)),
-    hasMissionPosition: Boolean(missionPosition),
-    localizationTargets: fieldLocalizationObjects.filter(item =>
-      Number.isFinite(Number(item.x)) &&
-      Number.isFinite(Number(item.y))
-    ),
-    singleViewTargets: fieldSingleViewTargets,
-    singleViewDrone: fieldSingleViewDrone,
-    dropTargetsSelected: dropTargetsFromSelection.map(item => pointForFieldMap(item, next)).filter(Boolean),
-    reconLocalizationTargets: fieldReconLocalizationTargets,
-    dropWorkflow: extractDropWorkflow(next),
-    workflowTargets: buildWorkflowTargets(next),
-  };
-}
-
-function buildWorkflowTargets(next) {
-  var wf = next.drop_workflow || {};
-  var targets = wf.selected_targets || [];
-  if (!Array.isArray(targets)) return [];
-  return targets.map(function (t) { return pointForFieldMap(t, next); }).filter(Boolean);
-}
-
-function getLockedTarget(next) {
-  var wf = next.drop_workflow || {};
-  var lock = wf.target_lock || {};
-  return (lock.best_estimate || lock.target) || null;
-}
-
-function extractDropWorkflow(next) {
-  var wf = next.drop_workflow || {};
-  if (!wf || typeof wf !== "object") return {};
-  return {
-    selectedTargets: wf.selected_targets || [],
-    targetLock: wf.target_lock || {},
-    alignDescend: wf.align_descend || {},
-    payloadRelease: wf.payload_release || {},
-    releasedTargetIds: Array.isArray(wf.released_target_ids) ? wf.released_target_ids.map(String) : [],
-    releaseEvents: Array.isArray(wf.release_events) ? wf.release_events : [],
-    current_rank: wf.current_rank,
-  };
-}
-
-const targetsMatch = FieldModel.targetsMatch;
-
-function resizeFieldCanvas(canvas) {
-  const rect = canvas.getBoundingClientRect();
-  const rawRatio = window.devicePixelRatio || 1;
-  const coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
-  const ratio = coarse ? Math.min(rawRatio, 1.25) : Math.min(rawRatio, 2);
-  const width = Math.max(1, Math.round(rect.width * ratio));
-  const height = Math.max(1, Math.round(rect.height * ratio));
-  if (canvas.width !== width || canvas.height !== height) {
-    canvas.width = width;
-    canvas.height = height;
-  }
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  return {ctx, rect};
-}
-function drawFieldLabel(ctx, text, x, y, options = {}) {
-  ctx.fillStyle = options.color || "#d7e6f5";
-  ctx.font = options.font || "12px Consolas, monospace";
-  ctx.textAlign = options.align || "center";
-  ctx.textBaseline = options.baseline || "middle";
-  ctx.fillText(text, x, y);
-}
-function drawArea(ctx, model, area, fill, stroke) {
-  const [x1, y1] = worldToCanvas(area.x - area.xLen / 2, area.y - area.yLen / 2, model.rect);
-  const [x2, y2] = worldToCanvas(area.x + area.xLen / 2, area.y + area.yLen / 2, model.rect);
-  const left = Math.min(x1, x2);
-  const top = Math.min(y1, y2);
-  const width = Math.abs(x2 - x1);
-  const height = Math.abs(y2 - y1);
-  ctx.fillStyle = fill;
-  ctx.strokeStyle = stroke;
-  ctx.lineWidth = 1;
-  ctx.fillRect(left, top, width, height);
-  ctx.strokeRect(left, top, width, height);
-  drawFieldLabel(ctx, area.label, left + width / 2, top + height / 2, {color: stroke});
-}
-function drawCoordinateTicks(ctx, model) {
-  const rect = model.rect;
-  const view = fieldMapView;
-  const step = niceGridStep(view.scale);
-  const topLeft = canvasToWorld(0, 0, rect, view);
-  const bottomRight = canvasToWorld(rect.width, rect.height, rect, view);
-  const vxMin = Math.min(topLeft.x, bottomRight.x);
-  const vxMax = Math.max(topLeft.x, bottomRight.x);
-  const vyMin = Math.min(topLeft.y, bottomRight.y);
-  const vyMax = Math.max(topLeft.y, bottomRight.y);
-
-  // Auto-increase step to prevent excessive grid lines
-  const maxGridLines = 80;
-  var actualStep = step;
-  while ((vxMax - vxMin) / actualStep > maxGridLines || (vyMax - vyMin) / actualStep > maxGridLines) {
-    actualStep *= 2;
-  }
-
-  ctx.strokeStyle = "rgba(147,168,191,.18)";
-  ctx.fillStyle = "#93a8bf";
-  ctx.lineWidth = 1;
-  ctx.font = "11px Consolas, monospace";
-
-  // vertical grid lines (constant x)
-  const xStart = Math.floor(vxMin / actualStep) * actualStep;
-  for (let x = xStart; x <= vxMax; x += actualStep) {
-    const [sx1, sy1] = worldToCanvas(x, vyMin, rect, view);
-    const [sx2, sy2] = worldToCanvas(x, vyMax, rect, view);
-    ctx.beginPath();
-    ctx.moveTo(sx1, sy1);
-    ctx.lineTo(sx2, sy2);
-    ctx.stroke();
-  }
-
-  // horizontal grid lines (constant y)
-  const yStart = Math.floor(vyMin / actualStep) * actualStep;
-  for (let y = yStart; y <= vyMax; y += actualStep) {
-    const [sx1, sy1] = worldToCanvas(vxMin, y, rect, view);
-    const [sx2, sy2] = worldToCanvas(vxMax, y, rect, view);
-    ctx.beginPath();
-    ctx.moveTo(sx1, sy1);
-    ctx.lineTo(sx2, sy2);
-    ctx.stroke();
-  }
-
-  // highlight y=0 axis
-  ctx.strokeStyle = "rgba(147,168,191,.55)";
-  ctx.setLineDash([5, 5]);
-  const [x0a, y0a] = worldToCanvas(vxMin, 0, rect, view);
-  const [x0b, y0b] = worldToCanvas(vxMax, 0, rect, view);
-  ctx.beginPath();
-  ctx.moveTo(x0a, y0a);
-  ctx.lineTo(x0b, y0b);
-  ctx.stroke();
-  // x=0 axis
-  const [x0c, y0c] = worldToCanvas(0, vyMin, rect, view);
-  const [x0d, y0d] = worldToCanvas(0, vyMax, rect, view);
-  ctx.beginPath();
-  ctx.moveTo(x0c, y0c);
-  ctx.lineTo(x0d, y0d);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // edge labels
-  ctx.strokeStyle = "rgba(147,168,191,.50)";
-  // x labels at bottom
-  ctx.textBaseline = "top";
-  for (let x = xStart; x <= vxMax; x += step) {
-    const [tickX, tickY] = worldToCanvas(x, vyMin, rect, view);
-    ctx.beginPath();
-    ctx.moveTo(tickX, tickY + 2);
-    ctx.lineTo(tickX, tickY + 7);
-    ctx.stroke();
-    ctx.textAlign = "center";
-    if (!fieldMapView.interacting || actualStep >= step * 2) {
-      ctx.fillText(`${Math.round(x)}`, tickX, tickY + 9);
-    }
-  }
-  // y labels at left
-  ctx.textBaseline = "middle";
-  for (let y = yStart; y <= vyMax; y += step) {
-    const [tickX, tickY] = worldToCanvas(vxMin, y, rect, view);
-    ctx.beginPath();
-    ctx.moveTo(tickX - 2, tickY);
-    ctx.lineTo(tickX - 7, tickY);
-    ctx.stroke();
-    ctx.textAlign = "right";
-    if (!fieldMapView.interacting || actualStep >= step * 2) {
-      ctx.fillText(`${Math.round(y)}`, tickX - 9, tickY);
-    }
-  }
-
-  drawFieldLabel(ctx, "x/m", model.rect.width / 2, model.rect.height - 16, {color: "#93a8bf"});
-  drawFieldLabel(ctx, "y/m", 24, model.rect.height / 2, {color: "#93a8bf", align: "left"});
-}
-function drawField(ctx, model) {
-  ctx.clearRect(0, 0, model.rect.width, model.rect.height);
-  drawCoordinateTicks(ctx, model);
-  if (model.profilePreview) {
-    drawProfilePreviewBoxes(ctx, model);
-    drawProfileCornerPoints(ctx, model);
-    drawRuntimeGeometryPoints(ctx, model);
-  } else {
-    drawArea(ctx, model, model.areas.takeoff, "rgba(147,168,191,.10)", "rgba(147,168,191,.75)");
-    drawArea(ctx, model, model.areas.drop, "rgba(57,200,191,.12)", "rgba(57,200,191,.82)");
-    drawArea(ctx, model, model.areas.recce, "rgba(237,169,61,.14)", "rgba(237,169,61,.85)");
-  }
-  drawFieldLabel(ctx, "+x →", model.rect.width - 50, 22, {color: "#93a8bf"});
-  drawFieldLabel(ctx, "+y ↑", model.rect.width - 50, 40, {color: "#93a8bf"});
-}
-
-function drawRuntimeGeometryPoints(ctx, model) {
-  var preview = model && model.profilePreview;
-  var geometry = preview && preview._runtime_geometry;
-  if (!geometry || !model.rect) return [];
-  var entries = [];
-  if (geometry.home) entries.push({point: geometry.home, label: "HOME / A"});
-  if (geometry.forward_marker) {
-    entries.push({point: geometry.forward_marker, label: "B / Forward Marker"});
-  }
-  (geometry.drop_scan_waypoints || []).forEach(function (point, index) {
-    entries.push({point: point, label: "SCAN" + (index + 1)});
-  });
-  (geometry.drop_area_corners || []).forEach(function (point) {
-    entries.push({point: point, label: point.name});
-  });
-  (geometry.recce_area_corners || []).forEach(function (point) {
-    entries.push({point: point, label: point.name});
-  });
-  entries.forEach(function (entry) {
-    var point = entry.point;
-    var pos = worldToCanvas(point.field_x_m, point.field_y_m, model.rect);
-    ctx.beginPath();
-    ctx.arc(pos[0], pos[1], 5, 0, Math.PI * 2);
-    ctx.fillStyle = preview._confirmed ? "#39c8bf" : "#eda93d";
-    ctx.strokeStyle = "#08111a";
-    ctx.lineWidth = 1.5;
-    ctx.fill();
-    ctx.stroke();
-    drawFieldLabel(ctx, entry.label, pos[0] + 8, pos[1] - 8, {
-      align: "left", color: "#e6edf6", font: "10px Consolas, monospace"
-    });
-  });
-  return entries.map(function (entry) { return entry.label; });
-}
-function drawSurveyPoints(ctx, model) {
-  const drawPoint = (point, index, activeIndex, color) => {
-    const [x, y] = worldToCanvas(point.x, point.y, model.rect);
-    const done = index < activeIndex;
-    const active = index === activeIndex;
-    ctx.beginPath();
-    ctx.arc(x, y, active ? 5 : 4, 0, Math.PI * 2);
-    ctx.fillStyle = done ? color : "#08111a";
-    ctx.strokeStyle = active ? "#e6edf6" : color;
-    ctx.lineWidth = active ? 2 : 1;
-    ctx.fill();
-    ctx.stroke();
-    drawFieldLabel(ctx, point.name, x, y - 12, {color});
-  };
-  model.dropSurvey.forEach((point, index) => drawPoint(point, index, model.dropScanIndex, "#39c8bf"));
-  model.recceSurvey.forEach((point, index) => drawPoint(point, index, model.recceScanIndex, "#eda93d"));
-}
-
-function drawMultiViewPlan(ctx, model) {
-  var plan = model.multiViewPlan;
-  if (!plan || !Array.isArray(plan.waypoints)) return;
-  plan.waypoints.forEach(function (wp, i) {
-    var pos = worldToCanvas(wp.x, wp.y, model.rect);
-    var cx = pos[0], cy = pos[1];
-    var isCurrent = i === plan.waypoint_index;
-    var isCompleted = i < plan.waypoint_index;
-    var isPending = i > plan.waypoint_index;
-
-    var r = isCurrent ? 7 : 5;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    if (isCompleted) {
-      ctx.fillStyle = "rgba(57,200,191,.55)";
-      ctx.strokeStyle = "rgba(57,200,191,.85)";
-      ctx.lineWidth = 1.5;
-      ctx.fill();
-      ctx.stroke();
-      // checkmark
-      ctx.strokeStyle = "#e6edf6";
-      ctx.lineWidth = 2;
+  function drawBoxes(ctx, boxes) {
+    boxes.forEach(function (box) {
+      const screen = box.points.map(function (point) { return toCanvas(point.x, point.y); });
       ctx.beginPath();
-      ctx.moveTo(cx - 3, cy);
-      ctx.lineTo(cx - 1, cy + 2);
-      ctx.lineTo(cx + 3, cy - 3);
-      ctx.stroke();
-    } else if (isCurrent) {
-      ctx.fillStyle = "#e6edf6";
-      ctx.strokeStyle = "#08111a";
-      ctx.lineWidth = 2;
-      ctx.fill();
-      ctx.stroke();
-    } else {
-      ctx.fillStyle = "rgba(147,168,191,.25)";
-      ctx.strokeStyle = "rgba(147,168,191,.65)";
-      ctx.lineWidth = 1.5;
-      ctx.fill();
-      ctx.stroke();
-    }
-    var labelColor = isCurrent ? "#e6edf6" : isCompleted ? "#39c8bf" : "#93a8bf";
-    drawFieldLabel(ctx, wp.name, cx + 9, cy - 9, {align: "left", color: labelColor, font: "10px Consolas, monospace"});
-  });
-}
-
-function drawDrone(ctx, model) {
-  if (!model.drone || !Number.isFinite(Number(model.drone.x)) || !Number.isFinite(Number(model.drone.y))) return;
-  const [x, y] = worldToCanvas(model.drone.x, model.drone.y, model.rect);
-  ctx.fillStyle = "#e6edf6";
-  ctx.strokeStyle = "#08111a";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(x, y - 9);
-  ctx.lineTo(x - 6, y + 7);
-  ctx.lineTo(x, y + 4);
-  ctx.lineTo(x + 6, y + 7);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-  const label = model.drone.field ? "UAV field" : model.drone.fallback ? "UAV LOCAL fallback" : "UAV";
-  drawFieldLabel(ctx, `${label} ${num(model.drone.x, 1)}, ${num(model.drone.y, 1)}`, x + 46, y - 14, {align: "left"});
-  drawFieldLabel(ctx, `z=${num(model.drone.z, 1)}`, x + 46, y + 2, {align: "left", color: "#93a8bf"});
-}
-function drawTargets(ctx, model) {
-  const drawTarget = (target, kind, index) => {
-    const isDrop = kind === "drop";
-    const current = isDrop ? index === model.dropTargetIndex : index === model.recceTargetIndex;
-    const visited = Boolean(target.visited);
-    const status = isDrop ? "" : model.recceStatus.get(Number(target.target_id)) || "pending";
-    const confirmed = status === "confirmed";
-    const color = confirmed ? "#2bc277" : isDrop ? "#39c8bf" : "#eda93d";
-    const [x, y] = worldToCanvas(target.x, target.y, model.rect);
-    ctx.beginPath();
-    ctx.arc(x, y, current ? 7 : 5, 0, Math.PI * 2);
-    ctx.fillStyle = visited && !confirmed ? "rgba(147,168,191,.75)" : color;
-    ctx.strokeStyle = current ? "#e6edf6" : "#08111a";
-    ctx.lineWidth = current ? 2 : 1;
-    ctx.fill();
-    ctx.stroke();
-    const label = `${isDrop ? "D" : "R"}-T${target.target_id}`;
-    drawFieldLabel(ctx, label, x + 9, y - 10, {align: "left", color});
-    drawFieldLabel(ctx, `seen=${target.seen_count ?? 0}`, x + 9, y + 5, {align: "left", color: "#93a8bf"});
-  };
-  model.dropTargets.forEach((target, index) => drawTarget(target, "drop", index));
-  model.recceTargets.forEach((target, index) => drawTarget(target, "recce", index));
-}
-function drawLocalizationTargets(ctx, model) {
-  model.localizationTargets.forEach((target, index) => {
-    const tx = pointX(target);
-    const ty = pointY(target);
-    if (tx === null || ty === null) return;
-    const [x, y] = worldToCanvas(tx, ty, model.rect);
-    const id = target.id ?? target.target_id ?? index;
-    const count = target.sample_count ?? target.count ?? target.seen_count ?? 0;
-    const selected = isSelectedDropTarget(target, model.dropTargetsSelected);
-    var wfTargets = model.workflowTargets || [];
-    var wfTarget = null;
-    for (var wi = 0; wi < wfTargets.length; wi++) {
-      if (targetsMatch(target, wfTargets[wi], 0.35)) { wfTarget = wfTargets[wi]; break; }
-    }
-    var status = wfTarget ? wfTarget.status : "";
-    var locked = wfTarget && wfTarget.locked;
-    var dropped = wfTarget && wfTarget.released;
-    var rank = wfTarget ? wfTarget.rank : 0;
-    var fillColor = selected ? "#ff3b30" : "#2bc277";
-    var labelColor = selected ? "#ff3b30" : "#2bc277";
-    ctx.beginPath();
-    ctx.arc(x, y, selected ? 8 : 7, 0, Math.PI * 2);
-    ctx.fillStyle = fillColor;
-    ctx.strokeStyle = "#e6edf6";
-    ctx.lineWidth = 2;
-    ctx.fill();
-    ctx.stroke();
-    if (locked) {
-      ctx.beginPath();
-      ctx.arc(x, y, 12, 0, Math.PI * 2);
-      ctx.strokeStyle = "#ffd84d";
-      ctx.lineWidth = 3;
-      ctx.stroke();
-      drawFieldLabel(ctx, "LOCKED", x + 10, y - 28, {align: "left", color: "#ffd84d", font: "10px Consolas, monospace"});
-    }
-    if (dropped) {
-      drawFieldLabel(ctx, "RELEASED", x + 10, y + 20, {align: "left", color: "#93a8bf", font: "10px Consolas, monospace"});
-    }
-    var label = `L${id} ${target.class_name || "obj"}`;
-    var selIdx = model.dropTargetsSelected ? model.dropTargetsSelected.findIndex(function (t) { return targetsMatch(target, t, 0.25); }) : -1;
-    if (selIdx >= 0) label += " SEL" + (selIdx + 1);
-    drawFieldLabel(ctx, label, x + 10, y - 12, {
-      align: "left",
-      color: labelColor,
+      screen.forEach(function (point, index) { if (index) ctx.lineTo(point[0], point[1]); else ctx.moveTo(point[0], point[1]); });
+      ctx.closePath();
+      ctx.fillStyle = box.color === "#39c8bf" ? "rgba(57,200,191,.12)"
+        : box.color === "#eda93d" ? "rgba(237,169,61,.14)" : "rgba(147,168,191,.12)";
+      ctx.strokeStyle = box.color; ctx.lineWidth = 1.5; ctx.fill(); ctx.stroke();
+      const center = box.points.reduce(function (sum, point) { return {x: sum.x + point.x, y: sum.y + point.y}; }, {x: 0, y: 0});
+      const point = toCanvas(center.x / box.points.length, center.y / box.points.length);
+      drawLabel(ctx, box.label + (runtimeGeometryConfirmed ? "" : "（预览）"), point[0], point[1], box.color);
     });
-    var meta = `x=${num(tx, 2)} y=${num(ty, 2)} n=${count}`;
-    if (target.raw_count != null) meta += ` raw=${target.raw_count}`;
-    if (target.confidence != null) meta += ` conf=${num(target.confidence, 2)}`;
-    drawFieldLabel(ctx, meta, x + 10, y + 5, {
-      align: "left",
-      color: "#93a8bf",
-      font: "11px Consolas, monospace",
-    });
-  });
-}
-function drawSingleViewTargets(ctx, model) {
-  const targets = Array.isArray(model.singleViewTargets) ? model.singleViewTargets : [];
-  if (!targets.length) return;
-  const lineSource = model.singleViewDrone || (
-    model.drone && Number.isFinite(Number(model.drone.x)) && Number.isFinite(Number(model.drone.y))
-      ? {x: Number(model.drone.x), y: Number(model.drone.y)}
-      : null
-  );
-  targets.forEach((target, index) => {
-    const [x, y] = worldToCanvas(target.x, target.y, model.rect);
-    if (lineSource) {
-      const [sx, sy] = worldToCanvas(lineSource.x, lineSource.y, model.rect);
+  }
+  function refreshBase(model) {
+    const key = baseCacheKey(model);
+    if (key === baseKey && baseCanvas) return;
+    baseKey = key;
+    baseCanvas = document.createElement("canvas");
+    baseCanvas.width = Math.round(canvasRect.width * pixelRatio); baseCanvas.height = Math.round(canvasRect.height * pixelRatio);
+    const ctx = baseCanvas.getContext("2d");
+    ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    ctx.clearRect(0, 0, canvasRect.width, canvasRect.height);
+    drawGrid(ctx); drawBoxes(ctx, model.boxes);
+  }
+  function drawDrone(ctx, drone) {
+    if (!drone) return;
+    const point = toCanvas(drone.x, drone.y);
+    ctx.save(); ctx.translate(point[0], point[1]); ctx.rotate(drone.yaw);
+    ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(-7, 8); ctx.lineTo(0, 4); ctx.lineTo(7, 8); ctx.closePath();
+    ctx.fillStyle = "#e6edf6"; ctx.strokeStyle = "#08111a"; ctx.lineWidth = 1.5; ctx.fill(); ctx.stroke(); ctx.restore();
+    drawLabel(ctx, "UAV", point[0] + 16, point[1] - 12, "#e6edf6", "left");
+    drawLabel(ctx, "x=" + drone.x.toFixed(2) + " y=" + drone.y.toFixed(2), point[0] + 16, point[1] + 3, "#93a8bf", "left");
+  }
+  function drawStartPoint(ctx, startPoint) {
+    if (!startPoint) return;
+    const point = toCanvas(startPoint.x, startPoint.y);
+    ctx.beginPath(); ctx.arc(point[0], point[1], 8, 0, Math.PI * 2);
+    ctx.fillStyle = "#08111a"; ctx.strokeStyle = "#e6edf6"; ctx.lineWidth = 2; ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(point[0] - 4, point[1]); ctx.lineTo(point[0] + 4, point[1]); ctx.moveTo(point[0], point[1] - 4); ctx.lineTo(point[0], point[1] + 4); ctx.stroke();
+    drawLabel(ctx, startPoint.label, point[0] + 12, point[1] - 12, "#e6edf6", "left");
+  }
+  function drawObjects(ctx, objects, color, prefix) {
+    objects.slice(0, 64).forEach(function (point, index) {
+      const p = toCanvas(point.x, point.y);
       ctx.beginPath();
-      ctx.moveTo(sx, sy);
-      ctx.lineTo(x, y);
-      ctx.strokeStyle = "rgba(255,91,91,.55)";
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      if (prefix === "筒") ctx.rect(p[0] - 6, p[1] - 6, 12, 12);
+      else ctx.arc(p[0], p[1], 6, 0, Math.PI * 2);
+      ctx.fillStyle = color; ctx.strokeStyle = "#08111a"; ctx.lineWidth = 1.5; ctx.fill(); ctx.stroke();
+      const id = point.id ?? point.target_id ?? index + 1;
+      drawLabel(ctx, prefix + " " + id, p[0] + 10, p[1] - 8, color, "left");
+      if (prefix === "筒") drawLabel(ctx, "x=" + point.x.toFixed(2) + " y=" + point.y.toFixed(2), p[0] + 10, p[1] + 7, "#93a8bf", "left");
+    });
+  }
+  function updateInfo(model) {
+    const info = $("fieldMapInfoBox");
+    if (info) {
+      const text = MAP_DEMO_ENABLED ? "DEMO 假数据：未连接飞控，不能用于操作。"
+        : model.ready ? "坐标：FIELD via GPS（已确认并冻结）"
+        : runtimeGeometry ? "场地几何：预览；飞机和目标坐标已隐藏，等待确认/冻结。" : "等待 Field Reference 确认、同步并冻结。";
+      if (text !== infoKey) { info.textContent = text; infoKey = text; }
+      info.style.display = "block";
     }
-    ctx.beginPath();
-    ctx.moveTo(x - 6, y);
-    ctx.lineTo(x + 6, y);
-    ctx.moveTo(x, y - 6);
-    ctx.lineTo(x, y + 6);
-    ctx.strokeStyle = "#ff5b5b";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(x, y, 4, 0, Math.PI * 2);
-    ctx.fillStyle = "#08111a";
-    ctx.strokeStyle = "#ff5b5b";
-    ctx.lineWidth = 1;
-    ctx.fill();
-    ctx.stroke();
+    const legend = $("fieldMapLegend");
+    if (legend) legend.innerHTML = ["Coord: " + model.source, "Stage: " + model.stage, "筒: " + model.localization.length, "Recon: " + model.recon.length]
+      .map(function (text) { return "<span>" + text + "</span>"; }).join("");
+    const empty = $("fieldMapEmpty");
+    if (empty) empty.style.display = model.ready || runtimeGeometry ? "none" : "block";
+  }
+  function renderNow(next) {
+    const canvas = $("fieldMap");
+    if (!canvas) return;
+    ensureCanvas(canvas); setupFieldMapInteractions();
+    const model = fieldMapModel(next);
+    if (!view.initialized) fitFieldMapToDefaults();
+    refreshBase(model);
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    ctx.clearRect(0, 0, canvasRect.width, canvasRect.height);
+    ctx.drawImage(baseCanvas, 0, 0, baseCanvas.width, baseCanvas.height, 0, 0, canvasRect.width, canvasRect.height);
+    drawStartPoint(ctx, model.startPoint); drawObjects(ctx, model.localization, "#2bc277", "筒"); drawObjects(ctx, model.recon, "#eda93d", "侦察"); drawDrone(ctx, model.drone);
+    updateInfo(model);
+  }
 
-    const label = `SV${index}`;
-    const meta = [];
-    if (target.confidence !== null) meta.push(`conf=${num(target.confidence, 2)}`);
-    if (target.ex !== null && target.ey !== null) meta.push(`ex=${num(target.ex, 2)} ey=${num(target.ey, 2)}`);
-    drawFieldLabel(ctx, label, x + 10, y - 12, {align: "left", color: "#ff8a8a"});
-    if (meta.length) {
-      drawFieldLabel(ctx, meta.join(" "), x + 10, y + 5, {
-        align: "left",
-        color: "#ffb3b3",
-        font: "11px Consolas, monospace",
+  function fitFieldMapToDefaults() {
+    view.centerX = (DEFAULT_BOUNDS.xMin + DEFAULT_BOUNDS.xMax) / 2;
+    view.centerY = (DEFAULT_BOUNDS.yMin + DEFAULT_BOUNDS.yMax) / 2;
+    if (!canvasRect) return;
+    const padding = 60;
+    view.scale = Math.max(view.minScale, Math.min(view.maxScale,
+      Math.min((canvasRect.width - padding * 2) / (DEFAULT_BOUNDS.xMax - DEFAULT_BOUNDS.xMin),
+        (canvasRect.height - padding * 2) / (DEFAULT_BOUNDS.yMax - DEFAULT_BOUNDS.yMin))));
+    view.initialized = true; baseKey = "";
+  }
+  function updateCursor(event) {
+    const canvas = $("fieldMap"); if (!canvas || !canvasRect) return;
+    const rect = canvas.getBoundingClientRect(), world = toWorld(event.clientX - rect.left, event.clientY - rect.top);
+    const el = $("fieldMapCoord");
+    if (el) el.textContent = "FIELD x=" + world.x.toFixed(2) + " y=" + world.y.toFixed(2) + " m";
+  }
+  function setupFieldMapInteractions() {
+    const canvas = $("fieldMap");
+    if (!canvas || canvas.dataset.mapReady === "1") return;
+    canvas.dataset.mapReady = "1";
+    if (window.ResizeObserver) new ResizeObserver(function () { resizeDirty = true; queueRender(); }).observe(canvas);
+    const pointers = new Map(); let drag = null; let pinch = null; let moveQueued = false; let pendingMove = null;
+    function pointerDistance(points) { return Math.hypot(points[0].clientX - points[1].clientX, points[0].clientY - points[1].clientY); }
+    function pointerMidpoint(points) { return {x: (points[0].clientX + points[1].clientX) / 2, y: (points[0].clientY + points[1].clientY) / 2}; }
+    function queueMove(event) {
+      pendingMove = event; if (moveQueued) return; moveQueued = true;
+      requestAnimationFrame(function () {
+        moveQueued = false; const current = pendingMove; pendingMove = null; if (!current) return;
+        updateCursor(current);
+        if (pointers.size >= 2 && pinch) {
+          const points = Array.from(pointers.values()).slice(0, 2), rect = canvas.getBoundingClientRect();
+          const mid = pointerMidpoint(points), distance = Math.max(1, pointerDistance(points));
+          view.scale = Math.max(view.minScale, Math.min(view.maxScale, pinch.scale * distance / pinch.distance));
+          const after = toWorld(mid.x - rect.left, mid.y - rect.top);
+          view.centerX += after.x - pinch.world.x; view.centerY += pinch.world.y - after.y;
+          baseKey = ""; queueRender();
+        } else if (pointers.size === 1 && drag) {
+          view.centerX = drag.centerX - (current.clientX - drag.x) / view.scale;
+          view.centerY = drag.centerY + (current.clientY - drag.y) / view.scale;
+          baseKey = ""; queueRender();
+        }
       });
     }
-  });
-}
-
-function drawProfilePreviewBoxes(ctx, model) {
-  var preview = model.profilePreview;
-  if (!preview || !Array.isArray(preview.boxes)) return;
-  var colors = {
-    field_bounds: {fill: "rgba(147,168,191,.10)", stroke: "rgba(147,168,191,.75)"},
-    drop_area: {fill: "rgba(57,200,191,.12)", stroke: "rgba(57,200,191,.82)"},
-    recce_area: {fill: "rgba(237,169,61,.14)", stroke: "rgba(237,169,61,.85)"},
-  };
-  preview.boxes.forEach(function (box) {
-    var c = colors[box.kind] || {fill: "rgba(147,168,191,.08)", stroke: "rgba(147,168,191,.55)"};
-    var xs = box.corners.map(function (pt) { return pt.field_x; });
-    var ys = box.corners.map(function (pt) { return pt.field_y; });
-    var fxMin = Math.min.apply(null, xs);
-    var fxMax = Math.max.apply(null, xs);
-    var fyMin = Math.min.apply(null, ys);
-    var fyMax = Math.max.apply(null, ys);
-    var area = {x: (fxMin + fxMax) / 2, y: (fyMin + fyMax) / 2, xLen: fxMax - fxMin, yLen: fyMax - fyMin, label: box.label};
-    drawArea(ctx, model, area, c.fill, c.stroke);
-  });
-}
-
-function drawProfileCornerPoints(ctx, model) {
-  var preview = model.profilePreview;
-  if (!preview || !Array.isArray(preview.boxes)) return;
-  if (preview._runtime_geometry) return;
-  preview.boxes.forEach(function (box) {
-    box.corners.forEach(function (pt) {
-      var pos = worldToCanvas(pt.field_x, pt.field_y, model.rect);
-      var cx = pos[0], cy = pos[1];
-      ctx.beginPath();
-      ctx.arc(cx, cy, 4, 0, Math.PI * 2);
-      ctx.fillStyle = "#e6edf6";
-      ctx.strokeStyle = "#08111a";
-      ctx.lineWidth = 1.5;
-      ctx.fill();
-      ctx.stroke();
-      drawFieldLabel(ctx, pt.name, cx + 8, cy - 8, {align: "left", color: "#e6edf6", font: "10px Consolas, monospace"});
-    });
-  });
-}
-
-function renderFieldMapInfoBox(model) {
-  var el = $("fieldMapInfoBox");
-  if (!el) return;
-  var preview = model.profilePreview;
-  if (!preview || !preview.ok) {
-    el.style.display = "none";
-    fieldMapInfoBoxKey = "";
-    return;
-  }
-  // Simple key: profile_id + corner GPS summary (changes only on new profile)
-  var key = preview.profile_id + "|" + JSON.stringify(preview.reference) + "|" +
-    String(Boolean(preview._confirmed)) + "|" + JSON.stringify(preview._runtime_geometry || null);
-  if (key === fieldMapInfoBoxKey) return;
-  fieldMapInfoBoxKey = key;
-  el.style.display = "block";
-  var lines = [];
-  lines.push("Field Profile: " + escapeHtml(preview.profile_id || "--"));
-  if (preview._runtime_geometry) {
-    var runtime = preview._runtime_geometry;
-    var pointLine = function (prefix, point, includeAltitude) {
-      if (!point) return prefix + ": --";
-      var line = prefix + " " + point.name +
-        " FIELD x=" + Number(point.field_x_m).toFixed(2) +
-        " y=" + Number(point.field_y_m).toFixed(2) +
-        " GPS " + Number(point.lat).toFixed(7) + ", " + Number(point.lon).toFixed(7);
-      if (includeAltitude) line += " altitude=" + Number(point.altitude_m).toFixed(2) + "m";
-      return line;
-    };
-    lines.push(runtimeGeometryConfirmed ? "CONFIRMED / FROZEN" : "UNCONFIRMED");
-    lines.push("A GPS: " + Number(runtime.home.lat).toFixed(7) + ", " + Number(runtime.home.lon).toFixed(7));
-    lines.push("B GPS: " + Number(runtime.forward_marker.lat).toFixed(7) + ", " + Number(runtime.forward_marker.lon).toFixed(7));
-    lines.push("baseline: " + Number(runtime.baseline).toFixed(2) + "m");
-    lines.push("heading: " + Number(runtime.heading.degrees).toFixed(2) + "°");
-    (runtime.drop_scan_waypoints || []).forEach(function (point, index) {
-      lines.push(pointLine("SCAN" + (index + 1), point, true));
-    });
-    (runtime.drop_area_corners || []).forEach(function (point) {
-      lines.push(pointLine(point.name, point, false));
-    });
-    (runtime.recce_area_corners || []).forEach(function (point) {
-      lines.push(pointLine(point.name, point, false));
-    });
-  } else {
-    lines.push("Heading: " + (preview.reference && preview.reference.field_heading_deg != null ? preview.reference.field_heading_deg.toFixed(2) + "°" : "--"));
-    lines.push("Origin O: " + (preview.reference ? preview.reference.origin_lat.toFixed(7) + ", " + preview.reference.origin_lon.toFixed(7) : "--"));
-  }
-  lines.push("");
-
-  var boxes = preview.boxes || [];
-  var boxTags = {field_bounds: "Field corners", drop_area: "Drop area", recce_area: "Recce area"};
-  boxes.forEach(function (box) {
-    var tag = boxTags[box.kind] || box.label || box.id;
-    lines.push(tag + ":");
-    (box.corners || []).forEach(function (c) {
-      var sx = c.field_x >= 0 ? "+" + c.field_x.toFixed(2) : c.field_x.toFixed(2);
-      var sy = c.field_y >= 0 ? "+" + c.field_y.toFixed(2) : c.field_y.toFixed(2);
-      lines.push(
-        c.name + " x=" + sx + " y=" + sy +
-        " GPS " + c.lat.toFixed(7) + ", " + c.lon.toFixed(7)
-      );
-    });
-  });
-
-  // Merge tube coordinates (drawTargetCoordinateList data)
-  var dropTargets = (model.dropTargets || []).map(function (t) { return {prefix: "D", target: t}; });
-  var recceTargets = (model.recceTargets || []).map(function (t) { return {prefix: "R", target: t}; });
-  var allTargets = dropTargets.concat(recceTargets);
-  if (allTargets.length) {
-    lines.push("");
-    lines.push("Targets:");
-    var maxRows = 8;
-    allTargets.slice(0, maxRows).forEach(function (item) {
-      var t = item.target;
-      var tid = t.target_id != null ? t.target_id : "?";
-      var tx = num(pointX(t), 2);
-      var ty = num(pointY(t), 2);
-      lines.push(item.prefix + "-T" + tid + ": x=" + tx + " y=" + ty);
-    });
-    if (allTargets.length > maxRows) lines.push("... +" + (allTargets.length - maxRows));
-  }
-
-  // Localized objects produced by the atomic capture/fusion workflow.
-  var locTargets = model.localizationTargets || [];
-  if (locTargets.length) {
-    lines.push("");
-    lines.push("Localized (" + locTargets.length + "):");
-    var preview = model.profilePreview;
-    var hasRef = preview && preview.ok && preview.reference;
-    locTargets.forEach(function (t) {
-      var tid = t.target_id != null ? t.target_id : "?";
-      var cn = t.class_name || "obj";
-      var conf = t.confidence != null ? " conf=" + Number(t.confidence).toFixed(2) : "";
-      var sc = t.seen_count != null ? " seen=" + t.seen_count : (t.count != null ? " seen=" + t.count : "");
-      var tx = pointX(t) != null ? num(pointX(t), 2) : "?";
-      var ty = pointY(t) != null ? num(pointY(t), 2) : "?";
-      var line = "L" + tid + " " + cn + " x=" + tx + " y=" + ty + conf + sc;
-      if (hasRef) {
-        var ref = preview.reference;
-        var h = ref.field_heading_yaw_rad;
-        var fx = Number(pointX(t)), fy = Number(pointY(t));
-        if (Number.isFinite(fx) && Number.isFinite(fy)) {
-          var cosH = Math.cos(h), sinH = Math.sin(h);
-          var dN = fy * cosH - fx * sinH;
-          var dE = fy * sinH + fx * cosH;
-          var ldm = 1.0 / 111320.0;
-          var lnm = 1.0 / (111320.0 * Math.cos(ref.origin_lat * Math.PI / 180.0));
-          var tLat = ref.origin_lat + dN * ldm;
-          var tLon = ref.origin_lon + dE * lnm;
-          line += " GPS " + tLat.toFixed(7) + ", " + tLon.toFixed(7);
-        }
+    canvas.addEventListener("wheel", function (event) {
+      event.preventDefault(); const rect = canvas.getBoundingClientRect();
+      const before = toWorld(event.clientX - rect.left, event.clientY - rect.top);
+      view.scale = Math.max(view.minScale, Math.min(view.maxScale, view.scale * (event.deltaY < 0 ? 1.15 : 1 / 1.15)));
+      const after = toWorld(event.clientX - rect.left, event.clientY - rect.top);
+      view.centerX += after.x - before.x; view.centerY += before.y - after.y; baseKey = ""; queueRender();
+    }, {passive: false});
+    canvas.addEventListener("pointerdown", function (event) {
+      canvas.setPointerCapture(event.pointerId); pointers.set(event.pointerId, event);
+      if (pointers.size === 1) drag = {x: event.clientX, y: event.clientY, centerX: view.centerX, centerY: view.centerY};
+      if (pointers.size === 2) {
+        const points = Array.from(pointers.values()), rect = canvas.getBoundingClientRect(), mid = pointerMidpoint(points);
+        pinch = {distance: Math.max(1, pointerDistance(points)), scale: view.scale, world: toWorld(mid.x - rect.left, mid.y - rect.top)};
       }
-      lines.push(line);
+    });
+    canvas.addEventListener("pointermove", function (event) { if (pointers.has(event.pointerId)) pointers.set(event.pointerId, event); queueMove(event); });
+    function finish(event) {
+      pointers.delete(event.pointerId);
+      if (!pointers.size) { drag = null; pinch = null; return; }
+      const remaining = pointers.values().next().value;
+      drag = {x: remaining.clientX, y: remaining.clientY, centerX: view.centerX, centerY: view.centerY};
+      pinch = null;
+    }
+    ["pointerup", "pointercancel", "lostpointercapture"].forEach(function (name) { canvas.addEventListener(name, finish); });
+    $("fieldMapZoomIn")?.addEventListener("click", function () { view.scale = Math.min(view.maxScale, view.scale * 1.2); baseKey = ""; queueRender(); });
+    $("fieldMapZoomOut")?.addEventListener("click", function () { view.scale = Math.max(view.minScale, view.scale / 1.2); baseKey = ""; queueRender(); });
+    $("fieldMapReset")?.addEventListener("click", function () { fitFieldMapToDefaults(); queueRender(); });
+    $("clearLocalization")?.addEventListener("click", function () {
+      if (typeof cfg.onClearLocalization !== "function") return;
+      cfg.onClearLocalization().catch(function (error) { if (typeof cfg.setCompletionHint === "function") cfg.setCompletionHint("清空筒坐标失败: " + error.message); });
     });
   }
-
-  // MultiView plan
-  var mvPlan = model.multiViewPlan;
-  if (mvPlan && Array.isArray(mvPlan.waypoints)) {
-    lines.push("");
-    lines.push("MultiView:");
-    lines.push("phase: " + (mvPlan.phase || "--"));
-    if (mvPlan.waypoint_index >= 0) {
-      lines.push("current: MV" + (mvPlan.waypoint_index + 1));
-    }
-    if (mvPlan.target) {
-      var tx = mvPlan.target.x >= 0 ? "+" + mvPlan.target.x.toFixed(2) : mvPlan.target.x.toFixed(2);
-      var ty = mvPlan.target.y >= 0 ? "+" + mvPlan.target.y.toFixed(2) : mvPlan.target.y.toFixed(2);
-      lines.push("target FIELD: x=" + tx + " y=" + ty + " alt=" + mvPlan.target.altitude_m.toFixed(1));
-      var preview = model.profilePreview;
-      if (preview && preview.ok && preview.reference) {
-        var ref = preview.reference;
-        var h = ref.field_heading_yaw_rad;
-        var fx = mvPlan.target.x, fy = mvPlan.target.y;
-        var cosH = Math.cos(h), sinH = Math.sin(h);
-        var dN = fy * cosH - fx * sinH;
-        var dE = fy * sinH + fx * cosH;
-        var ldm = 1.0 / 111320.0;
-        var lnm = 1.0 / (111320.0 * Math.cos(ref.origin_lat * Math.PI / 180.0));
-        var tLat = ref.origin_lat + dN * ldm;
-        var tLon = ref.origin_lon + dE * lnm;
-        lines.push("target GPS: " + tLat.toFixed(7) + ", " + tLon.toFixed(7));
-      }
-    }
-  }
-
-  // Drop workflow
-  var wf = model.dropWorkflow;
-  var wfSel = wf && Array.isArray(wf.selectedTargets) ? wf.selectedTargets : [];
-  if (wf && (wfSel.length || Object.keys(wf.targetLock || {}).length || Object.keys(wf.alignDescend || {}).length || Object.keys(wf.payloadRelease || {}).length)) {
-    lines.push("");
-    lines.push("Drop workflow:");
-    lines.push("selected: " + wfSel.length + " cur_rank=" + (wf.current_rank != null ? wf.current_rank : "--"));
-    wfSel.forEach(function (st) {
-      var cn = st.class_name || "obj";
-      var tid = st.target_id || st.id || "?";
-      lines.push(
-        "SEL" + (st.rank || "?") + " L?/" + cn +
-        " status=" + (st.status || "--") +
-        " locked=" + Boolean(st.locked) +
-        " released=" + Boolean(st.released) +
-        " payload=" + (st.payload_id || "--")
-      );
-    });
-    var lock = wf.targetLock || {};
-    if (Object.keys(lock).length) {
-      lines.push("lock: rank=" + (wf.current_rank || "--") + " track=" + (lock.locked_track_id != null ? lock.locked_track_id : "--") + " dist=" + (lock.best_distance_m != null ? Number(lock.best_distance_m).toFixed(2) : "--"));
-    }
-    var align = wf.alignDescend || {};
-    if (Object.keys(align).length) {
-      lines.push("align: aligned=" + Boolean(align.aligned) + " alt=" + (align.current_altitude_m != null ? Number(align.current_altitude_m).toFixed(2) : "--") + " ex=" + (align.ex_cam != null ? Number(align.ex_cam).toFixed(3) : "--") + " ey=" + (align.ey_cam != null ? Number(align.ey_cam).toFixed(3) : "--"));
-    }
-    var events = wf.releaseEvents || [];
-    if (events.length) {
-      lines.push("released: " + events.map(function (e) { return String(e.payload_id || "?") + "->" + String(e.target_id || "?"); }).join(", "));
-    }
-  }
-
-  el.innerHTML = lines.map(function (l) { return escapeHtml(l); }).join("<br>");
-}
-
-function drawTargetCoordinateList(ctx, model) {
-  const targets = [
-    ...model.dropTargets.map(target => ({...target, prefix: "D"})),
-    ...model.recceTargets.map(target => ({...target, prefix: "R"})),
-    ...model.localizationTargets.map(target => ({...target, prefix: "L"})),
-  ];
-  if (!targets.length) return;
-  const maxRows = 8;
-  const rows = targets.slice(0, maxRows).map(target =>
-    `${target.prefix}-T${target.target_id}: x=${num(target.x, 2)} y=${num(target.y, 2)}`
-  );
-  if (targets.length > maxRows) rows.push(`... +${targets.length - maxRows}`);
-  const x = 16;
-  const rowH = 16;
-  const width = 188;
-  const height = 28 + rows.length * rowH;
-  const y = model.rect.height - height - 14;
-  ctx.fillStyle = "rgba(8,17,26,.84)";
-  ctx.strokeStyle = "rgba(147,168,191,.55)";
-  ctx.lineWidth = 1;
-  ctx.fillRect(x, y, width, height);
-  ctx.strokeRect(x, y, width, height);
-  drawFieldLabel(ctx, "筒坐标", x + 10, y + 14, {align: "left", color: "#e6edf6"});
-  rows.forEach((row, index) => {
-    drawFieldLabel(ctx, row, x + 10, y + 32 + index * rowH, {
-      align: "left",
-      color: "#93a8bf",
-      font: "11px Consolas, monospace",
-    });
-  });
-}
-function fitFieldMapToDefaults() {
-  const bounds = FIELD_DEFAULTS.bounds;
-  fieldMapView.centerX = (bounds.xMin + bounds.xMax) / 2;
-  fieldMapView.centerY = (bounds.yMin + bounds.yMax) / 2;
-  const canvas = $("fieldMap");
-  if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  const pad = 70;
-  const scaleX = Math.max(1, (rect.width - pad * 2) / (bounds.xMax - bounds.xMin));
-  const scaleY = Math.max(1, (rect.height - pad * 2) / (bounds.yMax - bounds.yMin));
-  fieldMapView.scale = Math.max(
-    fieldMapView.minScale,
-    Math.min(fieldMapView.maxScale, Math.min(scaleX, scaleY))
-  );
-  fieldMapView.initialized = true;
-}
-function setupFieldMapInteractions() {
-  const canvas = $("fieldMap");
-  if (!canvas || canvas.dataset.mapReady === "1") return;
-  canvas.dataset.mapReady = "1";
-
-  canvas.addEventListener("wheel", event => {
-    event.preventDefault();
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = event.clientX - rect.left;
-    const mouseY = event.clientY - rect.top;
-    const before = canvasToWorld(mouseX, mouseY, rect);
-    const zoomFactor = event.deltaY < 0 ? 1.15 : 1 / 1.15;
-    fieldMapView.scale = Math.max(
-      fieldMapView.minScale,
-      Math.min(fieldMapView.maxScale, fieldMapView.scale * zoomFactor)
-    );
-    const after = canvasToWorld(mouseX, mouseY, rect);
-    fieldMapView.centerX += after.x - before.x;
-    fieldMapView.centerY += before.y - after.y;
-    scheduleFieldMapRender();
-  }, {passive: false});
-
-  // mousemove: display FIELD x/y and lat/lon coordinates
-  canvas.addEventListener("mousemove", event => {
-    var rect = canvas.getBoundingClientRect();
-    var world = canvasToWorld(event.clientX - rect.left, event.clientY - rect.top, rect);
-    var next = _state();
-    var latLon = fieldXYToLatLon(world.x, world.y, next);
-    var coordEl = document.getElementById("fieldMapCoord");
-    if (coordEl) {
-      var latStr = latLon ? latLon.lat.toFixed(6) : "--";
-      var lonStr = latLon ? latLon.lon.toFixed(6) : "--";
-      coordEl.textContent =
-        "FIELD x=" + world.x.toFixed(2) + " y=" + world.y.toFixed(2) +
-        " | lat=" + latStr + " lon=" + lonStr;
-    }
-  });
-
-  // Pointer Events: unify mouse + touch drag/pinch
-  const activePointers = new Map();
-
-  function pointerPoint(event) {
-    const rect = canvas.getBoundingClientRect();
-    return {
-      id: event.pointerId,
-      x: event.clientX,
-      y: event.clientY,
-      canvasX: event.clientX - rect.left,
-      canvasY: event.clientY - rect.top,
-    };
-  }
-
-  function pinchDistance(a, b) {
-    return Math.hypot(a.x - b.x, a.y - b.y);
-  }
-
-  function pinchMidpoint(a, b) {
-    return {
-      x: (a.x + b.x) / 2,
-      y: (a.y + b.y) / 2,
-    };
-  }
-
-  fieldMapView.pinchStartDistance = 0;
-  fieldMapView.pinchStartScale = fieldMapView.scale;
-  fieldMapView.pinchStartWorld = null;
-
-  canvas.addEventListener("pointerdown", event => {
-    event.preventDefault();
-    canvas.setPointerCapture(event.pointerId);
-    activePointers.set(event.pointerId, pointerPoint(event));
-
-    if (activePointers.size === 1) {
-      fieldMapView.isDragging = true;
-      fieldMapView.interacting = true;
-      fieldMapView.dragStartX = event.clientX;
-      fieldMapView.dragStartY = event.clientY;
-      fieldMapView.dragStartCenterX = fieldMapView.centerX;
-      fieldMapView.dragStartCenterY = fieldMapView.centerY;
-      canvas.classList.add("dragging");
-    }
-
-    if (activePointers.size === 2) {
-      const points = Array.from(activePointers.values());
-      const rect = canvas.getBoundingClientRect();
-      const mid = pinchMidpoint(points[0], points[1]);
-      fieldMapView.pinchStartDistance = Math.max(1, pinchDistance(points[0], points[1]));
-      fieldMapView.pinchStartScale = fieldMapView.scale;
-      fieldMapView.pinchStartWorld = canvasToWorld(mid.x - rect.left, mid.y - rect.top, rect);
-    }
-  });
-
-  canvas.addEventListener("pointermove", event => {
-    if (!activePointers.has(event.pointerId)) return;
-    event.preventDefault();
-    activePointers.set(event.pointerId, pointerPoint(event));
-
-    if (activePointers.size === 1 && fieldMapView.isDragging) {
-      const p = activePointers.get(event.pointerId);
-      const dx = p.x - fieldMapView.dragStartX;
-      const dy = p.y - fieldMapView.dragStartY;
-      fieldMapView.centerX = fieldMapView.dragStartCenterX - dx / fieldMapView.scale;
-      fieldMapView.centerY = fieldMapView.dragStartCenterY + dy / fieldMapView.scale;
-      scheduleFieldMapRender();
-      return;
-    }
-
-    if (activePointers.size >= 2) {
-      const points = Array.from(activePointers.values()).slice(0, 2);
-      const rect = canvas.getBoundingClientRect();
-      const mid = pinchMidpoint(points[0], points[1]);
-      const currentDistance = Math.max(1, pinchDistance(points[0], points[1]));
-      const before = fieldMapView.pinchStartWorld || canvasToWorld(mid.x - rect.left, mid.y - rect.top, rect);
-
-      fieldMapView.scale = Math.max(
-        fieldMapView.minScale,
-        Math.min(fieldMapView.maxScale, fieldMapView.pinchStartScale * currentDistance / fieldMapView.pinchStartDistance)
-      );
-
-      const after = canvasToWorld(mid.x - rect.left, mid.y - rect.top, rect);
-      fieldMapView.centerX += after.x - before.x;
-      fieldMapView.centerY += before.y - after.y;
-      scheduleFieldMapRender();
-    }
-  });
-
-  function endPointer(event) {
-    activePointers.delete(event.pointerId);
-    if (activePointers.size === 0) {
-      fieldMapView.isDragging = false;
-      fieldMapView.interacting = false;
-      fieldMapView.pinchStartWorld = null;
-      canvas.classList.remove("dragging");
-      scheduleFieldMapRender();
-    } else if (activePointers.size === 1) {
-      const p = Array.from(activePointers.values())[0];
-      fieldMapView.isDragging = true;
-      fieldMapView.dragStartX = p.x;
-      fieldMapView.dragStartY = p.y;
-      fieldMapView.dragStartCenterX = fieldMapView.centerX;
-      fieldMapView.dragStartCenterY = fieldMapView.centerY;
-    }
-  }
-
-  canvas.addEventListener("pointerup", endPointer);
-  canvas.addEventListener("pointercancel", endPointer);
-  canvas.addEventListener("lostpointercapture", endPointer);
-
-  // button handlers
-  $("fieldMapZoomIn")?.addEventListener("click", () => {
-    fieldMapView.scale = Math.min(fieldMapView.maxScale, fieldMapView.scale * 1.2);
-    scheduleFieldMapRender();
-  });
-  $("fieldMapZoomOut")?.addEventListener("click", () => {
-    fieldMapView.scale = Math.max(fieldMapView.minScale, fieldMapView.scale / 1.2);
-    scheduleFieldMapRender();
-  });
-  $("fieldMapReset")?.addEventListener("click", () => {
-    fitFieldMapToDefaults();
-    scheduleFieldMapRender();
-  });
-  $("clearLocalization")?.addEventListener("click", () => {
-    _clearLocalization().catch(error => {
-      _setCompletionHint("清空筒坐标失败: " + error.message);
-    });
-  });
-}
-function renderFieldMapNow(next) {
-  next = next || _state();
-  const canvas = $("fieldMap");
-  if (!canvas) return;
-  setupFieldMapInteractions();
-  const {ctx, rect} = resizeFieldCanvas(canvas);
-  const model = fieldMapModel(next);
-  model.rect = rect;
-  if (!fieldMapView.initialized) {
-    fitFieldMapToDefaults();
-  }
-  drawField(ctx, model);
-  drawSurveyPoints(ctx, model);
-  drawTargets(ctx, model);
-  drawLocalizationTargets(ctx, model);
-  drawSingleViewTargets(ctx, model);
-  drawDrone(ctx, model);
-  if (model.profilePreview && !fieldMapView.interacting) {
-    renderFieldMapInfoBox(model);
-  } else if (model.profilePreview) {
-    // interacting: skip DOM update, keep existing info box visible
-  } else {
-    drawTargetCoordinateList(ctx, model);
-    var infoEl = $("fieldMapInfoBox");
-    if (infoEl) infoEl.style.display = "none";
-  }
-  const hasProfilePreview = Boolean(model.profilePreview && model.profilePreview.ok);
-  const hasDronePosition = Boolean(model.drone);
-  $("fieldMapEmpty").style.display =
-    (model.hasMissionPosition || hasProfilePreview || hasDronePosition) ? "none" : "block";
-  $("fieldMapLegend").innerHTML = [
-    `Stage: ${escapeHtml(model.stage)}`,
-    `Drop: ${model.dropCount}/${model.requiredDrops}`,
-    `Drop targets: ${model.dropTargets.length}`,
-    `Selected: ${model.dropTargetsSelected.length}`,
-    `Recce confirmed: ${model.confirmedCount}/${model.requiredConfirmed}`,
-    `Localization: ${model.localizationTargets.length}`,
-    `Drop fusion: ${model.localizationTargets.length}`,
-    `Recon fusion: ${model.reconLocalizationTargets.length}`,
-    `SingleView: ${model.singleViewTargets.length}`,
-    hasProfilePreview ? "Coord: profile preview" : model.hasMissionPosition ? "Coord: mission" : hasDronePosition && model.drone.field ? "Coord: field" : "Coord: unavailable",
-  ].map(item => `<span>${item}</span>`).join("");
-}
-
 
   window.UavFieldMap = {
-    configure: configure,
-    FIELD_DEFAULTS: FIELD_DEFAULTS,
-    fieldMapView: fieldMapView,
-    finiteNumber: finiteNumber,
-    pointX: pointX,
-    pointY: pointY,
-    pointForFieldMap: pointForFieldMap,
-    isSelectedDropTarget: isSelectedDropTarget,
-    fieldMapModel: fieldMapModel,
-    canvasToWorld: canvasToWorld,
-    fieldXYToLatLon: fieldXYToLatLon,
-    worldToCanvas: worldToCanvas,
-    fitFieldMapToDefaults: fitFieldMapToDefaults,
-    setupFieldMapInteractions: setupFieldMapInteractions,
-    renderFieldMap: renderFieldMap,
-    setProfilePreview: setProfilePreview,
-    setRuntimeGeometry: setRuntimeGeometry,
-    drawRuntimeGeometryPoints: drawRuntimeGeometryPoints,
-    renderFieldMapInfoBox: renderFieldMapInfoBox,
+    configure, FIELD_DEFAULTS: {bounds: DEFAULT_BOUNDS}, fieldMapView: view,
+    finiteNumber: finite, pointX: Model.pointX, pointY: Model.pointY, pointForFieldMap: fieldPoint,
+    fieldXYToLatLon: Model.fieldXYToLatLon, fieldMapModel,
+    canvasToWorld: function (x, y) { return toWorld(x, y); }, worldToCanvas: function (x, y) { return toCanvas(x, y); },
+    fitFieldMapToDefaults, setupFieldMapInteractions, renderFieldMap, setProfilePreview, setRuntimeGeometry,
+    renderFieldMapInfoBox: updateInfo,
   };
 })();

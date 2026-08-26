@@ -60,6 +60,16 @@ const DEFAULT_ACTION_MISSION_STEPS = [
   },
 ];
 const actionMissionPresets = {};
+const POSITION_DEMO_ENABLED = new URLSearchParams(window.location.search).get("demo-position") === "1";
+const POSITION_DEMO = Object.freeze({
+  field_x: 12.345,
+  field_y: 28.910,
+  field_z: 6.250,
+  yaw_deg: 127.64,
+  field_yaw_deg: 42.64,
+  lat: 34.341_456_789,
+  lon: 108.939_123_456,
+});
 
 const json = window.UavApi.request;
 
@@ -67,8 +77,6 @@ const {
   stamp,
   escapeHtml,
   num,
-  degNum,
-  xyzText,
   boolText,
 } = window.UavFormat;
 
@@ -99,7 +107,6 @@ async function clearLocalization() {
   $("completionHint").textContent = result.message || "localized object coordinates cleared";
   state.localization = {};
   renderFieldMap(state);
-  await loadAudit();
   return result;
 }
 // Field Map configure (WU-5 v3) — must be before init() and ActionLab
@@ -372,12 +379,39 @@ function renderDashboardSummaries(next) {
     ["note", actionLab.note || dispatch.note || "--"],
   ]);
 }
+function fullPositionNumber(value, unit = "") {
+  return Number.isFinite(Number(value)) ? `${String(value)}${unit}` : "--";
+}
+function positionDisplay(next, drone) {
+  if (POSITION_DEMO_ENABLED) return POSITION_DEMO;
+  const field = next.field_position || {};
+  const localZ = Number(field.local_z);
+  const headingYaw = Number(next.field_heading?.current_yaw_deg);
+  const fieldHeadingYaw = Number(next.field_heading?.field_heading_yaw_deg);
+  const reportedFieldYaw = Number(next.field_heading?.delta_current_to_field_deg);
+  const fallbackYaw = Number(drone.yaw) * 180 / Math.PI;
+  const northYaw = Number.isFinite(headingYaw) ? headingYaw : fallbackYaw;
+  const calculatedFieldYaw = Number.isFinite(northYaw) && Number.isFinite(fieldHeadingYaw)
+    ? ((northYaw - fieldHeadingYaw + 540) % 360) - 180
+    : NaN;
+  return {
+    field_x: field.x,
+    field_y: field.y,
+    // FIELD +Z is up; LOCAL_NED z is down.
+    field_z: Number.isFinite(localZ) ? -localZ : drone.relative_altitude,
+    yaw_deg: northYaw,
+    // FIELD yaw is relative to FIELD +Y (the runway/field forward direction).
+    field_yaw_deg: Number.isFinite(reportedFieldYaw) ? reportedFieldYaw : calculatedFieldYaw,
+    lat: drone.lat,
+    lon: drone.lon,
+    source: field.source || "--",
+  };
+}
 function renderStatus(next) {
   state = next;
   const link = next.link || {};
   const drone = next.drone || {};
   const gimbal = next.gimbal || {};
-  const target = next.perception || {};
   const controls = next.controllers || {};
   setBadge($("sourceBadge"), `SOURCE ${String(next.active_source || "--").toUpperCase()}`, next.active_source === "real" ? "warning" : "");
   setBadge($("linkBadge"), `LINK ${link.connected ? "OK" : "DOWN"}`, link.connected ? "ok" : "danger");
@@ -394,36 +428,20 @@ function renderStatus(next) {
   setOptionalText("stageController", next.stage_controller || "--");
   setOptionalText("holdReason", next.hold_reason || "none");
   updateControlHighlights(next, drone, controls);
-  $("targetCurrent").textContent = target.target_valid
-    ? `当前锁定: ${target.class_name} #${target.track_id} (${Number(target.confidence).toFixed(2)})`
-    : "当前锁定: --";
-  const scene = next.scene || {};
-  const detections = scene.detections || [];
-  infoRows($("targetInfo"), [
-    ["目标状态", target.target_valid ? "LOCKED" : (target.tracking_state || "--").toUpperCase()],
-    ["Track ID", target.target_valid ? `#${target.track_id}` : "--"],
-    ["类别/置信度", target.target_valid ? `${target.class_name || "--"} / ${num(target.confidence, 2)}` : "--"],
-    ["Frame", `${scene.frame_id ?? target.frame_id ?? "--"}`],
-    ["检测数", `${detections.length}`],
-    ["图像尺寸", `${scene.image_width || target.image_width || "--"} x ${scene.image_height || target.image_height || "--"}`],
-    ["中心 cx/cy", target.target_valid ? `${num(target.cx, 1)} / ${num(target.cy, 1)}` : "--"],
-    ["框 w/h", target.target_valid ? `${num(target.w, 1)} / ${num(target.h, 1)}` : "--"],
-    ["误差 ex/ey", target.target_valid ? `${num(target.ex, 3)} / ${num(target.ey, 3)}` : "--"],
-    ["目标尺寸", target.target_valid ? num(target.target_size, 3) : "--"],
-    ["丢失计数", `${target.lost_count ?? "--"}`],
-    ["Scene 时间", stamp(scene.timestamp || target.timestamp)],
-  ]);
+  const position = positionDisplay(next, drone);
+  const demoLabel = $("positionDemoLabel");
+  if (demoLabel) demoLabel.hidden = !POSITION_DEMO_ENABLED;
   infoRows($("aircraftInfo"), [
-    ["GPS", `${drone.gps_fix_type ?? "--"} fix / ${drone.satellites_visible ?? "--"} sats`],
-    ["电池", drone.battery_valid ? `${num(drone.battery_voltage, 1, " V")} / ${drone.battery_remaining}%` : "--"],
-    ["高度", `${num(drone.relative_altitude, 2, " m")} / ${num(drone.altitude, 2, " m")}`],
-    ["飞控模式", drone.mode || "--"],
-    ["解锁", boolText(drone.armed, "ARMED", "DISARMED")],
-    ["当前 yaw", degNum(next.field_heading?.current_yaw_deg)],
-    ["场地方向", next.field_heading?.field_heading_confirmed ? degNum(next.field_heading?.field_heading_yaw_deg) : "--"],
-    ["yaw 偏差", degNum(next.field_heading?.delta_current_to_field_deg)],
+    ["FIELD X（右，m）", fullPositionNumber(position.field_x)],
+    ["FIELD Y（前，m）", fullPositionNumber(position.field_y)],
+    ["FIELD Z（上，m）", fullPositionNumber(position.field_z)],
+    ["偏航 yaw（北基准）", fullPositionNumber(position.yaw_deg, "°")],
+    ["偏航 yaw（FIELD +Y）", fullPositionNumber(position.field_yaw_deg, "°")],
+    ["GPS 纬度", fullPositionNumber(position.lat)],
+    ["GPS 经度", fullPositionNumber(position.lon)],
+    ["位置来源", POSITION_DEMO_ENABLED ? "DEMO 假数据" : position.source],
+    ["GPS 质量", `${drone.gps_fix_type ?? "--"} fix / ${drone.satellites_visible ?? "--"} sats`],
   ]);
-  renderDetections(scene, target);
   cards($("statusCards"), {
     "链路": `${link.status_text || "--"} / ${link.transport || "--"}`,
     "心跳": link.connected ? `${num(drone.hb_age_sec, 2, " s")} ago` : "--",
@@ -441,7 +459,6 @@ function renderStatus(next) {
     "云台 Y/P/R": gimbal.gimbal_valid ? `${num(gimbal.yaw, 3)} / ${num(gimbal.pitch, 3)} / ${num(gimbal.roll, 3)}` : "--",
     "最新消息": drone.last_message_type || "--",
     "Mission": next.mission || "--", "Stage": next.stage || "--",
-    "Target": target.target_valid ? `${target.class_name} #${target.track_id}` : "--",
     "Hold": next.hold_reason || "none"
   });
   const cmd = next.command || {};
@@ -459,50 +476,6 @@ function renderStatus(next) {
   renderActionMissionStatus(next.action_mission || null);
   renderDashboardSummaries(next);
 }
-function renderDetections(scene, target) {
-  $("frameId").textContent = scene.frame_id ?? "--";
-  const detections = scene.detections || [];
-  $("detCount").textContent = detections.length;
-  $("detections").innerHTML = detections.map(det => {
-    const locked = target.target_valid && det.track_id === target.track_id;
-    return `<button class="detection ${locked ? "locked" : ""}" data-track="${det.track_id}">
-      <span>#${det.track_id} ${escapeHtml(det.class_name)}</span><span>${Number(det.confidence).toFixed(2)}</span></button>`;
-  }).join("") || `<div class="hint">暂无目标</div>`;
-  $("detections").querySelectorAll("[data-track]").forEach(button => button.onclick = () =>
-    yoloTargetAction("lock", button.dataset.track));
-}
-// Audit log moved to log_panel.js (WU-7A)
-// Config panel configure (WU-7B v2)
-var loadConfigFiles = function () { return window.UavConfigPanel.loadConfigFiles(); };
-var openConfig = function (path) { return window.UavConfigPanel.openConfig(path); };
-var localDiff = function (before, after) { return window.UavConfigPanel.localDiff(before, after); };
-var saveConfig = function (action) { return window.UavConfigPanel.saveConfig(action); };
-var restoreConfig = function () { return window.UavConfigPanel.restoreConfig(); };
-var actionForPath = function () { return window.UavConfigPanel.actionForPath(); };
-
-// Video panel configure (WU-6 v2)
-if (window.UavLogPanel && window.UavLogPanel.configure) {
-  window.UavLogPanel.configure({
-    api: window.UavApi,
-    dom: window.UavDom,
-    format: window.UavFormat,
-    appState: window.UavAppState,
-  });
-}
-var loadAudit = function () { return window.UavLogPanel.loadAudit(); };
-
-// Config panel configure (WU-7B v2) — must be after loadAudit is defined
-if (window.UavConfigPanel && window.UavConfigPanel.configure) {
-  window.UavConfigPanel.configure({
-    api: window.UavApi,
-    dom: window.UavDom,
-    format: window.UavFormat,
-    loadAudit: loadAudit,
-    setCompletionHint: function (text) { $("completionHint").textContent = text; },
-    setConfigStatus: function (text) { var el = $("configStatus"); if (el) el.textContent = text; },
-  });
-}
-
 // Video panel configure (WU-6 v2)
 if (window.UavVideoPanel && window.UavVideoPanel.configure) {
   window.UavVideoPanel.configure({
@@ -511,7 +484,6 @@ if (window.UavVideoPanel && window.UavVideoPanel.configure) {
     format: window.UavFormat,
     getState: function () { return state; },
     targetAction: yoloTargetAction,
-    loadAudit: loadAudit,
     setCompletionHint: function (text) { $("completionHint").textContent = text; },
   });
 }
@@ -666,7 +638,6 @@ async function skipCurrentActionMissionStep() {
   lastActionMissionStatus = result.action_mission || {};
   renderActionMissionStatus(lastActionMissionStatus);
   $("completionHint").textContent = `已跳过当前阶段：${lastActionMissionStatus.reason || "manual_skip"}`;
-  await loadAudit();
 }
 function setActionMissionEditorValue(mission) {
   const editor = $("actionMissionSteps");
@@ -863,8 +834,6 @@ async function init() {
   } else {
     console.warn("UavVideoPanel unavailable");
   }
-  document.querySelectorAll("[data-yolo-action]").forEach(button => button.onclick = () =>
-    yoloTargetAction(button.dataset.yoloAction).catch(error => { $("completionHint").textContent = error.message; }));
   $("takeoffButton").onclick = () => {
     const altitude = Number($("takeoffAltitude").value);
     selectAction("takeoff");
@@ -898,13 +867,6 @@ async function init() {
     document.querySelectorAll(".tab").forEach(item => item.classList.toggle("active", item === tab));
     document.querySelectorAll(".page").forEach(page => page.classList.toggle("active", page.id === `${tab.dataset.page}Page`));
   });
-  $("previewConfig").onclick = function () { $("configDiff").textContent = window.UavConfigPanel.localDiff(window.UavConfigPanel.getCurrentOriginal(), $("yamlEditor").value); };
-  $("saveConfig").onclick = () => saveConfig("save");
-  $("applyConfig").onclick = () => saveConfig(actionForPath());
-  $("restoreConfig").onclick = restoreConfig;
-  $("reconnectTelemetry").onclick = () => confirm("重连通信将关闭自动发送，确认？") && json("/api/services/telemetry/reconnect", {method: "POST"}).then(loadAudit);
-  $("restartYolo").onclick = () => confirm("确认重启 YOLO 服务？") && json("/api/services/yolo/restart", {method: "POST"}).then(loadAudit);
-  $("restartApp").onclick = () => confirm("重启 App 将关闭自动发送并暂时断开网页，确认？") && json("/api/services/app/restart", {method: "POST"}).then(loadAudit);
   $("actionParams").oninput = () => cacheSelectedActionParams();
   setupActionStatusJsonCopyGuard();
   if ($("actionRunToggle")) $("actionRunToggle").onclick = () => toggleActionLabRun().catch(error => { $("completionHint").textContent = error.message; });
@@ -944,14 +906,12 @@ async function init() {
   });
   if ($("payloadReleaseSelect")) $("payloadReleaseSelect").onclick = () => {
     selectAction("payload_release");
-    document.querySelectorAll(".tab").forEach(tab => tab.classList.toggle("active", tab.dataset.page === "actions"));
-    document.querySelectorAll(".page").forEach(page => page.classList.toggle("active", page.id === "actionsPage"));
   };
   if ($("payloadReleaseRun")) $("payloadReleaseRun").onclick = () => {
     selectAction("payload_release");
     startActionLabAction(true).catch(error => { $("completionHint").textContent = error.message; });
   };
-  await Promise.all([loadAudit(), loadConfigFiles(), loadActionLab()]);
+  await loadActionLab();
   startStatusUpdates();
 }
 window.UavControl = Object.freeze({init});

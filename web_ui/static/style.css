@@ -55,6 +55,13 @@ button.active-choice {
 .badge.warning { color: var(--warn); }
 .badge.danger { color: var(--danger); }
 .badge.active { color: #8ebcff; border: 1px solid rgba(89, 143, 255, .45); }
+.global-completion-hint {
+  padding: 7px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+}
 .app-shell {
   display: grid;
   grid-template-columns: minmax(320px, 28vw) minmax(0, 1fr);
@@ -124,6 +131,16 @@ button.active-choice {
   gap: 6px 8px;
   max-height: 260px;
   overflow: auto;
+}
+.position-info-grid {
+  grid-template-columns: 132px minmax(0, 1fr);
+  max-height: none;
+  overflow: visible;
+}
+.demo-position-label {
+  color: var(--warn);
+  font-size: 11px;
+  letter-spacing: .04em;
 }
 .info-label {
   color: var(--muted);
@@ -797,8 +814,7 @@ button.active-choice {
 .scroll-list { max-height: 258px; min-height: 120px; overflow: auto; font-family: Consolas, monospace; font-size: 12px; }
 .log-line { border-bottom: 1px solid #1c2b3c; padding: 6px 3px; }
 .log-line.bad { color: var(--danger); }
-#events,
-#auditLog {
+#events {
   max-height: none;
   min-height: 840px;
   overflow: visible;
