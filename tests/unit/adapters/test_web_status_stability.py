@@ -56,7 +56,6 @@ def test_snapshot_lock_only_copies_shared_state():
         get_link_manager=outside_lock("get_link_manager", LinkManager()),
         get_latest_localization_result=outside_lock("localization", {}),
         get_latest_drop_targets_result=outside_lock("drop_targets", {}),
-        get_latest_recon_inspection_result=outside_lock("recon", {}),
         get_latest_drop_workflow_result=outside_lock("drop_workflow", {}),
     )
 
@@ -74,6 +73,5 @@ def test_snapshot_lock_only_copies_shared_state():
         "link_manager",
         "localization",
         "drop_targets",
-        "recon",
         "drop_workflow",
     }.issubset(callback_names)

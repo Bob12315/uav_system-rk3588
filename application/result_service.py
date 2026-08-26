@@ -15,8 +15,6 @@ class ResultSnapshot:
     drop_localization: dict[str, Any] = field(default_factory=dict)
     recon_localization: dict[str, Any] = field(default_factory=dict)
     drop_targets: dict[str, Any] = field(default_factory=dict)
-    recon_targets: dict[str, Any] = field(default_factory=dict)
-    recon_inspection: dict[str, Any] = field(default_factory=dict)
     drop_workflow: dict[str, Any] = field(default_factory=dict)
 
 
@@ -39,8 +37,6 @@ class ResultService:
         "latest_drop_localization_result": "drop_localization",
         "latest_recon_localization_result": "recon_localization",
         "latest_drop_targets_result": "drop_targets",
-        "latest_recon_targets_result": "recon_targets",
-        "latest_recon_inspection_result": "recon_inspection",
         "latest_drop_workflow_result": "drop_workflow",
     }
 
@@ -431,8 +427,6 @@ class ResultService:
         self.latest_localization_result = {}
         self.latest_drop_localization_result = {}
         self.latest_recon_localization_result = {}
-        self.latest_recon_targets_result = {}
-        self.latest_recon_inspection_result = {}
         result = OperationResult(True, "localized object coordinates cleared")
         self._record_event("OK", result.message)
         return result
@@ -465,86 +459,3 @@ class ResultService:
             "selected_count": detail.get("selected_count", len(selected)),
             "candidate_count": detail.get("candidate_count", 0),
         }
-
-    def _maybe_save_recon_inspection_result(self) -> None:
-        name = getattr(self.action_runtime, "action_name", None)
-        if name != "build_recon_report":
-            return
-        last = getattr(self.action_runtime, "last_result", None)
-        if last is None:
-            return
-        detail = last.get("detail") if isinstance(last, dict) else getattr(last, "detail", None)
-        if not isinstance(detail, dict):
-            detail = {}
-        done = last.get("done") if isinstance(last, dict) else getattr(last, "done", False)
-        if not done:
-            return
-
-        recon_report = detail.get("recon_report", {})
-        barrels = recon_report.get("barrels", []) if isinstance(recon_report, dict) else []
-        self.latest_recon_inspection_result = {
-            "source": "build_recon_report", "updated_at": time.time(),
-            "barrels": self._with_field_coordinates(barrels),
-            "barrel_count": detail.get("barrel_count", len(barrels)),
-            "detected_count": detail.get("detected_count", 0),
-            "blank_count": detail.get("blank_count", 0),
-            "skipped_count": detail.get("skipped_count", 0),
-            "report": self._with_field_coordinates(barrels),
-            "inspected_count": len(barrels),
-            "detected_sign_count": detail.get("detected_count", 0),
-            "no_sign_count": detail.get("blank_count", 0),
-            "failed_count": detail.get("skipped_count", 0),
-        }
-
-    def _maybe_save_recon_targets_from_mission(self) -> None:
-        orch = self.action_mission_orchestrator
-        data = getattr(getattr(orch, "blackboard", None), "data", {}) if orch else {}
-        value = data.get("recon_targets") if isinstance(data, dict) else None
-        if not isinstance(value, dict): return
-        selected = value.get("selected_targets")
-        if isinstance(selected, list):
-            self.latest_recon_targets_result = {"source": "select_recon_targets", "updated_at": time.time(), "selected_targets": self._with_field_coordinates(selected), "selected_count": value.get("selected_count", len(selected)), "candidate_count": value.get("candidate_count", 0)}
-
-    def _maybe_save_recon_report_from_mission(self) -> None:
-        orch = self.action_mission_orchestrator
-        data = getattr(getattr(orch, "blackboard", None), "data", {}) if orch else {}
-        detail = data.get("recon_report") if isinstance(data, dict) else None
-        if not isinstance(detail, dict): return
-        report = detail.get("recon_report", detail)
-        barrels = report.get("barrels", []) if isinstance(report, dict) else []
-        if isinstance(barrels, list):
-            self.latest_recon_inspection_result = {"source": "build_recon_report", "updated_at": time.time(), "report": self._with_field_coordinates(barrels), "barrels": self._with_field_coordinates(barrels), "barrel_count": len(barrels), "detected_count": detail.get("detected_count", 0), "blank_count": detail.get("blank_count", 0), "skipped_count": detail.get("skipped_count", 0), "failed_count": detail.get("failed_count", 0)}
-
-    def _maybe_save_recon_ranking_from_mission(self) -> None:
-        orch = self.action_mission_orchestrator
-        data = getattr(getattr(orch, "blackboard", None), "data", {}) if orch else {}
-        detail = data.get("recon_scan_ranking") if isinstance(data, dict) else None
-        if not isinstance(detail, dict) or detail.get("ranking_mode") is not True:
-            return
-        ranking = detail.get("ranking")
-        if isinstance(ranking, list):
-            self.latest_recon_inspection_result = {"source": "recon_rank_views", "updated_at": time.time(), "ranking_mode": True, "ranking": ranking, "scan_summary": detail.get("scan_summary", {})}
-
-    def _publish_recon_ranking_from_action_result(
-        self,
-        result: object,
-        *,
-        action_name: object,
-    ) -> bool:
-        """Publish live/final area-scan rankings without waiting for blackboard save."""
-        if action_name != "recon_rank_views" or not isinstance(result, dict):
-            return False
-        detail = result.get("detail")
-        if not isinstance(detail, dict) or detail.get("ranking_mode") is not True:
-            return False
-        ranking = detail.get("ranking")
-        if not isinstance(ranking, list):
-            return False
-        self.latest_recon_inspection_result = {
-            "source": "recon_rank_views",
-            "updated_at": time.time(),
-            "ranking_mode": True,
-            "ranking": ranking,
-            "scan_summary": detail.get("scan_summary", {}),
-        }
-        return True

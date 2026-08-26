@@ -28,17 +28,12 @@
     "takeoff",
     "land",
     "goto_waypoint",
-    "fixed_view_localize",
     "target_lock",
     "align_descend",
     "select_drop_targets",
-    "select_recon_targets",
     "gps_capture_view",
     "gps_fuse_views",
     "gps_target_lock",
-    "recon_score_view",
-    "recon_rank_views",
-    "build_recon_report"
   ]);
 
   // ------------------------------------------------------------------

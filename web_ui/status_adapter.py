@@ -34,14 +34,10 @@ class WebStatusService:
         latest_drop_targets_result: dict[str, object] | None = None,
         latest_drop_localization_result: dict[str, object] | None = None,
         latest_recon_localization_result: dict[str, object] | None = None,
-        latest_recon_targets_result: dict[str, object] | None = None,
-        latest_recon_inspection_result: dict[str, object] | None = None,
         get_latest_localization_result: Callable[[], dict[str, object]] | None = None,
         get_latest_drop_targets_result: Callable[[], dict[str, object]] | None = None,
         get_latest_drop_localization_result: Callable[[], dict[str, object]] | None = None,
         get_latest_recon_localization_result: Callable[[], dict[str, object]] | None = None,
-        get_latest_recon_targets_result: Callable[[], dict[str, object]] | None = None,
-        get_latest_recon_inspection_result: Callable[[], dict[str, object]] | None = None,
         get_latest_drop_workflow_result: Callable[[], dict[str, object]] | None = None,
         get_link_manager: Callable[[], Any] | None = None,
         latest_mission_name: str = "",
@@ -64,14 +60,10 @@ class WebStatusService:
         self._latest_drop_targets = latest_drop_targets_result
         self._latest_drop_localization = latest_drop_localization_result
         self._latest_recon_localization = latest_recon_localization_result
-        self._latest_recon_targets = latest_recon_targets_result
-        self._latest_recon = latest_recon_inspection_result
         self._get_latest_localization_result = get_latest_localization_result
         self._get_latest_drop_targets_result = get_latest_drop_targets_result
         self._get_latest_drop_localization_result = get_latest_drop_localization_result
         self._get_latest_recon_localization_result = get_latest_recon_localization_result
-        self._get_latest_recon_targets_result = get_latest_recon_targets_result
-        self._get_latest_recon_inspection_result = get_latest_recon_inspection_result
         self._get_latest_drop_workflow_result = get_latest_drop_workflow_result
         self._get_link_manager = get_link_manager
         self._latest_mission_name = latest_mission_name
@@ -123,12 +115,6 @@ class WebStatusService:
             ) or {},
             "drop_localization": (self._get_latest_drop_localization_result() if self._get_latest_drop_localization_result else self._latest_drop_localization) or {},
             "recon_localization": (self._get_latest_recon_localization_result() if self._get_latest_recon_localization_result else self._latest_recon_localization) or {},
-            "recon_targets": (self._get_latest_recon_targets_result() if self._get_latest_recon_targets_result else self._latest_recon_targets) or {},
-            "recon_inspection": (
-                self._get_latest_recon_inspection_result()
-                if self._get_latest_recon_inspection_result
-                else self._latest_recon
-            ) or {},
             "drop_workflow": (
                 self._get_latest_drop_workflow_result()
                 if self._get_latest_drop_workflow_result

@@ -174,8 +174,8 @@ class MissionOrchestrator:
             step = self.steps[self.current_index]
             if step.save_as:
                 try:
-                    detail = result.get("detail") if isinstance(result.get("detail"), dict) else {}
-                    self.blackboard.set(step.save_as, detail)
+                    output = result.get("output") if isinstance(result.get("output"), dict) else {}
+                    self.blackboard.set(step.save_as, output)
                 except Exception as exc:
                     self.failed = True
                     self.running = False

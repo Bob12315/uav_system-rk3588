@@ -36,7 +36,25 @@ class ActionRunner:
                 )
             )
         try:
-            action.start(params)
+            from .action_lab import action_definition
+            definition = action_definition(action_name)
+        except KeyError:
+            definition = None
+        try:
+            normalized_params = definition.merge_and_validate_params(params) if definition else dict(params or {})
+        except Exception as exc:
+            self.current_action = None
+            self.action_name = None
+            self.state = "failed"
+            return self._set_result(
+                ActionResult(
+                    failed=True,
+                    reason="action_params_invalid",
+                    detail={"action_name": action_name, "parameter": str(exc), "validation_error": str(exc)},
+                )
+            )
+        try:
+            action.start(normalized_params)
         except Exception as exc:
             self.current_action = None
             self.action_name = None
@@ -72,6 +90,27 @@ class ActionRunner:
             return self._set_result(
                 ActionResult(failed=True, reason="invalid_action_result")
             )
+        if not result.failed:
+            try:
+                from .action_lab import action_definition
+                definition = action_definition(self.action_name or "")
+                definition.validate_output(result.output)
+                unauthorized = next((effect.action_type for effect in result.effects if effect.action_type not in definition.allowed_effect_types), None)
+                if unauthorized is not None:
+                    result = ActionResult(
+                        failed=True,
+                        reason="action_effect_contract_violation",
+                        detail={"action_name": self.action_name, "effect_type": unauthorized,
+                                "allowed_effect_types": list(definition.allowed_effect_types)},
+                    )
+            except KeyError:
+                pass
+            except ValueError as exc:
+                result = ActionResult(
+                    failed=True,
+                    reason="action_output_contract_violation",
+                    detail={"action_name": self.action_name, "validation_error": str(exc)},
+                )
         if result.failed:
             self.state = "failed"
         elif result.done:

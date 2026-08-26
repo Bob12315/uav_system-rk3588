@@ -32,9 +32,9 @@ class GpsCaptureViewAction(ActionModule):
         if not self.started:
             return ActionResult(failed=True, reason="action_not_started")
         if self.stopped:
-            return ActionResult(done=True, reason="stopped", detail=self.last_detail)
+            return ActionResult(done=True, reason="stopped", output=dict(self.last_detail), detail=self.last_detail)
         if self.done:
-            return ActionResult(done=True, reason="gps_view_captured", detail=self.last_detail)
+            return ActionResult(done=True, reason="gps_view_captured", output=dict(self.last_detail), detail=self.last_detail)
         data = context or {}
         detections, width, height = scene_detections(data)
         estimates, rejected = [], {}
@@ -73,7 +73,7 @@ class GpsCaptureViewAction(ActionModule):
                             "source_waypoint": self.source_waypoint,
                             "rejected_by_reason": rejected, "coordinate_frame": "GLOBAL"}
         self.done = True
-        return ActionResult(done=True, reason="gps_view_captured", detail=self.last_detail)
+        return ActionResult(done=True, reason="gps_view_captured", output=dict(self.last_detail), detail=self.last_detail)
 
     def stop(self) -> None: self.stopped = True
 

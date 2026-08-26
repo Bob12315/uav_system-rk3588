@@ -72,19 +72,6 @@ def test_dispatcher_dispatches_land():
     assert result.get("status") != "skipped" or "unsupported" not in str(result.get("reason", ""))
 
 
-def test_dispatcher_dispatches_local_position():
-    """ActionDispatcher dispatches local_position."""
-    dispatcher = ActionDispatcher(test_source="test")
-    result = dispatcher._dispatch_action(
-        {
-            "action_type": "local_position",
-            "params": {"x": 10.0, "y": 20.0, "z": -3.0, "yaw_rad": 0.5},
-        },
-        link_manager=None,
-    )
-    assert result.get("status") != "skipped" or "unsupported" not in str(result.get("reason", ""))
-
-
 def test_dispatcher_dispatches_body_velocity():
     """ActionDispatcher dispatches flight_command / body_velocity."""
     dispatcher = ActionDispatcher(test_source="test")

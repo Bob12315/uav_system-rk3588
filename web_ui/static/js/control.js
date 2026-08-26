@@ -10,7 +10,6 @@ let currentActionMissionSteps = [];
 let lastActionMissionStatus = null;
 let lastActionMissionResult = null;
 let lastActionMissionSummaryHtml = "";
-let lastReconInspectionHtml = "";
 let statusUpdatesStop = null;
 // latestCameraRecording moved to video_panel.js (WU-6 v2)
 const ACTION_SAFETY_HINTS = {
@@ -18,31 +17,20 @@ const ACTION_SAFETY_HINTS = {
   target_lock: "YOLO 锁定命令，不需要 SEND=ON，但需要 Dispatch。",
   align_descend: "BODY_NED 速度控制，需要 SEND=ON 才实发。",
   payload_release: "舵机 PWM 输出，需要 SEND=ON 才实发；确认 SERVO 输出通道和 PWM。",
-  fixed_view_localize: "固定视角定位，读取当前画面多帧融合，不主动移动。",
   select_drop_targets: "从 drop_scan.localized_objects 选择投放目标，不发送飞控命令。",
-  select_recon_targets: "选择侦察目标，不发送飞控命令。",
-  build_recon_report: "纯报告生成，不发送飞控命令。",
   gps_capture_view: "当前位置采集一帧并投影到 GPS，不发送飞控命令。",
   gps_fuse_views: "融合 Mission 已采集的 GPS 视图，不发送飞控命令。",
-  recon_score_view: "当前位置采集危险标识，不发送飞控命令。",
-  recon_rank_views: "对 Mission 已采集的侦察视图排名，不发送飞控命令。",
 };
 const ACTION_ZH_LABELS = {
   takeoff: "起飞",
   land: "降落",
   goto_waypoint: "飞到航点",
-  fixed_view_localize: "固定视角定位",
-  single_view_localize: "单视角定位",
   target_lock: "目标锁定",
   align_descend: "对准下降",
   payload_release: "载荷投放",
   select_drop_targets: "选择投放目标",
-  select_recon_targets: "选择侦察目标",
-  build_recon_report: "生成侦察报告",
   gps_capture_view: "GPS 单视图采集",
   gps_fuse_views: "GPS 多视图融合",
-  recon_score_view: "危险标识采集",
-  recon_rank_views: "危险标识排名",
 };
 const DEFAULT_ACTION_MISSION_STEPS = [
   {
@@ -296,54 +284,6 @@ function summarizeDropTargets(blackboard) {
   }).join("");
   return `<div class="mission-result-group"><strong>已选择投放目标</strong><div>投放目标数：${selected.length}</div>${rows}</div>`;
 }
-function summarizeReconReport(blackboard) {
-  const rankingResult = blackboard.recon_scan_ranking;
-  if (rankingResult?.ranking_mode && Array.isArray(rankingResult.ranking)) {
-    return "";
-  }
-  const report = getPathValue(blackboard, ["recon_report", "recon_report"])
-    || null;
-  if (!report || typeof report !== "object") return "";
-  const reportBlock = blackboard.recon_report || {};
-  const barrelCount = reportBlock.barrel_count ?? "--";
-  const detectedCount = reportBlock.detected_count ?? "--";
-  const blankCount = reportBlock.blank_count ?? "--";
-  const skippedCount = reportBlock.skipped_count ?? "--";
-  const barrels = Array.isArray(report.barrels) ? report.barrels : [];
-  const rows = barrels.slice(0, 8).map((barrel, index) => {
-    const id = barrel.id || `recon_${index + 1}`;
-    const content = barrel.hazard_label || barrel.content || barrel.sign_class || barrel.class_name || "blank";
-    const rawConfidence = barrel.confidence ?? barrel.confidence_max ?? barrel.confidence_mean;
-    const confidence = rawConfidence !== undefined ? ` conf=${Number(rawConfidence).toFixed(2)}` : "";
-    return `<div>${escapeHtml(id)}: ${escapeHtml(content)}${escapeHtml(confidence)}</div>`;
-  }).join("");
-  return `<div class="mission-result-group"><strong>侦察报告</strong><div>桶数：${barrelCount} / detected：${detectedCount} / blank：${blankCount} / skipped：${skippedCount}</div>${rows}</div>`;
-}
-const setTextIfChanged = window.UavStatus.setTextIfChanged;
-function renderReconRankingStable(container, ranking, className = "") {
-  if (container.dataset.resultMode !== "ranking") {
-    container.replaceChildren();
-    container.dataset.resultMode = "ranking";
-    const block = document.createElement("div"); block.className = className;
-    const title = document.createElement("strong"); title.textContent = "危险标识扫描排名";
-    const table = document.createElement("table");
-    const thead = document.createElement("thead"); const header = document.createElement("tr");
-    ["排名", "标识类别", "总参考值", "出现帧数", "平均置信度", "最大置信度", "命中率"].forEach(text => { const th = document.createElement("th"); th.textContent = text; header.appendChild(th); });
-    thead.appendChild(header); table.appendChild(thead); table.appendChild(document.createElement("tbody"));
-    block.append(title, table); container.appendChild(block);
-  }
-  const tbody = container.querySelector("tbody");
-  ranking.slice().sort((a, b) => Number(a.rank) - Number(b.rank)).forEach(item => {
-    let row = tbody.querySelector(`[data-recon-class="${CSS.escape(String(item.class_name))}"]`);
-    if (!row) {
-      row = document.createElement("tr"); row.dataset.reconClass = item.class_name;
-      for (let index = 0; index < 7; index += 1) row.appendChild(document.createElement("td"));
-    }
-    const values = [item.rank, item.class_name, num(item.confidence_sum, 3), num(item.seen_frames, 0), num(item.confidence_mean, 3), num(item.confidence_max, 3), `${(Number(item.hit_ratio || 0) * 100).toFixed(1)}%`];
-    values.forEach((value, index) => setTextIfChanged(row.children[index], value));
-    tbody.appendChild(row);
-  });
-}
 function setResultSection(container, name, html) {
   let section = container.querySelector(`[data-result-section="${name}"]`);
   if (!section) { section = document.createElement("div"); section.dataset.resultSection = name; container.appendChild(section); }
@@ -355,16 +295,9 @@ function renderActionMissionSummary(actionMission) {
   if (!element) return;
   const blackboard = actionMissionBlackboard(actionMission);
   const dropScan = summarizeDropScan(blackboard), dropTargets = summarizeDropTargets(blackboard);
-  const ranking = blackboard.recon_scan_ranking;
   setResultSection(element, "drop-scan", dropScan);
   setResultSection(element, "drop-targets", dropTargets);
-  const recon = setResultSection(element, "recon", "");
-  if (ranking?.ranking_mode && Array.isArray(ranking.ranking)) renderReconRankingStable(recon, ranking.ranking, "mission-result-group");
-  else {
-    const legacy = summarizeReconReport(blackboard);
-    if (recon.dataset.resultMode !== "legacy" || recon.dataset.html !== legacy) { recon.dataset.resultMode = "legacy"; recon.dataset.html = legacy; recon.innerHTML = legacy; }
-  }
-  const hasResults = Boolean(dropScan || dropTargets || (ranking?.ranking_mode) || summarizeReconReport(blackboard));
+  const hasResults = Boolean(dropScan || dropTargets);
   if (!hasResults) setResultSection(element, "empty", `<div class="hint">暂无任务结果详情。</div>`);
   else { const empty = element.querySelector('[data-result-section="empty"]'); if (empty) empty.remove(); }
 }
@@ -438,31 +371,6 @@ function renderDashboardSummaries(next) {
     ["errors", JSON.stringify(dispatch.errors ?? "--"), dispatch.errors ? "danger" : ""],
     ["note", actionLab.note || dispatch.note || "--"],
   ]);
-  renderReconInspection(next.recon_inspection || {});
-}
-function renderReconInspection(result) {
-  const element = $("reconInspectionResults");
-  if (!element) return;
-  if (result.ranking_mode && Array.isArray(result.ranking)) {
-    renderReconRankingStable(element, result.ranking);
-    return;
-  }
-  const report = Array.isArray(result.report) ? result.report : [];
-  const html = report.length ? report.map((item, index) => {
-    const x = pointX(item), y = pointY(item);
-    const label = item.hazard_label || item.content || item.sign_class || item.class_name || "--";
-    const confidence = item.confidence ?? item.confidence_max ?? item.confidence_mean;
-    const statusLabel = ["confirmed", "detected"].includes(item.status)
-      ? `${label} ${num(confidence, 2)}`
-      : ["blank", "no_sign", "blank_or_uncertain"].includes(item.status) ? "空白或未识别到可靠标识"
-        : item.status === "skipped_missing_target" ? "跳过：目标数据缺失" : "识别失败";
-    return `<div>#${index + 1} &nbsp; x=${num(x, 2)} y=${num(y, 2)} &nbsp; ${escapeHtml(statusLabel)}</div>`;
-  }).join("") : `<div class="hint">暂无侦察识别结果。</div>`;
-  if (element.dataset.resultMode === "legacy" && element.dataset.html === html) return;
-  element.dataset.resultMode = "legacy";
-  element.dataset.html = html;
-  lastReconInspectionHtml = html;
-  element.innerHTML = html;
 }
 function renderStatus(next) {
   state = next;

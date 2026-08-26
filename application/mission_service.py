@@ -19,8 +19,6 @@ class MissionApplicationService:
         "latest_drop_localization_result": "drop_localization",
         "latest_recon_localization_result": "recon_localization",
         "latest_drop_targets_result": "drop_targets",
-        "latest_recon_targets_result": "recon_targets",
-        "latest_recon_inspection_result": "recon_inspection",
         "latest_drop_workflow_result": "drop_workflow",
     }
 
@@ -60,11 +58,6 @@ class MissionApplicationService:
                 )
             self._maybe_save_localization_result()
             self._maybe_save_drop_targets_result()
-            self._publish_recon_ranking_from_action_result(
-                getattr(self.action_runtime, "last_result", None),
-                action_name=getattr(self.action_runtime, "action_name", None),
-            )
-            self._maybe_save_recon_inspection_result()
             last = getattr(self.action_runtime, "last_result", None)
             if isinstance(last, dict):
                 self._save_drop_workflow_from_action_result(
@@ -190,10 +183,8 @@ class MissionApplicationService:
         if self.action_mission_orchestrator is None:
             return self.action_mission_status_payload()
         with self.action_runtime_lock:
-            self.latest_recon_inspection_result = {}
             self.latest_drop_localization_result = {}
             self.latest_recon_localization_result = {}
-            self.latest_recon_targets_result = {}
             self.latest_drop_workflow_result = {}
             mission_actions = {step.name for step in self.action_mission_orchestrator.steps}
             requires_authorization = any(
@@ -282,10 +273,8 @@ class MissionApplicationService:
             return self.action_mission_status_payload()
         with self.action_runtime_lock:
             self._action_mission_next_tick_monotonic = None
-            self.latest_recon_inspection_result = {}
             self.latest_drop_localization_result = {}
             self.latest_recon_localization_result = {}
-            self.latest_recon_targets_result = {}
             self.latest_drop_workflow_result = {}
             self.action_mission_orchestrator.reset(
                 link_manager=None,
@@ -314,16 +303,8 @@ class MissionApplicationService:
                 send_commands=bool(self.controller_switches.snapshot().send_commands),
             )
             self._maybe_save_localization_from_mission()
-            self._maybe_save_recon_targets_from_mission()
-            self._maybe_save_recon_report_from_mission()
-            self._publish_recon_ranking_from_action_result(
-                getattr(self.action_runtime, "last_result", None),
-                action_name=pre_name,
-            )
-            self._maybe_save_recon_ranking_from_mission()
             self._maybe_save_localization_result()
             self._maybe_save_drop_targets_result()
-            self._maybe_save_recon_inspection_result()
             # current running action
             last = getattr(self.action_runtime, "last_result", None)
             if isinstance(last, dict):

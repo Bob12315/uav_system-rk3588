@@ -53,7 +53,7 @@ def test_recon_flow_contains_only_navigation_actions() -> None:
     steps = _load(ROOT / "config/action_missions/recon_gps_v2.json")["steps"]
     names = [step["name"] for step in steps]
     assert "gps_recon_area_scan" not in names
-    assert names == ["takeoff", "change_speed", "goto_waypoint", "goto_waypoint", "goto_waypoint", "goto_waypoint", "land"]
+    assert names == ["takeoff", "goto_waypoint", "goto_waypoint", "goto_waypoint", "goto_waypoint", "goto_waypoint", "goto_waypoint", "land"]
 
 
 def test_full_flow_replaces_visual_land_composite_with_atomic_steps() -> None:

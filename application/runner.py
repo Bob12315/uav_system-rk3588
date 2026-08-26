@@ -65,8 +65,6 @@ class SystemRunner:
         "latest_drop_localization_result": "drop_localization",
         "latest_recon_localization_result": "recon_localization",
         "latest_drop_targets_result": "drop_targets",
-        "latest_recon_targets_result": "recon_targets",
-        "latest_recon_inspection_result": "recon_inspection",
         "latest_drop_workflow_result": "drop_workflow",
     }
 
@@ -160,8 +158,6 @@ class SystemRunner:
             get_latest_drop_localization_result=lambda: self.result_service.get("drop_localization"),
             get_latest_recon_localization_result=lambda: self.result_service.get("recon_localization"),
             get_latest_drop_targets_result=lambda: self.result_service.get("drop_targets"),
-            get_latest_recon_targets_result=lambda: self.result_service.get("recon_targets"),
-            get_latest_recon_inspection_result=lambda: self.result_service.get("recon_inspection"),
             get_latest_drop_workflow_result=lambda: self.result_service.get("drop_workflow"),
         )
         self.action_runtime = ActionRuntimeService(

@@ -158,7 +158,7 @@ def test_action_mission_start_stop_reset_lifecycle() -> None:
     config = load_app_config(args)
     runner = SystemRunner(config)
 
-    runner.configure_action_mission([MissionActionStep("goto_waypoint", {"x": 1.0})])
+    runner.configure_action_mission([MissionActionStep("change_speed", {"speed_mps": 1.0})])
 
     started = runner.action_mission_start(authorize=True, target_source="sitl")
     assert started["enabled"] is True
@@ -196,7 +196,7 @@ def test_action_mission_web_api_lifecycle() -> None:
     configured = endpoint("/api/action-mission/configure")(
         ActionMissionConfigureRequest(
             steps=[
-                ActionMissionStepRequest(name="goto_waypoint", params={"x": 1.0}),
+                    ActionMissionStepRequest(name="change_speed", params={"speed_mps": 1.0}),
             ],
         )
     )

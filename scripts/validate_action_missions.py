@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from missions.engine import MissionBlackboard
-from missions.common.actions.action_lab import create_action_lab_registry
+from missions.common.actions.action_lab import action_definition, create_action_lab_registry
 
 
 DEFAULT_TEMPLATE_PATHS = [
@@ -146,17 +146,21 @@ def _validate_blackboard_refs(path: Path, steps: list[dict[str, Any]]) -> None:
             if ref == "$":
                 raise ValueError(f"ERROR {_display_path(path)}: step {index} blackboard path must be non-empty")
         try:
-            blackboard.resolve(params)
+            resolved_params = blackboard.resolve(params)
         except Exception as exc:
             raise ValueError(
                 f"ERROR {_display_path(path)}: step {index} blackboard resolve failed: {exc}"
             ) from exc
+        try:
+            action_definition(str(step["name"])).merge_and_validate_params(resolved_params)
+        except Exception as exc:
+            label = step.get("label") or "-"
+            raise ValueError(
+                f"ERROR {_display_path(path)}: step {index} label={label} action={step['name']} parameter validation failed: {exc}"
+            ) from exc
         save_as = step.get("save_as")
-        if save_as and save_as not in blackboard.data:
-            if step.get("name") == "gps_capture_view":
-                blackboard.set(save_as, {"raw_estimates": []})
-            else:
-                blackboard.set(save_as, {})
+        if save_as:
+            blackboard.set(save_as, _example_output(str(step["name"])))
 
 
 def _blackboard_refs(value: Any) -> list[str]:
@@ -176,150 +180,35 @@ def _blackboard_refs(value: Any) -> list[str]:
 
 
 def _smoke_blackboard() -> MissionBlackboard:
-    blackboard = MissionBlackboard()
-    blackboard.set(
-        "drop_scan",
-        {
-            "localized_objects": [
-                {"id": "b1", "local_x": 1.0, "local_y": 30.0},
-                {"id": "b2", "local_x": -1.0, "local_y": 31.0},
-            ],
-            "raw_estimates": [
-                {"track_id": 1, "class_name": "bucket_1", "local_x": 1.0, "local_y": 30.0, "source": {"ex": 0.1, "ey": 0.05}, "confidence": 0.85},
-                {"track_id": 2, "class_name": "bucket_2", "local_x": -1.0, "local_y": 31.0, "source": {"ex": -0.1, "ey": 0.08}, "confidence": 0.78},
-            ],
-        },
-    )
-    blackboard.set(
-        "drop_center",
-        {
-            "resolved_targets": [
-                {"valid": True, "source": "field", "local_x": 100.0, "local_y": 232.5, "z_down_m": -5.0, "lat": 30.0, "lon": 120.0, "altitude_m": 5.0},
-            ],
-        },
-    )
-    blackboard.set(
-        "first_scan_point",
-        {
-            "resolved_targets": [
-                {"valid": True, "source": "field", "local_x": 98.0, "local_y": 231.25, "z_down_m": -5.0, "lat": 30.0, "lon": 120.0, "altitude_m": 5.0},
-            ],
-        },
-    )
-    blackboard.set(
-        "drop_buckets",
-        {
-            "resolved_targets": [
-                {"valid": True, "source": "vision", "class_name": "bucket_1", "local_x": 101.0, "local_y": 230.0, "z_down_m": -5.0, "lat": 30.0, "lon": 120.0, "altitude_m": 5.0, "confidence": 0.85},
-                {"valid": True, "source": "vision", "class_name": "bucket_2", "local_x": 99.0, "local_y": 231.0, "z_down_m": -5.0, "lat": 30.0, "lon": 120.0, "altitude_m": 5.0, "confidence": 0.78},
-            ],
-        },
-    )
-    blackboard.set(
-        "home_waypoint",
-        {
-            "resolved_targets": [
-                {"valid": True, "source": "home", "local_x": 100.0, "local_y": 200.0, "z_down_m": -5.0, "lat": 30.0, "lon": 120.0, "altitude_m": 5.0},
-            ],
-        },
-    )
-    blackboard.set(
-        "drop_targets",
-        {
-            "selected_targets": [
-                {"id": "b1", "local_x": 1.0, "local_y": 30.0},
-                {"id": "b2", "local_x": -1.0, "local_y": 31.0},
-            ],
-            "first_release_servo_outputs": [
-                {"channel": 8, "release_pwm": 1750, "hold_pwm": 1250},
-            ],
-            "target_slots": [
-                {
-                    "valid": True,
-                    "id": "b1",
-                    "target_id": "b1",
-                    "class_name": "bucket_1",
-                    "local_x": 1.0,
-                    "local_y": 30.0,
-                    "x": 1.0,
-                    "y": 30.0,
-                    "lat": 34.10364,
-                    "lon": 108.64267,
-                    "score": 500,
-                    "seen_count": 3,
-                    "count": 3,
-                    "raw_count": 3,
-                    "weight": 2.0,
-                    "track_ids": [1],
-                    "rank": 1,
-                },
-                {
-                    "valid": True,
-                    "id": "b2",
-                    "target_id": "b2",
-                    "class_name": "bucket_2",
-                    "local_x": -1.0,
-                    "local_y": 31.0,
-                    "x": -1.0,
-                    "y": 31.0,
-                    "lat": 34.10363,
-                    "lon": 108.64318,
-                    "score": 300,
-                    "seen_count": 2,
-                    "count": 2,
-                    "raw_count": 2,
-                    "weight": 1.5,
-                    "track_ids": [2],
-                    "rank": 2,
-                },
-                {
-                    "valid": False,
-                    "id": "missing_drop_target_2",
-                    "target_id": None,
-                    "class_name": "",
-                    "local_x": None,
-                    "local_y": None,
-                    "x": None,
-                    "y": None,
-                    "score": 0.0,
-                    "seen_count": 0,
-                    "count": 0,
-                    "raw_count": 0,
-                    "weight": 0.0,
-                    "track_ids": [],
-                    "rank": 3,
-                    "status": "missing",
-                },
-            ],
-        },
-    )
-    blackboard.set(
-        "recon_targets",
-        {
-            "selected_targets": [
-                {"id": "r1", "class_name": "bucket", "local_x": 1.0, "local_y": 5.0},
-                {"id": "r2", "class_name": "recon_bucket", "local_x": -1.0, "local_y": 51.0},
-                {"id": "r3", "class_name": "white_bucket", "local_x": 0.5, "local_y": 49.0},
-            ],
-            "target_slots": [
-                {"valid": True, "id": "r1", "class_name": "bucket", "local_x": 1.0, "local_y": 5.0, "x": 1.0, "y": 5.0, "seen_count": 3, "raw_count": 3, "weight": 3.0, "rank": 1},
-                {"valid": True, "id": "r2", "class_name": "recon_bucket", "local_x": -1.0, "local_y": 51.0, "x": -1.0, "y": 51.0, "seen_count": 2, "raw_count": 2, "weight": 2.0, "rank": 2},
-                {"valid": True, "id": "r3", "class_name": "white_bucket", "local_x": 0.5, "local_y": 49.0, "x": 0.5, "y": 49.0, "seen_count": 1, "raw_count": 1, "weight": 1.0, "rank": 3},
-                {"valid": False, "id": "missing_recon_target_3", "class_name": "", "local_x": None, "local_y": None, "x": None, "y": None, "seen_count": 0, "raw_count": 0, "weight": 0.0, "rank": 4, "status": "missing"},
-                {"valid": False, "id": "missing_recon_target_4", "class_name": "", "local_x": None, "local_y": None, "x": None, "y": None, "seen_count": 0, "raw_count": 0, "weight": 0.0, "rank": 5, "status": "missing"},
-            ],
-        },
-    )
-    for i in range(5):
-        blackboard.set(
-            f"recon_result_{i}",
-            {"target_id": f"recon_{i}", "target_index": i, "content": "blank", "confidence": 0.0, "status": "blank_or_uncertain"},
-        )
-    blackboard.set(
-        "recon_report",
-        {"recon_report": {"barrels": []}, "barrel_count": 5, "detected_count": 0, "blank_count": 5, "skipped_count": 0},
-    )
-    return blackboard
+    return MissionBlackboard()
+
+
+def _example_output(action_name: str) -> dict[str, Any]:
+    """Minimal valid business output for sequential Blackboard path checks.
+
+    These are validator fixtures, not a second Action contract: each value is
+    constrained by and shaped after the Action's output schema.
+    """
+    raw_estimate = {"lat": 34.0, "lon": 108.0, "east_offset_m": 1.0, "north_offset_m": 1.0,
+                    "capture_drone_lat": 34.0, "capture_drone_lon": 108.0, "capture_yaw_rad": 0.0,
+                    "capture_relative_altitude_m": 4.0, "ex": 0.0, "ey": 0.0, "class_name": "bucket_1",
+                    "confidence": 0.9, "track_id": 1, "frame_id": 1, "timestamp": 0.0, "source_waypoint": "view"}
+    if action_name == "gps_capture_view":
+        return {"raw_estimates": [raw_estimate], "count": 1, "source_waypoint": "view",
+                "rejected_by_reason": {}, "coordinate_frame": "GLOBAL"}
+    if action_name == "gps_fuse_views":
+        localized = {"id": 1, "lat": 34.0, "lon": 108.0, "east_m": 1.0, "north_m": 1.0,
+                     "sample_count": 2, "raw_count": 2, "class_name": "bucket_1", "confidence": 0.9,
+                     "cluster_spread_m": 0.1, "source_waypoints": ["view"], "source_frames": [1]}
+        return {"localized_objects": [localized], "objects": [localized], "raw_estimates_count": 1,
+                "count": 1, "coordinate_frame": "GLOBAL"}
+    if action_name == "select_drop_targets":
+        slot = {"valid": True, "id": "bucket_1", "target_id": "bucket_1", "class_name": "bucket_1",
+                "local_x": 1.0, "local_y": 1.0, "x": 1.0, "y": 1.0, "east_m": 1.0, "north_m": 1.0,
+                "lat": 34.0, "lon": 108.0, "score": 500.0, "seen_count": 2, "count": 2,
+                "raw_count": 2, "weight": 1.0, "track_ids": [1], "rank": 1}
+        return {"selected_targets": [slot], "target_slots": [slot, dict(slot, rank=2)], "selected_count": 2, "candidate_count": 2}
+    return {}
 
 
 def _display_path(path: Path) -> str:

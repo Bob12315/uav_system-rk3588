@@ -255,7 +255,6 @@ function fieldMapModel(next) {
   const localization = next.localization || {};
   const dropLocalization = next.drop_localization || {};
   const reconLocalization = next.recon_localization || {};
-  const reconTargets = next.recon_targets || {};
   const localizationObjects = Array.isArray(dropLocalization.objects) ? dropLocalization.objects : (Array.isArray(localization.objects) ? localization.objects : []);
   const reconLocalizationObjects = Array.isArray(reconLocalization.objects) ? reconLocalization.objects : [];
   const singleViewLocalization = actionLocalizationTargets(next.action_lab || _latestActionLab());
@@ -264,11 +263,7 @@ function fieldMapModel(next) {
   const fieldSingleViewDrone = singleViewLocalization.drone
     ? pointForFieldMap(singleViewLocalization.drone, next)
     : null;
-  const reconInspection = next.recon_inspection || {};
-  const reconInspectionTargets = (Array.isArray(reconInspection.report) ? reconInspection.report : [])
-    .map(item => pointForFieldMap(item, next)).filter(Boolean);
   const fieldReconLocalizationTargets = reconLocalizationObjects.map(item => pointForFieldMap(item, next)).filter(Boolean);
-  const fieldReconSelectedTargets = (Array.isArray(reconTargets.selected_targets) ? reconTargets.selected_targets : []).map(item => pointForFieldMap(item, next)).filter(Boolean);
 
   // selected drop targets — priority: drop_targets.status, localization.selected_targets, action_lab detail fallback
   const dropTargetsStatus = next.drop_targets || {};
@@ -316,9 +311,7 @@ function fieldMapModel(next) {
     singleViewTargets: fieldSingleViewTargets,
     singleViewDrone: fieldSingleViewDrone,
     dropTargetsSelected: dropTargetsFromSelection.map(item => pointForFieldMap(item, next)).filter(Boolean),
-    reconInspectionTargets,
     reconLocalizationTargets: fieldReconLocalizationTargets,
-    reconTargetsSelected: fieldReconSelectedTargets,
     dropWorkflow: extractDropWorkflow(next),
     workflowTargets: buildWorkflowTargets(next),
   };
@@ -691,27 +684,6 @@ function drawLocalizationTargets(ctx, model) {
       color: "#93a8bf",
       font: "11px Consolas, monospace",
     });
-  });
-}
-function drawReconInspectionTargets(ctx, model) {
-  model.reconLocalizationTargets.forEach((target, index) => {
-    const result = model.reconInspectionTargets.find(item => targetsMatch(item, target, 0.35));
-    const tx = pointX(target), ty = pointY(target);
-    if (tx === null || ty === null) return;
-    const [x, y] = worldToCanvas(tx, ty, model.rect);
-    const status = result?.status || "pending";
-    const detected = ["confirmed", "detected"].includes(status);
-    const blank = ["blank", "no_sign", "blank_or_uncertain"].includes(status);
-    const color = detected ? "#39c8bf" : blank ? "#93a8bf" : status === "failed" ? "#ff5b5b" : "#ffb347";
-    const label = detected ? `${result.hazard_label || result.content || "--"} ${num(result.confidence ?? result.confidence_max, 2)}` : blank ? "blank" : status;
-    ctx.beginPath();
-    ctx.arc(x, y, 7, 0, Math.PI * 2);
-    ctx.fillStyle = color;
-    ctx.strokeStyle = "#e6edf6";
-    ctx.lineWidth = 2;
-    ctx.fill();
-    ctx.stroke();
-    drawFieldLabel(ctx, `R-L${index + 1} ${label}`, x + 10, y - 10, {align: "left", color});
   });
 }
 function drawSingleViewTargets(ctx, model) {
@@ -1216,7 +1188,6 @@ function renderFieldMapNow(next) {
   drawSurveyPoints(ctx, model);
   drawTargets(ctx, model);
   drawLocalizationTargets(ctx, model);
-  drawReconInspectionTargets(ctx, model);
   drawSingleViewTargets(ctx, model);
   drawDrone(ctx, model);
   if (model.profilePreview && !fieldMapView.interacting) {
@@ -1241,11 +1212,7 @@ function renderFieldMapNow(next) {
     `Localization: ${model.localizationTargets.length}`,
     `Drop fusion: ${model.localizationTargets.length}`,
     `Recon fusion: ${model.reconLocalizationTargets.length}`,
-    `Recon selected: ${model.reconTargetsSelected.length}`,
-    `Recon confirmed: ${model.reconInspectionTargets.filter(item => ["confirmed", "detected"].includes(item.status)).length}`,
-    `Recon blank: ${model.reconInspectionTargets.filter(item => ["blank", "no_sign", "blank_or_uncertain"].includes(item.status)).length}`,
     `SingleView: ${model.singleViewTargets.length}`,
-    `Recon inspect: ${model.reconInspectionTargets.length}`,
     hasProfilePreview ? "Coord: profile preview" : model.hasMissionPosition ? "Coord: mission" : hasDronePosition && model.drone.field ? "Coord: field" : "Coord: unavailable",
   ].map(item => `<span>${item}</span>`).join("");
 }

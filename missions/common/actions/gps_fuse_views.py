@@ -42,9 +42,9 @@ class GpsFuseViewsAction(ActionModule):
         if not self.started:
             return ActionResult(failed=True, reason="action_not_started")
         if self.stopped:
-            return ActionResult(done=True, reason="stopped", detail=self.last_detail)
+            return ActionResult(done=True, reason="stopped", output=dict(self.last_detail), detail=self.last_detail)
         if self.done:
-            return ActionResult(done=True, reason="gps_views_fused", detail=self.last_detail)
+            return ActionResult(done=True, reason="gps_views_fused", output=dict(self.last_detail), detail=self.last_detail)
         reference = (context or {}).get("field_reference")
         if not isinstance(reference, dict) or not reference.get("is_ready_for_field_to_gps"):
             return ActionResult(failed=True, reason="field_reference_not_ready")
@@ -63,7 +63,7 @@ class GpsFuseViewsAction(ActionModule):
                             "count": len(localized), "coordinate_frame": "GLOBAL"}
         self.done = True
         reason = "gps_views_fused" if localized else "gps_views_fused_empty"
-        return ActionResult(done=True, reason=reason, detail=self.last_detail)
+        return ActionResult(done=True, reason=reason, output=dict(self.last_detail), detail=self.last_detail)
 
     def stop(self) -> None: self.stopped = True
 

@@ -17,6 +17,7 @@ class ActionResult:
     done: bool = False
     failed: bool = False
     reason: str = ""
+    output: dict[str, Any] = field(default_factory=dict)
     detail: dict[str, Any] = field(default_factory=dict)
 
     def __init__(
@@ -26,6 +27,7 @@ class ActionResult:
         done: bool = False,
         failed: bool = False,
         reason: str = "",
+        output: dict[str, Any] | None = None,
         detail: dict[str, Any] | None = None,
     ) -> None:
         self.effects = list(effects or [])
@@ -34,6 +36,7 @@ class ActionResult:
         self.done = bool(done)
         self.failed = bool(failed)
         self.reason = str(reason)
+        self.output = dict(output or {})
         self.detail = dict(detail or {})
 
     @staticmethod
@@ -52,4 +55,5 @@ class ActionResult:
     def to_dict(self) -> dict[str, Any]:
         serialized = self.actions
         return {"actions": serialized, "done": self.done,
-                "failed": self.failed, "reason": self.reason, "detail": dict(self.detail)}
+                "failed": self.failed, "reason": self.reason,
+                "output": dict(self.output), "detail": dict(self.detail)}

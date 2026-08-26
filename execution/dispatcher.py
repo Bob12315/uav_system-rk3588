@@ -8,7 +8,6 @@ from execution.policy import ACTION_DISPATCH_POLICY, DispatchRule, SafetyGate
 from execution.types import empty_dispatch
 from execution.normalizer import get_action_params, optional_float, format_log_float
 from execution.handlers.servo import dispatch_set_servo
-from execution.handlers.local_position import dispatch_local_position
 from execution.handlers.global_position import dispatch_global_goto
 from execution.handlers.flight_mode import (
     dispatch_set_mode, dispatch_arm, dispatch_takeoff, dispatch_land,
@@ -64,8 +63,6 @@ class ActionDispatcher:
     def _compat_note_for_action_type(action_type: str) -> str:
         if action_type == "set_servo":
             return "payload_set_servo_dispatch_enabled"
-        if action_type == "local_position":
-            return "local_position_dispatch_enabled"
         if action_type in ("flight_command", "body_velocity"):
             return "action_dispatch_enabled"
         return "action_dispatch_enabled"
@@ -289,7 +286,7 @@ class ActionDispatcher:
                         {"action": action, "action_type": action_type, "reason": "servo_duplicate_key"}
                     )
                     continue
-            if action_type in {"local_position", "global_goto", "land", "takeoff"}:
+            if action_type in {"global_goto", "land", "takeoff"}:
                 self.safety_pipeline.stop_continuous("transition_to_discrete_control")
             elif action_type == "clear_continuous_commands":
                 self.safety_pipeline.stop_continuous("explicit_continuous_clear", emit=False)
@@ -381,8 +378,6 @@ class ActionDispatcher:
             return self._dispatch_condition_yaw(action, link_manager=link_manager)
         if action_type == "change_speed":
             return self._dispatch_change_speed(action, link_manager=link_manager)
-        if action_type == "local_position":
-            return self._dispatch_local_position(action, link_manager=link_manager)
         if action_type == "global_goto":
             return self._dispatch_global_goto(action, link_manager=link_manager)
         if action_type in ("flight_command", "body_velocity"):
@@ -502,17 +497,6 @@ class ActionDispatcher:
                 detail.get("speed_mps"), detail.get("speed_type"),
                 detail.get("priority"), detail.get("key"),
             )
-        return result
-
-    def _dispatch_local_position(
-        self,
-        action: dict[str, object],
-        *,
-        link_manager: object | None,
-    ) -> dict[str, object]:
-        result, log_msg = dispatch_local_position(action, link_manager=link_manager)
-        if log_msg is not None:
-            self._logger.info(log_msg)
         return result
 
     def _dispatch_flight_command(

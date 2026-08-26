@@ -85,6 +85,7 @@ def test_action_result_to_dict() -> None:
         "done": True,
         "failed": False,
         "reason": "ok",
+        "output": {},
         "detail": {"value": 1},
     }
 

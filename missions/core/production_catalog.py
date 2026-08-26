@@ -30,15 +30,16 @@ from .native_one_shot_actions import (
 )
 
 
-_EFFECTS_BY_ACTION = {
-    "takeoff": frozenset({EffectKind.SET_FLIGHT_MODE, EffectKind.ARM, EffectKind.TAKEOFF}),
-    "land": frozenset({EffectKind.LAND}),
-    "change_speed": frozenset({EffectKind.CHANGE_SPEED}),
-    "goto_waypoint": frozenset({EffectKind.GLOBAL_POSITION_TARGET}),
-    "align_descend": frozenset({EffectKind.BODY_VELOCITY_TARGET}),
-    "payload_release": frozenset({EffectKind.SET_SERVO}),
-    "target_lock": frozenset({EffectKind.SET_VISION_TARGET}),
-    "gps_target_lock": frozenset({EffectKind.SET_VISION_TARGET}),
+_EFFECT_KIND_BY_ACTION_EFFECT = {
+    "set_mode": EffectKind.SET_FLIGHT_MODE,
+    "arm": EffectKind.ARM,
+    "takeoff": EffectKind.TAKEOFF,
+    "land": EffectKind.LAND,
+    "change_speed": EffectKind.CHANGE_SPEED,
+    "global_goto": EffectKind.GLOBAL_POSITION_TARGET,
+    "flight_command": EffectKind.BODY_VELOCITY_TARGET,
+    "set_servo": EffectKind.SET_SERVO,
+    "yolo_lock_target": EffectKind.SET_VISION_TARGET,
 }
 
 
@@ -57,7 +58,10 @@ def create_production_catalog() -> ActionRegistrationCatalog:
             f"{legacy.name}:v1:{schema_text}".encode("utf-8")
         ).hexdigest())
         ref = ActionContractRef(ActionDefinitionId(legacy.name), "v1", fingerprint)
-        effect_kinds = _EFFECTS_BY_ACTION.get(legacy.name, frozenset())
+        effect_kinds = frozenset(
+            _EFFECT_KIND_BY_ACTION_EFFECT[effect_type]
+            for effect_type in legacy.allowed_effect_types
+        )
         definition = ActionDefinition(
             ref,
             legacy.name,
@@ -69,7 +73,7 @@ def create_production_catalog() -> ActionRegistrationCatalog:
             frozenset(),
             tuple((kind, EffectDispatchPolicy(1000, 5, 1,
                   100 if kind is EffectKind.BODY_VELOCITY_TARGET else None)) for kind in sorted(effect_kinds, key=lambda k: k.value)),
-            ExitBarrier.MOTION_STOPPED if legacy.name == "align_descend" else ExitBarrier.NONE,
+            legacy.exit_barrier,
             "payload_release_v1" if legacy.name == "payload_release" else None,
         )
         native = _NATIVE_ONE_SHOT.get(legacy.name)

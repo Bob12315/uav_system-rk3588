@@ -48,7 +48,7 @@ takeoff
 | --- | --- |
 | `rescue_2026_full_auto_v2.json` | 当前完整 GPS-first 比赛流程 |
 | `drop_two_targets_v2.json` | 双目标投放分项流程 |
-| `recon_gps_v2.json` | 危险标识侦察分项流程 |
+| `recon_gps_v2.json` | 侦察航点飞行分项流程 |
 
 历史模板已归档到 `examples/archived_missions/`，不参与正式运行 catalog 或默认 validator。
 

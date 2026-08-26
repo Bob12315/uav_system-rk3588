@@ -14,6 +14,9 @@ RETIRED_COMPOSITES = {
     "recon_scan", "survey_area", "recon_inspect_target", "recon_descend_observe",
     "visual_land",
 }
+RETIRED_RECON_ACTIONS = {
+    "select_recon_targets", "build_recon_report",
+}
 
 
 def test_formal_templates_are_explicit_atomic_subflows() -> None:
@@ -25,6 +28,7 @@ def test_formal_templates_are_explicit_atomic_subflows() -> None:
 def test_runtime_registry_does_not_publish_composite_actions() -> None:
     names = set(create_action_lab_registry().list())
     assert names.isdisjoint(RETIRED_COMPOSITES)
+    assert names.isdisjoint(RETIRED_RECON_ACTIONS)
 
 
 def test_production_actions_do_not_construct_child_actions() -> None:
@@ -42,4 +46,3 @@ def test_align_descend_is_a_self_contained_action() -> None:
     assert "guidance.align_descend" not in source
     assert "missions.common.lifecycle.align_descend" not in source
     assert not (ROOT / "guidance/align_descend.py").exists()
-    assert not (ROOT / "missions/common/lifecycle/align_descend.py").exists()

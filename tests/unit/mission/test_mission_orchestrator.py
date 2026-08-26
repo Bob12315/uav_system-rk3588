@@ -9,10 +9,11 @@ from missions.engine import MissionActionStep, MissionOrchestrator
 
 
 class FakeActionResult:
-    def __init__(self, done=False, failed=False, reason="", detail=None):
+    def __init__(self, done=False, failed=False, reason="", output=None, detail=None):
         self.done = done
         self.failed = failed
         self.reason = reason
+        self.output = output or {}
         self.detail = detail or {}
 
     def to_dict(self):
@@ -20,6 +21,7 @@ class FakeActionResult:
             "done": self.done,
             "failed": self.failed,
             "reason": self.reason,
+            "output": dict(self.output),
             "detail": dict(self.detail),
         }
 
@@ -327,8 +329,8 @@ def test_stop_with_hold_passes_hold_current() -> None:
     assert orch.status().running is False
 
 
-def test_blackboard_save_as_stores_done_detail() -> None:
-    runtime = FakeRuntime([FakeActionResult(done=True, reason="done", detail={"value": 123})])
+def test_blackboard_save_as_stores_done_output() -> None:
+    runtime = FakeRuntime([FakeActionResult(done=True, reason="done", output={"value": 123}, detail={"debug": True})])
     orch = MissionOrchestrator(
         runtime,
         [
@@ -345,7 +347,7 @@ def test_blackboard_save_as_stores_done_detail() -> None:
 
 
 def test_blackboard_resolves_next_step_params() -> None:
-    runtime = FakeRuntime([FakeActionResult(done=True, reason="done", detail={"value": 123})])
+    runtime = FakeRuntime([FakeActionResult(done=True, reason="done", output={"value": 123})])
     orch = MissionOrchestrator(
         runtime,
         [
@@ -549,7 +551,7 @@ def test_continue_after_failure_advances_to_next_step() -> None:
     orch = MissionOrchestrator(
         runtime,
         [
-            MissionActionStep("fixed_view_localize", on_failed={"action": "continue"}),
+            MissionActionStep("gps_capture_view", on_failed={"action": "continue"}),
             MissionActionStep("land"),
         ],
     )
@@ -560,7 +562,7 @@ def test_continue_after_failure_advances_to_next_step() -> None:
 
     assert continue_status.current_action == "land"
     assert done_status.done is True
-    assert runtime.runner.sent_actions == [("fixed_view_localize", {}), ("land", {})]
+    assert runtime.runner.sent_actions == [("gps_capture_view", {}), ("land", {})]
 
 
 def test_default_failure_policy_still_fails_mission() -> None:
@@ -597,7 +599,7 @@ def test_skip_current_step_advances_to_next_step() -> None:
 
 def test_skip_does_not_clear_blackboard() -> None:
     """skip_current_step preserves blackboard data."""
-    runtime = FakeRuntime([FakeActionResult(done=True, reason="done", detail={"value": 42})])
+    runtime = FakeRuntime([FakeActionResult(done=True, reason="done", output={"value": 42})])
     orch = MissionOrchestrator(
         runtime,
         [

@@ -162,7 +162,7 @@ class SelectDropTargetsAction(ActionModule):
         if not self.objects:
             detail = self._base_detail([], [])
             if self.allow_fewer:
-                return ActionResult(done=True, reason="drop_targets_selected_empty", detail=detail)
+                return ActionResult(done=True, reason="drop_targets_selected_empty", output=self._output(detail), detail=detail)
             return ActionResult(failed=True, reason="no_drop_objects", detail=detail)
 
         candidates: list[_Candidate] = []
@@ -180,7 +180,7 @@ class SelectDropTargetsAction(ActionModule):
         if not candidates:
             detail = self._base_detail([], rejected)
             if self.allow_fewer:
-                return ActionResult(done=True, reason="drop_targets_selected_empty", detail=detail)
+                return ActionResult(done=True, reason="drop_targets_selected_empty", output=self._output(detail), detail=detail)
             return ActionResult(failed=True, reason="no_valid_drop_targets", detail=detail)
 
         ordered = sorted(candidates, key=self._sort_key)
@@ -218,7 +218,7 @@ class SelectDropTargetsAction(ActionModule):
             return ActionResult(failed=True, reason="not_enough_drop_targets", detail=detail)
 
         detail = self._base_detail(selected, rejected, candidate_count=len(candidates))
-        return ActionResult(done=True, reason="drop_targets_selected", detail=detail)
+        return ActionResult(done=True, reason="drop_targets_selected", output=self._output(detail), detail=detail)
 
     def _candidate(
         self,
@@ -527,8 +527,18 @@ class SelectDropTargetsAction(ActionModule):
             done=result.done,
             failed=result.failed,
             reason=result.reason,
+            output=dict(result.output),
             detail=dict(result.detail),
         )
+
+    @staticmethod
+    def _output(detail: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "selected_targets": list(detail.get("selected_targets") or []),
+            "target_slots": list(detail.get("target_slots") or []),
+            "selected_count": int(detail.get("selected_count", 0)),
+            "candidate_count": int(detail.get("candidate_count", 0)),
+        }
 
     def _bool_param(self, value: Any, name: str) -> bool:
         if isinstance(value, bool):

@@ -244,7 +244,7 @@ def test_failed_atomic_goto_clears_global_navigation_and_holds_current() -> None
     registry = ActionRegistry()
     registry.register("goto_waypoint", FailingRecon)
     service = ActionRuntimeService(runner=ActionRunner(registry), dispatcher=ActionDispatcher(test_source="test"))
-    service.start("goto_waypoint", link_manager=None)
+    service.start("goto_waypoint", {"field_x_m": 0.0, "field_y_m": 0.0, "altitude_m": 3.0}, link_manager=None)
     service.tick({}, link_manager=FakeLink(), send_commands=False)
 
     assert calls == [
