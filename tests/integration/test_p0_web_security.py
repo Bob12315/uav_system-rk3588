@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from types import SimpleNamespace
 
 import httpx
@@ -100,6 +101,11 @@ def test_modifying_requests_require_auth_csrf_and_allowed_origin(tmp_path) -> No
     assert allowed.status_code == 200
     assert cross_origin.status_code == 403
     assert runner.calls == [("send", True)]
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline:
+        if (tmp_path / "audit.jsonl").exists() and (tmp_path / "security.jsonl").exists():
+            break
+        time.sleep(0.01)
     assert (tmp_path / "audit.jsonl").exists()
     assert (tmp_path / "security.jsonl").exists()
 
