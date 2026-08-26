@@ -14,8 +14,9 @@ from .result import ActionResult
 class GotoWaypointAction(ActionModule):
     """Convert a FIELD target to GPS without changing yaw by default.
 
-    This Action emits only ``global_goto``.  ``yaw_mode=hold`` omits yaw from
-    the MAVLink target so the Action does not command a yaw change.
+    This Action emits only ``global_goto``.  ``yaw_mode=hold`` snapshots the
+    first valid vehicle yaw and includes it in every MAVLink target, preventing
+    GUIDED mode from automatically turning the vehicle toward the waypoint.
     ``yaw_mode=field_heading`` uses ``field_yaw_deg`` clockwise from FIELD +Y
     and converts it to the north-referenced yaw used by MAVLink.
     ``lat``/``lon`` are accepted only as a migration input for a target already
@@ -85,11 +86,20 @@ class GotoWaypointAction(ActionModule):
             target = self._global_target(reference)
         except FieldReferenceError as exc:
             return ActionResult(failed=True, reason="field_to_gps_failed", detail={"error": str(exc)})
-        yaw_rad = (
-            self._normalize_yaw(float(reference.field_heading_yaw_rad) + math.radians(self.field_yaw_deg))
-            if self.yaw_mode == "field_heading"
-            else None
-        )
+        if self.yaw_mode == "field_heading":
+            yaw_rad = self._normalize_yaw(
+                float(reference.field_heading_yaw_rad) + math.radians(self.field_yaw_deg)
+            )
+        else:
+            if self.hold_yaw_rad is None:
+                current_yaw = self._current_yaw(context_data)
+                if current_yaw is None:
+                    return ActionResult(
+                        reason="waiting_for_attitude",
+                        detail=self._detail(target, None, None, None, None),
+                    )
+                self.hold_yaw_rad = self._normalize_yaw(current_yaw)
+            yaw_rad = self.hold_yaw_rad
         current = self._current_global_position(context_data)
         if current is None:
             return ActionResult(
@@ -119,6 +129,7 @@ class GotoWaypointAction(ActionModule):
         self.field_x_m = self.field_y_m = self.lat = self.lon = None
         self.altitude_m = self.field_yaw_deg = 0.0
         self.yaw_mode = "hold"
+        self.hold_yaw_rad: float | None = None
         self.tolerance_xy_m = self.tolerance_z_m = 0.3
         self.min_hold_updates, self.require_velocity_valid = 1, False
         self.max_horizontal_speed_mps, self.max_vertical_speed_mps = 0.15, 0.10
@@ -180,6 +191,7 @@ class GotoWaypointAction(ActionModule):
             "input_frame": "field", "input_kind": self.input_kind, "field_x_m": self.field_x_m,
             "field_y_m": self.field_y_m, "yaw_mode": self.yaw_mode,
             "field_yaw_deg": self.field_yaw_deg,
+            "hold_yaw_deg": None if self.hold_yaw_rad is None else math.degrees(self.hold_yaw_rad) % 360.0,
             "actual_yaw_deg": None if yaw_rad is None else math.degrees(yaw_rad) % 360.0,
             "actual_yaw_rad": yaw_rad,
             "global_target": target, "current": current, "distance_xy_m": distance, "z_error_m": z_error,
@@ -212,6 +224,17 @@ class GotoWaypointAction(ActionModule):
         except (KeyError, StopIteration, TypeError, ValueError):
             return None
         return {"lat": lat, "lon": lon, "alt": alt} if all(math.isfinite(v) for v in (lat, lon, alt)) else None
+
+    @staticmethod
+    def _current_yaw(context: dict[str, Any]) -> float | None:
+        drone = context.get("drone")
+        if not isinstance(drone, dict) or drone.get("attitude_valid") is not True:
+            return None
+        try:
+            yaw = float(drone["yaw"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        return yaw if math.isfinite(yaw) else None
 
     @staticmethod
     def _gps_distance_m(lat_a, lon_a, lat_b, lon_b) -> float:

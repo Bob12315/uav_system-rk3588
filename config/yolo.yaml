@@ -14,7 +14,7 @@ model_path: "../data/models/gazebo_dataset-fp16.rknn"
 class_names: ["baozha", "shenghua", "yiran", "fangshe", "buran", "fushi", "youdu", "yushi", "ziran", "ciji", "bucket", "H"]
 
 # 检测置信度阈值与 NMS IOU 阈值，范围通常为 0.0 到 1.0。
-conf_thres: 0.60
+conf_thres: 0.30
 iou_thres: 0.45
 
 # 类别过滤列表。空列表表示保留全部类别，例如 [0] 表示只保留 class_id=0。

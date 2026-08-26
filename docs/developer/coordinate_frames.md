@@ -39,6 +39,10 @@ BODY_NED 速度不经过 FIELD 坐标转换。
 `ey_norm` 经 `image_y_sign=-1` 映射到机体后方/LOCAL_NED 南向偏移。不要恢复只影响
 显示的 mirror、输入层 mirror 或历史 `vy_sign=-1.0` 修正。
 
+对准下降直接以检测器的原始 `ey_norm` 计算机体前后速度：默认
+`vx_sign=-1.0`，即目标在画面上方（负 `ey_norm`）时向前飞，目标在画面下方时向后飞。
+横向仍为 `vy_sign=1.0`。相机安装发生变化时，可在该 Action 参数中显式覆盖这两个符号。
+
 ## FIELD
 
 FIELD 是比赛场地坐标系：

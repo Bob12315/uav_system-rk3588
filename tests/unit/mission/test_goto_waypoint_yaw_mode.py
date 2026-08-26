@@ -18,7 +18,7 @@ def _context() -> dict:
             "is_frozen": True,
             "is_ready_for_field_to_gps": True,
         },
-        "drone": {"global_position_valid": False},
+        "drone": {"global_position_valid": False, "attitude_valid": True, "yaw": -math.pi / 3},
     }
 
 
@@ -31,11 +31,11 @@ def _active_action(params: dict) -> dict:
     return result.actions[0]
 
 
-def test_hold_yaw_mode_omits_yaw_from_global_goto() -> None:
+def test_hold_yaw_mode_snapshots_current_yaw_in_global_goto() -> None:
     request = _active_action({"yaw_mode": "hold"})
 
     assert request["action_type"] == "global_goto"
-    assert "yaw" not in request["params"]
+    assert math.isclose(request["params"]["yaw"], -math.pi / 3)
 
 
 def test_field_heading_yaw_mode_sends_explicit_yaw() -> None:

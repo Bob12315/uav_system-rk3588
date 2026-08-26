@@ -67,6 +67,8 @@ class UiConfig:
     session_ttl_sec: float
     allowed_hosts: tuple[str, ...]
     allowed_origins: tuple[str, ...]
+    allowed_networks: tuple[str, ...] = ()
+    auto_allow_current_private_network: bool = False
 
 
 @dataclass(slots=True)
@@ -195,7 +197,8 @@ def load_app_config(args: argparse.Namespace) -> AppConfig:
     _reject_unknown(services, {"connect_telemetry", "start_yolo_udp"}, "services")
     _reject_unknown(ui, {"web_enabled", "web_host", "web_port", "audit_log_path",
                          "security_event_log_path", "auth_required", "credential_env",
-                         "credential_file_env", "session_ttl_sec", "allowed_hosts", "allowed_origins"}, "ui")
+                         "credential_file_env", "session_ttl_sec", "allowed_hosts", "allowed_origins",
+                         "allowed_networks", "auto_allow_current_private_network"}, "ui")
     _reject_unknown(blackbox, {"enabled", "output_dir", "sample_hz", "flush_every", "rotate_mb",
                                "keep_files", "include_perception", "include_drone", "include_gimbal",
                                "include_fused", "include_commands", "include_events"}, "blackbox")
@@ -213,8 +216,9 @@ def load_app_config(args: argparse.Namespace) -> AppConfig:
     if not security.is_absolute(): security = ROOT_DIR / security
     allowed_hosts = ui.get("allowed_hosts", ["127.0.0.1", "localhost", "[::1]"])
     allowed_origins = ui.get("allowed_origins", ["http://127.0.0.1:8080"])
-    if not isinstance(allowed_hosts, list) or not isinstance(allowed_origins, list):
-        raise ValueError("ui.allowed_hosts and ui.allowed_origins must be lists")
+    allowed_networks = ui.get("allowed_networks", [])
+    if not isinstance(allowed_hosts, list) or not isinstance(allowed_origins, list) or not isinstance(allowed_networks, list):
+        raise ValueError("ui.allowed_hosts, ui.allowed_origins, and ui.allowed_networks must be lists")
     yolo_udp_ip = args.yolo_udp_ip or str(runtime.get("yolo_udp_ip", "127.0.0.1"))
     start_yolo_udp = False if args.no_yolo_udp else _bool(services, "start_yolo_udp", True)
     try: yolo_udp_is_loopback = ipaddress.ip_address(yolo_udp_ip).is_loopback
@@ -256,7 +260,7 @@ def load_app_config(args: argparse.Namespace) -> AppConfig:
             include_gimbal=_bool(blackbox, "include_gimbal", True), include_fused=_bool(blackbox, "include_fused", True),
             include_commands=_bool(blackbox, "include_commands", True), include_events=_bool(blackbox, "include_events", True),
         ),
-        ui=UiConfig(args.ui_enabled if args.ui_enabled is not None else _bool(ui, "web_enabled", True), str(ui.get("web_host", "127.0.0.1")), int(ui.get("web_port", 8080)), str(audit), str(security), _bool(ui, "auth_required", True), str(ui.get("credential_env", "UAV_WEB_OPERATOR_PASSWORD")), str(ui.get("credential_file_env", "UAV_WEB_OPERATOR_PASSWORD_FILE")), float(ui.get("session_ttl_sec", 28800)), tuple(str(x) for x in allowed_hosts), tuple(str(x).rstrip("/") for x in allowed_origins)),
+        ui=UiConfig(args.ui_enabled if args.ui_enabled is not None else _bool(ui, "web_enabled", True), str(ui.get("web_host", "127.0.0.1")), int(ui.get("web_port", 8080)), str(audit), str(security), _bool(ui, "auth_required", True), str(ui.get("credential_env", "UAV_WEB_OPERATOR_PASSWORD")), str(ui.get("credential_file_env", "UAV_WEB_OPERATOR_PASSWORD_FILE")), float(ui.get("session_ttl_sec", 28800)), tuple(str(x) for x in allowed_hosts), tuple(str(x).rstrip("/") for x in allowed_origins), tuple(str(x) for x in allowed_networks), _bool(ui, "auto_allow_current_private_network", False)),
         services_control=ServiceControlConfig(_command_list(control.get("restart_app_command")), _command_list(control.get("restart_yolo_command"))),
         telemetry=telemetry, yolo_command=_load_yolo_command_config(args.yolo_config),
         executor=ExecutorConfig(int(executor.get("body_frame", 8)), float(executor.get("gimbal_roll_deg", 0.0)), _bool(executor, "log_commands", True), send_commands),

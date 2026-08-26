@@ -46,7 +46,7 @@ def test_locked_target_uses_body_velocity_descent_and_fixed_yaw() -> None:
 
     assert result.reason == "align_descending"
     command = _command(result)
-    assert command.params["vx_cmd"] == -0.2
+    assert command.params["vx_cmd"] == 0.2
     assert command.params["vy_cmd"] == 0.1
     assert command.params["vz_cmd"] == 0.2
     assert math.isclose(command.params["yaw_hold_rad"], math.pi / 2)

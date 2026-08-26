@@ -26,15 +26,17 @@ def test_action_definition_is_the_single_registry_and_web_catalog() -> None:
         assert spec["parameter_schema"]["type"] == "object"
 
 
-def test_action_definition_defaults_keep_safe_global_field_and_send_boundaries() -> None:
+def test_action_definition_defaults_keep_global_field_and_send_boundaries() -> None:
     definitions = {definition.name: definition for definition in action_definitions()}
     goto = definitions["goto_waypoint"].default_params
-    # Coordinates and altitude are required inputs, not made-up safe defaults.
-    assert "field_x_m" not in goto
-    assert "altitude_m" not in goto
-    # A waypoint does not command yaw unless the caller explicitly requests
-    # field-heading yaw.
-    assert "field_yaw_deg" not in goto
+    assert goto == {
+        "field_x_m": 0, "field_y_m": 30, "altitude_m": 3,
+        "tolerance_xy_m": 3, "tolerance_z_m": 3, "min_hold_updates": 1,
+        "require_velocity_valid": False, "max_horizontal_speed_mps": 0.15,
+        "max_vertical_speed_mps": 0.10, "priority": 4, "yaw_mode": "hold",
+    }
+    assert definitions["align_descend"].default_params["vx_sign"] == -1.0
+    assert definitions["align_descend"].default_params["vy_sign"] == 1.0
     assert "manual_step" not in definitions
     assert not ({
         "select_recon_targets", "build_recon_report",

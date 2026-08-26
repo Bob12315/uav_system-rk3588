@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 import os
+import ipaddress
 import secrets
+import socket
+import struct
 import threading
 import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Web UI deployment is Linux.
+    fcntl = None
 
 from fastapi import Request, WebSocket
 from fastapi.responses import JSONResponse
@@ -17,6 +26,39 @@ from web_ui.audit import AuditLog, bind_audit_request_context
 
 SESSION_COOKIE = "uav_session"
 CSRF_HEADER = "x-uav-csrf"
+_SIOCGIFADDR = 0x8915
+_SIOCGIFNETMASK = 0x891B
+
+
+def _current_private_interface_networks() -> tuple[ipaddress.IPv4Network, ...]:
+    """Return the complete private IPv4 subnet of the current default route."""
+    if fcntl is None:
+        return ()
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            # connect() only selects the route locally; it sends no packet.
+            probe.connect(("192.0.2.1", 9))
+            primary_address = probe.getsockname()[0]
+    except OSError:
+        return ()
+    networks: set[ipaddress.IPv4Network] = set()
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        for _index, interface in socket.if_nameindex():
+            request = struct.pack("256s", interface.encode()[:15])
+            try:
+                address = socket.inet_ntoa(fcntl.ioctl(probe.fileno(), _SIOCGIFADDR, request)[20:24])
+                netmask = socket.inet_ntoa(fcntl.ioctl(probe.fileno(), _SIOCGIFNETMASK, request)[20:24])
+            except OSError:
+                continue
+            if address != primary_address:
+                continue
+            parsed_address = ipaddress.ip_address(address)
+            if not parsed_address.is_private or parsed_address.is_loopback or parsed_address.is_link_local:
+                continue
+            network = ipaddress.ip_network(f"{address}/{netmask}", strict=False)
+            if isinstance(network, ipaddress.IPv4Network):
+                networks.add(network)
+    return tuple(sorted(networks, key=str))
 
 
 def _loopback_host(host: str) -> bool:
@@ -74,6 +116,18 @@ class WebSecurity:
         if testing_config:
             self.allowed_hosts.add("testserver")
         self.allowed_origins = {str(value).rstrip("/") for value in (configured_origins or ())}
+        self.allowed_networks = tuple(
+            ipaddress.ip_network(str(value).strip(), strict=False)
+            for value in (getattr(ui_config, "allowed_networks", ()) or ())
+        )
+        self.auto_allow_current_private_network = bool(
+            getattr(ui_config, "auto_allow_current_private_network", False)
+        )
+        if self.auto_allow_current_private_network:
+            self.allowed_networks = tuple(sorted(
+                {*self.allowed_networks, *_current_private_interface_networks()}, key=str
+            ))
+        self.web_port = int(getattr(ui_config, "web_port", 8080))
         self.security_events = AuditLog(
             str(getattr(ui_config, "security_event_log_path", "runtime/logs/web_ui/security.jsonl"))
         )
@@ -94,6 +148,31 @@ class WebSecurity:
             )
         if not _loopback_host(self.host) and not self.auth_required:
             raise RuntimeError("non-loopback Web UI cannot disable authentication")
+
+    def host_allowed(self, host: str) -> bool:
+        normalized = host.strip().lower().strip("[]")
+        if normalized in self.allowed_hosts:
+            return True
+        try:
+            address = ipaddress.ip_address(normalized)
+        except ValueError:
+            return False
+        if any(address in network for network in self.allowed_networks):
+            return True
+        if not self.auto_allow_current_private_network:
+            return False
+        # Re-read the default route here so a DHCP address change is accepted
+        # immediately, without requiring an application restart.
+        return any(address in network for network in _current_private_interface_networks())
+
+    def origin_allowed(self, origin: str) -> bool:
+        normalized = origin.rstrip("/")
+        if normalized in self.allowed_origins:
+            return True
+        parsed = urlsplit(normalized)
+        if parsed.scheme != "http" or parsed.hostname is None or parsed.port != self.web_port:
+            return False
+        return self.host_allowed(parsed.hostname)
 
     def login(self, password: str, source_address: str) -> tuple[str, str] | None:
         if not self._rate.allow(source_address, "login", limit=5, window_s=60.0):
@@ -168,12 +247,12 @@ class WebSecurity:
                 source_address=source_address,
             )
             host = str(request.url.hostname or "").lower().strip("[]")
-            if host and host not in security.allowed_hosts:
+            if host and not security.host_allowed(host):
                 security._audit_rejection(path, source_address, "host_not_allowed")
                 return JSONResponse({"detail": "host not allowed"}, status_code=400)
 
             origin = request.headers.get("origin")
-            if origin and origin.rstrip("/") not in security.allowed_origins:
+            if origin and not security.origin_allowed(origin):
                 security._audit_rejection(path, source_address, "origin_not_allowed")
                 return JSONResponse({"detail": "origin not allowed"}, status_code=403)
 

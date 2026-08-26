@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Default to the currently deployed RK3588.  It can still be overridden for
 # another ground station by setting GCS_HOST explicitly.
-GCS_HOST="${GCS_HOST:-10.101.31.108}"
+GCS_HOST="${GCS_HOST:-10.101.31.109}"
 VIDEO_HOST="${VIDEO_HOST:-${GCS_HOST}}"
 MAVLINK_PORT="${MAVLINK_PORT:-14550}"
 VIDEO_PORT="${VIDEO_PORT:-5600}"
