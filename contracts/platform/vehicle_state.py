@@ -42,6 +42,10 @@ class VehicleStateSnapshot:
     relative_altitude_m: float | None
     global_valid: bool
     global_age_s: float | None
+    # Exact local receive timestamp of the latest GLOBAL_POSITION_INT frame.
+    # Unlike ``captured_at - global_age_s``, this value is stable while a
+    # snapshot is republished and is safe as a GPS-sample identity.
+    global_position_received_at_utc_s: float | None
     gps_fix_type: int | None
     satellites_visible: int | None
     gps_eph_m: float | None

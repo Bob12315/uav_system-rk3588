@@ -32,7 +32,9 @@ def test_action_definition_defaults_keep_safe_global_field_and_send_boundaries()
     # Coordinates and altitude are required inputs, not made-up safe defaults.
     assert "field_x_m" not in goto
     assert "altitude_m" not in goto
-    assert goto["field_yaw_deg"] == 0.0
+    # A waypoint does not command yaw unless the caller explicitly requests
+    # field-heading yaw.
+    assert "field_yaw_deg" not in goto
     assert "manual_step" not in definitions
     assert not ({
         "select_recon_targets", "build_recon_report",

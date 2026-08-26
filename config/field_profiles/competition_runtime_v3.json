@@ -77,7 +77,7 @@
     "max_epv": 5.0
   },
   "runtime_origin_sampling": {
-    "min_samples": 20,
+    "min_samples": 6,
     "sample_window_s": 12.0,
     "max_horizontal_spread_m": 1.0,
     "estimator": "median"

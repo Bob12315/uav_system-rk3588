@@ -240,10 +240,7 @@ class SystemRunner:
                 for envelope, command_status in self.services.command_port.observation_candidates():
                     self.command_observer.observe(envelope, command_status, vehicle_snapshot)
                 drone, gimbal, link = project_legacy_vehicle_frame(vehicle_snapshot)
-                self._observe_runtime_field_sampling(
-                    drone,
-                    now_s=now,
-                )
+                self._observe_runtime_field_sampling(vehicle_snapshot, now_s=now)
                 fused = self.services.fusion_manager.update(perception, drone, gimbal)
                 command = _IdleCommandSnapshot()
                 inputs = SimpleNamespace(
@@ -534,28 +531,25 @@ class SystemRunner:
 
     def _observe_runtime_field_sampling(
         self,
-        drone: object,
+        vehicle_snapshot: object,
         *,
         now_s: float,
     ) -> None:
         try:
-            if hasattr(drone, "__dataclass_fields__"):
-                snapshot = asdict(drone)
-            elif isinstance(drone, Mapping):
-                snapshot = dict(drone)
-            else:
-                snapshot = {}
+            snapshot = vehicle_snapshot
+            source_time = getattr(snapshot, "global_position_received_at_utc_s", None)
             with self.action_runtime_lock:
                 result = self.field_service.observe_runtime_profile_sampling(GpsObservation(
-                    observation_id=f"vehicle:{snapshot.get('last_global_position_time', now_s)}",
+                    observation_id=f"vehicle:{source_time}",
                     observed_at_s=now_s,
-                    global_position_valid=bool(snapshot.get("global_position_valid", False)),
-                    lat=self._float_or_none(snapshot.get("lat")), lon=self._float_or_none(snapshot.get("lon")),
-                    gps_fix_type=int(snapshot.get("gps_fix_type", 0)),
-                    satellites_visible=int(snapshot.get("satellites_visible", 0)),
-                    gps_eph=self._float_or_none(snapshot.get("gps_eph")) or -1.0,
-                    gps_epv=self._float_or_none(snapshot.get("gps_epv")) or -1.0,
-                    last_global_position_time=self._float_or_none(snapshot.get("last_global_position_time")),
+                    global_position_valid=bool(getattr(snapshot, "global_valid", False)),
+                    lat=self._float_or_none(getattr(snapshot, "latitude_deg", None)),
+                    lon=self._float_or_none(getattr(snapshot, "longitude_deg", None)),
+                    gps_fix_type=int(getattr(snapshot, "gps_fix_type", 0) or 0),
+                    satellites_visible=int(getattr(snapshot, "satellites_visible", 0) or 0),
+                    gps_eph=self._float_or_none(getattr(snapshot, "gps_eph_m", None)) or -1.0,
+                    gps_epv=self._float_or_none(getattr(snapshot, "gps_epv_m", None)) or -1.0,
+                    last_global_position_time=self._float_or_none(source_time),
                 ))
             if result.get("auto_finalized") is True:
                 if result.get("ok") is True:

@@ -25,8 +25,10 @@ FIELD 航点建议迁移为：
 }
 ```
 
-`goto_waypoint` 只接受 FIELD 输入并只发送 GLOBAL GPS 目标；它把
-`field_yaw_deg`（相对 FIELD +Y、顺时针为正）转换为飞控北基准实际偏航。
+`goto_waypoint` 只接受 FIELD 输入并只发送 GLOBAL GPS 目标。默认
+`yaw_mode=hold`，不在 GLOBAL GPS 目标中下发 yaw；只有明确
+`yaw_mode=field_heading` 时，才把 `field_yaw_deg`（相对 FIELD +Y、顺时针为正）
+转换为飞控北基准实际偏航。
 不再生成 LOCAL_NED 航点。BODY_NED 速度建议使用
 `vx_forward_mps/vy_right_mps/vz_down_mps`。完整符号约定见
 [坐标系规范](../../developer/coordinate_frames.md)。
