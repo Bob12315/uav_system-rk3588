@@ -16,6 +16,7 @@ __pycache__/
 *.mp4
 *.mov
 *.tlog
+*.tlog.*
 *.ulg
 *.bag
 *.mavlink
@@ -26,6 +27,7 @@ yolo_app/logs/
 
 # IDE internal state
 .reasonix/
+reasonix.toml
 
 # Personal notes
 action调试.md

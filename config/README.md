@@ -24,7 +24,7 @@
 | `drop_two_targets_v2.json` | 双目标投放分项流程 |
 | `recon_gps_v2.json` | GPS 危险标识侦察分项流程 |
 
-历史参考模板已迁至 `examples/archived_missions/`，不参与正式 catalog 和 validator。
+历史参考模板已删除；它们不参与正式 catalog 和 validator。
 
 模板由 Web UI 加载并交给 `MissionOrchestrator`。修改后必须运行：
 

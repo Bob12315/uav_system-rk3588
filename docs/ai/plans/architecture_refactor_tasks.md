@@ -542,7 +542,7 @@ SSH target: pi@192.168.5.33
 
   - 正式 catalog 只保留 `rescue_2026_full_auto_v2.json`、`drop_two_targets_v2.json`、
     `recon_gps_v2.json`；
-  - 参考模板移动到 `examples/archived_missions/`，不参与正式 validator；
+  - 历史参考模板已删除，不参与正式 validator；
   - 更新 README、Web catalog 和测试；
   - 不把归档模板继续作为 runtime compatibility 的理由。
 
@@ -550,8 +550,8 @@ SSH target: pi@192.168.5.33
 
   完成记录（2026-08-13）：
   - 主要变更：正式 catalog/validator 只保留三个 v2 模板。
-  - 删除/迁移：五个历史模板及 SITL 副本迁入 examples/archived_missions/。
-  - 安全边界：归档文件保留为只读历史对照，不再提供 runtime compatibility。
+  - 删除：五个历史模板及 SITL 副本已从仓库移除。
+  - 安全边界：不保留 runtime compatibility。
   - 定向测试：模板 catalog、归档和 validator 测试通过。
   - 全量测试：1536 passed, 1 skipped。
   - 后续任务前置状态：ready。
@@ -658,7 +658,7 @@ SSH target: pi@192.168.5.33
 
   完成记录（2026-08-13）：
   - 主要变更：三个正式模板展开多视角、双投放、侦察航迹和视觉降落原子 subflow。
-  - 删除/迁移：12 个复合 Action/共享状态机及其旧行为锁迁入 `examples/`，从 registry、policy、UI 删除。
+  - 删除：12 个复合 Action/共享状态机及其旧行为锁已从仓库移除，并从 registry、policy、UI 删除。
   - 安全边界：align→payload 仍触发 zero/queue clear；两个 payload 的 SERVO/PWM/顺序和恢复标签保持显式。
   - 定向测试：模板 validator、atomic subflow、payload、dispatch policy contract 通过。
   - 全量测试：708 passed, 1 skipped（AR-24 审计前）。

@@ -1,2 +1,0 @@
-[permissions]
-allow = ["Bash(cd /home/level6/uav_project/uav_system-rk3588 && git status)", "Bash(cd /home/level6/uav_project/uav_system-rk3588 && git diff --stat)"]

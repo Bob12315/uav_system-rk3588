@@ -28,4 +28,4 @@ CF-21/CF-25/CF-26 静止切换与零命中证明，仍属于 production rollback
 | profile 内完整 Mission/config 副本 | 已删除 | 根配置 + `profile.yaml` 差异 | 不得恢复整份复制 |
 | Web 接收 `SystemRunner` / 单文件 routes | 已删除 | `WebServices` + `web_ui/routers/` | 不得以兼容 fallback 恢复 |
 
-退役实现与历史行为锁只保存在 `examples/`，不进入生产导入、正式 validator 或 pytest 主线。
+退役实现与历史行为锁已删除，不进入生产导入、正式 validator 或 pytest 主线。

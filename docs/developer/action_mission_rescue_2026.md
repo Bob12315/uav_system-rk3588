@@ -50,7 +50,7 @@ takeoff
 | `drop_two_targets_v2.json` | 双目标投放分项流程 |
 | `recon_gps_v2.json` | 侦察航点飞行分项流程 |
 
-历史模板已归档到 `examples/archived_missions/`，不参与正式运行 catalog 或默认 validator。
+历史模板已删除，不参与正式运行 catalog 或默认 validator。
 
 模板存在不代表已经通过实飞验收。正式比赛前必须在 Web UI 核对当前模板内容、场地
 profile、速度、高度、SERVO 输出和失败恢复目标。

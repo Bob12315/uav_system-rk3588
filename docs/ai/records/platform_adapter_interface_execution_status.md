@@ -62,9 +62,9 @@ BASELINE  python -m mypy app application contracts execution field observability
           314 errors in 52 files（既存 typing/import fallback 债务）
 ```
 
-修改前直接在仓库根目录运行裸 `pytest` 会误收集 `examples/archived_tests/`，其中引用了已删除且禁止
-恢复的 `FieldReferenceService`、旧 GPS sequence/Stage 路径，并在 collection 阶段失败。现已通过
-`pytest.ini: testpaths = tests` 固化正式测试根；不得为使归档样例通过而恢复 deprecated stack。
+此前裸 `pytest` 会误收集已删除的历史测试，其中引用了已删除且禁止恢复的
+`FieldReferenceService`、旧 GPS sequence/Stage 路径，并在 collection 阶段失败。正式测试根仍由
+`pytest.ini: testpaths = tests` 固化；不得恢复 deprecated stack。
 
 安全边界复核：
 
