@@ -875,7 +875,7 @@ async function init() {
   $("actionReset").onclick = () => resetActionLabAction().catch(error => { $("completionHint").textContent = error.message; });
   $("actionRefresh").onclick = () => refreshActionStatus().catch(error => { $("completionHint").textContent = error.message; });
   if ($("actionMissionSteps")) {
-    await loadActionMissionTemplate("rescue_2026_full_auto_v2", {confirmOverwrite: false});
+    await loadActionMissionTemplate("rescue_2026_full_auto", {confirmOverwrite: false});
   }
   if ($("actionMissionConfigure")) $("actionMissionConfigure").onclick = () => configureActionMission().catch(error => { $("completionHint").textContent = error.message; });
   if ($("actionMissionStart")) $("actionMissionStart").onclick = () => startActionMission().catch(error => { $("completionHint").textContent = error.message; });

@@ -143,7 +143,7 @@ schema v3 GPS runtime sampling。确认 `FIELD→GPS` 已就绪而 `FIELD→LOCA
 → 起飞与降落分项
 → 投放请求（无真实机构）
 → 分项 Mission
-→ 完整 rescue_2026_full_auto_v2
+→ 完整 rescue_2026_full_auto
 ```
 
 只有在确认仿真场地、速度、高度和遥控接管后，才在 SITL 中开启系统 SEND，并为本次

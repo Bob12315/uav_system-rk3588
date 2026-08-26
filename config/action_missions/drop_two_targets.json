@@ -1,24 +1,24 @@
 {
-  "name": "rescue_2026_full_auto_v2",
   "version": 2,
-  "profile": "v3-default",
+  "profile": "default",
   "steps": [
     {
       "name": "takeoff",
-      "label": "takeoff_4_5m",
+      "label": "takeoff_3_5m",
       "params": {
         "mode": "GUIDED",
-        "altitude_m": 4.5,
+        "altitude_m": 3.5,
         "altitude_tolerance_m": 0.35,
         "require_armed": true,
         "max_updates": 150,
-        "max_duration_s": 45,
         "priority": 2,
         "arm_priority": 1,
         "mode_priority": 2
       },
       "on_failed": {
-        "action": "fail"
+        "action": "jump_to",
+        "target": "land_home",
+        "max_attempts": 1
       }
     },
     {
@@ -219,9 +219,7 @@
           "cluster_radius_m": 0.8,
           "outlier_radius_m": 0.8,
           "min_cluster_size": 2,
-          "center_weight_power": 1,
-          "max_abs_ex": 1,
-          "max_abs_ey": 1
+          "center_weight_power": 1
         }
       }
     },
@@ -259,27 +257,17 @@
       }
     },
     {
-      "name": "change_speed",
-      "label": "drop_speed_1mps",
-      "params": {
-        "speed_mps": 1,
-        "speed_type": "ground",
-        "priority": 4,
-        "key": "drop_speed_1mps"
-      }
-    },
-    {
       "name": "goto_waypoint",
       "label": "drop_1_approach",
       "on_failed": {
         "action": "jump_to",
-        "target": "restore_return_speed_2mps",
+        "target": "return_home_gps",
         "max_attempts": 1
       },
       "params": {
         "lat": "$drop_targets.target_slots.0.lat",
         "lon": "$drop_targets.target_slots.0.lon",
-        "altitude_m": 3.5,
+        "altitude_m": 2.5,
         "target_frame": "global",
         "waypoint_mode": "absolute",
         "yaw_mode": "hold",
@@ -301,11 +289,9 @@
       },
       "params": {
         "target": "$drop_targets.target_slots.0",
-        "max_updates": 6,
-        "max_match_distance_m": 3,
-        "try_next_target_on_failure": true,
-        "direct_release_when_exhausted": true,
-        "min_confidence": 0.75,
+        "max_updates": 8,
+        "max_match_distance_m": 1.5,
+        "min_confidence": 0.35,
         "require_track_id": false,
         "class_names": [
           "bucket_1",
@@ -327,7 +313,7 @@
       "label": "drop_1_align",
       "on_failed": {
         "action": "jump_to",
-        "target": "restore_return_speed_2mps",
+        "target": "return_home_gps",
         "max_attempts": 1
       },
       "params": {
@@ -335,17 +321,16 @@
         "lost_timeout_updates": 10,
         "hold_updates_required": 1,
         "max_retries": 1,
-        "max_updates": 150,
+        "max_updates": 35,
         "finish_policy": "latched_center_alignment",
-        "finish_alignment_max_ex_cam": 0.18,
-        "finish_alignment_max_ey_cam": 0.18,
-        "finish_alignment_hold_updates": 2,
-        "finish_alignment_timeout_s": 1,
+        "finish_alignment_max_ex_cam": 0.35,
+        "finish_alignment_max_ey_cam": 0.35,
+        "finish_alignment_hold_updates": 1,
         "config": {
-          "kp_vx": 0.3,
-          "kp_vy": 0.3,
-          "max_vx_mps": 0.25,
-          "max_vy_mps": 0.25,
+          "kp_vx": 0.275,
+          "kp_vy": 0.275,
+          "max_vx_mps": 0.2,
+          "max_vy_mps": 0.2,
           "height_gain_enabled": true,
           "height_gain_mode": "points",
           "height_scale_points": [
@@ -371,28 +356,14 @@
             }
           ],
           "scale_max_velocity_with_height": true,
-          "descend_speed_mps": 0.3,
-          "slow_descend_speed_mps": 0.14,
-          "descent_speed_stages": [
-            {
-              "max_altitude_m": 2.4,
-              "max_descend_speed_mps": 0.18
-            },
-            {
-              "max_altitude_m": 3.2,
-              "max_descend_speed_mps": 0.24
-            },
-            {
-              "max_altitude_m": 3.5,
-              "max_descend_speed_mps": 0.3
-            }
-          ],
-          "max_ex_cam": 0.16,
-          "max_ey_cam": 0.16,
-          "slow_descend_max_ex_cam": 0.35,
-          "slow_descend_max_ey_cam": 0.35,
-          "deadband_ex_cam": 0.04,
-          "deadband_ey_cam": 0.04,
+          "descend_speed_mps": 0.24,
+          "slow_descend_speed_mps": 0.18,
+          "max_ex_cam": 0.28,
+          "max_ey_cam": 0.28,
+          "slow_descend_max_ex_cam": 0.55,
+          "slow_descend_max_ey_cam": 0.55,
+          "deadband_ex_cam": 0.06,
+          "deadband_ey_cam": 0.08,
           "integral_enabled": true,
           "integral_active_below_altitude_m": 1.6,
           "ki_vx": 0.04,
@@ -409,8 +380,8 @@
           "min_altitude_m": 1.2,
           "require_target_locked": false,
           "payload_offset_enabled": true,
-          "descent_gate_policy": "aligned_or_slow",
-          "unaligned_descend_speed_mps": 0,
+          "descent_gate_policy": "allow_unaligned",
+          "unaligned_descend_speed_mps": 0.08,
           "fov_x_deg": 85,
           "fov_y_deg": 69,
           "image_x_sign": 1,
@@ -429,7 +400,7 @@
       "save_as": "drop_release_1",
       "on_failed": {
         "action": "jump_to",
-        "target": "restore_return_speed_2mps",
+        "target": "return_home_gps",
         "max_attempts": 1
       },
       "params": {
@@ -453,7 +424,7 @@
       "label": "drop_1_climb",
       "on_failed": {
         "action": "jump_to",
-        "target": "restore_return_speed_2mps",
+        "target": "return_home_gps",
         "max_attempts": 1
       },
       "params": {
@@ -475,13 +446,13 @@
       "label": "drop_2_approach",
       "on_failed": {
         "action": "jump_to",
-        "target": "restore_return_speed_2mps",
+        "target": "return_home_gps",
         "max_attempts": 1
       },
       "params": {
         "lat": "$drop_targets.target_slots.1.lat",
         "lon": "$drop_targets.target_slots.1.lon",
-        "altitude_m": 3.5,
+        "altitude_m": 2.5,
         "target_frame": "global",
         "waypoint_mode": "absolute",
         "yaw_mode": "hold",
@@ -503,11 +474,9 @@
       },
       "params": {
         "target": "$drop_targets.target_slots.1",
-        "max_updates": 6,
-        "max_match_distance_m": 3,
-        "try_next_target_on_failure": true,
-        "direct_release_when_exhausted": true,
-        "min_confidence": 0.75,
+        "max_updates": 8,
+        "max_match_distance_m": 1.5,
+        "min_confidence": 0.35,
         "require_track_id": false,
         "class_names": [
           "bucket_1",
@@ -529,7 +498,7 @@
       "label": "drop_2_align",
       "on_failed": {
         "action": "jump_to",
-        "target": "restore_return_speed_2mps",
+        "target": "return_home_gps",
         "max_attempts": 1
       },
       "params": {
@@ -537,17 +506,16 @@
         "lost_timeout_updates": 10,
         "hold_updates_required": 1,
         "max_retries": 1,
-        "max_updates": 150,
+        "max_updates": 35,
         "finish_policy": "latched_center_alignment",
-        "finish_alignment_max_ex_cam": 0.18,
-        "finish_alignment_max_ey_cam": 0.18,
-        "finish_alignment_hold_updates": 2,
-        "finish_alignment_timeout_s": 1,
+        "finish_alignment_max_ex_cam": 0.35,
+        "finish_alignment_max_ey_cam": 0.35,
+        "finish_alignment_hold_updates": 1,
         "config": {
-          "kp_vx": 0.3,
-          "kp_vy": 0.3,
-          "max_vx_mps": 0.25,
-          "max_vy_mps": 0.25,
+          "kp_vx": 0.275,
+          "kp_vy": 0.275,
+          "max_vx_mps": 0.2,
+          "max_vy_mps": 0.2,
           "height_gain_enabled": true,
           "height_gain_mode": "points",
           "height_scale_points": [
@@ -573,28 +541,14 @@
             }
           ],
           "scale_max_velocity_with_height": true,
-          "descend_speed_mps": 0.3,
-          "slow_descend_speed_mps": 0.14,
-          "descent_speed_stages": [
-            {
-              "max_altitude_m": 2.4,
-              "max_descend_speed_mps": 0.18
-            },
-            {
-              "max_altitude_m": 3.2,
-              "max_descend_speed_mps": 0.24
-            },
-            {
-              "max_altitude_m": 3.5,
-              "max_descend_speed_mps": 0.3
-            }
-          ],
-          "max_ex_cam": 0.16,
-          "max_ey_cam": 0.16,
-          "slow_descend_max_ex_cam": 0.35,
-          "slow_descend_max_ey_cam": 0.35,
-          "deadband_ex_cam": 0.04,
-          "deadband_ey_cam": 0.04,
+          "descend_speed_mps": 0.24,
+          "slow_descend_speed_mps": 0.18,
+          "max_ex_cam": 0.28,
+          "max_ey_cam": 0.28,
+          "slow_descend_max_ex_cam": 0.55,
+          "slow_descend_max_ey_cam": 0.55,
+          "deadband_ex_cam": 0.06,
+          "deadband_ey_cam": 0.08,
           "integral_enabled": true,
           "integral_active_below_altitude_m": 1.6,
           "ki_vx": 0.04,
@@ -611,8 +565,8 @@
           "min_altitude_m": 1.2,
           "require_target_locked": false,
           "payload_offset_enabled": true,
-          "descent_gate_policy": "aligned_or_slow",
-          "unaligned_descend_speed_mps": 0,
+          "descent_gate_policy": "allow_unaligned",
+          "unaligned_descend_speed_mps": 0.08,
           "fov_x_deg": 85,
           "fov_y_deg": 69,
           "image_x_sign": 1,
@@ -631,7 +585,7 @@
       "save_as": "drop_release_2",
       "on_failed": {
         "action": "jump_to",
-        "target": "restore_return_speed_2mps",
+        "target": "return_home_gps",
         "max_attempts": 1
       },
       "params": {
@@ -655,7 +609,7 @@
       "label": "drop_2_climb",
       "on_failed": {
         "action": "jump_to",
-        "target": "restore_return_speed_2mps",
+        "target": "return_home_gps",
         "max_attempts": 1
       },
       "params": {
@@ -673,173 +627,6 @@
       }
     },
     {
-      "name": "change_speed",
-      "label": "restore_transition_speed_2mps",
-      "params": {
-        "speed_mps": 2,
-        "speed_type": "ground",
-        "priority": 4,
-        "key": "restore_transition_speed_2mps"
-      }
-    },
-    {
-      "name": "change_speed",
-      "label": "recon_speed_1mps",
-      "params": {
-        "speed_mps": 1,
-        "speed_type": "ground",
-        "priority": 4,
-        "key": "recon_speed_1mps"
-      }
-    },
-    {
-      "name": "goto_waypoint",
-      "label": "goto_recon_entry_4m",
-      "on_failed": {
-        "action": "jump_to",
-        "target": "restore_return_speed_2mps",
-        "max_attempts": 1
-      },
-      "params": {
-        "x": -2,
-        "y": 56,
-        "altitude_m": 4,
-        "waypoint_mode": "field",
-        "target_frame": "global",
-        "yaw_mode": "hold",
-        "tolerance_xy_m": 0.5,
-        "tolerance_z_m": 0.35,
-        "min_hold_updates": 2,
-        "priority": 5,
-        "key": "goto_recon_entry_4m"
-      }
-    },
-    {
-      "name": "goto_waypoint",
-      "label": "recon_scan_goto_1",
-      "on_failed": {
-        "action": "jump_to",
-        "max_attempts": 1,
-        "target": "restore_return_speed_2mps"
-      },
-      "params": {
-        "x": -2,
-        "y": 56,
-        "altitude_m": 4,
-        "waypoint_mode": "field",
-        "target_frame": "global",
-        "yaw_mode": "hold",
-        "tolerance_xy_m": 0.4,
-        "tolerance_z_m": 0.3,
-        "min_hold_updates": 1,
-        "require_velocity_valid": false,
-        "key": "recon_scan_goto_1",
-        "priority": 5
-      }
-    },
-    {
-      "name": "goto_waypoint",
-      "label": "recon_scan_goto_2",
-      "on_failed": {
-        "action": "jump_to",
-        "max_attempts": 1,
-        "target": "restore_return_speed_2mps"
-      },
-      "params": {
-        "x": 2,
-        "y": 56,
-        "altitude_m": 4,
-        "waypoint_mode": "field",
-        "target_frame": "global",
-        "yaw_mode": "hold",
-        "tolerance_xy_m": 0.4,
-        "tolerance_z_m": 0.3,
-        "min_hold_updates": 1,
-        "require_velocity_valid": false,
-        "key": "recon_scan_goto_2",
-        "priority": 5
-      }
-    },
-    {
-      "name": "goto_waypoint",
-      "label": "recon_scan_goto_3",
-      "on_failed": {
-        "action": "jump_to",
-        "max_attempts": 1,
-        "target": "restore_return_speed_2mps"
-      },
-      "params": {
-        "x": 2,
-        "y": 59,
-        "altitude_m": 4,
-        "waypoint_mode": "field",
-        "target_frame": "global",
-        "yaw_mode": "hold",
-        "tolerance_xy_m": 0.4,
-        "tolerance_z_m": 0.3,
-        "min_hold_updates": 1,
-        "require_velocity_valid": false,
-        "key": "recon_scan_goto_3",
-        "priority": 5
-      }
-    },
-    {
-      "name": "goto_waypoint",
-      "label": "recon_scan_goto_4",
-      "on_failed": {
-        "action": "jump_to",
-        "max_attempts": 1,
-        "target": "restore_return_speed_2mps"
-      },
-      "params": {
-        "x": -2,
-        "y": 59,
-        "altitude_m": 4,
-        "waypoint_mode": "field",
-        "target_frame": "global",
-        "yaw_mode": "hold",
-        "tolerance_xy_m": 0.4,
-        "tolerance_z_m": 0.3,
-        "min_hold_updates": 1,
-        "require_velocity_valid": false,
-        "key": "recon_scan_goto_4",
-        "priority": 5
-      }
-    },
-    {
-      "name": "goto_waypoint",
-      "label": "recon_scan_goto_5",
-      "on_failed": {
-        "action": "jump_to",
-        "max_attempts": 1,
-        "target": "restore_return_speed_2mps"
-      },
-      "params": {
-        "x": 0,
-        "y": 57.5,
-        "altitude_m": 4,
-        "waypoint_mode": "field",
-        "target_frame": "global",
-        "yaw_mode": "hold",
-        "tolerance_xy_m": 0.4,
-        "tolerance_z_m": 0.3,
-        "min_hold_updates": 1,
-        "require_velocity_valid": false,
-        "key": "recon_scan_goto_5",
-        "priority": 5
-      }
-    },
-    {
-      "name": "change_speed",
-      "label": "restore_return_speed_2mps",
-      "params": {
-        "speed_mps": 2,
-        "speed_type": "ground",
-        "priority": 4,
-        "key": "restore_return_speed_2mps"
-      }
-    },
-    {
       "name": "goto_waypoint",
       "label": "return_home_gps",
       "on_failed": {
@@ -850,7 +637,7 @@
       "params": {
         "x": 0,
         "y": 0,
-        "altitude_m": 4,
+        "altitude_m": 3.5,
         "waypoint_mode": "field",
         "target_frame": "global",
         "yaw_mode": "hold",
@@ -862,75 +649,6 @@
       }
     },
     {
-      "name": "goto_waypoint",
-      "label": "descend_home_2_5m",
-      "on_failed": {
-        "action": "jump_to",
-        "target": "land_home",
-        "max_attempts": 1
-      },
-      "params": {
-        "x": 0,
-        "y": 0,
-        "altitude_m": 2.5,
-        "waypoint_mode": "field",
-        "target_frame": "global",
-        "yaw_mode": "hold",
-        "tolerance_xy_m": 0.7,
-        "tolerance_z_m": 0.25,
-        "min_hold_updates": 1,
-        "priority": 5,
-        "key": "descend_home_2_5m"
-      }
-    },
-    {
-      "name": "target_lock",
-      "label": "final_land_lock_h",
-      "on_failed": {
-        "action": "jump_to",
-        "target": "land_home",
-        "max_attempts": 1
-      },
-      "params": {
-        "class_names": [
-          "H"
-        ],
-        "min_confidence": 0.35,
-        "max_updates": 8,
-        "detection_source": "scene"
-      }
-    },
-    {
-      "name": "align_descend",
-      "label": "final_land_align",
-      "on_failed": {
-        "action": "jump_to",
-        "target": "land_home",
-        "max_attempts": 1
-      },
-      "params": {
-        "finish_altitude_m": 0.3,
-        "finish_policy": "legacy",
-        "max_updates": 300,
-        "config": {
-          "kp_vx": 0.3,
-          "kp_vy": 0.3,
-          "max_vx_mps": 0.3,
-          "max_vy_mps": 0.3,
-          "descend_speed_mps": 0.3,
-          "max_ex_cam": 0.3,
-          "max_ey_cam": 0.3,
-          "deadband_ex_cam": 0,
-          "deadband_ey_cam": 0,
-          "min_altitude_m": 0.3,
-          "require_target_locked": false,
-          "altitude_source": "local_ned",
-          "target_loss_policy": "continue_descent",
-          "target_loss_descend_speed_mps": 0.3
-        }
-      }
-    },
-    {
       "name": "land",
       "label": "land_home",
       "params": {
@@ -938,5 +656,7 @@
         "priority": 2
       }
     }
-  ]
+  ],
+  "name": "drop_two_targets",
+  "description": "GPS-first dual-target drop mission v2"
 }

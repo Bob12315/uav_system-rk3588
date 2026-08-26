@@ -540,8 +540,8 @@ SSH target: pi@192.168.5.33
 
   用户确认后：
 
-  - 正式 catalog 只保留 `rescue_2026_full_auto_v2.json`、`drop_two_targets_v2.json`、
-    `recon_gps_v2.json`；
+  - 正式 catalog 只保留 `rescue_2026_full_auto.json`、`drop_two_targets.json`、
+    `recon_gps.json`；
   - 历史参考模板已删除，不参与正式 validator；
   - 更新 README、Web catalog 和测试；
   - 不把归档模板继续作为 runtime compatibility 的理由。

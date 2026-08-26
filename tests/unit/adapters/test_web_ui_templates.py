@@ -9,7 +9,7 @@ STATIC = ROOT / "web_ui/static"
 
 def test_index_contains_only_formal_v2_template_buttons() -> None:
     html = (STATIC / "index.html").read_text()
-    for name in ("drop_two_targets_v2", "recon_gps_v2", "rescue_2026_full_auto_v2"):
+    for name in ("drop_two_targets", "recon_gps", "rescue_2026_full_auto"):
         assert f'data-action-mission-template="{name}"' in html
     assert "旧版 / 调试模板" not in html
 
@@ -50,5 +50,5 @@ def test_api_client_is_only_fetch_owner() -> None:
 def test_web_template_catalog_is_not_in_server_lifecycle() -> None:
     server = (ROOT / "web_ui/server.py").read_text()
     templates = (ROOT / "web_ui/templates.py").read_text()
-    assert "drop_two_targets_v2" not in server
-    assert "drop_two_targets_v2" in templates
+    assert "drop_two_targets" not in server
+    assert "drop_two_targets" in templates

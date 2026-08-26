@@ -18,8 +18,8 @@ def _align(name: str) -> list[dict]:
 
 
 def test_atomic_drop_tuning_and_payload_offsets_are_preserved() -> None:
-    generic = _align("drop_two_targets_v2.json")
-    rescue = _align("rescue_2026_full_auto_v2.json")
+    generic = _align("drop_two_targets.json")
+    rescue = _align("rescue_2026_full_auto.json")
     assert len(generic) == len(rescue) == 2
     assert [item["config"]["payload_forward_m"] for item in generic] == [-0.06, 0.06]
     assert [item["config"]["payload_forward_m"] for item in rescue] == [-0.06, 0.06]
@@ -37,11 +37,11 @@ def test_atomic_drop_tuning_and_payload_offsets_are_preserved() -> None:
 
 
 def test_capture_camera_and_recon_routes_are_preserved() -> None:
-    drop = _steps("drop_two_targets_v2.json")
+    drop = _steps("drop_two_targets.json")
     cameras = [step["params"]["camera"] for step in drop if step["name"] == "gps_capture_view"]
     assert len(cameras) == 4
     assert all((camera["fov_x_deg"], camera["fov_y_deg"]) == (68.15, 54.3) for camera in cameras)
-    recon = _steps("recon_gps_v2.json")
+    recon = _steps("recon_gps.json")
     points = [(step["params"]["x"], step["params"]["y"], step["params"]["altitude_m"])
               for step in recon if step.get("label", "").startswith("recon_scan_goto_")]
     assert points == [(-3, 56, 3), (3, 56, 3), (3, 58, 3), (-3, 58, 3)]

@@ -13,8 +13,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_only_schema_v3_profile_is_shipped_and_listed() -> None:
     directory = ROOT / "config" / "field_profiles"
-    assert [path.name for path in directory.glob("*.json")] == ["competition_runtime_v3.json"]
-    profile = load_field_profile_json(directory / "competition_runtime_v3.json")
+    assert [path.name for path in directory.glob("*.json")] == ["competition_runtime.json"]
+    profile = load_field_profile_json(directory / "competition_runtime.json")
     assert profile.schema_version == 3
     assert FieldProfileService.validate_profile(profile).ok
 

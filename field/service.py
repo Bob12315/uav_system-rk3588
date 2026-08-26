@@ -81,7 +81,7 @@ class FieldService:
     def start_competition_runtime_sampling(self, forward_marker_lat: float, forward_marker_lon: float, *, started_at_s: float) -> dict[str, object]:
         operation_id=uuid.uuid4().hex
         receipt=self.calibration.start(CalibrationStart(operation_id, CalibrationMode.RUNTIME_FORWARD_MARKER,
-            "competition_runtime_v3", started_at_s, self._svc.current_version(), True,
+            "competition_runtime", started_at_s, self._svc.current_version(), True,
             float(forward_marker_lat), float(forward_marker_lon)))
         return {"ok":receipt.accepted,"state":receipt.state,"session_id":receipt.session_id,
                 "session_revision":receipt.session_revision,

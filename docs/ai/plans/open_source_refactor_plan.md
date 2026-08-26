@@ -106,7 +106,7 @@ Profile、centerline binding 与旧 Mission/Stage 入口的退役。
 2. 必须保留当前正式模板：
 
    ```text
-   config/field_profiles/competition_runtime_v3.json
+   config/field_profiles/competition_runtime.json
    ```
 
 3. schema v2 中心线/多点方案计划完整退役，但必须先完成 SITL 和所有运行路径迁移。
@@ -713,7 +713,7 @@ RK3588 硬件检查可以是发布前人工门禁，不要求公共 CI 拥有 NP
 
 ### 当前事实
 
-`competition_runtime_v3.json` 是正式比赛现场模板。schema v3 使用运行时 GPS 原点和 forward
+`competition_runtime.json` 是正式比赛现场模板。schema v3 使用运行时 GPS 原点和 forward
 marker 生成 FIELD→GLOBAL 几何，不建立 LOCAL_NED origin。schema v2 的 anchor/centerline
 方案及其 SITL、API、Web、服务和测试引用已在 P2 退役。
 
@@ -760,7 +760,7 @@ config/field_profiles/example_competition_lane.json
 ### 保留配置
 
 ```text
-config/field_profiles/competition_runtime_v3.json
+config/field_profiles/competition_runtime.json
 ```
 
 运行时生成的 profile 继续写入：
@@ -783,7 +783,7 @@ runtime/field_profiles/
 ### 禁止做法
 
 - 禁止删除整个 `config/field_profiles/`；
-- 禁止删除 `competition_runtime_v3.json`；
+- 禁止删除 `competition_runtime.json`；
 - 禁止保留一个永远失败的 v2 API 假装兼容；
 - 禁止把 v2 的 local origin 自动拼到 v3；
 - 禁止通过跳过 Field Reference 前置检查让旧测试通过。
@@ -1068,7 +1068,7 @@ RKNN runtime/driver、配置 profile 和 git commit。
 | P1-3 跨架构 CI | 已完成 | [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml)、`1920 passed, 4 skipped` 本地测试结果 |
 | P1-4 P1 验收 | 已完成 | NanoPC-T6 RK3588：RKNN Toolkit Lite2 2.3.2、rknpu 0.9.8、模型加载/NPU 初始化/空帧推理通过；YOLO 相关测试 `18 passed` |
 | P2-1 SITL/v2 前置迁移 | 已完成 | `scripts/validate_p2_field_reference.py`、schema v3 runtime sampling 测试 |
-| P2-2 schema v2 原子退役 | 已完成 | 仅保留 `competition_runtime_v3.json`；v2 parser/API/Web/测试已删除 |
+| P2-2 schema v2 原子退役 | 已完成 | 仅保留 `competition_runtime.json`；v2 parser/API/Web/测试已删除 |
 | P2-3 旧架构清理 | 已完成 | `app/mission_runner.py`、`app/stage_registry.py` 已删除；静态边界检查通过 |
 | P3-1 法律/社区文件 | 阻塞 | D-09～D-11 未决；[`p3_release_decisions.md`](../records/p3_release_decisions.md) |
 | P3-2 仓库和历史审计 | 阻塞 | 模型/地形/截图及历史产物待处置；[`p3_release_audit.md`](../records/p3_release_audit.md) |

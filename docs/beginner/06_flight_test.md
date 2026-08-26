@@ -109,7 +109,7 @@ schema v3 生成 FIELD → GPS/GLOBAL 任务几何，不建立 LOCAL_NED 场地�
 7. 确认状态为 confirmed、synced、frozen。
 
 当前模板通常要求至少 20 个合格样本、12 秒采样窗口和不超过 1 m 的水平离散度，实际
-阈值以 `config/field_profiles/competition_runtime_v3.json` 为准。
+阈值以 `config/field_profiles/competition_runtime.json` 为准。
 
 以下情况必须 Reset 并排除原因，不能绕过 preflight：
 
@@ -160,7 +160,7 @@ schema v3 生成 FIELD → GPS/GLOBAL 任务几何，不建立 LOCAL_NED 场地�
 ### F. 完整比赛任务
 
 只有所有分项通过后，才使用经批准的
-`config/action_missions/rescue_2026_full_auto_v2.json`。先以 SEND OFF 完整干跑，再在
+`config/action_missions/rescue_2026_full_auto.json`。先以 SEND OFF 完整干跑，再在
 保守参数下实飞。任务模板、速度、高度、场地 profile、两个 SERVO 输出和失败恢复路径
 必须由第二人复核。
 

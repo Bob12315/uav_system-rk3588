@@ -10,9 +10,9 @@ from app.config import ROOT_DIR
 
 ACTION_MISSION_TEMPLATE_DIR = ROOT_DIR / "config" / "action_missions"
 ACTION_MISSION_TEMPLATE_NAMES = {
-    "drop_two_targets_v2": "投放任务 v2",
-    "recon_gps_v2": "GPS 侦察任务 v2",
-    "rescue_2026_full_auto_v2": "完整流程 v2",
+    "drop_two_targets": "投放任务 v2",
+    "recon_gps": "GPS 侦察任务 v2",
+    "rescue_2026_full_auto": "完整流程 v2",
 }
 
 

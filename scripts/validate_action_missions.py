@@ -16,9 +16,9 @@ from missions.common.actions.action_lab import action_definition, create_action_
 
 
 DEFAULT_TEMPLATE_PATHS = [
-    ROOT / "config/action_missions/drop_two_targets_v2.json",
-    ROOT / "config/action_missions/recon_gps_v2.json",
-    ROOT / "config/action_missions/rescue_2026_full_auto_v2.json",
+    ROOT / "config/action_missions/drop_two_targets.json",
+    ROOT / "config/action_missions/recon_gps.json",
+    ROOT / "config/action_missions/rescue_2026_full_auto.json",
 ]
 ALLOWED_FAILURE_ACTIONS = {"fail", "retry_current", "retry_current_then_jump_to", "jump_to", "continue"}
 

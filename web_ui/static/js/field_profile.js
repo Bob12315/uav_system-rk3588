@@ -25,7 +25,7 @@ window.UavFieldProfiles = (function () {
     // ── fetch template summary (one-time) ──────────────────────────────
     async function fetchTemplateSummary() {
         try {
-            var d = await api.request("/api/field-profiles/competition_runtime_v3");
+            var d = await api.request("/api/field-profiles/competition_runtime");
             if (d && d.ok === true) {
                 templateSummary = d;
                 renderTemplateSummary(d);

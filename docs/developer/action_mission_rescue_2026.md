@@ -1,7 +1,7 @@
 # 2026 救援比赛 Action Mission
 
 本文描述当前比赛任务主线。正式完整流程以
-`config/action_missions/rescue_2026_full_auto_v2.json` 和实际代码为准。
+`config/action_missions/rescue_2026_full_auto.json` 和实际代码为准。
 
 ## 比赛任务目标
 
@@ -18,7 +18,7 @@ FIELD 坐标中 `+Y` 为场地前方、`+X` 为场地右方，`altitude_m` 向�
 
 ## 当前完整流程
 
-`rescue_2026_full_auto_v2.json` 当前包含以下步骤：
+`rescue_2026_full_auto.json` 当前包含以下步骤：
 
 ```text
 takeoff
@@ -46,9 +46,9 @@ takeoff
 
 | 模板 | 用途 |
 | --- | --- |
-| `rescue_2026_full_auto_v2.json` | 当前完整 GPS-first 比赛流程 |
-| `drop_two_targets_v2.json` | 双目标投放分项流程 |
-| `recon_gps_v2.json` | 侦察航点飞行分项流程 |
+| `rescue_2026_full_auto.json` | 当前完整 GPS-first 比赛流程 |
+| `drop_two_targets.json` | 双目标投放分项流程 |
+| `recon_gps.json` | 侦察航点飞行分项流程 |
 
 历史模板已删除，不参与正式运行 catalog 或默认 validator。
 
@@ -172,7 +172,7 @@ zero/stop 并清理旧命令。实机急停和最终接管依赖遥控器或地�
 ```bash
 python scripts/validate_action_missions.py
 python scripts/validate_action_missions.py \
-  config/action_missions/rescue_2026_full_auto_v2.json
+  config/action_missions/rescue_2026_full_auto.json
 ```
 
 validator 不连接飞控，不验证识别精度、坐标标定、飞行安全或实机投放结果。

@@ -18,7 +18,7 @@ def _load(path: Path) -> dict:
 def test_only_three_formal_v2_templates_are_shipped() -> None:
     paths = sorted((ROOT / "config/action_missions").glob("*.json"))
     assert [path.name for path in paths] == [
-        "drop_two_targets_v2.json", "recon_gps_v2.json", "rescue_2026_full_auto_v2.json",
+        "drop_two_targets.json", "recon_gps.json", "rescue_2026_full_auto.json",
     ]
     assert all(_load(path)["version"] == 2 for path in paths)
 
@@ -34,7 +34,7 @@ def test_formal_templates_validate_and_actions_are_registered() -> None:
 
 
 def test_drop_flow_is_explicit_and_preserves_payload_order_and_stop_boundary() -> None:
-    steps = _load(ROOT / "config/action_missions/drop_two_targets_v2.json")["steps"]
+    steps = _load(ROOT / "config/action_missions/drop_two_targets.json")["steps"]
     names = [step["name"] for step in steps]
     assert "gps_multi_view_localize" not in names
     assert "gps_drop_sequence" not in names
@@ -50,14 +50,14 @@ def test_drop_flow_is_explicit_and_preserves_payload_order_and_stop_boundary() -
 
 
 def test_recon_flow_contains_only_navigation_actions() -> None:
-    steps = _load(ROOT / "config/action_missions/recon_gps_v2.json")["steps"]
+    steps = _load(ROOT / "config/action_missions/recon_gps.json")["steps"]
     names = [step["name"] for step in steps]
     assert "gps_recon_area_scan" not in names
     assert names == ["takeoff", "goto_waypoint", "goto_waypoint", "goto_waypoint", "goto_waypoint", "goto_waypoint", "goto_waypoint", "land"]
 
 
 def test_full_flow_replaces_visual_land_composite_with_atomic_steps() -> None:
-    steps = _load(ROOT / "config/action_missions/rescue_2026_full_auto_v2.json")["steps"]
+    steps = _load(ROOT / "config/action_missions/rescue_2026_full_auto.json")["steps"]
     names = [step["name"] for step in steps]
     assert "visual_land" not in names
     assert steps[-3]["label"] == "final_land_lock_h"

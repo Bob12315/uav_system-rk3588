@@ -20,9 +20,9 @@
 
 | 文件 | 定位 |
 | --- | --- |
-| `rescue_2026_full_auto_v2.json` | 当前完整 GPS-first 比赛流程 |
-| `drop_two_targets_v2.json` | 双目标投放分项流程 |
-| `recon_gps_v2.json` | GPS 危险标识侦察分项流程 |
+| `rescue_2026_full_auto.json` | 当前完整 GPS-first 比赛流程 |
+| `drop_two_targets.json` | 双目标投放分项流程 |
+| `recon_gps.json` | GPS 危险标识侦察分项流程 |
 
 历史参考模板已删除；它们不参与正式 catalog 和 validator。
 
@@ -36,7 +36,7 @@ validator 只检查模板结构和引用，不代表通过 SITL 或实飞验证�
 
 ## Field Profile
 
-- `competition_runtime_v3.json`：唯一受支持的比赛/SITL 场地初始化模板；输入 forward
+- `competition_runtime.json`：唯一受支持的比赛/SITL 场地初始化模板；输入 forward
   marker GPS，并在起飞点采样动态原点。
 
 场地绑定完成前不得实发 FIELD 航点。详细契约见

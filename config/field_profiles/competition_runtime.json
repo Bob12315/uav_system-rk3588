@@ -1,6 +1,6 @@
 {
   "schema_version": 3,
-  "profile_id": "competition_runtime_v3",
+  "profile_id": "competition_runtime",
   "name": "Competition Runtime Field Template",
   "coordinate_convention": {
     "field_x_positive": "right",

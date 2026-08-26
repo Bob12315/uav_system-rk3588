@@ -16,7 +16,7 @@ from telemetry_link.command_broker import CommandBroker
 
 
 def _candidate():
-    profile = FieldProfileService.load_profile("competition_runtime_v3", "config/field_profiles")
+    profile = FieldProfileService.load_profile("competition_runtime", "config/field_profiles")
     profile = replace(profile, forward_marker=replace(profile.forward_marker, lat=34.001, lon=108.0))
     geometry = build_runtime_field_geometry(profile, origin_lat=34.0, origin_lon=108.0)
     values = dict(profile_id=profile.profile_id, origin_source=OriginSource.RUNTIME_CURRENT_GPS.value,
@@ -32,11 +32,11 @@ def _candidate():
 
 def test_profile_repository_priority_hash_and_path_guard(tmp_path) -> None:
     config_dir=tmp_path/"config"; runtime_dir=tmp_path/"runtime"; config_dir.mkdir(); runtime_dir.mkdir()
-    source=json.loads(open("config/field_profiles/competition_runtime_v3.json", encoding="utf-8").read())
-    (config_dir/"competition_runtime_v3.json").write_text(json.dumps(source), encoding="utf-8")
-    source["name"]="runtime shadow"; (runtime_dir/"competition_runtime_v3.json").write_text(json.dumps(source), encoding="utf-8")
+    source=json.loads(open("config/field_profiles/competition_runtime.json", encoding="utf-8").read())
+    (config_dir/"competition_runtime.json").write_text(json.dumps(source), encoding="utf-8")
+    source["name"]="runtime shadow"; (runtime_dir/"competition_runtime.json").write_text(json.dumps(source), encoding="utf-8")
     repo=ReadOnlyFieldProfileRepository((("config", config_dir), ("runtime", runtime_dir)))
-    record=repo.get("competition_runtime_v3")
+    record=repo.get("competition_runtime")
     assert record.source == "config" and len(record.content_sha256) == 64 and len(repo.list()) == 1
     try: repo.get("../secret")
     except ValueError: pass

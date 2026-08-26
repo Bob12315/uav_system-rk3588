@@ -36,7 +36,7 @@ Web UI 不再受普通局域网 Wi-Fi 覆盖距离的直接限制。这只是比
   → 视觉辅助降落
 ```
 
-正式完整模板是 `config/action_missions/rescue_2026_full_auto_v2.json`。当前模板来源于
+正式完整模板是 `config/action_missions/rescue_2026_full_auto.json`。当前模板来源于
 比赛版本并经过后续整理。不同飞机和场地仍需重新完成 SITL、参数检查和分级实飞验证。
 
 ## 系统由什么组成

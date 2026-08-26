@@ -69,8 +69,8 @@ FlightCommandExecutor` 不是当前可运行主线，其依赖的大量 mission/
 
 ## 当前任务编排边界
 
-正式 catalog 只有 `drop_two_targets_v2`、`recon_gps_v2`、
-`rescue_2026_full_auto_v2`。多视角飞行、双目标投放、侦察航迹和视觉降落均由模板中的
+正式 catalog 只有 `drop_two_targets`、`recon_gps`、
+`rescue_2026_full_auto`。多视角飞行、双目标投放、侦察航迹和视觉降落均由模板中的
 原子步骤表达；Action registry 不再发布复合 sequence/scan/visual-land Action。
 Mission engine 是受限顺序编排器，提供保存结果、失败重试、条件跳转和 finally 等价的
 明确返航/降落步骤，不是通用脚本语言。

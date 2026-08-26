@@ -84,7 +84,7 @@ config/app.yaml: executor.send_commands: false
 2. PA-21 的硬前置是 PA-00～PA-20 已验收且 `AR-26 / CF-00～CF-28` 全部完成。当前 PA-07～PA-10 未验收，
    所以不得启动 CF-00，也不得推进 PA-21～PA-31；跳过此前置会制造第二套核心 owner，违反计划本身。
 3. PA-15 的验收写明“三份正式 profile 内容逐字段一致”，当前 `config/field_profiles/` 只有一份正式
-   `competition_runtime_v3.json`，`runtime/field_profiles/` 没有另外两份正式 profile。
+   `competition_runtime.json`，`runtime/field_profiles/` 没有另外两份正式 profile。
    未经产品输入不能凭空制造另外两份正式场地 profile，因此该验收项保持阻塞。
 4. PA-29 明确需要获准的 RK3588 目标硬件门禁；本轮禁止连接真机，无法产生该证据。
 5. PA-26 的 soak/hit-counter、PA-27～PA-30 的兼容删除以及 PA-31 最终审计都依赖上述门禁，不能通过离线

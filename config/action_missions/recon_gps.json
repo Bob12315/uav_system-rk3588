@@ -1,7 +1,7 @@
 {
   "version": 2,
-  "name": "recon_gps_v2",
-  "profile": "v3-default",
+  "name": "recon_gps",
+  "profile": "default",
   "steps": [
     {
       "name": "takeoff",

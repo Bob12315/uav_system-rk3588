@@ -57,7 +57,7 @@ RK3588 负责视觉、任务和 Web UI；飞控负责稳定、动力与执行机
 ## 比赛任务
 
 当前完整流程由
-[`rescue_2026_full_auto_v2.json`](config/action_missions/rescue_2026_full_auto_v2.json)
+[`rescue_2026_full_auto.json`](config/action_missions/rescue_2026_full_auto.json)
 定义：
 
 ```text

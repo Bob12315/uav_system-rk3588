@@ -64,7 +64,7 @@ function makeHarness(options = {}) {
       return typeof configured === "function" ? configured(url, requestOptions) : configured;
     }
     if (url === "/api/field-reference/status") return defaultStatus;
-    if (url === "/api/field-profiles/competition_runtime_v3") return {ok: false};
+    if (url === "/api/field-profiles/competition_runtime") return {ok: false};
     return {ok: true};
   }
 

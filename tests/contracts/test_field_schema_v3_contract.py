@@ -16,7 +16,7 @@ from field.service import FieldService
 
 def _candidate() -> RuntimeFieldBindingCandidate:
     origin_lat, origin_lon = 34.0, 108.0
-    profile = FieldProfileService.load_profile("competition_runtime_v3", profile_dir="config/field_profiles")
+    profile = FieldProfileService.load_profile("competition_runtime", profile_dir="config/field_profiles")
     profile = replace(profile, forward_marker=replace(profile.forward_marker, lat=34.001, lon=108.0))
     geometry = build_runtime_field_geometry(profile, origin_lat=origin_lat, origin_lon=origin_lon)
     yaw = geometry.field_heading_yaw_rad

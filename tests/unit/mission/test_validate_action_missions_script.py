@@ -122,7 +122,7 @@ def test_validate_action_missions_cli_success() -> None:
         [
             sys.executable,
             "scripts/validate_action_missions.py",
-            "config/action_missions/drop_two_targets_v2.json",
+            "config/action_missions/drop_two_targets.json",
         ],
         check=False,
         text=True,

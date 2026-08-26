@@ -27,9 +27,9 @@ PASS  python -m compileall -q app application contracts execution field guidance
       missions observability telemetry_link fusion yolo_app web_ui scripts
 PASS  python scripts/validate_architecture_boundaries.py
 PASS  python scripts/validate_action_missions.py
-      drop_two_targets_v2.json: 23 steps
-      recon_gps_v2.json: 11 steps
-      rescue_2026_full_auto_v2.json: 36 steps
+      drop_two_targets.json: 23 steps
+      recon_gps.json: 11 steps
+      rescue_2026_full_auto.json: 36 steps
 BLOCKED  PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
          tests/unit tests/contracts tests/integration tests/sitl
          原因：当前可用解释器没有 pytest；PA-00 不安装依赖或新增测试设施
@@ -308,7 +308,7 @@ YOLO `RawFrameRecorder` 才实际创建 `camera_<timestamp>.mp4`、持有 writer
 | reference query | `FieldService.status()` | `{ok,field_reference,telemetry}` 裸 dict |
 | lifecycle | `reset()`、`freeze()` | 至少 `{ok}`，失败用 `{ok:false,error}` |
 | registered sampling | `start_runtime_profile_sampling(profile_id)` | session/sampling dict；template-only 拒绝 |
-| competition sampling | `start_competition_runtime_sampling(lat,lon)` | 用 `competition_runtime_v3` template 建 runtime profile |
+| competition sampling | `start_competition_runtime_sampling(lat,lon)` | 用 `competition_runtime` template 建 runtime profile |
 | observation | `observe_runtime_profile_sampling(snapshot, observed_at_s)` | Runner 每周期主动推送 drone dict；成功自动 finalize/apply/freeze |
 | finalize/cancel | `finalize_runtime_profile_binding()`、`cancel_runtime_profile_sampling()` | Calibration session dict |
 | profile list/get/validate | Runner 内 `field_profile_*` 方法 | Web-compatible dict，而不是 repository DTO |

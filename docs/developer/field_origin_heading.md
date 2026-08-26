@@ -1,7 +1,7 @@
 # Field Reference：schema v3 运行时 GPS 场地参考
 
 FIELD 使用 `+Y` 前方、`+X` 右方、`+Z` 向上。唯一受支持的配置是
-`config/field_profiles/competition_runtime_v3.json`。
+`config/field_profiles/competition_runtime.json`。
 
 Web UI 的 Competition Field Setup 流程为：操作者输入 WGS84 forward marker B；无人机在
 起飞点静止采样 GPS；系统验证质量、样本数和离散度，以中位 GPS 位置建立原点 A，使用 A→B
