@@ -90,7 +90,7 @@ class AlignDescendAction(ActionModule):
             self._non_negative(data.get("ki_right", 0.0), "ki_right"),
             self._non_negative(data.get("kd_right", 0.0), "kd_right"), max_vy,
         )
-        self.vx_sign = self._signed(data.get("vx_sign", legacy.get("vx_sign", 1.0)), "vx_sign")
+        self.vx_sign = self._signed(data.get("vx_sign", legacy.get("vx_sign", -1.0)), "vx_sign")
         self.vy_sign = self._signed(data.get("vy_sign", legacy.get("vy_sign", 1.0)), "vy_sign")
         self.field_yaw_deg = self._finite(data.get("field_yaw_deg", 0.0), "field_yaw_deg")
         self.desired_yaw_deg = self._optional_finite(data.get("desired_yaw_deg"))

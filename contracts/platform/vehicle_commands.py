@@ -95,6 +95,7 @@ class GlobalPositionTarget:
     latitude_deg: float
     longitude_deg: float
     altitude_m: float
+    yaw_rad: float | None = None
     kind: Literal["global_position"] = "global_position"
 
 

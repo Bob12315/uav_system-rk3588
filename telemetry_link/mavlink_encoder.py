@@ -59,9 +59,12 @@ class MavlinkEnvelopeWriter:
             if payload.yaw_rad is not None: params["yaw"] = payload.yaw_rad
             self._action(ActionType.LOCAL_POSITION, params)
         elif isinstance(payload, GlobalPositionTarget):
-            self._action(ActionType.GLOBAL_GOTO, {"lat": payload.latitude_deg,
+            params = {"lat": payload.latitude_deg,
                 "lon": payload.longitude_deg, "alt": payload.altitude_m,
-                "frame": 6, "_speed_overrides": []})
+                "frame": 6, "_speed_overrides": []}
+            if payload.yaw_rad is not None:
+                params["yaw"] = payload.yaw_rad
+            self._action(ActionType.GLOBAL_GOTO, params)
         elif isinstance(payload, BodyVelocity):
             self.encoder._send_control(ControlCommand(ControlType.VELOCITY,
                 vx=payload.forward_mps, vy=payload.right_mps, vz=payload.down_mps,

@@ -52,7 +52,10 @@ class LegacyOneShotShadow:
         if kind == ActionType.TAKEOFF: return Takeoff(float(p["altitude_m"]))
         if kind == ActionType.LAND: return Land()
         if kind == ActionType.LOCAL_POSITION: return LocalPositionTarget(float(p["x"]), float(p["y"]), float(p["z"]), p.get("yaw"))
-        if kind == ActionType.GLOBAL_GOTO: return GlobalPositionTarget(float(p["lat"]), float(p["lon"]), float(p["alt"]))
+        if kind == ActionType.GLOBAL_GOTO:
+            return GlobalPositionTarget(
+                float(p["lat"]), float(p["lon"]), float(p["alt"]), p.get("yaw")
+            )
         if kind == ActionType.CONDITION_YAW: return ConditionYaw(float(p["yaw_deg"]), bool(p.get("relative", False)))
         if kind == ActionType.CHANGE_SPEED: return ChangeSpeed(float(p["speed_mps"]))
         if kind == ActionType.SET_SERVO: return SetServo(int(p["channel"]), int(p["pwm"]))

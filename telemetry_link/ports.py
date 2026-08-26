@@ -72,7 +72,7 @@ class VehicleStateAdapter:
                 velocity_north_mps=None, velocity_east_mps=None, velocity_down_mps=None,
                 local_valid=False, local_age_s=None,
                 latitude_deg=None, longitude_deg=None, altitude_msl_m=None, relative_altitude_m=None,
-                global_valid=False, global_age_s=None,
+                global_valid=False, global_age_s=None, global_position_received_at_utc_s=None,
                 gps_fix_type=None, satellites_visible=None, gps_eph_m=None, gps_epv_m=None, gps_valid=False,
                 battery_voltage_v=None, battery_current_a=None, battery_remaining_pct=None, battery_valid=False,
                 gimbal_yaw_rad=None, gimbal_pitch_rad=None, gimbal_roll_rad=None,

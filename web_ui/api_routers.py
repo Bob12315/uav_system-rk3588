@@ -41,7 +41,7 @@ def create_router_app(web_services: WebServices, config: UiConfig) -> FastAPI:
             await websocket.close(code=4401)
             return
         origin = websocket.headers.get("origin")
-        if origin and origin.rstrip("/") not in security.allowed_origins:
+        if origin and not security.origin_allowed(origin):
             await websocket.close(code=4403)
             return
         await websocket.accept()

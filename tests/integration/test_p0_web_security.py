@@ -102,3 +102,39 @@ def test_modifying_requests_require_auth_csrf_and_allowed_origin(tmp_path) -> No
     assert runner.calls == [("send", True)]
     assert (tmp_path / "audit.jsonl").exists()
     assert (tmp_path / "security.jsonl").exists()
+
+
+def test_trusted_network_allows_host_and_same_port_origin(tmp_path) -> None:
+    config = _config(tmp_path)
+    config.web_port = 8080
+    config.allowed_networks = ("10.101.31.0/24",)
+    app = create_app(_services(_Runner()), config)
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://10.101.31.109:8080") as client:
+            return await client.get("/api/status", headers={"origin": "http://10.101.31.109:8080"})
+
+    assert asyncio.run(run()).status_code == 200
+
+
+def test_current_private_interface_network_can_be_auto_allowed(tmp_path, monkeypatch) -> None:
+    import ipaddress
+    import web_ui.security as security_module
+
+    monkeypatch.setattr(
+        security_module,
+        "_current_private_interface_networks",
+        lambda: (ipaddress.ip_network("192.168.50.0/24"),),
+    )
+    config = _config(tmp_path)
+    config.web_port = 8080
+    config.auto_allow_current_private_network = True
+    app = create_app(_services(_Runner()), config)
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://192.168.50.99:8080") as client:
+            return await client.get("/api/status", headers={"origin": "http://192.168.50.99:8080"})
+
+    assert asyncio.run(run()).status_code == 200

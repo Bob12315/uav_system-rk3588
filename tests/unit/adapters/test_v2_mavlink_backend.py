@@ -33,6 +33,7 @@ class _Mav:
     def __init__(self): self.calls = []
     def command_long_send(self, *args): self.calls.append(args)
     def set_position_target_local_ned_send(self, *args): self.calls.append(args)
+    def set_position_target_global_int_send(self, *args): self.calls.append(args)
 
 
 class _Client:
@@ -83,6 +84,20 @@ def test_v2_one_shot_has_one_writer_and_transmitted_only_after_wire() -> None:
     assert broker.status(receipt.command_id).transport_state == TransportState.TRANSMITTED
     assert len(client.master.mav.calls) == 1
     assert client.master.mav.calls[0][2] == mavutil.mavlink.MAV_CMD_DO_SET_SERVO
+
+
+def test_v2_global_goto_preserves_explicit_yaw() -> None:
+    client, broker, adapter = _backend()
+    receipt = adapter.submit_action(ActionCommand(
+        ActionType.GLOBAL_GOTO,
+        {"lat": -35.0, "lon": 149.0, "alt": 3.0, "frame": 6, "yaw": 1.25},
+    ))
+    broker.drain_one()
+
+    sent = client.master.mav.calls[0]
+    assert sent[4] & mavutil.mavlink.POSITION_TARGET_TYPEMASK_YAW_IGNORE == 0
+    assert sent[-2] == pytest.approx(1.25)
+    assert broker.status(receipt.command_id).transport_state == TransportState.TRANSMITTED
 
 
 def test_v2_control_rejects_implicit_frame_conversion_and_types_stop() -> None:

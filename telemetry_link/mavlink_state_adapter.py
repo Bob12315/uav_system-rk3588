@@ -65,6 +65,11 @@ class MavlinkVehicleStateAdapter:
             altitude_msl_m=float(getattr(state, "altitude", 0.0)) if valid("altitude_valid") else None,
             relative_altitude_m=float(getattr(state, "relative_altitude", 0.0)) if valid("relative_alt_valid") else None,
             global_valid=valid("global_position_valid"), global_age_s=age(getattr(state, "last_global_position_time", 0.0)),
+            global_position_received_at_utc_s=(
+                float(getattr(state, "last_global_position_time", 0.0))
+                if float(getattr(state, "last_global_position_time", 0.0)) > 0.0
+                else None
+            ),
             gps_fix_type=int(getattr(state, "gps_fix_type", 0)) or None,
             satellites_visible=int(getattr(state, "satellites_visible", 0)) or None,
             gps_eph_m=float(getattr(state, "gps_eph", -1.0)) if float(getattr(state, "gps_eph", -1.0)) >= 0 else None,

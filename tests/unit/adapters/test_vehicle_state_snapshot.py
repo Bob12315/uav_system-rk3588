@@ -28,6 +28,20 @@ def test_old_receiver_generation_cannot_overwrite_new_session() -> None:
     assert cache.get_latest_drone_state_raw().mode == "GUIDED"
 
 
+def test_snapshot_preserves_exact_global_position_receive_timestamp() -> None:
+    cache = StateCache(3.0, 2.0)
+    cache.begin_receiver_generation()
+    received_at = 1234.56789
+    cache.update_drone_state(
+        global_position_valid=True,
+        last_global_position_time=received_at,
+    )
+
+    snapshot = MavlinkVehicleStateAdapter(lambda _: cache, lambda: "sitl").snapshot("sitl")
+
+    assert snapshot.global_position_received_at_utc_s == received_at
+
+
 def test_wait_next_returns_immediately_across_session() -> None:
     cache = StateCache(3.0, 2.0)
     cache.begin_receiver_generation()

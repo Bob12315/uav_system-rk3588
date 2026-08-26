@@ -342,21 +342,35 @@ class MissionApplicationService:
         *,
         now_monotonic: float | None = None,
     ) -> bool:
-        """Advance a running Action Mission without depending on a Web UI client."""
+        """Advance the one active Action Mission or Action Lab run off the Web thread."""
         now = time.monotonic() if now_monotonic is None else float(now_monotonic)
         with self.action_runtime_lock:
             orchestrator = self.action_mission_orchestrator
-            if orchestrator is None or not orchestrator.running:
+            mission_running = orchestrator is not None and orchestrator.running
+            action_lab_running = bool(
+                getattr(getattr(self, "action_runtime", None), "runner", None)
+                and self.action_runtime.runner.state == "running"
+            )
+            if not mission_running and not action_lab_running:
                 self._action_mission_next_tick_monotonic = None
                 return False
             deadline = self._action_mission_next_tick_monotonic
             if deadline is not None and now < deadline:
                 return False
+            if not mission_running:
+                self._action_mission_next_tick_monotonic = now + ACTION_MISSION_TICK_INTERVAL_S
         try:
-            self.action_mission_tick()
+            if mission_running:
+                self.action_mission_tick()
+            else:
+                self.action_lab_tick()
         except Exception:
-            self.logger.exception("autonomous Action Mission tick failed")
-            self.action_mission_stop()
+            if mission_running:
+                self.logger.exception("autonomous Action Mission tick failed")
+                self.action_mission_stop()
+            else:
+                self.logger.exception("autonomous Action Lab tick failed")
+                self.action_lab_stop_action()
             return False
         return True
 
