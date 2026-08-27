@@ -57,7 +57,7 @@ class GpsFuseViewsAction(ActionModule):
             origin_lat=origin_lat, origin_lon=origin_lon,
             config=self.config, class_names=self.class_names,
         ).fuse(self.raw_estimates)
-        localized = [asdict(item) for item in objects]
+        localized = [_output_item(item) for item in objects]
         self.last_detail = {"localized_objects": localized, "objects": localized,
                             "raw_estimates_count": len(self.raw_estimates),
                             "count": len(localized), "coordinate_frame": "GLOBAL"}
@@ -71,3 +71,11 @@ class GpsFuseViewsAction(ActionModule):
         self.raw_estimates = []
         self.started = self.stopped = self.done = False
         self.last_detail = {}
+
+
+def _output_item(item: Any) -> dict[str, Any]:
+    """Serialize fused DTOs to the JSON-array shapes promised by Contract v1."""
+    output = asdict(item)
+    output["source_waypoints"] = list(item.source_waypoints)
+    output["source_frames"] = list(item.source_frames)
+    return output
