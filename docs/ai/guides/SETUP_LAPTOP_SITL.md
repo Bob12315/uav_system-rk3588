@@ -128,6 +128,15 @@ sudo apt-get update
 sudo apt-get install -y gz-harmonic
 ```
 
+安装完成后可用 headless server 验证，避免把 GUI/显卡问题误判为基础安装失败：
+
+```bash
+gz --versions
+timeout 20 gz sim -s -v4 shapes.sdf
+```
+
+日志应包含 `World [shapes] initialized`；`timeout` 发送 SIGTERM 后的正常关闭日志不代表失败。
+
 Gazebo Harmonic 默认不能与 Gazebo Classic 11 并存。检测到 `gazebo11`、ROS/Gazebo 版本绑定
 或已有自定义 OSRF 源时，不要直接卸载或替换；先报告冲突及官方兼容方案，需要改变现有环境时
 再询问用户。
@@ -159,20 +168,32 @@ Tools/environment_install/install-prereqs-ubuntu.sh -y
 ```
 
 该脚本可能修改用户 profile。执行后检查实际 diff，不再重复手工添加官方脚本已经配置的 PATH。
-重新加载 profile 或启动干净 shell，再显式构建 SITL Copter：
+按官方方式重新加载路径（重新登录后同样生效），再显式构建 SITL Copter：
+
+```bash
+. ~/.profile
+```
 
 ```bash
 cd "$HOME/ardupilot"
-./waf configure --board sitl
+./waf configure
 ./waf copter
 ```
 
-验证生成物，并运行一个不解锁、不起飞的短时 Copter SITL 启动检查。记录使用的 ArduPilot commit。
+验证生成物，并运行一个不解锁、不起飞的短时 Copter SITL 启动检查。JSON 模型必须显式指定：
+
+```bash
+test -x "$HOME/ardupilot/build/sitl/bin/arducopter"
+timeout 15 "$HOME/ardupilot/build/sitl/bin/arducopter" -S --model JSON
+```
+
+应看到 `Starting SITL: JSON`、`JSON control interface set to 127.0.0.1:9002` 与
+`SERIAL0 on TCP port 5760`；超时结束是预期行为。记录使用的 ArduPilot commit。
 
 ## 5. 安装 `ardupilot_gazebo`
 
 以 [SITL with Gazebo 官方文档](https://ardupilot.org/dev/docs/sitl-with-gazebo.html)和
-[`ardupilot_gazebo` 官方 README](https://github.com/ArduPilot/ardupilot_gazebo) 为准。
+[`ardupilot_gazebo` README](https://github.com/Bob12315/ardupilot_gazebo.git) 为准。
 
 安装 Harmonic 对应依赖：
 
@@ -180,14 +201,15 @@ cd "$HOME/ardupilot"
 sudo apt-get update
 sudo apt-get install -y libgz-sim8-dev rapidjson-dev \
   libopencv-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-  gstreamer1.0-plugins-bad gstreamer1.0-libav gstreamer1.0-gl
+  gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-gl \
+  build-essential
 ```
 
 默认工作区为 `$HOME/gz_ws`。仓库不存在时克隆；已存在时按上一节相同规则保护工作树：
 
 ```bash
 mkdir -p "$HOME/gz_ws/src"
-git clone https://github.com/ArduPilot/ardupilot_gazebo \
+git clone https://github.com/Bob12315/ardupilot_gazebo.git \
   "$HOME/gz_ws/src/ardupilot_gazebo"
 ```
 
@@ -201,29 +223,53 @@ cmake -S "$HOME/gz_ws/src/ardupilot_gazebo" \
 cmake --build "$HOME/gz_ws/src/ardupilot_gazebo/build" -j"$(nproc)"
 ```
 
-把以下环境变量加入实际使用的 shell 配置。添加前先搜索，保证每项只出现一次；不要反复追加
-重复行，也不要覆盖已有同名路径：
+把以下环境变量写入 `~/.bashrc`。添加前先搜索，保证每项只出现一次；不要反复追加重复行，
+也不要覆盖已有同名路径：
 
 ```bash
 export GZ_SIM_SYSTEM_PLUGIN_PATH="$HOME/gz_ws/src/ardupilot_gazebo/build:${GZ_SIM_SYSTEM_PLUGIN_PATH:-}"
 export GZ_SIM_RESOURCE_PATH="$HOME/gz_ws/src/ardupilot_gazebo/models:$HOME/gz_ws/src/ardupilot_gazebo/worlds:${GZ_SIM_RESOURCE_PATH:-}"
 ```
 
+项目启动脚本使用自己的绝对路径变量，但 Gazebo 加载插件和资源仍需要上述两个环境变量。
+新终端会自动读取 `~/.bashrc`；当前 shell 在启动测试前执行 `. ~/.bashrc`。
+
+GStreamer 验证：
+
+```bash
+gst-inspect-1.0 x264enc rtph264depay h264parse rtph264pay avdec_h264
+```
+
 ## 6. 联调验证
 
-在新 shell 中至少验证：
+使用项目脚本验证 Gazebo 与本机 Copter SITL。先编辑
+`/home/level6/uav_ws/cuadc2026/scripts/run_iris_gimbal_sitl.sh` 顶部的路径变量，使其与本机
+实际安装位置一致；只改路径值，不改启动逻辑、端口或其他代码：
 
-1. `gz`、`sim_vehicle.py`、Copter SITL 和插件构建产物都能找到；
-2. `gz sim -v4 -r iris_runway.sdf` 能加载世界和插件；
-3. ArduCopter SITL 能以 JSON 模型连接 Gazebo；
-4. GStreamer 所需插件可查询；
-5. 项目 `uav-dev` Conda 环境正常；
-6. 本项目辅助脚本的默认路径与实际安装路径一致。
+- `ARDUPILOT_DIR=/home/level6/ardupilot`
+- `GZ_REPO_DIR=/home/level6/gz_ws/src/ardupilot_gazebo`
+- `GZ_PARAM_FILE=/home/level6/gz_ws/src/ardupilot_gazebo/config/gazebo-cuadc2026-fixed-camera.parm`
+- `GZ_WORLD=/home/level6/gz_ws/src/ardupilot_gazebo/worlds/cuadc2026_rescue.sdf`
 
-联调时只启动 Gazebo 和本机 SITL，不执行 arm、takeoff、Mission 或任何真实飞控连接。长时间运行的
-进程使用独立终端或有限时长的诊断启动，验证完成后清理测试进程。不要直接运行
-`scripts/run_iris_gimbal_sitl.sh` 的默认网络目标；先阅读脚本，并显式提供本次测试需要的
-`GCS_HOST`、`VIDEO_HOST`、`ARDUPILOT_DIR` 和 `GZ_PARAM_FILE`。
+本机的以上四项已是脚本当前默认值；仅当安装目录不同才修改。确认路径文件存在后，再启动测试。
+
+该测试不连接 RK3588。脚本默认将 `GCS_HOST` 和 `VIDEO_HOST` 设为 `127.0.0.1`；如为其他
+测试临时覆盖，必须明确指定目标地址。运行：
+
+```bash
+cd /home/level6/uav_ws/cuadc2026
+. ~/.bashrc
+ARDUPILOT_DIR=/home/level6/ardupilot \
+  GZ_REPO_DIR=/home/level6/gz_ws/src/ardupilot_gazebo \
+  GZ_PARAM_FILE=/home/level6/gz_ws/src/ardupilot_gazebo/config/gazebo-cuadc2026-fixed-camera.parm \
+  GZ_WORLD=/home/level6/gz_ws/src/ardupilot_gazebo/worlds/cuadc2026_rescue.sdf \
+  bash scripts/run_iris_gimbal_sitl.sh
+```
+
+脚本会分别启动 Gazebo、JSON Copter、payload bridge 和 RTP relay。此次只判定 Gazebo 世界成功
+加载、Copter 显示 `Starting SITL: JSON` 且 JSON 控制接口连接到 `127.0.0.1:9002` 为通过；不执行
+arm、takeoff、Mission，也不向 RK3588 或任何真实飞控发送数据。验证结束后关闭本次启动的终端。
+payload bridge 或 RTP relay 的单独报错不应掩盖 Gazebo/SITL 的核心启动结果，但应记录在最终报告。
 
 如果插件仓库现有世界、模型或参数文件名与项目文档不同，以实际 commit 为证据报告差异，不要
 伪造缺失文件或随意下载第三方替代物。

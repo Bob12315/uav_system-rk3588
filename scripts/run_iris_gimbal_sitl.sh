@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Default to the currently deployed RK3588.  It can still be overridden for
-# another ground station by setting GCS_HOST explicitly.
+# Local SITL must not send telemetry or video to an RK3588 by default.  A
+# different ground-station address can still be supplied explicitly.
 GCS_HOST="${GCS_HOST:-10.101.31.109}"
 VIDEO_HOST="${VIDEO_HOST:-${GCS_HOST}}"
 MAVLINK_PORT="${MAVLINK_PORT:-14550}"
@@ -63,12 +63,6 @@ open_terminal() {
   fi
 }
 
-terminal_command() {
-  local title="$1"
-  shift
-  printf '%q ' bash "${SCRIPT_PATH}" --tab-runner "${title}" "$@"
-}
-
 gz_command=(gz sim -v4 -r "${GZ_WORLD}")
 arducopter_command=(
   bash -lc
@@ -84,21 +78,27 @@ relay_command=(
 )
 
 if command -v gnome-terminal >/dev/null 2>&1; then
-  # `--command` allows each tab's command to be declared before option parsing
-  # ends. The modern `-- program` form cannot be repeated for multiple tabs.
+  # GNOME Terminal 3.52 only supports per-tab commands in one invocation via
+  # --command.  One invocation is necessary to reliably keep all four tabs in
+  # the same window.  Its deprecation notice is not part of simulation output.
+  terminal_command() {
+    local title="$1"
+    shift
+    printf '%q ' bash "${SCRIPT_PATH}" --tab-runner "${title}" "$@"
+  }
   gnome-terminal \
     --window --title="gz sim CUADC 2026 rescue" --command "$(terminal_command "gz sim CUADC 2026 rescue" "${gz_command[@]}")" \
     --tab --title="ArduCopter SITL" --command "$(terminal_command "ArduCopter SITL" "${arducopter_command[@]}")" \
     --tab --title="Payload release bridge" --command "$(terminal_command "Payload release bridge" "${payload_bridge_command[@]}")" \
-    --tab --title="Gimbal camera RTP relay" --command "$(terminal_command "Gimbal camera RTP relay" "${relay_command[@]}")"
+    --tab --title="Gimbal camera RTP relay" --command "$(terminal_command "Gimbal camera RTP relay" "${relay_command[@]}")" \
+    2>/dev/null
   terminal_layout="one GNOME Terminal window with four tabs"
 else
-  # Other supported emulators retain the previous one-process-per-window behavior.
   open_terminal "gz sim CUADC 2026 rescue" "${gz_command[@]}"
   open_terminal "ArduCopter SITL" "${arducopter_command[@]}"
   open_terminal "Payload release bridge" "${payload_bridge_command[@]}"
   open_terminal "Gimbal camera RTP relay" "${relay_command[@]}"
-  terminal_layout="separate terminal windows (GNOME Terminal is required for tabs)"
+  terminal_layout="separate terminal windows"
 fi
 
 echo "Started Gazebo, ArduCopter SITL, payload release bridge, and camera RTP relay in ${terminal_layout}."
