@@ -4,6 +4,7 @@ import time
 from types import SimpleNamespace
 
 from execution.authorization import RunAuthorization
+from execution.safety_config import load_safety_config
 from execution.safety_pipeline import ActionSafetyPipeline
 
 
@@ -147,6 +148,14 @@ def test_navigation_takeoff_and_payload_envelopes_fail_closed() -> None:
         link_manager=_LiveLink(),
     )
     assert servo.reason_code == "servo_pwm_out_of_range"
+
+
+def test_sitl_payload_outputs_match_the_gazebo_release_bridge() -> None:
+    config = load_safety_config()
+    assert [(item.servo_output, item.min_pwm, item.max_pwm) for item in config.servo_outputs] == [
+        (9, 1600, 1800),
+        (10, 1600, 1800),
+    ]
 
 
 def test_schema_v3_rejects_field_to_local_target_unconditionally() -> None:

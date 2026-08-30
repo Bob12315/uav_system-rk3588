@@ -51,6 +51,10 @@ def test_drop_flow_is_explicit_and_preserves_payload_order_and_stop_boundary() -
         assert scan_goto["params"]["min_hold_updates"] == 3
     releases = [step for step in steps if step["name"] == "payload_release"]
     assert [step["params"]["payload_id"] for step in releases] == ["payload_1", "payload_2"]
+    assert [step["params"]["servo_outputs"] for step in releases] == [
+        [{"channel": 9, "release_pwm": 1800, "hold_pwm": 1600}],
+        [{"channel": 10, "release_pwm": 1800, "hold_pwm": 1600}],
+    ]
     for release in releases:
         index = steps.index(release)
         assert steps[index - 1]["name"] == "align_descend"
@@ -71,6 +75,13 @@ def test_full_flow_replaces_visual_land_composite_with_atomic_steps() -> None:
     assert steps[-3]["label"] == "final_land_lock_h"
     assert steps[-2]["label"] == "final_land_align"
     assert steps[-1]["name"] == "land"
+    final_h_lock = steps[-3]["params"]
+    assert steps[-3]["save_as"] == "final_h_lock"
+    assert final_h_lock["acquire_mode"] == "class_single"
+    assert final_h_lock["class_names"] == ["H"]
+    assert final_h_lock["require_unique_track"] is True
+    assert final_h_lock["max_target_age_s"] == 0.5
+    assert steps[-2]["params"]["track_id"] == "$final_h_lock.locked_track_id"
     captures = [index for index, step in enumerate(steps) if step["name"] == "gps_capture_view"]
     for capture_index in captures:
         scan_goto = steps[capture_index - 1]
@@ -79,3 +90,28 @@ def test_full_flow_replaces_visual_land_composite_with_atomic_steps() -> None:
         assert scan_goto["params"]["max_horizontal_speed_mps"] == 0.15
         assert scan_goto["params"]["max_vertical_speed_mps"] == 0.1
         assert scan_goto["params"]["min_hold_updates"] == 3
+
+
+def test_full_flow_uses_the_fixed_down_sitl_camera_and_payload_contract() -> None:
+    steps = _load(ROOT / "config/action_missions/rescue_2026_full_auto.json")["steps"]
+    camera = {
+        "fov_x_deg": 114.591559,
+        "fov_y_deg": 98.864783,
+        "image_x_sign": 1,
+        "image_y_sign": -1,
+    }
+
+    for step in steps:
+        if step["name"] in {"gps_capture_view", "gps_target_lock", "target_lock"}:
+            assert step["params"]["camera"] == camera
+        if step["name"] == "align_descend" and "fov_x_deg" in step["params"].get("config", {}):
+            assert step["params"]["config"].get("fov_x_deg") == camera["fov_x_deg"]
+            assert step["params"]["config"].get("fov_y_deg") == camera["fov_y_deg"]
+            assert step["params"]["config"].get("image_x_sign") == camera["image_x_sign"]
+            assert step["params"]["config"].get("image_y_sign") == camera["image_y_sign"]
+
+    releases = [step["params"] for step in steps if step["name"] == "payload_release"]
+    assert [release["servo_outputs"] for release in releases] == [
+        [{"channel": 9, "release_pwm": 1800, "hold_pwm": 1600}],
+        [{"channel": 10, "release_pwm": 1800, "hold_pwm": 1600}],
+    ]

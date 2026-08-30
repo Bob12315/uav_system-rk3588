@@ -153,6 +153,7 @@ class RuntimeContextBuilder:
             "drone": snapshot.get("drone", {}),
             "scene": snapshot.get("scene", {}),
             "perception": snapshot.get("perception", {}),
+            "perception_status": snapshot.get("perception_status", {}),
             "gimbal": snapshot.get("gimbal", {}),
             "link": snapshot.get("link", {}),
             "health": snapshot.get("health", {}),

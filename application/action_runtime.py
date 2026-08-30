@@ -53,7 +53,13 @@ class ActionRuntimeService:
         self.dispatcher.reset_keys()
         self.dispatcher.last_dispatch = self.dispatcher.empty_dispatch()
         self.dispatcher.last_servo_command = None
-        return self.runner.start(action_name, dict(params or {}))
+        result = self.runner.start(action_name, dict(params or {}))
+        # MissionOrchestrator consumes ``last_result`` on its next tick.  The
+        # start result must replace any result left by the preceding Action;
+        # otherwise a failed start can leave a stale success visible and
+        # incorrectly advance the mission.
+        self.last_result = result.to_dict()
+        return result
 
     def tick(
         self,

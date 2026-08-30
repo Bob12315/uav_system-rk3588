@@ -221,6 +221,94 @@ def test_switch_running_action_stops_old_action_and_clears_navigation() -> None:
     assert service.runner.state == "running"
 
 
+def test_start_failure_replaces_previous_result_for_mission_orchestrator() -> None:
+    """A failed start cannot leave the preceding Action's success visible."""
+    from execution.dispatcher import ActionDispatcher
+    from missions.common.actions.base import ActionModule
+    from missions.common.actions.registry import ActionRegistry
+    from missions.common.actions.runner import ActionRunner
+
+    class StartFails(ActionModule):
+        def start(self, params=None):
+            raise ValueError("missing target")
+
+        def update(self, context=None):
+            raise AssertionError("must not update after start failure")
+
+        def stop(self):
+            pass
+
+        def reset(self):
+            pass
+
+    registry = ActionRegistry()
+    registry.register("start_fails", StartFails)
+    service = ActionRuntimeService(
+        runner=ActionRunner(registry),
+        dispatcher=ActionDispatcher(test_source="test"),
+    )
+    service.last_result = {"done": True, "failed": False, "reason": "previous_done"}
+
+    result = service.start("start_fails")
+
+    assert result.failed is True
+    assert service.last_result is not None
+    assert service.last_result["failed"] is True
+    assert service.last_result["reason"] == "action_start_failed"
+
+
+def test_mission_handles_a_start_failure_instead_of_reusing_previous_success() -> None:
+    from execution.dispatcher import ActionDispatcher
+    from missions.common.actions.base import ActionModule
+    from missions.common.actions.registry import ActionRegistry
+    from missions.common.actions.result import ActionResult
+    from missions.common.actions.runner import ActionRunner
+    from missions.engine import MissionActionStep, MissionOrchestrator
+
+    class Done(ActionModule):
+        def start(self, params=None):
+            pass
+
+        def update(self, context=None):
+            return ActionResult(done=True, reason="done")
+
+        def stop(self):
+            pass
+
+        def reset(self):
+            pass
+
+    class StartFails(Done):
+        def start(self, params=None):
+            raise ValueError("bad start")
+
+    registry = ActionRegistry()
+    registry.register("done", Done)
+    registry.register("start_fails", StartFails)
+    service = ActionRuntimeService(
+        runner=ActionRunner(registry),
+        dispatcher=ActionDispatcher(test_source="test"),
+    )
+    mission = MissionOrchestrator(service, [
+        MissionActionStep("done", label="first"),
+        MissionActionStep(
+            "start_fails",
+            label="broken",
+            on_failed={"action": "jump_to", "target": "recovery"},
+        ),
+        MissionActionStep("done", label="recovery"),
+    ])
+
+    mission.start()
+    mission.tick({})  # first Action completes; broken Action then fails to start
+    status = mission.tick({})
+
+    assert status.current_action == "done"
+    assert status.current_index == 2
+    assert status.reason == "jump_to"
+    assert status.detail["failed_action_result"]["reason"] == "action_start_failed"
+
+
 def test_failed_atomic_goto_clears_global_navigation_and_holds_current() -> None:
     """Direct Action Lab failure uses the same queue clear + hold primitive as Mission."""
     from execution.dispatcher import ActionDispatcher

@@ -139,8 +139,8 @@ _DEFINITIONS = (
                 parameter_schema_extra={"required": ["altitude_m"], "anyOf": [{"required": ["lat", "lon"]}, {"required": ["field_x_m", "field_y_m"]}]},
                 required_inputs=("field_reference", "drone.global_position"), effects=("global_goto",)),
     _definition("target_lock", TargetLockAction, "Select and lock a visual target.",
-                {"max_match_distance_m": 1.0, "min_confidence": 0.0, "detection_source": "scene", "max_updates": 30, "priority": 5, "lock_once": True},
-                properties={"target": _TARGET, "skip_if_invalid_target": _BOOLEAN, "max_match_distance_m": {"type": "number", "exclusiveMinimum": 0}, "min_confidence": {"type": "number", "minimum": 0}, "detection_source": {"type": "string", "enum": ["scene", "perception"]}, "max_updates": {"type": "integer", "minimum": 1}, "class_names": _STRING_ARRAY, "camera": _CAMERA, "priority": _INTEGER, "key": _STRING, "lock_once": _BOOLEAN}, required_inputs=("scene", "drone"), effects=("yolo_lock_target",)),
+                {"acquire_mode": "known_target", "max_match_distance_m": 1.0, "min_confidence": 0.0, "detection_source": "scene", "max_updates": 30, "max_target_age_s": 0.5, "require_unique_track": True, "priority": 5, "lock_once": True},
+                properties={"target": _TARGET, "skip_if_invalid_target": _BOOLEAN, "acquire_mode": {"type": "string", "enum": ["known_target", "class_single"]}, "max_match_distance_m": {"type": "number", "exclusiveMinimum": 0}, "min_confidence": {"type": "number", "minimum": 0}, "detection_source": {"type": "string", "enum": ["scene", "perception"]}, "max_updates": {"type": "integer", "minimum": 1}, "max_target_age_s": {"type": "number", "exclusiveMinimum": 0}, "require_unique_track": _BOOLEAN, "class_names": _STRING_ARRAY, "camera": _CAMERA, "priority": _INTEGER, "key": _STRING, "lock_once": _BOOLEAN}, output_properties={"locked_track_id": _INTEGER}, required_inputs=("scene", "drone"), effects=("yolo_lock_target",)),
     _definition(
         "align_descend",
         AlignDescendAction,

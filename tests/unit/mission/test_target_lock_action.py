@@ -51,6 +51,14 @@ def test_start_requires_valid_params() -> None:
         action.start(_params(detection_source="bad"))
     with pytest.raises(ValueError):
         action.start(_params(max_updates=0))
+    with pytest.raises(ValueError):
+        action.start({"acquire_mode": "class_single"})
+    with pytest.raises(ValueError):
+        action.start({
+            "acquire_mode": "class_single",
+            "class_names": ["H"],
+            "require_unique_track": False,
+        })
 
 
 def test_update_before_start_fails_without_exception() -> None:
@@ -110,6 +118,84 @@ def test_perception_detection_locks_target() -> None:
 
     assert result.done is True
     assert result.actions[0]["params"]["track_id"] == 8
+
+
+def test_class_single_locks_only_after_live_unique_candidate_is_acknowledged() -> None:
+    action = TargetLockAction()
+    action.start({
+        "acquire_mode": "class_single",
+        "class_names": ["H"],
+        "min_confidence": 0.35,
+        "max_target_age_s": 0.5,
+        "require_unique_track": True,
+    })
+    acquiring = {
+        "perception_status": {"stale": False, "age_sec": 0.1},
+        "scene": {
+            "valid": True,
+            "detections": [
+                {"track_id": 7, "class_name": "H", "confidence": 0.9, "ex": 0.1, "ey": -0.1},
+            ],
+        },
+        "perception": {"target_valid": False, "tracking_state": "searching"},
+    }
+
+    requested = action.update(acquiring)
+
+    assert requested.done is False
+    assert requested.reason == "target_lock_requested"
+    assert requested.actions[0]["params"] == {"track_id": 7}
+    assert requested.detail["candidate_count"] == 1
+    assert requested.detail["selected_candidate"]["class_name"] == "H"
+
+    acknowledged = action.update(acquiring | {
+        "perception": {
+            "target_valid": True,
+            "tracking_state": "locked",
+            "track_id": 7,
+            "class_name": "H",
+            "confidence": 0.9,
+            "ex": 0.1,
+            "ey": -0.1,
+        },
+    })
+
+    assert acknowledged.done is True
+    assert acknowledged.reason == "target_locked"
+    assert acknowledged.actions == []
+    assert acknowledged.detail["locked_track_id"] == 7
+    assert acknowledged.output == {"locked_track_id": 7}
+
+
+def test_class_single_rejects_ambiguous_or_stale_h_candidates() -> None:
+    action = TargetLockAction()
+    action.start({
+        "acquire_mode": "class_single",
+        "class_names": ["H"],
+        "min_confidence": 0.35,
+    })
+    ambiguous = action.update({
+        "perception_status": {"stale": False, "age_sec": 0.1},
+        "scene": {
+            "valid": True,
+            "detections": [
+                {"track_id": 7, "class_name": "H", "confidence": 0.9, "ex": 0.1, "ey": 0.0},
+                {"track_id": 8, "class_name": "H", "confidence": 0.9, "ex": -0.1, "ey": 0.0},
+            ],
+        },
+    })
+
+    assert ambiguous.reason == "target_acquisition_ambiguous"
+    assert ambiguous.actions == []
+    assert ambiguous.detail["candidate_track_ids"] == [7, 8]
+
+    stale = action.update({
+        "perception_status": {"stale": True, "age_sec": 0.6},
+        "scene": {"valid": True, "detections": []},
+    })
+
+    assert stale.reason == "perception_stale"
+    assert stale.actions == []
 
 
 def test_class_names_filter_controls_locking() -> None:

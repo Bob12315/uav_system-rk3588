@@ -14,9 +14,12 @@ class TargetLockAction(ActionModule):
 
     def start(self, params: dict[str, Any] | None = None) -> None:
         data = params or {}
+        self.acquire_mode = str(data.get("acquire_mode", "known_target")).strip().lower()
+        if self.acquire_mode not in {"known_target", "class_single"}:
+            raise ValueError("acquire_mode must be known_target or class_single")
         self.skip_if_invalid_target = bool(data.get("skip_if_invalid_target", False))
         target = data.get("target")
-        if self.skip_if_invalid_target:
+        if self.acquire_mode == "known_target" and self.skip_if_invalid_target:
             # skip on None, non-dict, explicit valid=false, or invalid coords
             if not isinstance(target, dict):
                 self._skipped = True
@@ -35,7 +38,7 @@ class TargetLockAction(ActionModule):
                 self.started = True
                 self.stopped = False
                 return
-        else:
+        elif self.acquire_mode == "known_target":
             if not isinstance(target, dict):
                 raise ValueError("target must be a dict")
             self.target_x, self.target_y = self._target_xy(target)
@@ -56,12 +59,25 @@ class TargetLockAction(ActionModule):
 
         class_names = data.get("class_names")
         self.class_names = {str(name) for name in class_names} if class_names is not None else None
-        camera_config = CameraProjectionConfig(**dict(data.get("camera") or {}))
-        self.localizer = TargetLocalization(
-            camera_config,
-            min_confidence=self.min_confidence,
-            class_names=self.class_names,
+        self.require_unique_track = bool(data.get("require_unique_track", True))
+        self.max_target_age_s = self._positive(
+            data.get("max_target_age_s", 0.5), "max_target_age_s"
         )
+        if self.acquire_mode == "class_single":
+            if self.detection_source != "scene":
+                raise ValueError("class_single requires detection_source=scene")
+            if not self.class_names:
+                raise ValueError("class_single requires class_names")
+            if not self.require_unique_track:
+                raise ValueError("class_single requires require_unique_track=true")
+            self.localizer = None
+        else:
+            camera_config = CameraProjectionConfig(**dict(data.get("camera") or {}))
+            self.localizer = TargetLocalization(
+                camera_config,
+                min_confidence=self.min_confidence,
+                class_names=self.class_names,
+            )
         self.priority = int(data.get("priority", 5))
         self.key = str(data.get("key", "target_lock"))
         self.lock_once = bool(data.get("lock_once", True))
@@ -72,6 +88,7 @@ class TargetLockAction(ActionModule):
         self.failed = False
         self.update_count = 0
         self.locked_track_id = None
+        self.lock_requested_track_id = None
         self.failure_reason = ""
         self.yaw_defaulted = False
         self.last_detail = {}
@@ -85,7 +102,12 @@ class TargetLockAction(ActionModule):
             return ActionResult(done=True, reason="skipped_missing_target",
                                 detail={"status": "skipped_missing_target"})
         if self.done:
-            return ActionResult(done=True, reason="target_locked", detail=self._detail())
+            return ActionResult(
+                done=True,
+                reason="target_locked",
+                output=self._locked_output(),
+                detail=self._detail(),
+            )
         if self.failed:
             return ActionResult(
                 failed=True,
@@ -104,6 +126,9 @@ class TargetLockAction(ActionModule):
             )
 
         data = context or {}
+        if self.acquire_mode == "class_single":
+            return self._update_class_single(data)
+
         detections, image_width, image_height = self._detections(data)
         drone = self._drone_context(data)
         estimates: list[dict[str, Any]] = []
@@ -153,6 +178,7 @@ class TargetLockAction(ActionModule):
             effects=ActionResult.typed([action]),
             done=True,
             reason="target_locked",
+            output=self._locked_output(),
             detail=self._detail(
                 detections_count=len(detections),
                 estimates_count=len(estimates),
@@ -167,6 +193,7 @@ class TargetLockAction(ActionModule):
     def reset(self) -> None:
         self.skip_if_invalid_target = False
         self._skipped = False
+        self.acquire_mode = "known_target"
         self.target_x = 0.0
         self.target_y = 0.0
         self.max_match_distance_m = 1.0
@@ -177,6 +204,8 @@ class TargetLockAction(ActionModule):
         self.key = "target_lock"
         self.lock_once = True
         self.max_updates = 30
+        self.require_unique_track = True
+        self.max_target_age_s = 0.5
         self.localizer: TargetLocalization | None = None
         self.started = False
         self.stopped = False
@@ -184,9 +213,142 @@ class TargetLockAction(ActionModule):
         self.failed = False
         self.update_count = 0
         self.locked_track_id: int | None = None
+        self.lock_requested_track_id: int | None = None
         self.failure_reason = ""
         self.yaw_defaulted = False
         self.last_detail: dict[str, Any] = {}
+
+    def _update_class_single(self, data: dict[str, Any]) -> ActionResult:
+        """Acquire one live class match, then wait for the lock acknowledgement.
+
+        There is intentionally no metric target in this mode.  It is for the
+        final home-marker correction after FIELD/GLOBAL navigation reaches
+        home, never for converting FIELD coordinates into LOCAL_NED.
+        """
+        source_error = self._class_single_source_error(data)
+        if source_error is not None:
+            return ActionResult(
+                reason=source_error,
+                detail=self._detail(localization_error=source_error),
+            )
+
+        if self.lock_requested_track_id is None:
+            detections, _width, _height = self._detections(data)
+            candidates, rejected = self._class_single_candidates(detections)
+            detail = self._detail(
+                detections_count=len(detections),
+                candidate_count=len(candidates),
+                candidate_track_ids=[candidate["track_id"] for candidate in candidates],
+                rejected_candidates=rejected,
+            )
+            if not candidates:
+                return ActionResult(reason="target_not_found", detail=detail)
+            if len(candidates) != 1:
+                return ActionResult(reason="target_acquisition_ambiguous", detail=detail)
+
+            candidate = candidates[0]
+            track_id = int(candidate["track_id"])
+            self.locked_track_id = track_id
+            self.lock_requested_track_id = track_id
+            action = {
+                "action_type": "yolo_lock_target",
+                "params": {"track_id": track_id},
+                "key": self.key,
+                "once": self.lock_once,
+                "priority": self.priority,
+            }
+            return ActionResult(
+                effects=ActionResult.typed([action]),
+                reason="target_lock_requested",
+                detail=self._detail(
+                    detections_count=len(detections),
+                    candidate_count=1,
+                    candidate_track_ids=[track_id],
+                    selected_candidate=candidate,
+                ),
+            )
+
+        lock_error = self._class_single_lock_error(data)
+        if lock_error is not None:
+            return ActionResult(
+                reason="target_lock_waiting",
+                detail=self._detail(lock_error=lock_error),
+            )
+
+        self.done = True
+        return ActionResult(
+            done=True,
+            reason="target_locked",
+            output=self._locked_output(),
+            detail=self._detail(),
+        )
+
+    def _class_single_source_error(self, data: dict[str, Any]) -> str | None:
+        status = data.get("perception_status")
+        if isinstance(status, dict):
+            if bool(status.get("stale", False)):
+                return "perception_stale"
+            age_s = self._optional_finite(status.get("age_sec"))
+            if age_s is not None and age_s > self.max_target_age_s:
+                return "perception_stale"
+        scene = data.get("scene")
+        if not isinstance(scene, dict) or scene.get("valid") is not True:
+            return "scene_invalid"
+        return None
+
+    def _class_single_candidates(
+        self,
+        detections: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        candidates_by_track: dict[int, dict[str, Any]] = {}
+        rejected: list[dict[str, Any]] = []
+        for detection in detections:
+            class_name = str(detection.get("class_name", ""))
+            if class_name not in (self.class_names or set()):
+                continue
+            track_id = self._optional_int(detection.get("track_id"))
+            confidence = self._optional_finite(detection.get("confidence"))
+            ex = self._optional_finite(detection.get("ex"))
+            ey = self._optional_finite(detection.get("ey"))
+            if track_id is None:
+                rejected.append({"reason": "track_id_missing", "class_name": class_name})
+                continue
+            if confidence is None or confidence < self.min_confidence:
+                rejected.append({"reason": "confidence_below_min", "track_id": track_id})
+                continue
+            if ex is None or ey is None:
+                rejected.append({"reason": "image_error_unavailable", "track_id": track_id})
+                continue
+            candidates_by_track[track_id] = {
+                "track_id": track_id,
+                "class_name": class_name,
+                "confidence": confidence,
+                "ex": ex,
+                "ey": ey,
+            }
+        return list(candidates_by_track.values()), rejected
+
+    def _class_single_lock_error(self, data: dict[str, Any]) -> str | None:
+        perception = data.get("perception")
+        if not isinstance(perception, dict):
+            return "perception_unavailable"
+        if not bool(perception.get("target_valid", False)):
+            return "target_not_valid"
+        if str(perception.get("tracking_state", "")).lower() != "locked":
+            return "target_not_locked"
+        if self._optional_int(perception.get("track_id")) != self.lock_requested_track_id:
+            return "target_track_id_mismatch"
+        if str(perception.get("class_name", "")) not in (self.class_names or set()):
+            return "target_class_mismatch"
+        confidence = self._optional_finite(perception.get("confidence"))
+        if confidence is None or confidence < self.min_confidence:
+            return "target_confidence_below_min"
+        if (
+            self._optional_finite(perception.get("ex")) is None
+            or self._optional_finite(perception.get("ey")) is None
+        ):
+            return "target_error_unavailable"
+        return None
 
     def _target_xy(self, target: dict[str, Any]) -> tuple[float, float]:
         if "x" in target and "y" in target:
@@ -198,6 +360,9 @@ class TargetLockAction(ActionModule):
                 target["local_y"], "target.local_y"
             )
         raise ValueError("target must include x/y or local_x/local_y")
+
+    def _locked_output(self) -> dict[str, int]:
+        return {} if self.locked_track_id is None else {"locked_track_id": self.locked_track_id}
 
     def _detections(
         self,
@@ -322,19 +487,38 @@ class TargetLockAction(ActionModule):
         best_distance_m: float | None = None,
         best_estimate: dict[str, Any] | None = None,
         localization_error: str | None = None,
+        candidate_count: int | None = None,
+        candidate_track_ids: list[int] | None = None,
+        rejected_candidates: list[dict[str, Any]] | None = None,
+        selected_candidate: dict[str, Any] | None = None,
+        lock_error: str | None = None,
     ) -> dict[str, Any]:
         detail: dict[str, Any] = {
-            "target": {"x": self.target_x, "y": self.target_y},
+            "acquire_mode": self.acquire_mode,
             "update_count": self.update_count,
             "detections_count": detections_count,
             "estimates_count": estimates_count,
             "best_distance_m": best_distance_m,
             "locked_track_id": self.locked_track_id,
         }
+        if self.acquire_mode == "known_target":
+            detail["target"] = {"x": self.target_x, "y": self.target_y}
         if best_estimate is not None:
             detail["best_estimate"] = self._json_safe_dict(best_estimate)
         if localization_error is not None:
             detail["localization_error"] = localization_error
+        if candidate_count is not None:
+            detail["candidate_count"] = candidate_count
+        if candidate_track_ids is not None:
+            detail["candidate_track_ids"] = candidate_track_ids
+        if rejected_candidates:
+            detail["rejected_candidates"] = [
+                self._json_safe_dict(candidate) for candidate in rejected_candidates
+            ]
+        if selected_candidate is not None:
+            detail["selected_candidate"] = self._json_safe_dict(selected_candidate)
+        if lock_error is not None:
+            detail["lock_error"] = lock_error
         if self.yaw_defaulted:
             detail["yaw_defaulted"] = True
         self.last_detail = detail
@@ -368,6 +552,35 @@ class TargetLockAction(ActionModule):
         if not math.isfinite(result):
             raise ValueError(f"{name} must be finite")
         return result
+
+    def _positive(self, value: Any, name: str) -> float:
+        result = self._float_value(value, name)
+        if result <= 0.0:
+            raise ValueError(f"{name} must be positive")
+        return result
+
+    def _optional_finite(self, value: Any) -> float | None:
+        if isinstance(value, bool):
+            return None
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            return None
+        return result if math.isfinite(result) else None
+
+    def _optional_int(self, value: Any) -> int | None:
+        if isinstance(value, bool):
+            return None
+        try:
+            candidate = int(value)
+        except (TypeError, ValueError):
+            return None
+        try:
+            if float(value) != float(candidate):
+                return None
+        except (TypeError, ValueError):
+            return None
+        return candidate
 
     def _has_float(self, data: dict[str, Any], name: str) -> bool:
         if name not in data:

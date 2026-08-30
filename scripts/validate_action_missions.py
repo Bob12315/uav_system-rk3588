@@ -208,6 +208,8 @@ def _example_output(action_name: str) -> dict[str, Any]:
                 "lat": 34.0, "lon": 108.0, "score": 500.0, "seen_count": 2, "count": 2,
                 "raw_count": 2, "weight": 1.0, "track_ids": [1], "rank": 1}
         return {"selected_targets": [slot], "target_slots": [slot, dict(slot, rank=2)], "selected_count": 2, "candidate_count": 2}
+    if action_name == "target_lock":
+        return {"locked_track_id": 1}
     return {}
 
 

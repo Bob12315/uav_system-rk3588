@@ -94,3 +94,13 @@ def test_successful_apply_is_confirmed_frozen_and_builder_reads_same_values() ->
     assert context["field_gps_transform_confirmed"] is True
     assert "field_origin_local_x" not in context
     assert result["reference_version"]["revision"] == 1
+
+
+def test_action_context_preserves_perception_freshness_for_visual_actions() -> None:
+    context = RuntimeContextBuilder().build_action_context({
+        "perception_status": {"perception_source": "udp", "stale": False, "age_sec": 0.1},
+    })
+
+    assert context["perception_status"] == {
+        "perception_source": "udp", "stale": False, "age_sec": 0.1,
+    }
