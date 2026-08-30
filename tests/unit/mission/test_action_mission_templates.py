@@ -41,6 +41,14 @@ def test_drop_flow_is_explicit_and_preserves_payload_order_and_stop_boundary() -
     assert names.count("gps_capture_view") == 4
     assert names.count("gps_target_lock") == 2
     assert names.count("align_descend") == 2
+    captures = [index for index, step in enumerate(steps) if step["name"] == "gps_capture_view"]
+    for capture_index in captures:
+        scan_goto = steps[capture_index - 1]
+        assert scan_goto["name"] == "goto_waypoint"
+        assert scan_goto["params"]["require_velocity_valid"] is True
+        assert scan_goto["params"]["max_horizontal_speed_mps"] == 0.15
+        assert scan_goto["params"]["max_vertical_speed_mps"] == 0.1
+        assert scan_goto["params"]["min_hold_updates"] == 3
     releases = [step for step in steps if step["name"] == "payload_release"]
     assert [step["params"]["payload_id"] for step in releases] == ["payload_1", "payload_2"]
     for release in releases:
@@ -63,3 +71,11 @@ def test_full_flow_replaces_visual_land_composite_with_atomic_steps() -> None:
     assert steps[-3]["label"] == "final_land_lock_h"
     assert steps[-2]["label"] == "final_land_align"
     assert steps[-1]["name"] == "land"
+    captures = [index for index, step in enumerate(steps) if step["name"] == "gps_capture_view"]
+    for capture_index in captures:
+        scan_goto = steps[capture_index - 1]
+        assert scan_goto["name"] == "goto_waypoint"
+        assert scan_goto["params"]["require_velocity_valid"] is True
+        assert scan_goto["params"]["max_horizontal_speed_mps"] == 0.15
+        assert scan_goto["params"]["max_vertical_speed_mps"] == 0.1
+        assert scan_goto["params"]["min_hold_updates"] == 3

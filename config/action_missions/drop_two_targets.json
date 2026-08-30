@@ -38,7 +38,10 @@
         "yaw_mode": "hold",
         "tolerance_xy_m": 0.8,
         "tolerance_z_m": 0.6,
-        "min_hold_updates": 1,
+        "min_hold_updates": 3,
+        "require_velocity_valid": true,
+        "max_horizontal_speed_mps": 0.15,
+        "max_vertical_speed_mps": 0.1,
         "priority": 5,
         "key": "drop_scan_goto_1"
       }
@@ -81,7 +84,10 @@
         "yaw_mode": "hold",
         "tolerance_xy_m": 0.8,
         "tolerance_z_m": 0.6,
-        "min_hold_updates": 1,
+        "min_hold_updates": 3,
+        "require_velocity_valid": true,
+        "max_horizontal_speed_mps": 0.15,
+        "max_vertical_speed_mps": 0.1,
         "priority": 5,
         "key": "drop_scan_goto_2"
       }
@@ -124,7 +130,10 @@
         "yaw_mode": "hold",
         "tolerance_xy_m": 0.8,
         "tolerance_z_m": 0.6,
-        "min_hold_updates": 1,
+        "min_hold_updates": 3,
+        "require_velocity_valid": true,
+        "max_horizontal_speed_mps": 0.15,
+        "max_vertical_speed_mps": 0.1,
         "priority": 5,
         "key": "drop_scan_goto_3"
       }
@@ -167,7 +176,10 @@
         "yaw_mode": "hold",
         "tolerance_xy_m": 0.8,
         "tolerance_z_m": 0.6,
-        "min_hold_updates": 1,
+        "min_hold_updates": 3,
+        "require_velocity_valid": true,
+        "max_horizontal_speed_mps": 0.15,
+        "max_vertical_speed_mps": 0.1,
         "priority": 5,
         "key": "drop_scan_goto_4"
       }

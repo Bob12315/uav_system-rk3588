@@ -49,6 +49,7 @@ def _definition(
 
 
 _NUMBER = {"type": "number"}
+_NULLABLE_NUMBER = {"type": ["number", "null"]}
 _INTEGER = {"type": "integer"}
 _BOOLEAN = {"type": "boolean"}
 _STRING = {"type": "string"}
@@ -63,10 +64,11 @@ _CAMERA = {"type": "object", "properties": {
 }, "additionalProperties": False}
 _TARGET = {"type": ["object", "null"], "properties": {
     "id": _ID, "target_id": _ID, "valid": _BOOLEAN,
-    "x": _NUMBER, "y": _NUMBER, "local_x": _NUMBER, "local_y": _NUMBER,
-    "lat": {"type": "number", "minimum": -90, "maximum": 90},
-    "lon": {"type": "number", "minimum": -180, "maximum": 180},
-    "class_name": _STRING, "east_m": _NUMBER, "north_m": _NUMBER,
+    "x": _NULLABLE_NUMBER, "y": _NULLABLE_NUMBER,
+    "local_x": _NULLABLE_NUMBER, "local_y": _NULLABLE_NUMBER,
+    "lat": {"type": ["number", "null"], "minimum": -90, "maximum": 90},
+    "lon": {"type": ["number", "null"], "minimum": -180, "maximum": 180},
+    "class_name": _STRING, "east_m": _NULLABLE_NUMBER, "north_m": _NULLABLE_NUMBER,
     "score": _NUMBER, "seen_count": _INTEGER, "count": _INTEGER,
     "raw_count": _INTEGER, "weight": _NUMBER, "track_ids": {"type": "array", "items": _INTEGER},
     "rank": _INTEGER, "status": _STRING,

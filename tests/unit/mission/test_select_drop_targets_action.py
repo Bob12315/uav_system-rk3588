@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from missions.common.actions.action_lab import create_action_lab_registry
+from missions.common.actions.runner import ActionRunner
 from missions.common.actions.select_drop_targets import SelectDropTargetsAction
 
 
@@ -198,6 +200,41 @@ def test_select_drop_targets_allow_fewer_accepts_zero_targets() -> None:
     assert result.detail["selected_count"] == 0
     assert len(result.detail["target_slots"]) == 2
     assert all(slot["valid"] is False for slot in result.detail["target_slots"])
+
+
+def test_select_drop_targets_allow_fewer_output_passes_action_contract() -> None:
+    runner = ActionRunner(create_action_lab_registry())
+    start = runner.start(
+        "select_drop_targets",
+        {
+            "objects": [
+                {
+                    "id": 0,
+                    "class_name": "bucket",
+                    "lat": -35.362971,
+                    "lon": 149.165251,
+                    "east_m": 1.21,
+                    "north_m": 32.36,
+                    "sample_count": 2,
+                    "raw_count": 2,
+                }
+            ],
+            "coordinate_mode": "gps_enu",
+            "target_count": 2,
+            "allow_fewer": True,
+            "min_seen_count": 2,
+            "min_raw_count": 2,
+        },
+    )
+
+    assert start.failed is False
+    result = runner.update({})
+    assert result.done is True
+    assert result.failed is False
+    assert result.reason == "drop_targets_selected"
+    assert result.output["target_slots"][0]["valid"] is True
+    assert result.output["target_slots"][1]["valid"] is False
+    assert result.output["target_slots"][1]["lat"] is None
 
 
 def test_select_drop_targets_deduplicates_nearby_candidates() -> None:
