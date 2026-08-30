@@ -261,7 +261,7 @@ class SelectDropTargetsAction(ActionModule):
                 return None, {**base_rejection, "reason": "invalid_gps"}
 
         seen_count = self._int_value(
-            obj.get("seen_count", obj.get("count", obj.get("raw_count", 0))),
+            obj.get("seen_count", obj.get("count", obj.get("sample_count", obj.get("raw_count", 0)))),
             default=0,
         )
         raw_count = self._int_value(obj.get("raw_count", seen_count), default=seen_count)

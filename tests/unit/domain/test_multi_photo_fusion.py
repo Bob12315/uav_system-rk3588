@@ -132,6 +132,23 @@ def test_center_weight_reduces_edge_detections() -> None:
     assert fused[0]["raw_count"] == 1
 
 
+def test_center_weight_uses_direct_image_errors() -> None:
+    fusion = MultiPhotoFusion(
+        MultiPhotoFusionConfig(cluster_radius_m=20.0, min_cluster_size=1)
+    )
+
+    fused = fusion.fuse(
+        [
+            {"x": 0.0, "y": 0.0, "confidence": 1.0, "ex": 0.0, "ey": 0.0},
+            {"x": 10.0, "y": 0.0, "confidence": 1.0, "ex": 1.0, "ey": 0.0},
+        ]
+    )
+
+    assert len(fused) == 1
+    assert fused[0]["x"] == pytest.approx(0.0)
+    assert fused[0]["count"] == 1
+
+
 def test_center_weight_power_zero_disables_center_weighting() -> None:
     fusion = MultiPhotoFusion(
         MultiPhotoFusionConfig(

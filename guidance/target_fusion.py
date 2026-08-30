@@ -149,7 +149,7 @@ class MultiPhotoFusion:
         weight = confidence * center_weight
         if weight <= 0.0:
             return None
-        source = estimate.get("source") if isinstance(estimate.get("source"), dict) else {}
+        ex, ey = self._extract_ex_ey(estimate)
         return {
             "x": x,
             "y": y,
@@ -163,8 +163,8 @@ class MultiPhotoFusion:
             "class_name": estimate.get("class_name"),
             "class_id": estimate.get("class_id"),
             "source": {
-                "ex": self._optional_float(source.get("ex")),
-                "ey": self._optional_float(source.get("ey")),
+                "ex": ex,
+                "ey": ey,
             },
             "estimate": estimate,
             "cluster_key": self._cluster_key(estimate),
@@ -335,11 +335,9 @@ class MultiPhotoFusion:
     def _center_weight(self, estimate: dict[str, Any]) -> float:
         if self.config.center_weight_power == 0.0:
             return 1.0
-        source = estimate.get("source")
-        if not isinstance(source, dict) or "ex" not in source or "ey" not in source:
+        ex, ey = self._extract_ex_ey(estimate)
+        if ex is None or ey is None:
             return 1.0
-        ex = self._float_value(source["ex"], "source.ex")
-        ey = self._float_value(source["ey"], "source.ey")
         r = math.sqrt(ex * ex + ey * ey)
         base = max(0.0, 1.0 - min(r, 1.0))
         return base ** self.config.center_weight_power

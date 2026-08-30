@@ -237,6 +237,22 @@ def test_select_drop_targets_allow_fewer_output_passes_action_contract() -> None
     assert result.output["target_slots"][1]["lat"] is None
 
 
+def test_select_drop_targets_prefers_effective_sample_count_to_raw_count() -> None:
+    result = _select(
+        [
+            {"id": "outlier_heavy", "class_name": "bucket", "local_x": 0.0, "local_y": 30.0,
+             "sample_count": 2, "raw_count": 20},
+            {"id": "well_supported", "class_name": "bucket", "local_x": 2.0, "local_y": 30.0,
+             "sample_count": 3, "raw_count": 3},
+        ],
+        target_count=1,
+        min_seen_count=2,
+    )
+
+    assert result.done is True
+    assert result.detail["selected_targets"][0]["id"] == "well_supported"
+
+
 def test_select_drop_targets_deduplicates_nearby_candidates() -> None:
     result = _select(
         [

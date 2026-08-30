@@ -76,6 +76,12 @@ class GpsFuseViewsAction(ActionModule):
 def _output_item(item: Any) -> dict[str, Any]:
     """Serialize fused DTOs to the JSON-array shapes promised by Contract v1."""
     output = asdict(item)
+    # ``sample_count`` is the number of post-outlier observations actually
+    # supporting the fused target.  Publish the generic aliases consumed by
+    # target selection as well, so it never mistakes pre-outlier ``raw_count``
+    # for effective evidence.
+    output["seen_count"] = int(item.sample_count)
+    output["count"] = int(item.sample_count)
     output["source_waypoints"] = list(item.source_waypoints)
     output["source_frames"] = list(item.source_frames)
     return output

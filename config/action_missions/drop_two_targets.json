@@ -38,7 +38,7 @@
         "yaw_mode": "hold",
         "tolerance_xy_m": 0.8,
         "tolerance_z_m": 0.6,
-        "min_hold_updates": 3,
+        "min_hold_updates": 8,
         "require_velocity_valid": true,
         "max_horizontal_speed_mps": 0.15,
         "max_vertical_speed_mps": 0.1,
@@ -84,7 +84,7 @@
         "yaw_mode": "hold",
         "tolerance_xy_m": 0.8,
         "tolerance_z_m": 0.6,
-        "min_hold_updates": 3,
+        "min_hold_updates": 8,
         "require_velocity_valid": true,
         "max_horizontal_speed_mps": 0.15,
         "max_vertical_speed_mps": 0.1,
@@ -130,7 +130,7 @@
         "yaw_mode": "hold",
         "tolerance_xy_m": 0.8,
         "tolerance_z_m": 0.6,
-        "min_hold_updates": 3,
+        "min_hold_updates": 8,
         "require_velocity_valid": true,
         "max_horizontal_speed_mps": 0.15,
         "max_vertical_speed_mps": 0.1,
@@ -176,7 +176,7 @@
         "yaw_mode": "hold",
         "tolerance_xy_m": 0.8,
         "tolerance_z_m": 0.6,
-        "min_hold_updates": 3,
+        "min_hold_updates": 8,
         "require_velocity_valid": true,
         "max_horizontal_speed_mps": 0.15,
         "max_vertical_speed_mps": 0.1,
@@ -228,10 +228,12 @@
           "bucket"
         ],
         "fusion": {
-          "cluster_radius_m": 0.8,
-          "outlier_radius_m": 0.8,
-          "min_cluster_size": 2,
-          "center_weight_power": 1
+          "cluster_radius_m": 0.65,
+          "outlier_radius_m": 0.65,
+          "min_cluster_size": 3,
+          "center_weight_power": 1,
+          "max_abs_ex": 0.8,
+          "max_abs_ey": 0.65
         }
       }
     },
@@ -255,8 +257,8 @@
           "bucket_3": 100,
           "bucket": 50
         },
-        "min_seen_count": 2,
-        "min_raw_count": 2,
+        "min_seen_count": 3,
+        "min_raw_count": 3,
         "min_weight": 0,
         "deduplicate_radius_m": 0.8,
         "prefer_class_order": [

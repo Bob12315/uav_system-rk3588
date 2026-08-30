@@ -133,8 +133,13 @@ class GpsTargetProjector:
         half_fov_x = math.radians(self.camera.fov_x_deg) / 2.0
         half_fov_y = math.radians(self.camera.fov_y_deg) / 2.0
 
-        angle_x = ex * half_fov_x
-        angle_y = ey * half_fov_y
+        # ``ex``/``ey`` are normalized image-plane coordinates, not a linear
+        # fraction of the optical angle.  Use the pinhole projection so that
+        # a normalized image coordinate maps back to its ground-ray angle.
+        # The former linear-angle approximation increasingly underestimated
+        # offsets away from the image centre for the 2 rad Gazebo camera.
+        angle_x = math.atan(ex * math.tan(half_fov_x))
+        angle_y = math.atan(ey * math.tan(half_fov_y))
 
         # body-frame offsets (forward/right, metres on ground plane)
         body_right_m = self.camera.image_x_sign * relative_altitude_m * math.tan(angle_x)

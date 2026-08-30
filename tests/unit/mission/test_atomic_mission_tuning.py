@@ -32,7 +32,7 @@ def test_atomic_drop_tuning_and_payload_offsets_are_preserved() -> None:
         assert (config["max_ex_cam"], config["max_ey_cam"]) == (0.16, 0.16)
         assert (config["slow_descend_max_ex_cam"], config["slow_descend_max_ey_cam"]) == (0.35, 0.35)
         assert (config["deadband_ex_cam"], config["deadband_ey_cam"]) == (0.04, 0.04)
-        assert (config["fov_x_deg"], config["fov_y_deg"]) == (85, 69)
+        assert (config["fov_x_deg"], config["fov_y_deg"]) == (114.591559, 98.864783)
         assert item["finish_alignment_timeout_s"] == 1.0
 
 
@@ -40,7 +40,9 @@ def test_capture_camera_and_recon_routes_are_preserved() -> None:
     drop = _steps("drop_two_targets.json")
     cameras = [step["params"]["camera"] for step in drop if step["name"] == "gps_capture_view"]
     assert len(cameras) == 4
-    assert all((camera["fov_x_deg"], camera["fov_y_deg"]) == (68.15, 54.3) for camera in cameras)
+    assert all((camera["fov_x_deg"], camera["fov_y_deg"]) == (114.591559, 98.864783) for camera in cameras)
+    scan_holds = [step["params"]["min_hold_updates"] for step in drop if step.get("label", "").startswith("drop_scan_goto_")]
+    assert scan_holds == [8, 8, 8, 8]
     recon = _steps("recon_gps.json")
     points = [(step["params"]["x"], step["params"]["y"], step["params"]["altitude_m"])
               for step in recon if step.get("label", "").startswith("recon_scan_goto_")]
