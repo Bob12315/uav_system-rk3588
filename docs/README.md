@@ -10,10 +10,9 @@ mission/stage/terminal UI 文档通过 Git 历史追溯，不再与当前教程�
 
 1. [前言](beginner/01_preface.md)
 2. [配置清单（含完整 BOM 表）](beginner/02_hardware_bom.md)
-3. [无人机组装](beginner/03_drone_assembly.md)
-4. [RK3588 环境配置](beginner/04_rk3588_setup.md)
-5. [SITL 测试](beginner/05_sitl_test.md)
-6. [实飞测试](beginner/06_flight_test.md)
+3. [RK3588 环境配置](beginner/04_rk3588_setup.md)
+4. [SITL 测试](beginner/05_sitl_test.md)
+5. [实飞测试](beginner/06_flight_test.md)
 
 ## 开发者
 

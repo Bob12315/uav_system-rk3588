@@ -5,7 +5,7 @@
 面向 CUADC 多旋翼侦察与救援任务，实现目标识别与定位、自动投放、区域侦察、返航和
 视觉辅助降落。
 
-<!-- TODO: 添加比赛现场整机照片 -->
+<img src="docs/assets/readme/drone-in-flight.webp" alt="比赛使用的救援无人机" width="720">
 
 [功能演示](#功能演示) · [从零复现](docs/beginner/01_preface.md) · [开发者文档](docs/developer/README.md)
 
@@ -32,8 +32,7 @@ RK3588 负责视觉、任务和 Web UI；飞控负责稳定、动力与执行机
 因此决定将项目开源，希望它能为其他第一次接触自主无人机或参加类似比赛的学生团队
 提供一个可以参考、复现和继续改进的起点。
 
-<!-- TODO: 添加比赛现场照片 -->
-<!-- TODO: 后续链接完整比赛经历 / project_story.md -->
+<img src="docs/assets/readme/team-and-uav.webp" alt="比赛现场的团队与无人机" width="720">
 
 ## 功能演示
 
@@ -48,12 +47,21 @@ RK3588 负责视觉、任务和 Web UI；飞控负责稳定、动力与执行机
 - Web UI 操作界面
 - ArduPilot + Gazebo SITL 仿真
 
-<!-- TODO: 添加完整比赛任务视频 / GIF -->
-<!-- TODO: 添加 YOLO 识别截图 -->
-<!-- TODO: 添加 Web UI 截图 -->
-<!-- TODO: 添加 Gazebo SITL 截图 -->
-<!-- TODO: 添加自动投放演示 -->
+点击下方动图可打开[完整比赛飞行视频](docs/assets/readme/flight-demo.mp4)。
 
+[![比赛飞行过程预览](docs/assets/readme/flight-demo-preview.gif)](docs/assets/readme/flight-demo.mp4)
+
+### YOLO 识别
+
+![YOLO 在投放区检测并锁定目标](docs/assets/readme/yolo-target-detection.webp)
+
+### Web UI
+
+![Web UI 中的 Action Mission、YOLO 和场地图](docs/assets/readme/web-ui-dashboard.webp)
+
+### Gazebo SITL
+
+![Gazebo SITL 中的无人机与比赛场地](docs/assets/readme/gazebo-sitl.webp)
 ## 比赛任务
 
 当前完整流程由
@@ -168,10 +176,9 @@ ArduPilot
 
 1. [前言](docs/beginner/01_preface.md)
 2. [配置清单](docs/beginner/02_hardware_bom.md)
-3. [无人机组装](docs/beginner/03_drone_assembly.md)
-4. [RK3588 环境配置](docs/beginner/04_rk3588_setup.md)
-5. [SITL 测试](docs/beginner/05_sitl_test.md)
-6. [实飞测试](docs/beginner/06_flight_test.md)
+3. [RK3588 环境配置](docs/beginner/04_rk3588_setup.md)
+4. [SITL 测试](docs/beginner/05_sitl_test.md)
+5. [实飞测试](docs/beginner/06_flight_test.md)
 
 ### 👨‍💻 开发者
 
@@ -206,4 +213,3 @@ cd uav_system-rk3588
 ```
 
 完整安装和部署请从[RK3588 环境配置](docs/beginner/04_rk3588_setup.md)开始。
-
