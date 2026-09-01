@@ -9,6 +9,56 @@ from typing import Any
 import yaml
 
 
+@dataclass(frozen=True, slots=True)
+class VirtualNadirAttitudeConfig:
+    ip: str
+    port: int
+    source: str
+    history_ms: float
+    max_samples: int
+    max_sample_distance_ms: float
+    max_bracket_span_ms: float
+    future_wait_ms: float
+
+
+@dataclass(frozen=True, slots=True)
+class CameraCalibrationConfig:
+    width: int
+    height: int
+    fx: float | None
+    fy: float | None
+    cx: float | None
+    cy: float | None
+    fov_x_deg: float | None
+    fov_y_deg: float | None
+    distortion: tuple[float, ...]
+    r_body_camera: tuple[tuple[float, float, float], ...]
+    approximate_calibration: bool
+
+
+@dataclass(frozen=True, slots=True)
+class VirtualOutputConfig:
+    width: int
+    height: int
+    fx: float | None
+    fy: float | None
+    cx: float | None
+    cy: float | None
+    fov_x_deg: float | None
+    fov_y_deg: float | None
+    border_value: tuple[int, int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class VirtualNadirConfig:
+    enabled: bool
+    yaw_reference_mode: str
+    debug_compare: bool
+    attitude: VirtualNadirAttitudeConfig
+    camera: CameraCalibrationConfig
+    output: VirtualOutputConfig
+
+
 @dataclass(slots=True)
 class AppConfig:
     model_path: str
@@ -47,6 +97,7 @@ class AppConfig:
     web_stream_width: int
     web_stream_height: int
     recording_dir: str
+    virtual_nadir: VirtualNadirConfig
 
 
 def _str_to_bool(value: str | bool) -> bool:
@@ -113,18 +164,122 @@ def _load_yaml_config(path: str) -> dict[str, Any]:
         "selection_mode", "target_class", "max_lost_frames", "show", "save_video", "save_path",
         "line_width", "show_all_tracks", "command_enabled", "command_ip", "command_port",
         "window_name", "class_names", "camera_width", "camera_height", "camera_fps", "camera_fourcc",
-        "latest_frame", "display", "web_stream", "recording_dir",
+        "latest_frame", "display", "web_stream", "recording_dir", "virtual_nadir",
     }
     unknown = set(data) - allowed
     if unknown:
         raise ValueError(f"unknown YOLO config field(s): {', '.join(sorted(unknown))}")
     nested = {"display": {"local_window_enabled", "fullscreen"},
-              "web_stream": {"enabled", "host", "port", "jpeg_quality", "max_fps", "width", "height"}}
+              "web_stream": {"enabled", "host", "port", "jpeg_quality", "max_fps", "width", "height"},
+              "virtual_nadir": {"enabled", "yaw_reference_mode", "debug_compare", "attitude", "camera", "output"}}
     for name, keys in nested.items():
         value = data.get(name, {})
         if isinstance(value, dict) and set(value) - keys:
             raise ValueError(f"unknown {name} field(s): {', '.join(sorted(set(value) - keys))}")
     return data
+
+
+def _optional_float(value: Any, path: str) -> float | None:
+    if value is None:
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{path} must be a number or null") from exc
+    return result
+
+
+def _virtual_nadir_config(data: Any) -> VirtualNadirConfig:
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        raise ValueError("virtual_nadir must be a mapping")
+    attitude = data.get("attitude", {})
+    camera = data.get("camera", {})
+    output = data.get("output", {})
+    if not all(isinstance(value, dict) for value in (attitude, camera, output)):
+        raise ValueError("virtual_nadir attitude/camera/output must be mappings")
+    allowed_attitude = {"ip", "port", "source", "history_ms", "max_samples",
+                        "max_sample_distance_ms", "max_bracket_span_ms", "future_wait_ms"}
+    allowed_camera = {"width", "height", "fx", "fy", "cx", "cy", "fov_x_deg",
+                      "fov_y_deg", "distortion", "r_body_camera", "approximate_calibration"}
+    allowed_output = {"width", "height", "fx", "fy", "cx", "cy", "fov_x_deg",
+                      "fov_y_deg", "border_value"}
+    for name, value, allowed_keys in (
+        ("attitude", attitude, allowed_attitude),
+        ("camera", camera, allowed_camera),
+        ("output", output, allowed_output),
+    ):
+        unknown = set(value) - allowed_keys
+        if unknown:
+            raise ValueError(f"unknown virtual_nadir.{name} field(s): {', '.join(sorted(unknown))}")
+    ip = str(attitude.get("ip", "127.0.0.1"))
+    if ip not in {"127.0.0.1", "localhost"}:
+        raise ValueError("virtual_nadir.attitude.ip must be localhost-only")
+    source = str(attitude.get("source", "sitl"))
+    if source not in {"real", "sitl", "test"}:
+        raise ValueError("virtual_nadir.attitude.source must be real, sitl, or test")
+    port = int(attitude.get("port", 5011))
+    history_ms = float(attitude.get("history_ms", 1500.0))
+    max_samples = int(attitude.get("max_samples", 128))
+    max_distance_ms = float(attitude.get("max_sample_distance_ms", 75.0))
+    max_span_ms = float(attitude.get("max_bracket_span_ms", 150.0))
+    future_wait_ms = float(attitude.get("future_wait_ms", 40.0))
+    if not 1 <= port <= 65535 or history_ms <= 0 or max_samples < 2:
+        raise ValueError("virtual_nadir attitude bounds are invalid")
+    if max_distance_ms <= 0 or max_span_ms <= 0 or future_wait_ms < 0:
+        raise ValueError("virtual_nadir attitude timing bounds are invalid")
+
+    distortion = tuple(float(value) for value in camera.get("distortion", [0, 0, 0, 0, 0]))
+    raw_rotation = camera.get(
+        "r_body_camera", [[0, -1, 0], [1, 0, 0], [0, 0, 1]]
+    )
+    if (
+        not isinstance(raw_rotation, list)
+        or len(raw_rotation) != 3
+        or any(not isinstance(row, list) or len(row) != 3 for row in raw_rotation)
+    ):
+        raise ValueError("virtual_nadir.camera.r_body_camera must be a 3x3 list")
+    rotation = tuple(tuple(float(value) for value in row) for row in raw_rotation)
+    raw_border = output.get("border_value", [0, 0, 0])
+    if not isinstance(raw_border, list) or len(raw_border) != 3:
+        raise ValueError("virtual_nadir.output.border_value must contain three integers")
+    border = tuple(int(value) for value in raw_border)
+    if any(value < 0 or value > 255 for value in border):
+        raise ValueError("virtual_nadir.output.border_value entries must be in 0..255")
+    yaw_mode = str(data.get("yaw_reference_mode", "lock_on_start"))
+    if yaw_mode != "lock_on_start":
+        raise ValueError("virtual_nadir V1 only supports yaw_reference_mode=lock_on_start")
+    return VirtualNadirConfig(
+        enabled=_strict_bool(data.get("enabled", False), "virtual_nadir.enabled"),
+        yaw_reference_mode=yaw_mode,
+        debug_compare=_strict_bool(data.get("debug_compare", False), "virtual_nadir.debug_compare"),
+        attitude=VirtualNadirAttitudeConfig(
+            ip, port, source, history_ms, max_samples, max_distance_ms, max_span_ms, future_wait_ms
+        ),
+        camera=CameraCalibrationConfig(
+            int(camera.get("width", 640)), int(camera.get("height", 480)),
+            _optional_float(camera.get("fx"), "virtual_nadir.camera.fx"),
+            _optional_float(camera.get("fy"), "virtual_nadir.camera.fy"),
+            _optional_float(camera.get("cx"), "virtual_nadir.camera.cx"),
+            _optional_float(camera.get("cy"), "virtual_nadir.camera.cy"),
+            _optional_float(camera.get("fov_x_deg", 114.591559), "virtual_nadir.camera.fov_x_deg"),
+            _optional_float(camera.get("fov_y_deg", 98.864783), "virtual_nadir.camera.fov_y_deg"),
+            distortion, rotation,
+            _strict_bool(camera.get("approximate_calibration", True),
+                         "virtual_nadir.camera.approximate_calibration"),
+        ),
+        output=VirtualOutputConfig(
+            int(output.get("width", 640)), int(output.get("height", 480)),
+            _optional_float(output.get("fx"), "virtual_nadir.output.fx"),
+            _optional_float(output.get("fy"), "virtual_nadir.output.fy"),
+            _optional_float(output.get("cx"), "virtual_nadir.output.cx"),
+            _optional_float(output.get("cy"), "virtual_nadir.output.cy"),
+            _optional_float(output.get("fov_x_deg", 114.591559), "virtual_nadir.output.fov_x_deg"),
+            _optional_float(output.get("fov_y_deg", 98.864783), "virtual_nadir.output.fov_y_deg"),
+            border,
+        ),
+    )
 
 
 def _expand_user_path(value: Any) -> str:
@@ -211,4 +366,5 @@ def load_config() -> AppConfig:
         web_stream_width=int(web_stream_config.get("width", 0)),
         web_stream_height=int(web_stream_config.get("height", 0)),
         recording_dir=_expand_user_path(merged.get("recording_dir", "~/uav_recordings")),
+        virtual_nadir=_virtual_nadir_config(merged.get("virtual_nadir")),
     )

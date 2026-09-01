@@ -11,6 +11,8 @@ os.environ.setdefault("QT_QPA_FONTDIR", "/usr/share/fonts/truetype/dejavu")
 import cv2
 
 try:
+    from .attitude_history import AttitudeHistory
+    from .attitude_receiver import AttitudeReceiver
     from .annotator import Annotator
     from .command_receiver import CommandReceiver
     from .config import load_config
@@ -21,7 +23,10 @@ try:
     from .udp_publisher import UdpPublisher
     from .utils import ensure_parent_dir
     from .video_source import VideoSource
+    from .virtual_nadir import VirtualNadirRectifier, build_debug_comparison
 except ImportError:
+    from attitude_history import AttitudeHistory
+    from attitude_receiver import AttitudeReceiver
     from annotator import Annotator
     from command_receiver import CommandReceiver
     from config import load_config
@@ -32,6 +37,7 @@ except ImportError:
     from udp_publisher import UdpPublisher
     from utils import ensure_parent_dir
     from video_source import VideoSource
+    from virtual_nadir import VirtualNadirRectifier, build_debug_comparison
 
 
 def build_video_writer(save_path: str, fps: float, width: int, height: int) -> cv2.VideoWriter:
@@ -42,6 +48,33 @@ def build_video_writer(save_path: str, fps: float, width: int, height: int) -> c
 
 def main() -> int:
     cfg = load_config()
+    attitude_history = None
+    attitude_receiver = None
+    rectifier = None
+    if cfg.virtual_nadir.enabled:
+        attitude_cfg = cfg.virtual_nadir.attitude
+        attitude_history = AttitudeHistory(
+            max_samples=attitude_cfg.max_samples,
+            history_ms=attitude_cfg.history_ms,
+        )
+        attitude_receiver = AttitudeReceiver(
+            attitude_cfg.ip,
+            attitude_cfg.port,
+            attitude_history,
+            expected_source=attitude_cfg.source,
+        )
+        rectifier = VirtualNadirRectifier(cfg.virtual_nadir)
+        attitude_receiver.start()
+        calibration_label = (
+            "approximate_calibration"
+            if cfg.virtual_nadir.camera.approximate_calibration
+            else "calibrated"
+        )
+        print(
+            f"virtual_nadir enabled yaw_reference_mode={cfg.virtual_nadir.yaw_reference_mode} "
+            f"calibration={calibration_label}",
+            flush=True,
+        )
     video_source = VideoSource(
         cfg.source,
         camera_width=cfg.camera_width,
@@ -87,11 +120,27 @@ def main() -> int:
             if packet is None:
                 break
 
-            frame = packet.frame
+            raw_frame = packet.frame
+            frame = raw_frame
+            rectification = None
+            if rectifier is not None and attitude_history is not None:
+                attitude_cfg = cfg.virtual_nadir.attitude
+                attitude = attitude_history.lookup(
+                    packet.captured_at_monotonic_ns,
+                    max_sample_distance_ms=attitude_cfg.max_sample_distance_ms,
+                    max_bracket_span_ms=attitude_cfg.max_bracket_span_ms,
+                    future_wait_ms=attitude_cfg.future_wait_ms,
+                )
+                rectification = rectifier.rectify(raw_frame, attitude)
+                frame = rectification.frame
             image_height, image_width = frame.shape[:2]
 
-            tracks = tracker.run(frame)
-            inference_metrics = tracker.last_metrics_ms
+            if rectification is not None and not rectification.valid:
+                tracks = []
+                inference_metrics = {"preprocess": 0.0, "npu": 0.0, "postprocess": 0.0}
+            else:
+                tracks = tracker.run(frame)
+                inference_metrics = tracker.last_metrics_ms
             frame_count += 1
             fps = frame_count / max(time.perf_counter() - start_time, 1e-9)
             # Producer and consumer run on the same board.  Use the monotonic
@@ -115,7 +164,7 @@ def main() -> int:
                         error=recorder_status.error or None)
                     continue
                 if command.action in {"recording_start", "recording_stop"}:
-                    raw_recorder.handle_command(command.action, frame.shape)
+                    raw_recorder.handle_command(command.action, raw_frame.shape)
                 else:
                     target_manager.apply_command(command, tracks)
                 recorder_status = raw_recorder.status()
@@ -147,7 +196,7 @@ def main() -> int:
             )
             udp_publisher.publish(current_target, scene, raw_recorder.status(),
                                   packet.captured_at_monotonic_ns)
-            raw_recorder.write(frame)
+            raw_recorder.write(raw_frame)
 
             if cfg.show or cfg.save_video or web_stream is not None:
                 annotated = annotator.annotate(
@@ -161,26 +210,40 @@ def main() -> int:
                     source_read_ms=packet.source_read_ms,
                     npu_ms=inference_metrics["npu"],
                 )
+                debug_view = (
+                    build_debug_comparison(raw_frame, rectification)
+                    if rectification is not None and cfg.virtual_nadir.debug_compare
+                    else annotated
+                )
                 if cfg.show:
-                    cv2.imshow(cfg.window_name, annotated)
+                    cv2.imshow(cfg.window_name, debug_view)
                     key = cv2.waitKey(1) & 0xFF
                     if key in {27, ord("q")}:
                         break
                 if web_stream is not None:
-                    web_stream.publish(annotated)
+                    web_stream.publish(debug_view)
                 if cfg.save_video:
                     if writer is None:
                         fps = video_source.cap.get(cv2.CAP_PROP_FPS)
                         writer = build_video_writer(cfg.save_path, fps, image_width, image_height)
                     writer.write(annotated)
             if frame_count == 1 or frame_count % 60 == 0:
+                rectify_status = (
+                    ""
+                    if rectification is None
+                    else (
+                        f" rectify_valid={rectification.valid} rectify_reason={rectification.reason} "
+                        f"attitude_match_ms={rectification.attitude_match_ms} "
+                        f"rectify_ms={rectification.rectify_ms:.1f}"
+                    )
+                )
                 print(
                     f"frame={frame_count} fps={fps:.1f} wait_frame_ms={packet.wait_frame_ms:.1f} "
                     f"source_read_decode_ms={packet.source_read_ms:.1f} "
                     f"preprocess_ms={inference_metrics['preprocess']:.1f} "
                     f"npu_ms={inference_metrics['npu']:.1f} "
                     f"postprocess_ms={inference_metrics['postprocess']:.1f} "
-                    f"frame_age_ms={frame_age_ms:.1f} tracks={len(tracks)}",
+                    f"frame_age_ms={frame_age_ms:.1f} tracks={len(tracks)}{rectify_status}",
                     flush=True,
                 )
     except KeyboardInterrupt:
@@ -190,6 +253,8 @@ def main() -> int:
         tracker.release()
         udp_publisher.close()
         command_receiver.close()
+        if attitude_receiver is not None:
+            attitude_receiver.close()
         if web_stream is not None:
             web_stream.close()
         if writer is not None:

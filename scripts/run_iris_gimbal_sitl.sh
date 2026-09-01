@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Local SITL must not send telemetry or video to an RK3588 by default.  A
 # different ground-station address can still be supplied explicitly.
-GCS_HOST="${GCS_HOST:-127.0.0.1}"
+GCS_HOST="${GCS_HOST:-10.101.31.108}"
 VIDEO_HOST="${VIDEO_HOST:-${GCS_HOST}}"
 MAVLINK_PORT="${MAVLINK_PORT:-14550}"
 VIDEO_PORT="${VIDEO_PORT:-5600}"

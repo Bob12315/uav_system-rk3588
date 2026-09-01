@@ -56,6 +56,9 @@ class TelemetryConfig:
     legacy_writer_enabled: bool = False
     v2_writer_enabled: bool = True
     ack_quarantine_ms: int = 250
+    attitude_udp_enabled: bool = False
+    attitude_udp_ip: str = "127.0.0.1"
+    attitude_udp_port: int = 5011
 
 
 def _to_bool(value: Any) -> bool:
@@ -124,6 +127,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--state-udp-enabled", type=_to_bool)
     parser.add_argument("--state-udp-ip")
     parser.add_argument("--state-udp-port", type=int)
+    parser.add_argument("--attitude-udp-enabled", type=_to_bool)
+    parser.add_argument("--attitude-udp-ip")
+    parser.add_argument("--attitude-udp-port", type=int)
     parser.add_argument("--ui", dest="ui_enabled", action="store_true", default=None)
     parser.add_argument("--log-level")
     return parser
@@ -185,6 +191,12 @@ def _build_config(merged: dict[str, Any]) -> TelemetryConfig:
     v2_writer_enabled = _require_yaml_bool(merged.get("v2_writer_enabled", True), "v2_writer_enabled")
     if legacy_writer_enabled == v2_writer_enabled:
         raise ValueError("exactly one of legacy_writer_enabled/v2_writer_enabled must be true")
+    attitude_udp_ip = str(merged.get("attitude_udp_ip", "127.0.0.1"))
+    if attitude_udp_ip not in {"127.0.0.1", "localhost"}:
+        raise ValueError("attitude_udp_ip must be localhost-only")
+    attitude_udp_port = int(merged.get("attitude_udp_port", 5011))
+    if not 1 <= attitude_udp_port <= 65535:
+        raise ValueError("attitude_udp_port must be in 1..65535")
     return TelemetryConfig(
         data_source=str(merged["data_source"]),
         active_source=str(merged["active_source"]),
@@ -213,6 +225,11 @@ def _build_config(merged: dict[str, Any]) -> TelemetryConfig:
         legacy_writer_enabled=legacy_writer_enabled,
         v2_writer_enabled=v2_writer_enabled,
         ack_quarantine_ms=max(0, int(merged.get("ack_quarantine_ms", 250))),
+        attitude_udp_enabled=_require_yaml_bool(
+            merged.get("attitude_udp_enabled", False), "attitude_udp_enabled"
+        ),
+        attitude_udp_ip=attitude_udp_ip,
+        attitude_udp_port=attitude_udp_port,
     )
 
 

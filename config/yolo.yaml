@@ -39,6 +39,54 @@ camera_fourcc: "MJPG"
 latest_frame: true
 
 # -----------------------------------------------------------------------------
+# Virtual Nadir Camera V1（仅离线 / SITL 验证）
+# -----------------------------------------------------------------------------
+# 默认关闭时保持 raw frame → tracker 原路径。当前参数由 Gazebo 约 2 rad
+# 宽视场近似推导，不是实机 Charuco / checkerboard 标定结果。
+virtual_nadir:
+  enabled: false
+  yaw_reference_mode: "lock_on_start"
+  debug_compare: false
+
+  attitude:
+    ip: "127.0.0.1"
+    port: 5011
+    source: "sitl"
+    history_ms: 1500
+    max_samples: 128
+    max_sample_distance_ms: 75
+    max_bracket_span_ms: 150
+    future_wait_ms: 40
+
+  camera:
+    width: 640
+    height: 480
+    fx: null
+    fy: null
+    cx: null
+    cy: null
+    fov_x_deg: 114.591559
+    fov_y_deg: 98.864783
+    distortion: [0, 0, 0, 0, 0]
+    # Camera → Body FRD：camera +X→body +Y，+Y→body -X，+Z→body +Z。
+    r_body_camera:
+      - [0, -1, 0]
+      - [1, 0, 0]
+      - [0, 0, 1]
+    approximate_calibration: true
+
+  output:
+    width: 640
+    height: 480
+    fx: null
+    fy: null
+    cx: null
+    cy: null
+    fov_x_deg: 114.591559
+    fov_y_deg: 98.864783
+    border_value: [0, 0, 0]
+
+# -----------------------------------------------------------------------------
 # 目标选择与锁定
 # -----------------------------------------------------------------------------
 # 自动选择主目标策略，可选值：center / biggest / class。

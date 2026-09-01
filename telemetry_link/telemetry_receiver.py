@@ -7,6 +7,7 @@ import time
 from pymavlink import mavutil
 
 try:
+    from .attitude_udp_publisher import AttitudeSample, AttitudeUdpPublisher
     from .config import TelemetryConfig
     from .mavlink_client import MavlinkClient
     from .state_cache import StateCache
@@ -20,6 +21,7 @@ try:
         parse_sys_status_values,
     )
 except ImportError:  # pragma: no cover - supports direct script execution
+    from attitude_udp_publisher import AttitudeSample, AttitudeUdpPublisher
     from config import TelemetryConfig
     from mavlink_client import MavlinkClient
     from state_cache import StateCache
@@ -37,7 +39,7 @@ except ImportError:  # pragma: no cover - supports direct script execution
 class TelemetryReceiver(threading.Thread):
     def __init__(self, client: MavlinkClient, state_cache: StateCache, cfg: TelemetryConfig,
                  stop_event: threading.Event, receiver_generation: int | None = None,
-                 ack_router: object | None = None) -> None:
+                 ack_router: object | None = None, source_name: str | None = None) -> None:
         super().__init__(name="TelemetryReceiver", daemon=True)
         self.client = client
         self.state_cache = state_cache
@@ -45,31 +47,48 @@ class TelemetryReceiver(threading.Thread):
         self.stop_event = stop_event
         self.receiver_generation = receiver_generation
         self.ack_router = ack_router
+        self.source_name = str(source_name or cfg.active_source)
+        self.attitude_publisher = (
+            AttitudeUdpPublisher(
+                cfg.attitude_udp_ip,
+                cfg.attitude_udp_port,
+                source=self.source_name,
+                stop_event=stop_event,
+            )
+            if cfg.attitude_udp_enabled and self.source_name == cfg.active_source
+            else None
+        )
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def run(self) -> None:
         if self.receiver_generation is not None:
             self.state_cache.bind_current_thread_generation(self.receiver_generation)
-        while not self.stop_event.is_set():
-            now = time.time()
-            self._check_timeouts(now)
-            try:
-                message = self.client.recv_message(timeout=0.2)
-            except Exception as exc:
-                self.logger.warning("recv_message failed: %s", exc)
-                time.sleep(self.cfg.receiver_idle_sleep_sec)
-                continue
+        if self.attitude_publisher is not None:
+            self.attitude_publisher.start()
+        try:
+            while not self.stop_event.is_set():
+                now = time.time()
+                self._check_timeouts(now)
+                try:
+                    message = self.client.recv_message(timeout=0.2)
+                except Exception as exc:
+                    self.logger.warning("recv_message failed: %s", exc)
+                    time.sleep(self.cfg.receiver_idle_sleep_sec)
+                    continue
 
-            if message is None:
-                self._check_timeouts(time.time())
-                time.sleep(self.cfg.receiver_idle_sleep_sec)
-                continue
+                if message is None:
+                    self._check_timeouts(time.time())
+                    time.sleep(self.cfg.receiver_idle_sleep_sec)
+                    continue
 
-            now = time.time()
-            msg_type = message.get_type()
-            self.state_cache.update_link(last_rx_time=now)
-            self.state_cache.update_state(last_message_type=msg_type)
-            self._handle_message(msg_type, message, now)
+                now = time.time()
+                msg_type = message.get_type()
+                self.state_cache.update_link(last_rx_time=now)
+                self.state_cache.update_state(last_message_type=msg_type)
+                self._handle_message(msg_type, message, now)
+        finally:
+            if self.attitude_publisher is not None:
+                self.attitude_publisher.close()
 
     def _check_timeouts(self, now: float) -> None:
         expire = getattr(self.ack_router, "expire", None)
@@ -126,6 +145,7 @@ class TelemetryReceiver(threading.Thread):
             return
 
         if msg_type == "ATTITUDE":
+            received_at_monotonic_ns = time.monotonic_ns()
             self.state_cache.update_drone_state(
                 attitude_valid=True,
                 roll=float(message.roll),
@@ -136,6 +156,19 @@ class TelemetryReceiver(threading.Thread):
                 yaw_rate=float(message.yawspeed),
                 last_attitude_time=now,
             )
+            if self.attitude_publisher is not None:
+                publication = self.state_cache.atomic_publication(now)
+                self.attitude_publisher.offer(AttitudeSample(
+                    source=self.source_name,
+                    link_session_id=str(publication["session_id"]),
+                    received_at_monotonic_ns=received_at_monotonic_ns,
+                    roll_rad=float(message.roll),
+                    pitch_rad=float(message.pitch),
+                    yaw_rad=float(message.yaw),
+                    roll_rate_rad_s=float(message.rollspeed),
+                    pitch_rate_rad_s=float(message.pitchspeed),
+                    yaw_rate_rad_s=float(message.yawspeed),
+                ))
             return
 
         if msg_type == "EXTENDED_SYS_STATE":

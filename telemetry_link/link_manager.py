@@ -177,7 +177,7 @@ class SourceRuntime:
                     writer.ack_router = self.ack_router
                     self.receiver = TelemetryReceiver(
                         self.client, self.state_cache, self.cfg, self.worker_stop_event,
-                        receiver_generation, self.ack_router,
+                        receiver_generation, self.ack_router, self.name,
                     )
                     self.receiver.start()
                     self.broker_worker = CommandBrokerWorker(
@@ -203,7 +203,7 @@ class SourceRuntime:
                 if self.receiver is None:
                     self.receiver = TelemetryReceiver(
                         self.client, self.state_cache, self.cfg, self.worker_stop_event,
-                        receiver_generation, self.ack_router,
+                        receiver_generation, self.ack_router, self.name,
                     )
                     self.receiver.start()
                 logger.info("source=%s Reconnected successfully", self.name)

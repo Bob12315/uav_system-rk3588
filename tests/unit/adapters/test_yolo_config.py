@@ -98,3 +98,71 @@ def test_cli_bool_override_is_parsed(tmp_path: Path, monkeypatch) -> None:
     cfg = load_config()
 
     assert cfg.save_video is False
+
+
+def test_virtual_nadir_defaults_disabled_with_approximate_calibration(
+    tmp_path: Path, monkeypatch
+) -> None:
+    path = _write_config(tmp_path, _config())
+    monkeypatch.setattr("sys.argv", ["yolo", "--config", str(path)])
+
+    cfg = load_config()
+
+    assert cfg.virtual_nadir.enabled is False
+    assert cfg.virtual_nadir.yaw_reference_mode == "lock_on_start"
+    assert cfg.virtual_nadir.camera.approximate_calibration is True
+    assert cfg.virtual_nadir.camera.r_body_camera == (
+        (0.0, -1.0, 0.0),
+        (1.0, 0.0, 0.0),
+        (0.0, 0.0, 1.0),
+    )
+
+
+def test_virtual_nadir_reads_explicit_camera_and_output_k(tmp_path: Path, monkeypatch) -> None:
+    data = _config()
+    data["virtual_nadir"] = {
+        "enabled": True,
+        "yaw_reference_mode": "lock_on_start",
+        "debug_compare": True,
+        "attitude": {"source": "test", "future_wait_ms": 0},
+        "camera": {
+            "width": 640,
+            "height": 480,
+            "fx": 300,
+            "fy": 301,
+            "cx": 320,
+            "cy": 240,
+            "distortion": [0.1, -0.01, 0, 0, 0],
+            "r_body_camera": [[0, -1, 0], [1, 0, 0], [0, 0, 1]],
+            "approximate_calibration": False,
+        },
+        "output": {
+            "width": 640,
+            "height": 480,
+            "fx": 280,
+            "fy": 281,
+            "cx": 320,
+            "cy": 240,
+        },
+    }
+    path = _write_config(tmp_path, data)
+    monkeypatch.setattr("sys.argv", ["yolo", "--config", str(path)])
+
+    cfg = load_config()
+
+    assert cfg.virtual_nadir.enabled is True
+    assert cfg.virtual_nadir.debug_compare is True
+    assert cfg.virtual_nadir.attitude.source == "test"
+    assert cfg.virtual_nadir.camera.fx == 300.0
+    assert cfg.virtual_nadir.camera.distortion[0] == pytest.approx(0.1)
+    assert cfg.virtual_nadir.output.fy == 281.0
+
+
+def test_virtual_nadir_rejects_non_localhost_attitude(tmp_path: Path, monkeypatch) -> None:
+    data = _config()
+    data["virtual_nadir"] = {"enabled": True, "attitude": {"ip": "0.0.0.0"}}
+    path = _write_config(tmp_path, data)
+    monkeypatch.setattr("sys.argv", ["yolo", "--config", str(path)])
+
+    with pytest.raises(ValueError, match="localhost-only"):
+        load_config()
