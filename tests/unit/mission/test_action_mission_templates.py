@@ -59,6 +59,18 @@ def test_drop_flow_is_explicit_and_preserves_payload_order_and_stop_boundary() -
         index = steps.index(release)
         assert steps[index - 1]["name"] == "align_descend"
         assert steps[index + 1]["name"] == "goto_waypoint"
+    labels = {step["label"]: index for index, step in enumerate(steps) if step.get("label")}
+    locks = [step for step in steps if step["name"] == "gps_target_lock"]
+    aligns = [step for step in steps if step["name"] == "align_descend"]
+    assert [step["save_as"] for step in locks] == ["drop_1_lock", "drop_2_lock"]
+    assert [step["params"]["track_id"] for step in aligns] == [
+        "$drop_1_lock.locked_track_id", "$drop_2_lock.locked_track_id",
+    ]
+    for step in locks:
+        assert step["params"]["require_track_id"] is True
+        assert step["params"]["require_class_match"] is True
+        assert step["params"]["require_lock_confirmation"] is True
+        assert labels[step["on_failed"]["target"]] > steps.index(step)
 
 
 def test_recon_flow_contains_only_navigation_actions() -> None:
@@ -82,6 +94,22 @@ def test_full_flow_replaces_visual_land_composite_with_atomic_steps() -> None:
     assert final_h_lock["require_unique_track"] is True
     assert final_h_lock["max_target_age_s"] == 0.5
     assert steps[-2]["params"]["track_id"] == "$final_h_lock.locked_track_id"
+    drop_locks = [step for step in steps if step["name"] == "gps_target_lock"]
+    drop_aligns = [step for step in steps if step["name"] == "align_descend" and step["label"].startswith("drop_")]
+    assert [step["save_as"] for step in drop_locks] == ["drop_1_lock", "drop_2_lock"]
+    assert [step["params"]["track_id"] for step in drop_aligns] == [
+        "$drop_1_lock.locked_track_id", "$drop_2_lock.locked_track_id",
+    ]
+    for step in drop_locks:
+        assert step["params"]["require_track_id"] is True
+        assert step["params"]["require_class_match"] is False
+        assert step["params"]["require_lock_confirmation"] is True
+        assert step["params"]["selection_mode"] == "nearest_image_center"
+        assert "max_match_distance_m" not in step["params"]
+        assert "min_match_margin_m" not in step["params"]
+        assert step["on_failed"]["action"] == "jump_to"
+    approaches = [step for step in steps if step.get("label") in {"drop_1_approach", "drop_2_approach"}]
+    assert [step["params"]["altitude_m"] for step in approaches] == [2.5, 2.5]
     captures = [index for index, step in enumerate(steps) if step["name"] == "gps_capture_view"]
     for capture_index in captures:
         scan_goto = steps[capture_index - 1]
@@ -104,11 +132,10 @@ def test_full_flow_uses_the_fixed_down_sitl_camera_and_payload_contract() -> Non
     for step in steps:
         if step["name"] in {"gps_capture_view", "gps_target_lock", "target_lock"}:
             assert step["params"]["camera"] == camera
-        if step["name"] == "align_descend" and "fov_x_deg" in step["params"].get("config", {}):
-            assert step["params"]["config"].get("fov_x_deg") == camera["fov_x_deg"]
-            assert step["params"]["config"].get("fov_y_deg") == camera["fov_y_deg"]
-            assert step["params"]["config"].get("image_x_sign") == camera["image_x_sign"]
-            assert step["params"]["config"].get("image_y_sign") == camera["image_y_sign"]
+        if step["name"] == "align_descend":
+            assert "config" not in step["params"]
+            if step["label"].startswith("drop_"):
+                assert step["params"]["camera"] == camera
 
     releases = [step["params"] for step in steps if step["name"] == "payload_release"]
     assert [release["servo_outputs"] for release in releases] == [

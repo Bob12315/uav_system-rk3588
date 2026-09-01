@@ -25,7 +25,7 @@ CUDA、PyTorch GPU 或其他 YOLO 推理替代路径。
 开始前阅读：
 
 1. 仓库根目录 `AGENTS.md` 和 `README.md`；
-2. [`docs/beginner/05_sitl_test.md`](../../beginner/05_sitl_test.md)；
+2. [`docs/beginner/04_sitl_test.md`](../../beginner/04_sitl_test.md)；
 3. [`docs/developer/platform_support.md`](../../developer/platform_support.md)；
 4. 本文件引用的 Gazebo 和 ArduPilot 官方安装文档。
 
@@ -286,7 +286,7 @@ payload bridge 或 RTP relay 的单独报错不应掩盖 Gazebo/SITL 的核心�
 - GStreamer 验证结果；
 - 新增或修改过的 apt 源、shell 配置和代理/镜像临时措施，以及恢复方法；
 - 未完成事项、原始错误摘要和需要人工处理的内容；
-- 下一步如何按照 [`docs/beginner/05_sitl_test.md`](../../beginner/05_sitl_test.md)
+- 下一步如何按照 [`docs/beginner/04_sitl_test.md`](../../beginner/04_sitl_test.md)
   连接 RK3588，且明确提醒实际 IP 不能照抄示例。
 
 不要只报告“安装成功”。每一项都给出实际执行的验证命令、关键结果或失败证据。

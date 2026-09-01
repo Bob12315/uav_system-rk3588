@@ -1,4 +1,4 @@
-# 04：RK3588 环境配置
+# 03：RK3588 环境配置
 
 ## 本章目标
 
@@ -204,4 +204,4 @@ Conda、Git 改动、代理配置或 shell 配置。
 - [ ] MAVLink 可以只读获取飞控状态
 - [ ] `executor.send_commands` 仍然为 `false`
 
-**下一章：[SITL 测试](05_sitl_test.md)**
+**下一章：[SITL 测试](04_sitl_test.md)**

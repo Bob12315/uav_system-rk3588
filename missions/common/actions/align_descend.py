@@ -94,6 +94,18 @@ class AlignDescendAction(ActionModule):
         self.vy_sign = self._signed(data.get("vy_sign", legacy.get("vy_sign", 1.0)), "vy_sign")
         self.field_yaw_deg = self._finite(data.get("field_yaw_deg", 0.0), "field_yaw_deg")
         self.desired_yaw_deg = self._optional_finite(data.get("desired_yaw_deg"))
+        self.payload_forward_m = self._finite(data.get("payload_forward_m", 0.0), "payload_forward_m")
+        self.payload_right_m = self._finite(data.get("payload_right_m", 0.0), "payload_right_m")
+        self.min_correction_speed_mps = self._non_negative(
+            data.get("min_correction_speed_mps", 0.0), "min_correction_speed_mps"
+        )
+        if self.min_correction_speed_mps > min(max_vx, max_vy):
+            raise ValueError("min_correction_speed_mps must not exceed horizontal velocity limits")
+        camera = data.get("camera") if isinstance(data.get("camera"), dict) else {}
+        self.camera_fov_x_deg = self._fov(camera.get("fov_x_deg", 114.591559), "camera.fov_x_deg")
+        self.camera_fov_y_deg = self._fov(camera.get("fov_y_deg", 98.864783), "camera.fov_y_deg")
+        self.camera_image_x_sign = self._unit_sign(camera.get("image_x_sign", 1.0), "camera.image_x_sign")
+        self.camera_image_y_sign = self._unit_sign(camera.get("image_y_sign", -1.0), "camera.image_y_sign")
         self.started_at = time.monotonic()
         self.last_update_at: float | None = None
         self.aligned_since: float | None = None
@@ -117,7 +129,7 @@ class AlignDescendAction(ActionModule):
         if target is None:
             return self._terminal(False, reason, yaw_rad=yaw)
         altitude = self._altitude(data)
-        if altitude is None:
+        if altitude is None or altitude <= 0.0:
             return self._terminal(False, "altitude_unavailable", yaw_rad=yaw)
         if not self._control_allowed(data):
             return self._terminal(False, "control_not_allowed", yaw_rad=yaw)
@@ -125,10 +137,14 @@ class AlignDescendAction(ActionModule):
         dt_s = 0.0 if self.last_update_at is None else min(0.25, max(0.0, now - self.last_update_at))
         self.last_update_at = now
         ex, ey = target["ex"], target["ey"]
-        vx = self.vx_sign * self.pid_forward.step(ey, dt_s)
-        vy = self.vy_sign * self.pid_right.step(ex, dt_s)
-        within_descent = abs(ex) <= self.descent_deadband_ex and abs(ey) <= self.descent_deadband_ey
-        within_release = abs(ex) <= self.release_deadband_ex and abs(ey) <= self.release_deadband_ey
+        desired_ex, desired_ey = self._payload_image_setpoint(altitude)
+        error_ex, error_ey = ex - desired_ex, ey - desired_ey
+        vx = self.vx_sign * self.pid_forward.step(error_ey, dt_s)
+        vy = self.vy_sign * self.pid_right.step(error_ex, dt_s)
+        vx = self._minimum_effective(vx, error_ey, self.release_deadband_ey)
+        vy = self._minimum_effective(vy, error_ex, self.release_deadband_ex)
+        within_descent = abs(error_ex) <= self.descent_deadband_ex and abs(error_ey) <= self.descent_deadband_ey
+        within_release = abs(error_ex) <= self.release_deadband_ex and abs(error_ey) <= self.release_deadband_ey
 
         if altitude <= self.target_altitude_m:
             if within_release:
@@ -165,6 +181,10 @@ class AlignDescendAction(ActionModule):
         self.max_target_age_s = 0.5
         self.priority, self.key = 5, "align_descend"
         self.field_yaw_deg, self.desired_yaw_deg = 0.0, None
+        self.payload_forward_m = self.payload_right_m = 0.0
+        self.min_correction_speed_mps = 0.0
+        self.camera_fov_x_deg, self.camera_fov_y_deg = 114.591559, 98.864783
+        self.camera_image_x_sign, self.camera_image_y_sign = 1.0, -1.0
         self.pid_forward = _Pid(0.3, 0.0, 0.0, 0.25)
         self.pid_right = _Pid(0.3, 0.0, 0.0, 0.25)
         self.vx_sign = self.vy_sign = 1.0
@@ -231,6 +251,24 @@ class AlignDescendAction(ActionModule):
             key=f"{self.key}_body", priority=self.priority, once=False,
         )
 
+    def _payload_image_setpoint(self, altitude_m: float) -> tuple[float, float]:
+        """Return where the target must appear for the payload point to be above it."""
+        scale_x = altitude_m * math.tan(math.radians(self.camera_fov_x_deg) / 2.0)
+        scale_y = altitude_m * math.tan(math.radians(self.camera_fov_y_deg) / 2.0)
+        desired_ex = self.payload_right_m / (self.camera_image_x_sign * scale_x)
+        desired_ey = self.payload_forward_m / (self.camera_image_y_sign * scale_y)
+        return desired_ex, desired_ey
+
+    def _minimum_effective(self, command: float, error: float, deadband: float) -> float:
+        if (
+            self.min_correction_speed_mps <= 0.0
+            or abs(error) <= deadband
+            or command == 0.0
+            or abs(command) >= self.min_correction_speed_mps
+        ):
+            return command
+        return math.copysign(self.min_correction_speed_mps, command)
+
     def _terminal(self, done: bool, reason: str, *, yaw_rad: float, altitude_m: float | None = None, target: dict[str, float] | None = None) -> ActionResult:
         self.pid_forward.reset()
         self.pid_right.reset()
@@ -238,8 +276,18 @@ class AlignDescendAction(ActionModule):
         return ActionResult(effects=(self._command(0.0, 0.0, 0.0, yaw_rad),), done=done, failed=not done, reason=reason, detail=detail)
 
     def _detail(self, reason, target, altitude, yaw, vx, vy, vz, descent_ok, release_ok) -> dict[str, Any]:
+        desired_ex = desired_ey = error_ex = error_ey = None
+        if altitude is not None and altitude > 0.0:
+            desired_ex, desired_ey = self._payload_image_setpoint(altitude)
+        if target is not None and desired_ex is not None and desired_ey is not None:
+            error_ex = target["ex"] - desired_ex
+            error_ey = target["ey"] - desired_ey
         return {"state": reason, "target_track_id": None if target is None else int(target["track_id"]),
                 "ex": None if target is None else target["ex"], "ey": None if target is None else target["ey"],
+                "desired_ex": desired_ex, "desired_ey": desired_ey,
+                "alignment_error_ex": error_ex, "alignment_error_ey": error_ey,
+                "payload_forward_m": self.payload_forward_m, "payload_right_m": self.payload_right_m,
+                "min_correction_speed_mps": self.min_correction_speed_mps,
                 "altitude_m": altitude, "target_altitude_m": self.target_altitude_m,
                 "yaw_rad": yaw, "yaw_deg": math.degrees(yaw) % 360.0,
                 "vx_forward_mps": vx, "vy_right_mps": vy, "vz_down_mps": vz,
@@ -283,6 +331,20 @@ class AlignDescendAction(ActionModule):
         result = cls._finite(value, name)
         if result == 0.0:
             raise ValueError(f"{name} must not be 0")
+        return result
+
+    @classmethod
+    def _unit_sign(cls, value: Any, name: str) -> float:
+        result = cls._finite(value, name)
+        if result not in {-1.0, 1.0}:
+            raise ValueError(f"{name} must be -1 or 1")
+        return result
+
+    @classmethod
+    def _fov(cls, value: Any, name: str) -> float:
+        result = cls._finite(value, name)
+        if not 0.0 < result < 180.0:
+            raise ValueError(f"{name} must be in (0, 180)")
         return result
 
     @staticmethod

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import math
 
+import pytest
+
 from contracts.effects import FlightCommand
 from missions.common.actions.align_descend import AlignDescendAction
 
@@ -87,3 +89,65 @@ def test_timeout_fails_safe_and_never_marks_release_ready() -> None:
     assert result.reason == "align_descend_timeout"
     command = _command(result)
     assert command.params["vx_cmd"] == command.params["vy_cmd"] == command.params["vz_cmd"] == 0.0
+
+
+def test_payload_offset_uses_height_and_camera_geometry_as_alignment_setpoint() -> None:
+    action = AlignDescendAction()
+    action.start({
+        "track_id": 42,
+        "target_altitude_m": 1.0,
+        "payload_forward_m": -0.1,
+        "payload_right_m": 0.2,
+        "min_correction_speed_mps": 0.035,
+        "camera": {
+            "fov_x_deg": 90.0,
+            "fov_y_deg": 90.0,
+            "image_x_sign": 1.0,
+            "image_y_sign": -1.0,
+        },
+        "descent_deadband_ex": 0.05,
+        "descent_deadband_ey": 0.05,
+        "release_deadband_ex": 0.05,
+        "release_deadband_ey": 0.05,
+    })
+
+    result = action.update(_context(ex=0.2, ey=0.1, altitude_m=2.0))
+
+    # At 2 m with a 90-degree FOV, the 0.2 m / -0.1 m offsets map to
+    # desired ex=0.1 and ey=0.05.  The remaining error is still too large
+    # to permit descent.
+    assert result.reason == "aligning"
+    assert result.detail["desired_ex"] == pytest.approx(0.1)
+    assert result.detail["desired_ey"] == pytest.approx(0.05)
+    assert result.detail["alignment_error_ex"] == pytest.approx(0.1)
+    assert result.detail["alignment_error_ey"] == pytest.approx(0.05)
+    command = _command(result)
+    assert command.params["vx_cmd"] == pytest.approx(-0.035)
+    assert command.params["vy_cmd"] == pytest.approx(0.035)
+    assert command.params["vz_cmd"] == 0.0
+
+
+def test_payload_offset_completes_with_target_at_payload_point_not_image_center() -> None:
+    action = AlignDescendAction()
+    action.start({
+        "track_id": 42,
+        "target_altitude_m": 1.0,
+        "payload_forward_m": -0.1,
+        "payload_right_m": 0.2,
+        "camera": {
+            "fov_x_deg": 90.0,
+            "fov_y_deg": 90.0,
+            "image_x_sign": 1.0,
+            "image_y_sign": -1.0,
+        },
+        "release_deadband_ex": 0.05,
+        "release_deadband_ey": 0.05,
+    })
+
+    centred = action.update(_context(ex=0.0, ey=0.0, altitude_m=1.0))
+    assert not centred.done and centred.reason == "final_align"
+
+    aligned = action.update(_context(ex=0.2, ey=0.1, altitude_m=1.0))
+    assert aligned.done and aligned.reason == "ready_to_release"
+    assert aligned.detail["desired_ex"] == pytest.approx(0.2)
+    assert aligned.detail["desired_ey"] == pytest.approx(0.1)

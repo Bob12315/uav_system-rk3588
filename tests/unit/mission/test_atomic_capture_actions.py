@@ -4,8 +4,8 @@ import pytest
 
 from missions.common.actions.gps_capture_view import GpsCaptureViewAction
 from missions.common.actions.gps_fuse_views import _output_item
-from guidance.gps_derived_enu_fusion import GpsLocalizedObject
-from guidance.target_projection import GpsProjectionCamera, GpsTargetProjector
+from guidance.gps_derived_enu_fusion import GpsDerivedEnuFusion, GpsFusionConfig, GpsLocalizedObject
+from guidance.target_projection import GpsProjectionCamera, GpsRawEstimate, GpsTargetProjector
 
 
 def test_gps_capture_view_projects_without_effects() -> None:
@@ -53,3 +53,27 @@ def test_gps_fuse_output_uses_json_arrays_for_source_metadata() -> None:
     assert output["source_frames"] == [101, 102]
     assert output["seen_count"] == 2
     assert output["count"] == 2
+
+
+def test_gps_fusion_requires_distinct_source_waypoints_when_configured() -> None:
+    def estimate(source_waypoint: str) -> GpsRawEstimate:
+        return GpsRawEstimate(
+            lat=34.0, lon=108.0, east_offset_m=0.0, north_offset_m=0.0,
+            capture_drone_lat=34.0, capture_drone_lon=108.0,
+            capture_yaw_rad=0.0, capture_relative_altitude_m=4.0,
+            ex=0.0, ey=0.0, class_name="bucket_1", confidence=0.9,
+            source_waypoint=source_waypoint,
+        )
+
+    fusion = GpsDerivedEnuFusion(
+        origin_lat=34.0,
+        origin_lon=108.0,
+        config=GpsFusionConfig(min_cluster_size=3, min_source_waypoints=3),
+        class_names={"bucket_1"},
+    )
+
+    assert fusion.fuse([estimate("VIEW_1"), estimate("VIEW_1"), estimate("VIEW_2")]) == []
+    accepted = fusion.fuse([estimate("VIEW_1"), estimate("VIEW_2"), estimate("VIEW_3")])
+    assert len(accepted) == 1
+    assert accepted[0].source_waypoints == ("VIEW_1", "VIEW_2", "VIEW_3")
+    assert accepted[0].weight > 0.0

@@ -231,6 +231,7 @@
           "cluster_radius_m": 0.65,
           "outlier_radius_m": 0.65,
           "min_cluster_size": 3,
+          "min_source_waypoints": 3,
           "center_weight_power": 1,
           "max_abs_ex": 0.8,
           "max_abs_ey": 0.65
@@ -291,7 +292,7 @@
       "params": {
         "lat": "$drop_targets.target_slots.0.lat",
         "lon": "$drop_targets.target_slots.0.lon",
-        "altitude_m": 3.5,
+        "altitude_m": 2.5,
         "target_frame": "global",
         "waypoint_mode": "absolute",
         "yaw_mode": "hold",
@@ -308,17 +309,21 @@
     {
       "name": "gps_target_lock",
       "label": "drop_1_lock",
+      "save_as": "drop_1_lock",
       "on_failed": {
-        "action": "continue"
+        "action": "jump_to",
+        "target": "restore_return_speed_2mps",
+        "max_attempts": 1
       },
       "params": {
         "target": "$drop_targets.target_slots.0",
         "max_updates": 6,
-        "max_match_distance_m": 3,
-        "try_next_target_on_failure": true,
-        "direct_release_when_exhausted": true,
+        "selection_mode": "nearest_image_center",
         "min_confidence": 0.75,
-        "require_track_id": false,
+        "require_track_id": true,
+        "require_class_match": false,
+        "require_lock_confirmation": true,
+        "max_target_age_s": 0.5,
         "class_names": [
           "bucket_1",
           "bucket_2",
@@ -343,96 +348,34 @@
         "max_attempts": 1
       },
       "params": {
-        "expected_dt_s": 0.1,
-        "lost_timeout_updates": 10,
-        "hold_updates_required": 1,
-        "max_retries": 1,
-        "max_updates": 150,
-        "finish_policy": "latched_center_alignment",
-        "finish_alignment_max_ex_cam": 0.18,
-        "finish_alignment_max_ey_cam": 0.18,
-        "finish_alignment_hold_updates": 2,
-        "finish_alignment_timeout_s": 1,
-        "config": {
-          "kp_vx": 0.3,
-          "kp_vy": 0.3,
-          "max_vx_mps": 0.25,
-          "max_vy_mps": 0.25,
-          "height_gain_enabled": true,
-          "height_gain_mode": "points",
-          "height_scale_points": [
-            {
-              "altitude_m": 1,
-              "scale": 0.4
-            },
-            {
-              "altitude_m": 1.3,
-              "scale": 0.4
-            },
-            {
-              "altitude_m": 2.4,
-              "scale": 0.65
-            },
-            {
-              "altitude_m": 3.5,
-              "scale": 0.65
-            },
-            {
-              "altitude_m": 4.5,
-              "scale": 0.65
-            }
-          ],
-          "scale_max_velocity_with_height": true,
-          "descend_speed_mps": 0.3,
-          "slow_descend_speed_mps": 0.14,
-          "descent_speed_stages": [
-            {
-              "max_altitude_m": 2.4,
-              "max_descend_speed_mps": 0.18
-            },
-            {
-              "max_altitude_m": 3.2,
-              "max_descend_speed_mps": 0.24
-            },
-            {
-              "max_altitude_m": 3.5,
-              "max_descend_speed_mps": 0.3
-            }
-          ],
-          "max_ex_cam": 0.16,
-          "max_ey_cam": 0.16,
-          "slow_descend_max_ex_cam": 0.35,
-          "slow_descend_max_ey_cam": 0.35,
-          "deadband_ex_cam": 0.04,
-          "deadband_ey_cam": 0.04,
-          "integral_enabled": true,
-          "integral_active_below_altitude_m": 1.6,
-          "ki_vx": 0.04,
-          "ki_vy": 0.04,
-          "integral_vx_limit_mps": 0.03,
-          "integral_vy_limit_mps": 0.03,
-          "min_effective_speed_enabled": true,
-          "min_effective_speed_active_below_altitude_m": 1.6,
-          "min_effective_speed_mps": 0.035,
-          "min_effective_speed_ex_threshold": 0.12,
-          "min_effective_speed_ey_threshold": 0.16,
-          "target_loss_grace_updates": 1,
-          "target_loss_grace_horizontal_scale": 0.5,
-          "min_altitude_m": 1.2,
-          "require_target_locked": false,
-          "payload_offset_enabled": true,
-          "descent_gate_policy": "aligned_or_slow",
-          "unaligned_descend_speed_mps": 0,
+        "track_id": "$drop_1_lock.locked_track_id",
+        "target_altitude_m": 1.2,
+        "max_duration_s": 30,
+        "max_target_age_s": 0.5,
+        "descend_speed_mps": 0.3,
+        "descent_deadband_ex": 0.16,
+        "descent_deadband_ey": 0.16,
+        "release_deadband_ex": 0.02,
+        "release_deadband_ey": 0.02,
+        "alignment_hold_s": 0.2,
+        "min_correction_speed_mps": 0.035,
+        "kp_forward": 0.3,
+        "kp_right": 0.3,
+        "max_vx_mps": 0.25,
+        "max_vy_mps": 0.25,
+        "vx_sign": -1,
+        "vy_sign": 1,
+        "payload_forward_m": -0.06,
+        "payload_right_m": 0,
+        "camera": {
           "fov_x_deg": 114.591559,
           "fov_y_deg": 98.864783,
           "image_x_sign": 1,
-          "image_y_sign": -1,
-          "max_payload_offset_ex_cam": 0.8,
-          "max_payload_offset_ey_cam": 0.8,
-          "payload_forward_m": -0.06,
-          "payload_right_m": 0
+          "image_y_sign": -1
         },
-        "finish_altitude_m": 1.2
+        "field_yaw_deg": 0,
+        "priority": 5,
+        "key": "drop_1_align"
       }
     },
     {
@@ -493,7 +436,7 @@
       "params": {
         "lat": "$drop_targets.target_slots.1.lat",
         "lon": "$drop_targets.target_slots.1.lon",
-        "altitude_m": 3.5,
+        "altitude_m": 2.5,
         "target_frame": "global",
         "waypoint_mode": "absolute",
         "yaw_mode": "hold",
@@ -510,17 +453,21 @@
     {
       "name": "gps_target_lock",
       "label": "drop_2_lock",
+      "save_as": "drop_2_lock",
       "on_failed": {
-        "action": "continue"
+        "action": "jump_to",
+        "target": "restore_return_speed_2mps",
+        "max_attempts": 1
       },
       "params": {
         "target": "$drop_targets.target_slots.1",
         "max_updates": 6,
-        "max_match_distance_m": 3,
-        "try_next_target_on_failure": true,
-        "direct_release_when_exhausted": true,
+        "selection_mode": "nearest_image_center",
         "min_confidence": 0.75,
-        "require_track_id": false,
+        "require_track_id": true,
+        "require_class_match": false,
+        "require_lock_confirmation": true,
+        "max_target_age_s": 0.5,
         "class_names": [
           "bucket_1",
           "bucket_2",
@@ -545,96 +492,34 @@
         "max_attempts": 1
       },
       "params": {
-        "expected_dt_s": 0.1,
-        "lost_timeout_updates": 10,
-        "hold_updates_required": 1,
-        "max_retries": 1,
-        "max_updates": 150,
-        "finish_policy": "latched_center_alignment",
-        "finish_alignment_max_ex_cam": 0.18,
-        "finish_alignment_max_ey_cam": 0.18,
-        "finish_alignment_hold_updates": 2,
-        "finish_alignment_timeout_s": 1,
-        "config": {
-          "kp_vx": 0.3,
-          "kp_vy": 0.3,
-          "max_vx_mps": 0.25,
-          "max_vy_mps": 0.25,
-          "height_gain_enabled": true,
-          "height_gain_mode": "points",
-          "height_scale_points": [
-            {
-              "altitude_m": 1,
-              "scale": 0.4
-            },
-            {
-              "altitude_m": 1.3,
-              "scale": 0.4
-            },
-            {
-              "altitude_m": 2.4,
-              "scale": 0.65
-            },
-            {
-              "altitude_m": 3.5,
-              "scale": 0.65
-            },
-            {
-              "altitude_m": 4.5,
-              "scale": 0.65
-            }
-          ],
-          "scale_max_velocity_with_height": true,
-          "descend_speed_mps": 0.3,
-          "slow_descend_speed_mps": 0.14,
-          "descent_speed_stages": [
-            {
-              "max_altitude_m": 2.4,
-              "max_descend_speed_mps": 0.18
-            },
-            {
-              "max_altitude_m": 3.2,
-              "max_descend_speed_mps": 0.24
-            },
-            {
-              "max_altitude_m": 3.5,
-              "max_descend_speed_mps": 0.3
-            }
-          ],
-          "max_ex_cam": 0.16,
-          "max_ey_cam": 0.16,
-          "slow_descend_max_ex_cam": 0.35,
-          "slow_descend_max_ey_cam": 0.35,
-          "deadband_ex_cam": 0.04,
-          "deadband_ey_cam": 0.04,
-          "integral_enabled": true,
-          "integral_active_below_altitude_m": 1.6,
-          "ki_vx": 0.04,
-          "ki_vy": 0.04,
-          "integral_vx_limit_mps": 0.03,
-          "integral_vy_limit_mps": 0.03,
-          "min_effective_speed_enabled": true,
-          "min_effective_speed_active_below_altitude_m": 1.6,
-          "min_effective_speed_mps": 0.035,
-          "min_effective_speed_ex_threshold": 0.12,
-          "min_effective_speed_ey_threshold": 0.16,
-          "target_loss_grace_updates": 1,
-          "target_loss_grace_horizontal_scale": 0.5,
-          "min_altitude_m": 1.2,
-          "require_target_locked": false,
-          "payload_offset_enabled": true,
-          "descent_gate_policy": "aligned_or_slow",
-          "unaligned_descend_speed_mps": 0,
+        "track_id": "$drop_2_lock.locked_track_id",
+        "target_altitude_m": 1.2,
+        "max_duration_s": 30,
+        "max_target_age_s": 0.5,
+        "descend_speed_mps": 0.3,
+        "descent_deadband_ex": 0.16,
+        "descent_deadband_ey": 0.16,
+        "release_deadband_ex": 0.02,
+        "release_deadband_ey": 0.02,
+        "alignment_hold_s": 0.2,
+        "min_correction_speed_mps": 0.035,
+        "kp_forward": 0.3,
+        "kp_right": 0.3,
+        "max_vx_mps": 0.25,
+        "max_vy_mps": 0.25,
+        "vx_sign": -1,
+        "vy_sign": 1,
+        "payload_forward_m": 0.06,
+        "payload_right_m": 0,
+        "camera": {
           "fov_x_deg": 114.591559,
           "fov_y_deg": 98.864783,
           "image_x_sign": 1,
-          "image_y_sign": -1,
-          "max_payload_offset_ex_cam": 0.8,
-          "max_payload_offset_ey_cam": 0.8,
-          "payload_forward_m": 0.06,
-          "payload_right_m": 0
+          "image_y_sign": -1
         },
-        "finish_altitude_m": 1.2
+        "field_yaw_deg": 0,
+        "priority": 5,
+        "key": "drop_2_align"
       }
     },
     {
@@ -932,25 +817,24 @@
       },
       "params": {
         "track_id": "$final_h_lock.locked_track_id",
-        "finish_altitude_m": 0.3,
-        "finish_policy": "legacy",
-        "max_updates": 300,
-        "config": {
-          "kp_vx": 0.3,
-          "kp_vy": 0.3,
-          "max_vx_mps": 0.3,
-          "max_vy_mps": 0.3,
-          "descend_speed_mps": 0.3,
-          "max_ex_cam": 0.3,
-          "max_ey_cam": 0.3,
-          "deadband_ex_cam": 0,
-          "deadband_ey_cam": 0,
-          "min_altitude_m": 0.3,
-          "require_target_locked": false,
-          "altitude_source": "local_ned",
-          "target_loss_policy": "continue_descent",
-          "target_loss_descend_speed_mps": 0.3
-        }
+        "target_altitude_m": 0.3,
+        "max_duration_s": 30,
+        "max_target_age_s": 0.5,
+        "descend_speed_mps": 0.3,
+        "descent_deadband_ex": 0.3,
+        "descent_deadband_ey": 0.3,
+        "release_deadband_ex": 0.3,
+        "release_deadband_ey": 0.3,
+        "alignment_hold_s": 0.2,
+        "kp_forward": 0.3,
+        "kp_right": 0.3,
+        "max_vx_mps": 0.3,
+        "max_vy_mps": 0.3,
+        "vx_sign": -1,
+        "vy_sign": 1,
+        "field_yaw_deg": 0,
+        "priority": 5,
+        "key": "final_land_align"
       }
     },
     {

@@ -39,9 +39,10 @@ BODY_NED 速度不经过 FIELD 坐标转换。
 `ey_norm` 经 `image_y_sign=-1` 映射到机体后方/LOCAL_NED 南向偏移。不要恢复只影响
 显示的 mirror、输入层 mirror 或历史 `vy_sign=-1.0` 修正。
 
-对准下降直接以检测器的原始 `ey_norm` 计算机体前后速度：默认
-`vx_sign=-1.0`，即目标在画面上方（负 `ey_norm`）时向前飞，目标在画面下方时向后飞。
-横向仍为 `vy_sign=1.0`。相机安装发生变化时，可在该 Action 参数中显式覆盖这两个符号。
+对准下降先根据载荷释放点相对相机的机体前/右偏移和当前高度，计算目标在画面中的期望
+`desired_ex/desired_ey`，再以 `ex_norm-desired_ex`、`ey_norm-desired_ey` 控制机体速度。
+零载荷偏移时等价于直接使用原始误差。默认 `vx_sign=-1.0`，即目标相对期望位置偏上时
+向前飞；横向为 `vy_sign=1.0`。相机安装发生变化时，可在该 Action 参数中显式覆盖符号。
 
 ## FIELD
 

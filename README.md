@@ -176,9 +176,9 @@ ArduPilot
 
 1. [前言](docs/beginner/01_preface.md)
 2. [配置清单](docs/beginner/02_hardware_bom.md)
-3. [RK3588 环境配置](docs/beginner/04_rk3588_setup.md)
-4. [SITL 测试](docs/beginner/05_sitl_test.md)
-5. [实飞测试](docs/beginner/06_flight_test.md)
+3. [RK3588 环境配置](docs/beginner/03_rk3588_setup.md)
+4. [SITL 测试](docs/beginner/04_sitl_test.md)
+5. [实飞测试](docs/beginner/05_flight_test.md)
 
 ### 👨‍💻 开发者
 
@@ -212,4 +212,4 @@ git clone https://github.com/Bob12315/uav_system-rk3588.git
 cd uav_system-rk3588
 ```
 
-完整安装和部署请从[RK3588 环境配置](docs/beginner/04_rk3588_setup.md)开始。
+完整安装和部署请从[RK3588 环境配置](docs/beginner/03_rk3588_setup.md)开始。

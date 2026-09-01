@@ -34,6 +34,11 @@ class GpsFusionConfig:
     min_confidence: float = 0.25
     max_abs_ex: Optional[float] = 0.75
     max_abs_ey: Optional[float] = 0.75
+    min_source_waypoints: int = 1
+
+    def __post_init__(self) -> None:
+        if self.min_source_waypoints < 1:
+            raise ValueError("min_source_waypoints must be at least 1")
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +62,8 @@ class GpsLocalizedObject:
     cluster_spread_m: float
     source_waypoints: Tuple[str, ...]
     source_frames: Tuple[int, ...]
+    weight: float = 0.0
+    score: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +170,8 @@ class GpsDerivedEnuFusion:
                             pass
             source_waypoints = sorted(wp_set)
             source_frames = sorted(fr_set)
+            if len(source_waypoints) < self._config.min_source_waypoints:
+                continue
 
             result.append(GpsLocalizedObject(
                 id=i,
@@ -177,6 +186,8 @@ class GpsDerivedEnuFusion:
                 cluster_spread_m=float(obj.get("radius_m", 0.0)),
                 source_waypoints=tuple(source_waypoints),
                 source_frames=tuple(source_frames),
+                weight=float(obj.get("weight", 0.0)),
+                score=float(obj.get("score", 0.0)),
             ))
 
         # Stable sort: class_name, then lat, then lon

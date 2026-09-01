@@ -50,7 +50,7 @@ bash scripts/install/install_yolo_env.sh
 重复执行 `pip install -r`。根目录旧 `requirements-app.txt`、`requirements-dev.txt` 和
 `requirements-yolo.txt` 已删除。
 
-完整说明见 [RK3588 环境配置](../docs/beginner/04_rk3588_setup.md)。
+完整说明见 [RK3588 环境配置](../docs/beginner/03_rk3588_setup.md)。
 
 ## 部署
 

@@ -55,12 +55,12 @@ takeoff
 | 11 | `select_gps_drop_targets` | `select_drop_targets` | `return_home_gps` |
 | 12 | `drop_speed_1mps` | `change_speed` | fail |
 | 13 | `drop_1_approach` | `goto_waypoint` | `restore_return_speed_2mps` |
-| 14 | `drop_1_lock` | `gps_target_lock` | continue；下一步仍须视觉锁定才能下降 |
+| 14 | `drop_1_lock` | `gps_target_lock` | `restore_return_speed_2mps`；未确认指定 track 不下降 |
 | 15 | `drop_1_align` | `align_descend` | `restore_return_speed_2mps` |
 | 16 | `drop_1_release` | `payload_release`（SERVO9 1800→1600） | `restore_return_speed_2mps` |
 | 17 | `drop_1_climb` | `goto_waypoint` | `restore_return_speed_2mps` |
 | 18 | `drop_2_approach` | `goto_waypoint` | `restore_return_speed_2mps` |
-| 19 | `drop_2_lock` | `gps_target_lock` | continue；下一步仍须视觉锁定才能下降 |
+| 19 | `drop_2_lock` | `gps_target_lock` | `restore_return_speed_2mps`；无第二目标时跳过下降与投放 |
 | 20 | `drop_2_align` | `align_descend` | `restore_return_speed_2mps` |
 | 21 | `drop_2_release` | `payload_release`（SERVO10 1800→1600） | `restore_return_speed_2mps` |
 | 22 | `drop_2_climb` | `goto_waypoint` | `restore_return_speed_2mps` |
@@ -105,9 +105,10 @@ profile、速度、高度、SERVO 输出和失败恢复目标。
 }
 ```
 
-`align_descend` 直接以 YOLO 的归一化 `ex/ey` 生成 BODY_NED 控制量；它使用
-`vx_sign=-1`、`vy_sign=1`，不使用 legacy `config.fov_*` 计算速度。模板仍记录同一组 FOV，
-避免后续迁移或诊断时出现相互矛盾的相机标定。
+`align_descend` 使用 YOLO 的归一化 `ex/ey` 生成 BODY_NED 控制量，并根据当前高度、相机
+FOV 和载荷相对相机的前/右安装偏移计算 `desired_ex/desired_ey`。PID 和下降/释放 deadband
+使用 `ex-desired_ex`、`ey-desired_ey`，因此控制目标是让实际载荷释放点位于目标上方，
+而不是让相机光轴位于目标上方。速度方向仍使用 `vx_sign=-1`、`vy_sign=1`。
 
 Gazebo payload bridge 同时监听人工 RC 输入和飞控 SERVO 输出，但自动任务只允许后者：
 
@@ -128,11 +129,24 @@ RC13/14 是仿真 bridge 的人工触发输入，绝不是 Mission 的参数。`
 | 阶段 | Action 与运行方式 | 成功结果 | 失败与模板策略 |
 | --- | --- | --- | --- |
 | 四视角投放区侦察 | 依次运行 4 × `goto_waypoint` → `gps_capture_view`，再运行 `gps_fuse_views` → `select_drop_targets`。每个 capture 从当前 YOLO `scene.detections` 与捕获时 GPS/yaw/高度投影。 | capture: `gps_view_captured`，`output.raw_estimates`；fuse: `gps_views_fused`（也可能是空成功 `gps_views_fused_empty`），`localized_objects`；select: `selected_targets` / `target_slots`。 | 航点和融合最多两次，耗尽后跳 `return_home_gps`；目标选择失败直接返航。capture 本身是一次快照，不因空结果失败；之后由融合/选择决定是否继续。 |
-| 目标复锁与对准下降 | 每个目标运行 `gps_target_lock`，随后 `align_descend`。复锁把当前检测投影到 GPS 并与选中 target 比较；对准以 locked、未 stale 的 YOLO target 的 `ex/ey` 连续生成 BODY_NED。 | lock: `gps_target_locked`，包含 `locked_track_id`（如有）、`best_distance_m`、匹配 GPS；align: 到释放高度且稳定对中时 `ready_to_release`，包含高度、`ex/ey`、速度、deadband 判定。 | lock 超时在此模板为 `continue`，但不会直接投放：下游 align 因 target 未锁而明确零速失败，随后跳到恢复速度和返航链。align 对丢目标、stale、失高、无控制许可或超时均发零速，模板跳恢复速度。 |
+| 目标复锁与对准下降 | 飞机先到融合 GPS 点上方 2.5 m，融合 GPS 到此只用于导航。每个目标运行 `gps_target_lock`，从桶类白名单且置信度不低于 0.75 的检测中直接选择距相机画面中心最近者；不做 GPS 投影距离门控，也不要求与融合目标类别一致。等待 YOLO 回报同一 track 已 locked 后，把 `locked_track_id` 显式传给 `align_descend`；对准只接受该 track 的未 stale `ex/ey`。 | lock: `gps_target_locked`，`output.locked_track_id`、`best_center_distance_norm`；align: 到释放高度且稳定对中时 `ready_to_release`，包含高度、`ex/ey`、速度、deadband 判定。 | lock 无桶目标、无 track、确认超时或无效 slot 均跳恢复速度，不进入对应下降/投放。align 对 track 不符、丢目标、stale、失高、无控制许可或超时均发零速并跳恢复速度。 |
 | 投放 | `payload_release` 先生成一次 release PWM，在等待窗口维持零速，随后生成 hold PWM。 | 首 tick 为 `release_sent`，最终为 `payload_released`；`detail` 记录 payload/target ID、SERVO 输出、PWM、等待状态与零速命令。 | 模板的 `on_failed` 会跳 `restore_return_speed_2mps`，不尝试第二次释放同一载荷。但当前 ActionResult 没有 dispatch/bridge 回执：SEND、安全或传输拒绝记录在 `last_dispatch.skipped/errors`，仍可能得到 `payload_released`。因此必须同时确认 dispatch 为 accepted，以及 Gazebo bridge 的 `released bottle*` 日志；不能将该 reason 视为已实际脱钩。 |
 
 连续的 `align_descend` 在停止、跳转、失败、丢失视觉或 telemetry stale 时都会发送显式零速，
 并清除旧连续命令；这不能替代飞手或地面站接管。
+
+投放对准段的有效参数是：目标高度 1.2 m、下降率 0.30 m/s、修正误差下降 deadband
+`|error_ex|/|error_ey| ≤ 0.16`、释放 deadband `≤ 0.02`、水平 PID 增益 0.3 且限幅 0.25 m/s、
+目标最大年龄 0.5 s、最大持续时间 30 s。到达目标高度后，目标必须持续处于释放
+deadband 0.2 s 才会进入投放。H 点下降段使用相同的超时、目标新鲜度和确认时长，
+但高度为 0.3 m、水平限幅及 deadband 为 0.3。`align_descend` 不支持分级/慢速下降、
+高度增益、积分、按更新次数超时或“丢目标继续下降”；这些参数不得加入模板。
+
+当前机械偏移初值为：`payload_1` 相对相机后方 0.06 m（`payload_forward_m=-0.06`），
+`payload_2` 相对相机前方 0.06 m（`payload_forward_m=0.06`），两者横向偏移暂为 0。
+小误差修正的最小有效速度为 0.035 m/s，防止 6 cm 偏移换算后的低速指令无法克服飞控死区。
+这里的正方向是机体前方和右方，不是图像方向。正式实飞前应空载测量相机光轴到实际
+释放点的水平距离并更新参数；不要通过反向修改 `vx_sign/vy_sign` 校正机械安装偏差。
 
 > [!NOTE]
 > `final_land_lock_h` 使用 `target_lock.acquire_mode=class_single`，不需要也不会构造
@@ -180,12 +194,19 @@ gps_capture_view save_as drop_scan_view_1..4
   → drop_scan.localized_objects
 
 select_drop_targets save_as drop_targets
-  → drop_targets.selected_targets
+  → drop_targets.target_slots
 
-align_descend
+gps_target_lock save_as drop_1_lock / drop_2_lock
+  → locked_track_id
+  → align_descend(track_id=locked_track_id)
   → MissionOrchestrator 清理连续命令并保持位置
   → payload_release save_as drop_release_1..2
 ```
+
+投放区融合除要求每个聚类至少 3 个有效观测外，还要求这些观测至少来自 3 个不同扫描
+航点，避免单一画面内的重复框满足融合门槛。融合输出携带的总权重会参与同类别目标的
+稳定排序。模板允许只选出一个目标，但缺失的第二 slot 会使复锁启动失败并直接跳到恢复
+速度步骤，第二次下降和投放不会执行。
 
 参数引用支持字典键和列表索引，例如：
 

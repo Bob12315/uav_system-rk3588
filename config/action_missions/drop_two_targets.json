@@ -231,6 +231,7 @@
           "cluster_radius_m": 0.65,
           "outlier_radius_m": 0.65,
           "min_cluster_size": 3,
+          "min_source_waypoints": 3,
           "center_weight_power": 1,
           "max_abs_ex": 0.8,
           "max_abs_ey": 0.65
@@ -298,15 +299,22 @@
     {
       "name": "gps_target_lock",
       "label": "drop_1_lock",
+      "save_as": "drop_1_lock",
       "on_failed": {
-        "action": "continue"
+        "action": "jump_to",
+        "target": "return_home_gps",
+        "max_attempts": 1
       },
       "params": {
         "target": "$drop_targets.target_slots.0",
         "max_updates": 8,
         "max_match_distance_m": 1.5,
+        "min_match_margin_m": 0.25,
         "min_confidence": 0.35,
-        "require_track_id": false,
+        "require_track_id": true,
+        "require_class_match": true,
+        "require_lock_confirmation": true,
+        "max_target_age_s": 0.5,
         "class_names": [
           "bucket_1",
           "bucket_2",
@@ -331,14 +339,15 @@
         "max_attempts": 1
       },
       "params": {
+        "track_id": "$drop_1_lock.locked_track_id",
         "expected_dt_s": 0.1,
         "lost_timeout_updates": 10,
         "hold_updates_required": 1,
         "max_retries": 1,
         "max_updates": 35,
         "finish_policy": "latched_center_alignment",
-        "finish_alignment_max_ex_cam": 0.35,
-        "finish_alignment_max_ey_cam": 0.35,
+        "release_deadband_ex": 0.02,
+        "release_deadband_ey": 0.02,
         "finish_alignment_hold_updates": 1,
         "config": {
           "kp_vx": 0.275,
@@ -393,19 +402,19 @@
           "target_loss_grace_horizontal_scale": 0.5,
           "min_altitude_m": 1.2,
           "require_target_locked": false,
-          "payload_offset_enabled": true,
           "descent_gate_policy": "allow_unaligned",
-          "unaligned_descend_speed_mps": 0.08,
+          "unaligned_descend_speed_mps": 0.08
+        },
+        "finish_altitude_m": 1.2,
+        "payload_forward_m": -0.06,
+        "payload_right_m": 0,
+        "min_correction_speed_mps": 0.035,
+        "camera": {
           "fov_x_deg": 114.591559,
           "fov_y_deg": 98.864783,
           "image_x_sign": 1,
-          "image_y_sign": -1,
-          "max_payload_offset_ex_cam": 0.8,
-          "max_payload_offset_ey_cam": 0.8,
-          "payload_forward_m": -0.06,
-          "payload_right_m": 0
-        },
-        "finish_altitude_m": 1.2
+          "image_y_sign": -1
+        }
       }
     },
     {
@@ -483,15 +492,22 @@
     {
       "name": "gps_target_lock",
       "label": "drop_2_lock",
+      "save_as": "drop_2_lock",
       "on_failed": {
-        "action": "continue"
+        "action": "jump_to",
+        "target": "return_home_gps",
+        "max_attempts": 1
       },
       "params": {
         "target": "$drop_targets.target_slots.1",
         "max_updates": 8,
         "max_match_distance_m": 1.5,
+        "min_match_margin_m": 0.25,
         "min_confidence": 0.35,
-        "require_track_id": false,
+        "require_track_id": true,
+        "require_class_match": true,
+        "require_lock_confirmation": true,
+        "max_target_age_s": 0.5,
         "class_names": [
           "bucket_1",
           "bucket_2",
@@ -516,14 +532,15 @@
         "max_attempts": 1
       },
       "params": {
+        "track_id": "$drop_2_lock.locked_track_id",
         "expected_dt_s": 0.1,
         "lost_timeout_updates": 10,
         "hold_updates_required": 1,
         "max_retries": 1,
         "max_updates": 35,
         "finish_policy": "latched_center_alignment",
-        "finish_alignment_max_ex_cam": 0.35,
-        "finish_alignment_max_ey_cam": 0.35,
+        "release_deadband_ex": 0.02,
+        "release_deadband_ey": 0.02,
         "finish_alignment_hold_updates": 1,
         "config": {
           "kp_vx": 0.275,
@@ -578,19 +595,19 @@
           "target_loss_grace_horizontal_scale": 0.5,
           "min_altitude_m": 1.2,
           "require_target_locked": false,
-          "payload_offset_enabled": true,
           "descent_gate_policy": "allow_unaligned",
-          "unaligned_descend_speed_mps": 0.08,
+          "unaligned_descend_speed_mps": 0.08
+        },
+        "finish_altitude_m": 1.2,
+        "payload_forward_m": 0.06,
+        "payload_right_m": 0,
+        "min_correction_speed_mps": 0.035,
+        "camera": {
           "fov_x_deg": 114.591559,
           "fov_y_deg": 98.864783,
           "image_x_sign": 1,
-          "image_y_sign": -1,
-          "max_payload_offset_ex_cam": 0.8,
-          "max_payload_offset_ey_cam": 0.8,
-          "payload_forward_m": 0.06,
-          "payload_right_m": 0
-        },
-        "finish_altitude_m": 1.2
+          "image_y_sign": -1
+        }
       }
     },
     {

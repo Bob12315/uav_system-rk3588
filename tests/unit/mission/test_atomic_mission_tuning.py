@@ -21,19 +21,20 @@ def test_atomic_drop_tuning_and_payload_offsets_are_preserved() -> None:
     generic = _align("drop_two_targets.json")
     rescue = _align("rescue_2026_full_auto.json")
     assert len(generic) == len(rescue) == 2
-    assert [item["config"]["payload_forward_m"] for item in generic] == [-0.06, 0.06]
-    assert [item["config"]["payload_forward_m"] for item in rescue] == [-0.06, 0.06]
+    assert [item["payload_forward_m"] for item in generic] == [-0.06, 0.06]
+    assert [item["payload_forward_m"] for item in rescue] == [-0.06, 0.06]
+    assert all(item["payload_right_m"] == 0 for item in generic + rescue)
     assert {item["max_updates"] for item in generic} == {35}
-    assert {item["max_updates"] for item in rescue} == {150}
     for item in rescue:
-        config = item["config"]
-        assert config["descend_speed_mps"] == 0.30
-        assert config["slow_descend_speed_mps"] == 0.14
-        assert (config["max_ex_cam"], config["max_ey_cam"]) == (0.16, 0.16)
-        assert (config["slow_descend_max_ex_cam"], config["slow_descend_max_ey_cam"]) == (0.35, 0.35)
-        assert (config["deadband_ex_cam"], config["deadband_ey_cam"]) == (0.04, 0.04)
-        assert (config["fov_x_deg"], config["fov_y_deg"]) == (114.591559, 98.864783)
-        assert item["finish_alignment_timeout_s"] == 1.0
+        assert item["target_altitude_m"] == 1.2
+        assert item["max_duration_s"] == 30.0
+        assert item["max_target_age_s"] == 0.5
+        assert item["descend_speed_mps"] == 0.30
+        assert (item["descent_deadband_ex"], item["descent_deadband_ey"]) == (0.16, 0.16)
+        assert (item["release_deadband_ex"], item["release_deadband_ey"]) == (0.02, 0.02)
+        assert item["min_correction_speed_mps"] == 0.035
+        assert item["alignment_hold_s"] == 0.2
+        assert "config" not in item
 
 
 def test_capture_camera_and_recon_routes_are_preserved() -> None:

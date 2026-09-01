@@ -1,4 +1,4 @@
-# 05：SITL 测试
+# 04：SITL 测试
 
 ## 本章目标
 
@@ -211,4 +211,4 @@ x/y 或修改符号来掩盖问题。
 bash scripts/config/apply_rk3588_real.sh
 ```
 
-下一章：[实飞测试](06_flight_test.md)。
+下一章：[实飞测试](05_flight_test.md)。
