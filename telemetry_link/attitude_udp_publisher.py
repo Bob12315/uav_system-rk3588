@@ -6,6 +6,7 @@ import socket
 import threading
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass
 
 
@@ -37,10 +38,12 @@ class AttitudeSample:
 
 
 class AttitudeUdpPublisher:
-    """Single-slot, non-blocking localhost attitude publisher.
+    """Bounded, non-blocking localhost attitude publisher.
 
-    ``offer`` only replaces the pending sample and never performs socket I/O,
-    so MAVLink reception cannot wait behind the UDP consumer.
+    ``offer`` only appends to a small bounded FIFO and never performs socket
+    I/O, so MAVLink reception cannot wait behind the UDP consumer.  Keeping a
+    short burst prevents scheduler jitter from collapsing a 30+ Hz attitude
+    stream into a much lower latest-only stream.
     """
 
     def __init__(
@@ -50,14 +53,17 @@ class AttitudeUdpPublisher:
         *,
         source: str,
         stop_event: threading.Event,
+        max_pending_samples: int = 32,
     ) -> None:
+        if max_pending_samples < 2:
+            raise ValueError("max_pending_samples must be at least 2")
         self.addr = (udp_ip, int(udp_port))
         self.source = source
         self.stop_event = stop_event
         self.publisher_session_id = uuid.uuid4().hex
         self._closed = threading.Event()
         self._condition = threading.Condition()
-        self._latest: AttitudeSample | None = None
+        self._pending: deque[AttitudeSample] = deque(maxlen=int(max_pending_samples))
         self._sequence = 0
         self._reset_pending = False
         self._generation = 0
@@ -76,7 +82,7 @@ class AttitudeUdpPublisher:
         with self._condition:
             if sample.source != self.source:
                 return
-            self._latest = sample
+            self._pending.append(sample)
             self._condition.notify()
 
     def switch_source(self, source: str) -> None:
@@ -90,7 +96,7 @@ class AttitudeUdpPublisher:
             self.publisher_session_id = uuid.uuid4().hex
             self._sequence = 0
             self._generation += 1
-            self._latest = None
+            self._pending.clear()
             self._reset_pending = True
             self._condition.notify_all()
 
@@ -107,12 +113,11 @@ class AttitudeUdpPublisher:
         try:
             while not self.stop_event.is_set() and not self._closed.is_set():
                 with self._condition:
-                    if self._latest is None and not self._reset_pending:
+                    if not self._pending and not self._reset_pending:
                         self._condition.wait(timeout=0.2)
                     reset_pending = self._reset_pending
                     self._reset_pending = False
-                    sample = self._latest
-                    self._latest = None
+                    sample = self._pending.popleft() if self._pending else None
                     source = self.source
                     publisher_session_id = self.publisher_session_id
                     generation = self._generation

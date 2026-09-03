@@ -190,7 +190,7 @@ def test_active_source_reset_clears_history_and_retires_old_source() -> None:
         receiver.close()
 
 
-def test_publisher_wire_is_latest_only_and_contains_link_identity() -> None:
+def test_publisher_preserves_short_burst_and_contains_link_identity() -> None:
     sink = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sink.bind(("127.0.0.1", 0))
     sink.settimeout(1.0)
@@ -202,13 +202,43 @@ def test_publisher_wire_is_latest_only_and_contains_link_identity() -> None:
         publisher.offer(PublisherSample("sitl", "link-a", 10, 0, 0, 0, 0, 0, 0))
         publisher.offer(PublisherSample("sitl", "link-a", 20, 1, 2, 3, 4, 5, 6))
         publisher.start()
-        payload, _addr = sink.recvfrom(4096)
-        data = json.loads(payload)
-        assert data["schema_version"] == 1
-        assert data["sequence"] == 1
-        assert data["link_session_id"] == "link-a"
-        assert data["received_at_monotonic_ns"] == 20
-        assert data["roll_rad"] == pytest.approx(1.0)
+        first_payload, _addr = sink.recvfrom(4096)
+        second_payload, _addr = sink.recvfrom(4096)
+        first = json.loads(first_payload)
+        second = json.loads(second_payload)
+        assert first["schema_version"] == 1
+        assert first["sequence"] == 1
+        assert first["link_session_id"] == "link-a"
+        assert first["received_at_monotonic_ns"] == 10
+        assert second["sequence"] == 2
+        assert second["received_at_monotonic_ns"] == 20
+        assert second["roll_rad"] == pytest.approx(1.0)
+    finally:
+        stop_event.set()
+        publisher.close()
+        sink.close()
+
+
+def test_publisher_drops_oldest_sample_when_bounded_fifo_overflows() -> None:
+    sink = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sink.bind(("127.0.0.1", 0))
+    sink.settimeout(1.0)
+    stop_event = threading.Event()
+    publisher = AttitudeUdpPublisher(
+        "127.0.0.1",
+        sink.getsockname()[1],
+        source="sitl",
+        stop_event=stop_event,
+        max_pending_samples=2,
+    )
+    try:
+        for timestamp_ns in (10, 20, 30):
+            publisher.offer(PublisherSample(
+                "sitl", "link-a", timestamp_ns, 0, 0, 0, 0, 0, 0
+            ))
+        publisher.start()
+        received = [json.loads(sink.recvfrom(4096)[0]) for _ in range(2)]
+        assert [item["received_at_monotonic_ns"] for item in received] == [20, 30]
     finally:
         stop_event.set()
         publisher.close()
