@@ -6,6 +6,7 @@ set -euo pipefail
 GCS_HOST="${GCS_HOST:-10.101.31.108}"
 VIDEO_HOST="${VIDEO_HOST:-${GCS_HOST}}"
 MAVLINK_PORT="${MAVLINK_PORT:-14550}"
+MAVPROXY_STREAMRATE="${MAVPROXY_STREAMRATE:-30}"
 VIDEO_PORT="${VIDEO_PORT:-5600}"
 PAYLOAD_MAVLINK_PORT="${PAYLOAD_MAVLINK_PORT:-14551}"
 ARDUPILOT_DIR="${ARDUPILOT_DIR:-/home/level6/ardupilot}"
@@ -66,7 +67,7 @@ open_terminal() {
 gz_command=(gz sim -v4 -r "${GZ_WORLD}")
 arducopter_command=(
   bash -lc
-  "cd '${ARDUPILOT_DIR}' && ./Tools/autotest/sim_vehicle.py -D -v ArduCopter -f JSON --add-param-file='${GZ_PARAM_FILE}' --console --out=udp:${GCS_HOST}:${MAVLINK_PORT} --out=udp:127.0.0.1:${PAYLOAD_MAVLINK_PORT}"
+  "cd '${ARDUPILOT_DIR}' && ./Tools/autotest/sim_vehicle.py -D -v ArduCopter -f JSON --add-param-file='${GZ_PARAM_FILE}' --console --mavproxy-args='--streamrate=${MAVPROXY_STREAMRATE}' --out=udp:${GCS_HOST}:${MAVLINK_PORT} --out=udp:127.0.0.1:${PAYLOAD_MAVLINK_PORT}"
 )
 payload_bridge_command=(
   bash -lc
@@ -103,5 +104,6 @@ fi
 
 echo "Started Gazebo, ArduCopter SITL, payload release bridge, and camera RTP relay in ${terminal_layout}."
 echo "  MAVLink out: udp:${GCS_HOST}:${MAVLINK_PORT}"
+echo "  MAVProxy stream rate: ${MAVPROXY_STREAMRATE} Hz"
 echo "  Payload UDP: udp:127.0.0.1:${PAYLOAD_MAVLINK_PORT}"
 echo "  Video out:   udp:${VIDEO_HOST}:${VIDEO_PORT}"
