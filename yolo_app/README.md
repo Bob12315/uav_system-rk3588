@@ -31,8 +31,12 @@ camera/video/stream
 → short-lived track_id association
 → TargetManager
 → UDP target + scene
-→ optional MJPEG annotation / raw recording
+→ optional annotation → bounded latest-only MJPEG encoder worker
+→ optional raw recording
 ```
+
+视频采集和 MJPEG 编码都与有序的 RKNN/tracker 主循环解耦。MJPEG worker 只保留
+最新待编码帧；浏览器或 JPEG 编码跟不上时覆盖旧帧，不反压 NPU 推理，也不累积视频延迟。
 
 启用 `virtual_nadir.enabled` 后，检测输入改为：
 

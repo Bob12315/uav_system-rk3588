@@ -236,6 +236,11 @@ def main() -> int:
                         writer = build_video_writer(cfg.save_path, fps, image_width, image_height)
                     writer.write(annotated)
             if frame_count == 1 or frame_count % 60 == 0:
+                web_metrics = (
+                    web_stream.encoder_metrics
+                    if web_stream is not None
+                    else {"encode_ms": 0.0, "replaced": 0}
+                )
                 rectify_status = (
                     ""
                     if rectification is None
@@ -252,6 +257,8 @@ def main() -> int:
                     f"preprocess_ms={inference_metrics['preprocess']:.1f} "
                     f"npu_ms={inference_metrics['npu']:.1f} "
                     f"postprocess_ms={inference_metrics['postprocess']:.1f} "
+                    f"web_encode_ms={float(web_metrics['encode_ms']):.1f} "
+                    f"web_replaced={int(web_metrics['replaced'])} "
                     f"frame_age_ms={frame_age_ms:.1f} tracks={len(tracks)}{rectify_status}",
                     flush=True,
                 )
