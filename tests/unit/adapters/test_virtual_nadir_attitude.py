@@ -145,6 +145,26 @@ def test_history_accepts_observed_attitude_rate_near_30_hz() -> None:
     assert match.observed_rate_hz is not None and match.observed_rate_hz > 30.0
 
 
+def test_history_rate_uses_full_window_instead_of_four_jittery_samples() -> None:
+    history = AttitudeHistory(max_samples=64, history_ms=2000)
+    timestamps_ns = [sequence * 30_000_000 for sequence in range(1, 23)]
+    timestamps_ns.extend([710_000_000, 760_000_000, 810_000_000, 860_000_000])
+    for sequence, timestamp_ns in enumerate(timestamps_ns, start=1):
+        history.append(_sample(sequence, timestamp_ns))
+
+    match = history.lookup(
+        835_000_000,
+        max_sample_distance_ms=30,
+        max_bracket_span_ms=60,
+        min_rate_hz=25.0,
+        rate_window_ms=1000,
+        min_rate_samples=4,
+    )
+
+    assert match.valid
+    assert match.observed_rate_hz == pytest.approx(25 / 830e-3)
+
+
 def test_receiver_retires_old_link_session() -> None:
     history = AttitudeHistory(max_samples=8, history_ms=1000)
     receiver = AttitudeReceiver("127.0.0.1", 0, history, expected_source="sitl")

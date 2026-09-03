@@ -174,7 +174,6 @@ class AttitudeHistory:
         ]
         observed_rate_hz: float | None = None
         if len(rate_samples) >= 2:
-            rate_samples = rate_samples[-max(2, min_rate_samples):]
             rate_span_ns = (
                 rate_samples[-1].received_at_monotonic_ns
                 - rate_samples[0].received_at_monotonic_ns

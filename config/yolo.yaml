@@ -61,7 +61,9 @@ virtual_nadir:
     max_samples: 128
     max_sample_distance_ms: 75
     max_bracket_span_ms: 150
-    future_wait_ms: 40
+    # 30 Hz 理论周期约 33 ms；等待至 75 ms 以覆盖调度/UDP 抖动。这里只等
+    # 下一条真实样本用于 SLERP，不进行姿态外推。
+    future_wait_ms: 75
     # 飞控侧请求 30 Hz；低于 25 Hz 时感知链 fail closed，避免低频姿态硬套图像。
     min_rate_hz: 25
     rate_window_ms: 1000
