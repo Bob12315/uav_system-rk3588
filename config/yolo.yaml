@@ -47,7 +47,7 @@ virtual_nadir:
   # 唯一的图像路径开关：
   # false = raw frame -> YOLO -> Web UI
   # true  = IMU stabilized frame -> YOLO -> Web UI
-  enabled: false
+  enabled: true
   yaw_reference_mode: "lock_on_start"
   # 只影响本机 OpenCV 调试窗口，不改变 Web UI 的 YOLO 标注画面。
   debug_compare: false
