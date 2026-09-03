@@ -561,6 +561,8 @@ def test_continue_after_failure_advances_to_next_step() -> None:
     done_status = orch.tick({})
 
     assert continue_status.current_action == "land"
+    assert continue_status.detail["skipped_steps"][0]["name"] == "gps_capture_view"
+    assert continue_status.detail["skipped_steps"][0]["reason"] == "recon_failed"
     assert done_status.done is True
     assert runtime.runner.sent_actions == [("gps_capture_view", {}), ("land", {})]
 

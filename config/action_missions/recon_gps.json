@@ -12,15 +12,16 @@
         "altitude_tolerance_m": 0.35,
         "require_armed": true,
         "max_updates": 150
+      },
+      "on_failed": {
+        "action": "continue"
       }
     },
     {
       "name": "goto_waypoint",
       "label": "goto_recon_entry_4m",
       "on_failed": {
-        "action": "jump_to",
-        "target": "return_home_gps",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
         "x": -3,
@@ -40,9 +41,7 @@
       "name": "goto_waypoint",
       "label": "recon_scan_goto_1",
       "on_failed": {
-        "action": "jump_to",
-        "target": "return_home_gps",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
         "x": -3,
@@ -63,9 +62,7 @@
       "name": "goto_waypoint",
       "label": "recon_scan_goto_2",
       "on_failed": {
-        "action": "jump_to",
-        "target": "return_home_gps",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
         "x": 3,
@@ -86,9 +83,7 @@
       "name": "goto_waypoint",
       "label": "recon_scan_goto_3",
       "on_failed": {
-        "action": "jump_to",
-        "target": "return_home_gps",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
         "x": 3,
@@ -109,9 +104,7 @@
       "name": "goto_waypoint",
       "label": "recon_scan_goto_4",
       "on_failed": {
-        "action": "jump_to",
-        "target": "return_home_gps",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
         "x": -3,
@@ -138,12 +131,18 @@
         "y": 0,
         "altitude_m": 3,
         "yaw_mode": "hold"
+      },
+      "on_failed": {
+        "action": "continue"
       }
     },
     {
       "name": "land",
       "label": "land_home",
-      "params": {}
+      "params": {},
+      "on_failed": {
+        "action": "continue"
+      }
     }
   ]
 }

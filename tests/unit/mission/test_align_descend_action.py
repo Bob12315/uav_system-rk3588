@@ -2,24 +2,25 @@ from __future__ import annotations
 
 import math
 
-import pytest
-
 from contracts.effects import FlightCommand
 from missions.common.actions.align_descend import AlignDescendAction
 
 
-def _context(*, ex: float = 0.0, ey: float = 0.0, altitude_m: float = 2.0, locked: bool = True) -> dict:
+def _context(
+    *,
+    frame_id: int,
+    detections: list[dict],
+    altitude_m: float = 2.0,
+) -> dict:
     return {
         "field_heading_yaw_rad": 0.0,
-        "drone": {"connected": True, "stale": False, "control_allowed": True, "relative_altitude": altitude_m},
-        "perception": {
-            "target_valid": True,
-            "tracking_state": "locked" if locked else "tracking",
-            "track_id": 42,
-            "ex": ex,
-            "ey": ey,
-        },
+        "drone": {"relative_altitude": altitude_m},
+        "scene": {"frame_id": frame_id, "detections": detections},
     }
+
+
+def _detection(ex: float, ey: float, track_id: int = 1) -> dict:
+    return {"track_id": track_id, "ex": ex, "ey": ey}
 
 
 def _command(result) -> FlightCommand:
@@ -29,125 +30,118 @@ def _command(result) -> FlightCommand:
     return command
 
 
-def test_locked_target_uses_body_velocity_descent_and_fixed_yaw() -> None:
+def test_always_selects_the_target_nearest_the_image_centre_and_descends() -> None:
     action = AlignDescendAction()
     action.start({
-        "track_id": 42,
         "target_altitude_m": 1.0,
-        "field_yaw_deg": 90.0,
+        "descend_speed_mps": 0.2,
         "kp_forward": 1.0,
         "kp_right": 1.0,
         "max_vx_mps": 0.5,
         "max_vy_mps": 0.5,
-        "descend_speed_mps": 0.2,
-        "descent_deadband_ex": 0.3,
-        "descent_deadband_ey": 0.3,
+        "field_yaw_deg": 90.0,
     })
 
-    result = action.update(_context(ex=0.1, ey=-0.2))
+    result = action.update(_context(
+        frame_id=1,
+        detections=[_detection(0.4, 0.4, 11), _detection(0.1, -0.2, 12)],
+    ))
 
     assert result.reason == "align_descending"
+    assert result.detail["target_track_id"] == 12
     command = _command(result)
     assert command.params["vx_cmd"] == 0.2
     assert command.params["vy_cmd"] == 0.1
     assert command.params["vz_cmd"] == 0.2
     assert math.isclose(command.params["yaw_hold_rad"], math.pi / 2)
-    assert "yaw_rate" not in command.params
 
 
-def test_completion_requires_height_and_release_deadband_then_stops() -> None:
+def test_descent_does_not_wait_for_alignment() -> None:
     action = AlignDescendAction()
-    action.start({"target_altitude_m": 1.0, "release_deadband_ex": 0.1, "release_deadband_ey": 0.1})
+    action.start({"target_altitude_m": 1.0, "descend_speed_mps": 0.2})
 
-    result = action.update(_context(ex=0.05, ey=-0.05, altitude_m=1.0))
+    result = action.update(_context(
+        frame_id=1,
+        detections=[_detection(0.9, 0.9)],
+        altitude_m=2.0,
+    ))
 
-    assert result.done and not result.failed
-    assert result.reason == "ready_to_release"
-    command = _command(result)
-    assert command.params["vx_cmd"] == command.params["vy_cmd"] == command.params["vz_cmd"] == 0.0
+    assert result.reason == "align_descending"
+    assert _command(result).params["vz_cmd"] == 0.2
 
 
-def test_unlocked_target_fails_safe_with_an_explicit_stop() -> None:
+def test_low_altitude_succeeds_when_three_of_five_frames_are_aligned() -> None:
+    action = AlignDescendAction()
+    action.start({
+        "target_altitude_m": 1.0,
+        "release_deadband_ex": 0.1,
+        "release_deadband_ey": 0.1,
+    })
+
+    samples = [(0.0, 0.0), (0.2, 0.0), (0.05, -0.05), (0.0, 0.2), (0.1, 0.1)]
+    results = [
+        action.update(_context(
+            frame_id=index,
+            detections=[_detection(ex, ey)],
+            altitude_m=1.0,
+        ))
+        for index, (ex, ey) in enumerate(samples, start=1)
+    ]
+
+    assert all(not result.done for result in results[:4])
+    assert results[-1].done and not results[-1].failed
+    assert results[-1].reason == "alignment_confirmed"
+    assert results[-1].detail["alignment_hits"] == 3
+    command = _command(results[-1])
+    assert command.params["vx_cmd"] == 0.0
+    assert command.params["vy_cmd"] == 0.0
+    assert command.params["vz_cmd"] == 0.0
+
+
+def test_duplicate_frame_is_not_counted_twice() -> None:
     action = AlignDescendAction()
     action.start({"target_altitude_m": 1.0})
 
-    result = action.update(_context(locked=False))
+    for _ in range(5):
+        result = action.update(_context(
+            frame_id=7,
+            detections=[_detection(0.0, 0.0)],
+            altitude_m=1.0,
+        ))
 
-    assert result.failed and result.reason == "target_not_locked"
-    command = _command(result)
-    assert command.params["vx_cmd"] == command.params["vy_cmd"] == command.params["vz_cmd"] == 0.0
+    assert not result.done
+    assert result.detail["alignment_window"] == [True]
 
 
-def test_timeout_fails_safe_and_never_marks_release_ready() -> None:
+def test_missing_target_holds_and_counts_as_a_miss_at_low_altitude() -> None:
     action = AlignDescendAction()
-    action.start({"target_altitude_m": 1.0, "max_duration_s": 1.0})
-    action.started_at -= 2.0
+    action.start({"target_altitude_m": 1.0})
 
-    result = action.update(_context(ex=0.0, ey=0.0, altitude_m=1.0))
+    result = action.update(_context(frame_id=1, detections=[], altitude_m=1.0))
+
+    assert not result.done and not result.failed
+    assert result.reason == "target_not_found"
+    assert result.detail["alignment_window"] == [False]
+    command = _command(result)
+    assert command.params["vx_cmd"] == 0.0
+    assert command.params["vy_cmd"] == 0.0
+    assert command.params["vz_cmd"] == 0.0
+
+
+def test_timeout_after_thirty_seconds_fails_with_an_explicit_stop() -> None:
+    action = AlignDescendAction()
+    action.start({"target_altitude_m": 1.0})
+    action.started_at -= 31.0
+
+    result = action.update(_context(
+        frame_id=1,
+        detections=[_detection(0.0, 0.0)],
+        altitude_m=1.0,
+    ))
 
     assert result.failed and not result.done
     assert result.reason == "align_descend_timeout"
     command = _command(result)
-    assert command.params["vx_cmd"] == command.params["vy_cmd"] == command.params["vz_cmd"] == 0.0
-
-
-def test_payload_offset_uses_height_and_camera_geometry_as_alignment_setpoint() -> None:
-    action = AlignDescendAction()
-    action.start({
-        "track_id": 42,
-        "target_altitude_m": 1.0,
-        "payload_forward_m": -0.1,
-        "payload_right_m": 0.2,
-        "min_correction_speed_mps": 0.035,
-        "camera": {
-            "fov_x_deg": 90.0,
-            "fov_y_deg": 90.0,
-            "image_x_sign": 1.0,
-            "image_y_sign": -1.0,
-        },
-        "descent_deadband_ex": 0.05,
-        "descent_deadband_ey": 0.05,
-        "release_deadband_ex": 0.05,
-        "release_deadband_ey": 0.05,
-    })
-
-    result = action.update(_context(ex=0.2, ey=0.1, altitude_m=2.0))
-
-    # At 2 m with a 90-degree FOV, the 0.2 m / -0.1 m offsets map to
-    # desired ex=0.1 and ey=0.05.  The remaining error is still too large
-    # to permit descent.
-    assert result.reason == "aligning"
-    assert result.detail["desired_ex"] == pytest.approx(0.1)
-    assert result.detail["desired_ey"] == pytest.approx(0.05)
-    assert result.detail["alignment_error_ex"] == pytest.approx(0.1)
-    assert result.detail["alignment_error_ey"] == pytest.approx(0.05)
-    command = _command(result)
-    assert command.params["vx_cmd"] == pytest.approx(-0.035)
-    assert command.params["vy_cmd"] == pytest.approx(0.035)
+    assert command.params["vx_cmd"] == 0.0
+    assert command.params["vy_cmd"] == 0.0
     assert command.params["vz_cmd"] == 0.0
-
-
-def test_payload_offset_completes_with_target_at_payload_point_not_image_center() -> None:
-    action = AlignDescendAction()
-    action.start({
-        "track_id": 42,
-        "target_altitude_m": 1.0,
-        "payload_forward_m": -0.1,
-        "payload_right_m": 0.2,
-        "camera": {
-            "fov_x_deg": 90.0,
-            "fov_y_deg": 90.0,
-            "image_x_sign": 1.0,
-            "image_y_sign": -1.0,
-        },
-        "release_deadband_ex": 0.05,
-        "release_deadband_ey": 0.05,
-    })
-
-    centred = action.update(_context(ex=0.0, ey=0.0, altitude_m=1.0))
-    assert not centred.done and centred.reason == "final_align"
-
-    aligned = action.update(_context(ex=0.2, ey=0.1, altitude_m=1.0))
-    assert aligned.done and aligned.reason == "ready_to_release"
-    assert aligned.detail["desired_ex"] == pytest.approx(0.2)
-    assert aligned.detail["desired_ey"] == pytest.approx(0.1)

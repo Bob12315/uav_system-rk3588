@@ -18,16 +18,14 @@
         "mode_priority": 2
       },
       "on_failed": {
-        "action": "fail"
+        "action": "continue"
       }
     },
     {
       "name": "goto_waypoint",
       "label": "drop_scan_goto_1",
       "on_failed": {
-        "action": "retry_current_then_jump_to",
-        "max_attempts": 2,
-        "target": "return_home_gps"
+        "action": "continue"
       },
       "params": {
         "x": -3,
@@ -65,15 +63,16 @@
           "image_x_sign": 1,
           "image_y_sign": -1
         }
+      },
+      "on_failed": {
+        "action": "continue"
       }
     },
     {
       "name": "goto_waypoint",
       "label": "drop_scan_goto_2",
       "on_failed": {
-        "action": "retry_current_then_jump_to",
-        "max_attempts": 2,
-        "target": "return_home_gps"
+        "action": "continue"
       },
       "params": {
         "x": 3,
@@ -111,15 +110,16 @@
           "image_x_sign": 1,
           "image_y_sign": -1
         }
+      },
+      "on_failed": {
+        "action": "continue"
       }
     },
     {
       "name": "goto_waypoint",
       "label": "drop_scan_goto_3",
       "on_failed": {
-        "action": "retry_current_then_jump_to",
-        "max_attempts": 2,
-        "target": "return_home_gps"
+        "action": "continue"
       },
       "params": {
         "x": 3,
@@ -157,15 +157,16 @@
           "image_x_sign": 1,
           "image_y_sign": -1
         }
+      },
+      "on_failed": {
+        "action": "continue"
       }
     },
     {
       "name": "goto_waypoint",
       "label": "drop_scan_goto_4",
       "on_failed": {
-        "action": "retry_current_then_jump_to",
-        "max_attempts": 2,
-        "target": "return_home_gps"
+        "action": "continue"
       },
       "params": {
         "x": -3,
@@ -203,6 +204,9 @@
           "image_x_sign": 1,
           "image_y_sign": -1
         }
+      },
+      "on_failed": {
+        "action": "continue"
       }
     },
     {
@@ -210,9 +214,7 @@
       "label": "drop_scan_fuse",
       "save_as": "drop_scan",
       "on_failed": {
-        "action": "retry_current_then_jump_to",
-        "max_attempts": 2,
-        "target": "return_home_gps"
+        "action": "continue"
       },
       "params": {
         "views": [
@@ -243,9 +245,7 @@
       "label": "select_gps_drop_targets",
       "save_as": "drop_targets",
       "on_failed": {
-        "action": "jump_to",
-        "target": "return_home_gps",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
         "objects": "$drop_scan.localized_objects",
@@ -279,15 +279,16 @@
         "speed_type": "ground",
         "priority": 4,
         "key": "drop_speed_1mps"
+      },
+      "on_failed": {
+        "action": "continue"
       }
     },
     {
       "name": "goto_waypoint",
       "label": "drop_1_approach",
       "on_failed": {
-        "action": "jump_to",
-        "target": "restore_return_speed_2mps",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
         "lat": "$drop_targets.target_slots.0.lat",
@@ -307,72 +308,22 @@
       }
     },
     {
-      "name": "gps_target_lock",
-      "label": "drop_1_lock",
-      "save_as": "drop_1_lock",
-      "on_failed": {
-        "action": "jump_to",
-        "target": "restore_return_speed_2mps",
-        "max_attempts": 1
-      },
-      "params": {
-        "target": "$drop_targets.target_slots.0",
-        "max_updates": 6,
-        "selection_mode": "nearest_image_center",
-        "min_confidence": 0.75,
-        "require_track_id": true,
-        "require_class_match": false,
-        "require_lock_confirmation": true,
-        "max_target_age_s": 0.5,
-        "class_names": [
-          "bucket_1",
-          "bucket_2",
-          "bucket_3",
-          "bucket"
-        ],
-        "detection_source": "scene",
-        "camera": {
-          "fov_x_deg": 114.591559,
-          "fov_y_deg": 98.864783,
-          "image_x_sign": 1,
-          "image_y_sign": -1
-        }
-      }
-    },
-    {
       "name": "align_descend",
       "label": "drop_1_align",
       "on_failed": {
-        "action": "jump_to",
-        "target": "restore_return_speed_2mps",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
-        "track_id": "$drop_1_lock.locked_track_id",
         "target_altitude_m": 1.2,
-        "max_duration_s": 30,
-        "max_target_age_s": 0.5,
         "descend_speed_mps": 0.3,
-        "descent_deadband_ex": 0.16,
-        "descent_deadband_ey": 0.16,
         "release_deadband_ex": 0.02,
         "release_deadband_ey": 0.02,
-        "alignment_hold_s": 0.2,
-        "min_correction_speed_mps": 0.035,
         "kp_forward": 0.3,
         "kp_right": 0.3,
         "max_vx_mps": 0.25,
         "max_vy_mps": 0.25,
         "vx_sign": -1,
         "vy_sign": 1,
-        "payload_forward_m": -0.06,
-        "payload_right_m": 0,
-        "camera": {
-          "fov_x_deg": 114.591559,
-          "fov_y_deg": 98.864783,
-          "image_x_sign": 1,
-          "image_y_sign": -1
-        },
         "field_yaw_deg": 0,
         "priority": 5,
         "key": "drop_1_align"
@@ -383,9 +334,7 @@
       "label": "drop_1_release",
       "save_as": "drop_release_1",
       "on_failed": {
-        "action": "jump_to",
-        "target": "restore_return_speed_2mps",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
         "payload_id": "payload_1",
@@ -407,9 +356,7 @@
       "name": "goto_waypoint",
       "label": "drop_1_climb",
       "on_failed": {
-        "action": "jump_to",
-        "target": "restore_return_speed_2mps",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
         "lat": "$drop_targets.target_slots.0.lat",
@@ -429,9 +376,7 @@
       "name": "goto_waypoint",
       "label": "drop_2_approach",
       "on_failed": {
-        "action": "jump_to",
-        "target": "restore_return_speed_2mps",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
         "lat": "$drop_targets.target_slots.1.lat",
@@ -451,72 +396,22 @@
       }
     },
     {
-      "name": "gps_target_lock",
-      "label": "drop_2_lock",
-      "save_as": "drop_2_lock",
-      "on_failed": {
-        "action": "jump_to",
-        "target": "restore_return_speed_2mps",
-        "max_attempts": 1
-      },
-      "params": {
-        "target": "$drop_targets.target_slots.1",
-        "max_updates": 6,
-        "selection_mode": "nearest_image_center",
-        "min_confidence": 0.75,
-        "require_track_id": true,
-        "require_class_match": false,
-        "require_lock_confirmation": true,
-        "max_target_age_s": 0.5,
-        "class_names": [
-          "bucket_1",
-          "bucket_2",
-          "bucket_3",
-          "bucket"
-        ],
-        "detection_source": "scene",
-        "camera": {
-          "fov_x_deg": 114.591559,
-          "fov_y_deg": 98.864783,
-          "image_x_sign": 1,
-          "image_y_sign": -1
-        }
-      }
-    },
-    {
       "name": "align_descend",
       "label": "drop_2_align",
       "on_failed": {
-        "action": "jump_to",
-        "target": "restore_return_speed_2mps",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
-        "track_id": "$drop_2_lock.locked_track_id",
         "target_altitude_m": 1.2,
-        "max_duration_s": 30,
-        "max_target_age_s": 0.5,
         "descend_speed_mps": 0.3,
-        "descent_deadband_ex": 0.16,
-        "descent_deadband_ey": 0.16,
         "release_deadband_ex": 0.02,
         "release_deadband_ey": 0.02,
-        "alignment_hold_s": 0.2,
-        "min_correction_speed_mps": 0.035,
         "kp_forward": 0.3,
         "kp_right": 0.3,
         "max_vx_mps": 0.25,
         "max_vy_mps": 0.25,
         "vx_sign": -1,
         "vy_sign": 1,
-        "payload_forward_m": 0.06,
-        "payload_right_m": 0,
-        "camera": {
-          "fov_x_deg": 114.591559,
-          "fov_y_deg": 98.864783,
-          "image_x_sign": 1,
-          "image_y_sign": -1
-        },
         "field_yaw_deg": 0,
         "priority": 5,
         "key": "drop_2_align"
@@ -527,9 +422,7 @@
       "label": "drop_2_release",
       "save_as": "drop_release_2",
       "on_failed": {
-        "action": "jump_to",
-        "target": "restore_return_speed_2mps",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
         "payload_id": "payload_2",
@@ -551,9 +444,7 @@
       "name": "goto_waypoint",
       "label": "drop_2_climb",
       "on_failed": {
-        "action": "jump_to",
-        "target": "restore_return_speed_2mps",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
         "lat": "$drop_targets.target_slots.1.lat",
@@ -577,6 +468,9 @@
         "speed_type": "ground",
         "priority": 4,
         "key": "restore_transition_speed_2mps"
+      },
+      "on_failed": {
+        "action": "continue"
       }
     },
     {
@@ -587,15 +481,16 @@
         "speed_type": "ground",
         "priority": 4,
         "key": "recon_speed_1mps"
+      },
+      "on_failed": {
+        "action": "continue"
       }
     },
     {
       "name": "goto_waypoint",
       "label": "goto_recon_entry_4m",
       "on_failed": {
-        "action": "jump_to",
-        "target": "restore_return_speed_2mps",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
         "x": -2,
@@ -615,9 +510,7 @@
       "name": "goto_waypoint",
       "label": "recon_scan_goto_1",
       "on_failed": {
-        "action": "jump_to",
-        "max_attempts": 1,
-        "target": "restore_return_speed_2mps"
+        "action": "continue"
       },
       "params": {
         "x": -2,
@@ -638,9 +531,7 @@
       "name": "goto_waypoint",
       "label": "recon_scan_goto_2",
       "on_failed": {
-        "action": "jump_to",
-        "max_attempts": 1,
-        "target": "restore_return_speed_2mps"
+        "action": "continue"
       },
       "params": {
         "x": 2,
@@ -661,9 +552,7 @@
       "name": "goto_waypoint",
       "label": "recon_scan_goto_3",
       "on_failed": {
-        "action": "jump_to",
-        "max_attempts": 1,
-        "target": "restore_return_speed_2mps"
+        "action": "continue"
       },
       "params": {
         "x": 2,
@@ -684,9 +573,7 @@
       "name": "goto_waypoint",
       "label": "recon_scan_goto_4",
       "on_failed": {
-        "action": "jump_to",
-        "max_attempts": 1,
-        "target": "restore_return_speed_2mps"
+        "action": "continue"
       },
       "params": {
         "x": -2,
@@ -707,9 +594,7 @@
       "name": "goto_waypoint",
       "label": "recon_scan_goto_5",
       "on_failed": {
-        "action": "jump_to",
-        "max_attempts": 1,
-        "target": "restore_return_speed_2mps"
+        "action": "continue"
       },
       "params": {
         "x": 0,
@@ -734,15 +619,16 @@
         "speed_type": "ground",
         "priority": 4,
         "key": "restore_return_speed_2mps"
+      },
+      "on_failed": {
+        "action": "continue"
       }
     },
     {
       "name": "goto_waypoint",
       "label": "return_home_gps",
       "on_failed": {
-        "action": "jump_to",
-        "target": "land_home",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
         "x": 0,
@@ -762,9 +648,7 @@
       "name": "goto_waypoint",
       "label": "descend_home_2_5m",
       "on_failed": {
-        "action": "jump_to",
-        "target": "land_home",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
         "x": 0,
@@ -781,51 +665,16 @@
       }
     },
     {
-      "name": "target_lock",
-      "label": "final_land_lock_h",
-      "save_as": "final_h_lock",
-      "on_failed": {
-        "action": "jump_to",
-        "target": "land_home",
-        "max_attempts": 1
-      },
-      "params": {
-        "acquire_mode": "class_single",
-        "class_names": [
-          "H"
-        ],
-        "camera": {
-          "fov_x_deg": 114.591559,
-          "fov_y_deg": 98.864783,
-          "image_x_sign": 1,
-          "image_y_sign": -1
-        },
-        "min_confidence": 0.35,
-        "max_updates": 8,
-        "max_target_age_s": 0.5,
-        "require_unique_track": true,
-        "detection_source": "scene"
-      }
-    },
-    {
       "name": "align_descend",
       "label": "final_land_align",
       "on_failed": {
-        "action": "jump_to",
-        "target": "land_home",
-        "max_attempts": 1
+        "action": "continue"
       },
       "params": {
-        "track_id": "$final_h_lock.locked_track_id",
         "target_altitude_m": 0.3,
-        "max_duration_s": 30,
-        "max_target_age_s": 0.5,
         "descend_speed_mps": 0.3,
-        "descent_deadband_ex": 0.3,
-        "descent_deadband_ey": 0.3,
         "release_deadband_ex": 0.3,
         "release_deadband_ey": 0.3,
-        "alignment_hold_s": 0.2,
         "kp_forward": 0.3,
         "kp_right": 0.3,
         "max_vx_mps": 0.3,
@@ -843,6 +692,9 @@
       "params": {
         "max_updates": 300,
         "priority": 2
+      },
+      "on_failed": {
+        "action": "continue"
       }
     }
   ]

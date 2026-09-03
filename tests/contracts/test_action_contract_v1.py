@@ -26,8 +26,7 @@ def test_legacy_aliases_normalize_before_defaults_without_override() -> None:
     assert goto.merge_and_validate_params({"x": 4.0, "y": 5.0, "altitude_m": 3.0})["field_x_m"] == 4.0
     assert goto.merge_and_validate_params({"field_x_m": 6.0, "x": 4.0, "field_y_m": 5.0, "altitude_m": 3.0})["field_x_m"] == 6.0
     align = definitions["align_descend"]
-    assert align.merge_and_validate_params({"finish_altitude_m": 0.3})["target_altitude_m"] == 0.3
-    assert align.merge_and_validate_params({"target_altitude_m": 0.5, "finish_altitude_m": 0.3})["target_altitude_m"] == 0.5
+    assert align.merge_and_validate_params({"target_altitude_m": 0.3})["target_altitude_m"] == 0.3
 
 
 def test_runner_rejects_unknown_contract_parameter_before_start() -> None:

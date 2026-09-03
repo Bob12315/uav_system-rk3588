@@ -375,8 +375,9 @@ class ResultService:
                 "vx_forward_mps": detail.get("vx_forward_mps"),
                 "vy_right_mps": detail.get("vy_right_mps"),
                 "vz_down_mps": detail.get("vz_down_mps"),
-                "within_descent_deadband": detail.get("within_descent_deadband"),
                 "within_release_deadband": detail.get("within_release_deadband"),
+                "alignment_window": detail.get("alignment_window"),
+                "alignment_hits": detail.get("alignment_hits"),
             }
             if target is not None and not bool(target.get("released")):
                 target["status"] = "aligned" if detail.get("within_release_deadband") else "aligning"

@@ -643,14 +643,13 @@ def _result_name_is_align_descend(result: object) -> bool:
     if not isinstance(result, dict):
         return False
     reason = str(result.get("reason", ""))
-    if reason.startswith("align_") or reason in {
-        "aligning",
+    if reason in {
         "align_descending",
-        "descending",
-        "descending_slow",
-        "min_altitude_reached",
-        "finish_altitude_reached",
-        "ready_to_release",
+        "confirming_alignment",
+        "alignment_confirmed",
+        "align_descend_timeout",
+        "target_not_found",
+        "altitude_unavailable",
     }:
         return True
     detail = result.get("detail")

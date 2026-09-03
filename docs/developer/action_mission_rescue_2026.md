@@ -26,7 +26,7 @@ takeoff
 → gps_fuse_views
 → select_drop_targets
 → change_speed (1 m/s)
-→ 2 × (goto_waypoint → gps_target_lock → align_descend → payload_release → goto_waypoint climb)
+→ 2 × (goto_waypoint → align_descend(nearest image centre) → payload_release → goto_waypoint climb)
 → change_speed (2 m/s)
 → change_speed (1 m/s)
 → goto_waypoint (recon entry)
@@ -34,7 +34,6 @@ takeoff
 → change_speed (2 m/s)
 → goto_waypoint (return home)
 → goto_waypoint (descend home)
-→ target_lock (H)
 → align_descend
 → land
 ```
@@ -42,38 +41,37 @@ takeoff
 速度切换必须显式使用 `change_speed` Action。`goto_waypoint` 中的到点速度参数是完成
 判据，不是飞行限速。
 
-### 展开的 v2 Action 清单与失败分支
+### 展开的 v2 Action 清单与失败策略
 
-下表的序号就是 JSON 内的执行序；`continue` 只会前进到下一步，并不会把失败伪装成成功。
+下表的序号就是 JSON 内的执行序。三个正式比赛模板的每一步都显式使用
+`on_failed: {"action": "continue"}`：失败会被记录为 skipped，然后启动紧邻的下一步，
+不会直接返航或终止整个 Mission。
 
 | # | label | Action | 失败策略 |
 | ---: | --- | --- | --- |
-| 1 | `takeoff_4_5m` | `takeoff` | fail |
-| 2, 4, 6, 8 | `drop_scan_goto_1..4` | `goto_waypoint` | 最多 2 次，随后 `return_home_gps` |
-| 3, 5, 7, 9 | `drop_scan_capture_1..4` | `gps_capture_view` | fail |
-| 10 | `drop_scan_fuse` | `gps_fuse_views` | 最多 2 次，随后 `return_home_gps` |
-| 11 | `select_gps_drop_targets` | `select_drop_targets` | `return_home_gps` |
-| 12 | `drop_speed_1mps` | `change_speed` | fail |
-| 13 | `drop_1_approach` | `goto_waypoint` | `restore_return_speed_2mps` |
-| 14 | `drop_1_lock` | `gps_target_lock` | `restore_return_speed_2mps`；未确认指定 track 不下降 |
-| 15 | `drop_1_align` | `align_descend` | `restore_return_speed_2mps` |
-| 16 | `drop_1_release` | `payload_release`（SERVO9 1800→1600） | `restore_return_speed_2mps` |
-| 17 | `drop_1_climb` | `goto_waypoint` | `restore_return_speed_2mps` |
-| 18 | `drop_2_approach` | `goto_waypoint` | `restore_return_speed_2mps` |
-| 19 | `drop_2_lock` | `gps_target_lock` | `restore_return_speed_2mps`；无第二目标时跳过下降与投放 |
-| 20 | `drop_2_align` | `align_descend` | `restore_return_speed_2mps` |
-| 21 | `drop_2_release` | `payload_release`（SERVO10 1800→1600） | `restore_return_speed_2mps` |
-| 22 | `drop_2_climb` | `goto_waypoint` | `restore_return_speed_2mps` |
-| 23 | `restore_transition_speed_2mps` | `change_speed` | fail |
-| 24 | `recon_speed_1mps` | `change_speed` | fail |
-| 25 | `goto_recon_entry_4m` | `goto_waypoint` | `restore_return_speed_2mps` |
-| 26–30 | `recon_scan_goto_1..5` | `goto_waypoint` | `restore_return_speed_2mps` |
-| 31 | `restore_return_speed_2mps` | `change_speed` | fail |
-| 32 | `return_home_gps` | `goto_waypoint` | `land_home` |
-| 33 | `descend_home_2_5m` | `goto_waypoint` | `land_home` |
-| 34 | `final_land_lock_h` | `target_lock` / `class_single` | `land_home` |
-| 35 | `final_land_align` | `align_descend` | `land_home` |
-| 36 | `land_home` | `land` | fail |
+| 1 | `takeoff_4_5m` | `takeoff` | `continue` |
+| 2, 4, 6, 8 | `drop_scan_goto_1..4` | `goto_waypoint` | `continue` |
+| 3, 5, 7, 9 | `drop_scan_capture_1..4` | `gps_capture_view` | `continue` |
+| 10 | `drop_scan_fuse` | `gps_fuse_views` | `continue` |
+| 11 | `select_gps_drop_targets` | `select_drop_targets` | `continue` |
+| 12 | `drop_speed_1mps` | `change_speed` | `continue` |
+| 13 | `drop_1_approach` | `goto_waypoint` | `continue` |
+| 14 | `drop_1_align` | `align_descend` | `continue` |
+| 15 | `drop_1_release` | `payload_release`（SERVO9 1800→1600） | `continue` |
+| 16 | `drop_1_climb` | `goto_waypoint` | `continue` |
+| 17 | `drop_2_approach` | `goto_waypoint` | `continue` |
+| 18 | `drop_2_align` | `align_descend` | `continue` |
+| 19 | `drop_2_release` | `payload_release`（SERVO10 1800→1600） | `continue` |
+| 20 | `drop_2_climb` | `goto_waypoint` | `continue` |
+| 21 | `restore_transition_speed_2mps` | `change_speed` | `continue` |
+| 22 | `recon_speed_1mps` | `change_speed` | `continue` |
+| 23 | `goto_recon_entry_4m` | `goto_waypoint` | `continue` |
+| 24–28 | `recon_scan_goto_1..5` | `goto_waypoint` | `continue` |
+| 29 | `restore_return_speed_2mps` | `change_speed` | `continue` |
+| 30 | `return_home_gps` | `goto_waypoint` | `continue` |
+| 31 | `descend_home_2_5m` | `goto_waypoint` | `continue` |
+| 32 | `final_land_align` | `align_descend` | `continue` |
+| 33 | `land_home` | `land` | `continue` |
 
 ## 模板定位
 
@@ -86,7 +84,7 @@ takeoff
 历史模板已删除，不参与正式运行 catalog 或默认 validator。
 
 模板存在不代表已经通过实飞验收。正式比赛前必须在 Web UI 核对当前模板内容、场地
-profile、速度、高度、SERVO 输出和失败恢复目标。
+profile、速度、高度、SERVO 输出和失败继续策略。
 
 ## SITL 固定下视相机与投放映射
 
@@ -94,7 +92,7 @@ profile、速度、高度、SERVO 输出和失败恢复目标。
 `iris_cuadc2026_fixed_down_camera`。其相机是固定下视、未镜像的 640 × 480 图像，10 Hz，
 水平 FOV 为 2.0 rad（114.591559°）；按 4:3 图像比例推导的垂直 FOV 为 98.864783°。
 因此两个投放模板中所有需要地面投影的 `gps_capture_view`、`gps_target_lock` 的 `camera`
-参数均为（`final_land_lock_h` 也保留该值用于标定审计，但 `class_single` 不做地面投影）：
+参数均为：
 
 ```json
 {
@@ -105,10 +103,8 @@ profile、速度、高度、SERVO 输出和失败恢复目标。
 }
 ```
 
-`align_descend` 使用 YOLO 的归一化 `ex/ey` 生成 BODY_NED 控制量，并根据当前高度、相机
-FOV 和载荷相对相机的前/右安装偏移计算 `desired_ex/desired_ey`。PID 和下降/释放 deadband
-使用 `ex-desired_ex`、`ey-desired_ey`，因此控制目标是让实际载荷释放点位于目标上方，
-而不是让相机光轴位于目标上方。速度方向仍使用 `vx_sign=-1`、`vy_sign=1`。
+`align_descend` 直接使用 YOLO 的归一化 `ex/ey` 生成 BODY_NED 控制量，控制目标是画面中心，
+速度方向使用 `vx_sign=-1`、`vy_sign=1`。
 
 Gazebo payload bridge 同时监听人工 RC 输入和飞控 SERVO 输出，但自动任务只允许后者：
 
@@ -128,38 +124,16 @@ RC13/14 是仿真 bridge 的人工触发输入，绝不是 Mission 的参数。`
 
 | 阶段 | Action 与运行方式 | 成功结果 | 失败与模板策略 |
 | --- | --- | --- | --- |
-| 四视角投放区侦察 | 依次运行 4 × `goto_waypoint` → `gps_capture_view`，再运行 `gps_fuse_views` → `select_drop_targets`。每个 capture 从当前 YOLO `scene.detections` 与捕获时 GPS/yaw/高度投影。 | capture: `gps_view_captured`，`output.raw_estimates`；fuse: `gps_views_fused`（也可能是空成功 `gps_views_fused_empty`），`localized_objects`；select: `selected_targets` / `target_slots`。 | 航点和融合最多两次，耗尽后跳 `return_home_gps`；目标选择失败直接返航。capture 本身是一次快照，不因空结果失败；之后由融合/选择决定是否继续。 |
-| 目标复锁与对准下降 | 飞机先到融合 GPS 点上方 2.5 m，融合 GPS 到此只用于导航。每个目标运行 `gps_target_lock`，从桶类白名单且置信度不低于 0.75 的检测中直接选择距相机画面中心最近者；不做 GPS 投影距离门控，也不要求与融合目标类别一致。等待 YOLO 回报同一 track 已 locked 后，把 `locked_track_id` 显式传给 `align_descend`；对准只接受该 track 的未 stale `ex/ey`。 | lock: `gps_target_locked`，`output.locked_track_id`、`best_center_distance_norm`；align: 到释放高度且稳定对中时 `ready_to_release`，包含高度、`ex/ey`、速度、deadband 判定。 | lock 无桶目标、无 track、确认超时或无效 slot 均跳恢复速度，不进入对应下降/投放。align 对 track 不符、丢目标、stale、失高、无控制许可或超时均发零速并跳恢复速度。 |
-| 投放 | `payload_release` 先生成一次 release PWM，在等待窗口维持零速，随后生成 hold PWM。 | 首 tick 为 `release_sent`，最终为 `payload_released`；`detail` 记录 payload/target ID、SERVO 输出、PWM、等待状态与零速命令。 | 模板的 `on_failed` 会跳 `restore_return_speed_2mps`，不尝试第二次释放同一载荷。但当前 ActionResult 没有 dispatch/bridge 回执：SEND、安全或传输拒绝记录在 `last_dispatch.skipped/errors`，仍可能得到 `payload_released`。因此必须同时确认 dispatch 为 accepted，以及 Gazebo bridge 的 `released bottle*` 日志；不能将该 reason 视为已实际脱钩。 |
+| 四视角投放区侦察 | 依次运行 4 × `goto_waypoint` → `gps_capture_view`，再运行 `gps_fuse_views` → `select_drop_targets`。每个 capture 从当前 YOLO `scene.detections` 与捕获时 GPS/yaw/高度投影。 | capture: `gps_view_captured`，`output.raw_estimates`；fuse: `gps_views_fused`（也可能是空成功 `gps_views_fused_empty`），`localized_objects`；select: `selected_targets` / `target_slots`。 | 任一步失败均记录后继续下一步。依赖缺失的 blackboard 数据可能使后续 Action 启动失败，该步骤同样会被跳过。 |
+| 最近目标对准下降 | 飞机先到融合 GPS 点上方 2.5 m，融合 GPS 只用于导航。`align_descend` 每帧直接从 `scene.detections` 中选择归一化距离画面中心最近的目标，同时修正水平位置并下降。 | 到目标高度后，连续 5 个不同 `frame_id` 的画面中至少 3 帧位于对准范围，返回 `alignment_confirmed`。 | 暂无检测或高度不可用时发零速等待；运行达到 30 s 时发零速并失败退出。 |
+| 投放 | `payload_release` 先生成一次 release PWM，在等待窗口维持零速，随后生成 hold PWM。 | 首 tick 为 `release_sent`，最终为 `payload_released`；`detail` 记录 payload/target ID、SERVO 输出、PWM、等待状态与零速命令。 | 失败后继续下一步。当前 ActionResult 没有 dispatch/bridge 回执：SEND、安全或传输拒绝记录在 `last_dispatch.skipped/errors`，仍可能得到 `payload_released`，因此仍需核对 dispatch 和 bridge 日志。 |
 
-连续的 `align_descend` 在停止、跳转、失败、丢失视觉或 telemetry stale 时都会发送显式零速，
+连续的 `align_descend` 在停止、超时或丢失视觉时都会发送显式零速，
 并清除旧连续命令；这不能替代飞手或地面站接管。
 
-投放对准段的有效参数是：目标高度 1.2 m、下降率 0.30 m/s、修正误差下降 deadband
-`|error_ex|/|error_ey| ≤ 0.16`、释放 deadband `≤ 0.02`、水平 PID 增益 0.3 且限幅 0.25 m/s、
-目标最大年龄 0.5 s、最大持续时间 30 s。到达目标高度后，目标必须持续处于释放
-deadband 0.2 s 才会进入投放。H 点下降段使用相同的超时、目标新鲜度和确认时长，
-但高度为 0.3 m、水平限幅及 deadband 为 0.3。`align_descend` 不支持分级/慢速下降、
-高度增益、积分、按更新次数超时或“丢目标继续下降”；这些参数不得加入模板。
-
-当前机械偏移初值为：`payload_1` 相对相机后方 0.06 m（`payload_forward_m=-0.06`），
-`payload_2` 相对相机前方 0.06 m（`payload_forward_m=0.06`），两者横向偏移暂为 0。
-小误差修正的最小有效速度为 0.035 m/s，防止 6 cm 偏移换算后的低速指令无法克服飞控死区。
-这里的正方向是机体前方和右方，不是图像方向。正式实飞前应空载测量相机光轴到实际
-释放点的水平距离并更新参数；不要通过反向修改 `vx_sign/vy_sign` 校正机械安装偏差。
-
-> [!NOTE]
-> `final_land_lock_h` 使用 `target_lock.acquire_mode=class_single`，不需要也不会构造
-> LOCAL_NED `params.target`。它仅作为返航已到 home 后的 GPS 残差纠正：要求最新的有效 scene，
-> `perception_status` 不 stale、年龄不超过 0.5 s，且恰好有一个置信度至少 0.35、带 track_id 与
-> `ex/ey` 的 H 候选。Action 先返回 `target_lock_requested` 并派发一次 YOLO 锁定，再等待同一
-> track 的 `target_valid=true` / `tracking_state=locked` 回执；只有收到回执才返回 `target_locked`
-> 并把 `locked_track_id` 写入 `final_h_lock`。`final_land_align` 只接受这个 track。无 H、多 H、
-> 过期感知或锁定回执不匹配会继续等待，超时则以
-> `target_lock_timeout` 跳到 `land_home`，不会执行 H 标志视觉下降。
->
-> `ActionRuntimeService` 现在会发布 `action_start_failed` 到 Mission，因而任何未来的启动失败也
-> 不会残留前一个 `goto_waypoint` 的成功结果并错误前进。
+投放对准段的有效参数是：目标高度 1.2 m、下降率 0.30 m/s、对准范围
+`|ex|/|ey| ≤ 0.02`、水平 P 增益 0.3 且限幅 0.25 m/s。返航视觉下降段高度为 0.3 m，
+水平限幅及对准范围为 0.3。超时固定为 30 s，5 帧窗口和 3 帧命中数固定在 Action 中。
 
 ## 运行架构
 
@@ -196,17 +170,16 @@ gps_capture_view save_as drop_scan_view_1..4
 select_drop_targets save_as drop_targets
   → drop_targets.target_slots
 
-gps_target_lock save_as drop_1_lock / drop_2_lock
-  → locked_track_id
-  → align_descend(track_id=locked_track_id)
+goto_waypoint（融合目标 GPS 上方）
+  → align_descend
+  → 每个新画面选择中心最近检测
   → MissionOrchestrator 清理连续命令并保持位置
   → payload_release save_as drop_release_1..2
 ```
 
 投放区融合除要求每个聚类至少 3 个有效观测外，还要求这些观测至少来自 3 个不同扫描
 航点，避免单一画面内的重复框满足融合门槛。融合输出携带的总权重会参与同类别目标的
-稳定排序。模板允许只选出一个目标，但缺失的第二 slot 会使复锁启动失败并直接跳到恢复
-速度步骤，第二次下降和投放不会执行。
+稳定排序。`align_descend` 不再消费目标 slot 或固定 track，只使用飞机到达位置后的当前画面。
 
 参数引用支持字典键和列表索引，例如：
 
@@ -228,23 +201,18 @@ gps_target_lock save_as drop_1_lock / drop_2_lock
   "label": "optional_label",
   "save_as": "optional_blackboard_key",
   "params": {},
-  "on_failed": {
-    "action": "jump_to",
-    "target": "recovery_label",
-    "max_attempts": 1
-  }
+  "on_failed": {"action": "continue"}
 }
 ```
 
-当前 orchestrator 的受限控制机制是顺序步骤、`save_as` 数据传递，以及 `fail`、
-`retry_current`、`retry_current_then_jump_to`、`jump_to`、`continue`。循环展开为明确的有限
-步骤，安全收尾由显式返航/降落标签承担，不提供通用脚本或旧 stage 类。调整恢复路径时必须确认：
+当前 orchestrator 仍支持 `fail`、`retry_current`、`retry_current_then_jump_to`、`jump_to`、
+`continue`，但三个正式比赛模板统一使用 `continue`。循环展开为明确的有限步骤，不提供
+通用脚本或旧 stage 类。调整流程时必须确认：
 
 - 失败 Action 的连续速度和 pending position 已停止、清除；
-- 跳转目标不会重复投放同一载荷；
-- 阶段限速在失败或跳转后得到恢复；
-- 侦察失败仍能进入返航/降落安全路径；
-- `payload_release` 失败不得被无条件忽略。
+- 阶段限速在失败后仍能由后续步骤恢复；
+- 失败步骤及原因能够在 `skipped_steps` 中追踪；
+- 最后的返航和降落步骤仍保留在顺序任务末尾。
 
 ## 场地初始化和起飞前检查
 

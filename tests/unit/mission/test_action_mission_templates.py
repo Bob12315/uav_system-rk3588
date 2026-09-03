@@ -29,6 +29,7 @@ def test_formal_templates_validate_and_actions_are_registered() -> None:
     for path in DEFAULT_TEMPLATE_PATHS:
         for step in _load(path)["steps"]:
             assert step["name"] in registered
+            assert step["on_failed"] == {"action": "continue"}
             MissionActionStep(step["name"], step["params"], save_as=step.get("save_as"),
                               label=step.get("label"), on_failed=step.get("on_failed"))
 
@@ -39,7 +40,7 @@ def test_drop_flow_is_explicit_and_preserves_payload_order_and_stop_boundary() -
     assert "gps_multi_view_localize" not in names
     assert "gps_drop_sequence" not in names
     assert names.count("gps_capture_view") == 4
-    assert names.count("gps_target_lock") == 2
+    assert names.count("gps_target_lock") == 0
     assert names.count("align_descend") == 2
     captures = [index for index, step in enumerate(steps) if step["name"] == "gps_capture_view"]
     for capture_index in captures:
@@ -48,7 +49,7 @@ def test_drop_flow_is_explicit_and_preserves_payload_order_and_stop_boundary() -
         assert scan_goto["params"]["require_velocity_valid"] is True
         assert scan_goto["params"]["max_horizontal_speed_mps"] == 0.15
         assert scan_goto["params"]["max_vertical_speed_mps"] == 0.1
-        assert scan_goto["params"]["min_hold_updates"] == 3
+        assert scan_goto["params"]["min_hold_updates"] == 8
     releases = [step for step in steps if step["name"] == "payload_release"]
     assert [step["params"]["payload_id"] for step in releases] == ["payload_1", "payload_2"]
     assert [step["params"]["servo_outputs"] for step in releases] == [
@@ -59,18 +60,13 @@ def test_drop_flow_is_explicit_and_preserves_payload_order_and_stop_boundary() -
         index = steps.index(release)
         assert steps[index - 1]["name"] == "align_descend"
         assert steps[index + 1]["name"] == "goto_waypoint"
-    labels = {step["label"]: index for index, step in enumerate(steps) if step.get("label")}
-    locks = [step for step in steps if step["name"] == "gps_target_lock"]
     aligns = [step for step in steps if step["name"] == "align_descend"]
-    assert [step["save_as"] for step in locks] == ["drop_1_lock", "drop_2_lock"]
-    assert [step["params"]["track_id"] for step in aligns] == [
-        "$drop_1_lock.locked_track_id", "$drop_2_lock.locked_track_id",
-    ]
-    for step in locks:
-        assert step["params"]["require_track_id"] is True
-        assert step["params"]["require_class_match"] is True
-        assert step["params"]["require_lock_confirmation"] is True
-        assert labels[step["on_failed"]["target"]] > steps.index(step)
+    assert all(
+        "selection_mode" not in step["params"]
+        and "target_valid" not in step["params"]
+        and "track_id" not in step["params"]
+        for step in aligns
+    )
 
 
 def test_recon_flow_contains_only_navigation_actions() -> None:
@@ -84,30 +80,18 @@ def test_full_flow_replaces_visual_land_composite_with_atomic_steps() -> None:
     steps = _load(ROOT / "config/action_missions/rescue_2026_full_auto.json")["steps"]
     names = [step["name"] for step in steps]
     assert "visual_land" not in names
-    assert steps[-3]["label"] == "final_land_lock_h"
     assert steps[-2]["label"] == "final_land_align"
     assert steps[-1]["name"] == "land"
-    final_h_lock = steps[-3]["params"]
-    assert steps[-3]["save_as"] == "final_h_lock"
-    assert final_h_lock["acquire_mode"] == "class_single"
-    assert final_h_lock["class_names"] == ["H"]
-    assert final_h_lock["require_unique_track"] is True
-    assert final_h_lock["max_target_age_s"] == 0.5
-    assert steps[-2]["params"]["track_id"] == "$final_h_lock.locked_track_id"
-    drop_locks = [step for step in steps if step["name"] == "gps_target_lock"]
+    assert "final_land_lock_h" not in {step.get("label") for step in steps}
+    assert "track_id" not in steps[-2]["params"]
     drop_aligns = [step for step in steps if step["name"] == "align_descend" and step["label"].startswith("drop_")]
-    assert [step["save_as"] for step in drop_locks] == ["drop_1_lock", "drop_2_lock"]
-    assert [step["params"]["track_id"] for step in drop_aligns] == [
-        "$drop_1_lock.locked_track_id", "$drop_2_lock.locked_track_id",
-    ]
-    for step in drop_locks:
-        assert step["params"]["require_track_id"] is True
-        assert step["params"]["require_class_match"] is False
-        assert step["params"]["require_lock_confirmation"] is True
-        assert step["params"]["selection_mode"] == "nearest_image_center"
-        assert "max_match_distance_m" not in step["params"]
-        assert "min_match_margin_m" not in step["params"]
-        assert step["on_failed"]["action"] == "jump_to"
+    assert not [step for step in steps if step["name"] == "gps_target_lock"]
+    assert all(
+        "selection_mode" not in step["params"]
+        and "target_valid" not in step["params"]
+        and "track_id" not in step["params"]
+        for step in drop_aligns
+    )
     approaches = [step for step in steps if step.get("label") in {"drop_1_approach", "drop_2_approach"}]
     assert [step["params"]["altitude_m"] for step in approaches] == [2.5, 2.5]
     captures = [index for index, step in enumerate(steps) if step["name"] == "gps_capture_view"]
@@ -117,7 +101,7 @@ def test_full_flow_replaces_visual_land_composite_with_atomic_steps() -> None:
         assert scan_goto["params"]["require_velocity_valid"] is True
         assert scan_goto["params"]["max_horizontal_speed_mps"] == 0.15
         assert scan_goto["params"]["max_vertical_speed_mps"] == 0.1
-        assert scan_goto["params"]["min_hold_updates"] == 3
+        assert scan_goto["params"]["min_hold_updates"] == 8
 
 
 def test_full_flow_uses_the_fixed_down_sitl_camera_and_payload_contract() -> None:
@@ -134,8 +118,6 @@ def test_full_flow_uses_the_fixed_down_sitl_camera_and_payload_contract() -> Non
             assert step["params"]["camera"] == camera
         if step["name"] == "align_descend":
             assert "config" not in step["params"]
-            if step["label"].startswith("drop_"):
-                assert step["params"]["camera"] == camera
 
     releases = [step["params"] for step in steps if step["name"] == "payload_release"]
     assert [release["servo_outputs"] for release in releases] == [

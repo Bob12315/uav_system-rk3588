@@ -17,24 +17,28 @@ def _align(name: str) -> list[dict]:
     return [step["params"] for step in _steps(name) if step["name"] == "align_descend" and step["label"].startswith("drop_")]
 
 
-def test_atomic_drop_tuning_and_payload_offsets_are_preserved() -> None:
+def test_atomic_drop_alignment_tuning_is_minimal() -> None:
     generic = _align("drop_two_targets.json")
     rescue = _align("rescue_2026_full_auto.json")
     assert len(generic) == len(rescue) == 2
-    assert [item["payload_forward_m"] for item in generic] == [-0.06, 0.06]
-    assert [item["payload_forward_m"] for item in rescue] == [-0.06, 0.06]
-    assert all(item["payload_right_m"] == 0 for item in generic + rescue)
-    assert {item["max_updates"] for item in generic} == {35}
+    allowed = {
+        "target_altitude_m", "descend_speed_mps", "release_deadband_ex",
+        "release_deadband_ey", "kp_forward", "kp_right", "max_vx_mps",
+        "max_vy_mps", "vx_sign", "vy_sign", "field_yaw_deg", "priority", "key",
+    }
+    assert all(set(item) == allowed for item in generic + rescue)
+    for item in generic:
+        assert item["target_altitude_m"] == 1.2
+        assert item["descend_speed_mps"] == 0.24
+        assert (item["release_deadband_ex"], item["release_deadband_ey"]) == (0.02, 0.02)
+        assert (item["kp_forward"], item["kp_right"]) == (0.275, 0.275)
+        assert (item["max_vx_mps"], item["max_vy_mps"]) == (0.2, 0.2)
     for item in rescue:
         assert item["target_altitude_m"] == 1.2
-        assert item["max_duration_s"] == 30.0
-        assert item["max_target_age_s"] == 0.5
         assert item["descend_speed_mps"] == 0.30
-        assert (item["descent_deadband_ex"], item["descent_deadband_ey"]) == (0.16, 0.16)
         assert (item["release_deadband_ex"], item["release_deadband_ey"]) == (0.02, 0.02)
-        assert item["min_correction_speed_mps"] == 0.035
-        assert item["alignment_hold_s"] == 0.2
-        assert "config" not in item
+        assert (item["kp_forward"], item["kp_right"]) == (0.3, 0.3)
+        assert (item["max_vx_mps"], item["max_vy_mps"]) == (0.25, 0.25)
 
 
 def test_capture_camera_and_recon_routes_are_preserved() -> None:

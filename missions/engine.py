@@ -545,10 +545,21 @@ class MissionOrchestrator:
         self._fail_mission(result, reason="jump_attempts_exhausted")
 
     def _handle_continue(self, result: dict[str, Any], *, link_manager: object | None) -> None:
+        step = self.steps[self.current_index]
+        failure_reason = str(result.get("reason") or "action_failed")
         self._finish_step_timing(
             self.current_index,
             status="continued",
-            reason=str(result.get("reason") or "action_failed"),
+            reason=failure_reason,
+        )
+        self.skipped_steps.append(
+            {
+                "index": self.current_index,
+                "name": step.name,
+                "label": step.label,
+                "reason": failure_reason,
+                "time": time.time(),
+            }
         )
         if self.current_index + 1 >= len(self.steps):
             self.done = True
