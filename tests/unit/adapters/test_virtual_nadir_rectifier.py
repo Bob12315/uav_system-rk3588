@@ -168,6 +168,8 @@ def test_invalid_attitude_does_not_reuse_previous_homography() -> None:
     assert not result.valid
     assert result.reason == "missing_attitude_after"
     assert np.count_nonzero(result.valid_mask) == 0
+    assert np.count_nonzero(result.frame) > 0
+    assert np.allclose(rectifier.last_homography, np.eye(3), atol=1e-9)
 
 
 def test_distortion_map_path_and_extrinsic_validation() -> None:

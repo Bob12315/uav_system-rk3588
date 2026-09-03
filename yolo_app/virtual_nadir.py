@@ -182,10 +182,52 @@ class VirtualNadirRectifier:
         started: float,
         attitude: AttitudeMatch,
     ) -> RectificationResult:
-        invalid_frame = np.empty(
-            (self.output.height, self.output.width, frame.shape[2]), dtype=frame.dtype
+        size = self.output.width, self.output.height
+        if frame.shape[:2] == (self.camera.height, self.camera.width):
+            source = frame
+            if self._undistort_map is not None:
+                map_x, map_y = self._undistort_map
+                source = cv2.remap(
+                    frame, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT
+                )
+            if self.last_homography is not None:
+                invalid_frame = cv2.warpPerspective(
+                    source,
+                    self.last_homography,
+                    size,
+                    flags=cv2.INTER_LINEAR,
+                    borderMode=cv2.BORDER_CONSTANT,
+                    borderValue=tuple(self.output.border_value),
+                )
+            else:
+                invalid_frame = cv2.resize(source, size, interpolation=cv2.INTER_LINEAR)
+        else:
+            invalid_frame = cv2.resize(frame, size, interpolation=cv2.INTER_LINEAR)
+
+        # This is display-only fail-soft output.  The all-zero valid mask keeps
+        # inference disabled, while an explicit warning prevents a stale pose
+        # preview from being mistaken for valid stabilized perception.
+        cv2.rectangle(invalid_frame, (0, 0), (self.output.width, 58), (0, 0, 180), -1)
+        cv2.putText(
+            invalid_frame,
+            "ATTITUDE SYNC LOST - YOLO PAUSED",
+            (10, 24),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.58,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
         )
-        invalid_frame[...] = tuple(self.output.border_value)
+        cv2.putText(
+            invalid_frame,
+            reason,
+            (10, 48),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.48,
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
         return RectificationResult(
             invalid_frame,
             np.zeros((self.output.height, self.output.width), dtype=np.uint8),
