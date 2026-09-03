@@ -33,6 +33,7 @@ class RknnDetector:
         iou_thres: float,
         classes: list[int],
         class_names: tuple[str, ...] = CLASS_NAMES,
+        npu_core: int | None = None,
     ) -> None:
         if Path(model_path).suffix.lower() != ".rknn":
             raise ValueError(f"RK3588 detector requires an .rknn model: {model_path}")
@@ -45,9 +46,18 @@ class RknnDetector:
         self.rknn = RKNNLite(verbose=False)
         if self.rknn.load_rknn(model_path) != 0:
             raise RuntimeError(f"failed to load RKNN model: {model_path}")
-        if self.rknn.init_runtime(core_mask=RKNNLite.NPU_CORE_0_1_2) != 0:
+        if npu_core is None:
+            core_mask = RKNNLite.NPU_CORE_0_1_2
+            core_label = "NPU_CORE_0_1_2"
+        elif npu_core in {0, 1, 2}:
+            core_mask = getattr(RKNNLite, f"NPU_CORE_{npu_core}")
+            core_label = f"NPU_CORE_{npu_core}"
+        else:
             self.rknn.release()
-            raise RuntimeError("failed to initialize RKNN runtime on NPU_CORE_0_1_2")
+            raise ValueError("npu_core must be 0, 1, 2, or None")
+        if self.rknn.init_runtime(core_mask=core_mask) != 0:
+            self.rknn.release()
+            raise RuntimeError(f"failed to initialize RKNN runtime on {core_label}")
         self.last_metrics_ms = {"preprocess": 0.0, "npu": 0.0, "postprocess": 0.0}
 
     def detect(self, frame) -> list[Detection]:

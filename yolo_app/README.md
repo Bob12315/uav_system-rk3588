@@ -37,6 +37,9 @@ camera/video/stream
 
 视频采集和 MJPEG 编码都与有序的 RKNN/tracker 主循环解耦。MJPEG worker 只保留
 最新待编码帧；浏览器或 JPEG 编码跟不上时覆盖旧帧，不反压 NPU 推理，也不累积视频延迟。
+`inference_workers` 可在 RK3588 上启用 1..3 个独立 RKNN context；多 worker 时分别固定到
+Core0/Core1/Core2 并行处理帧，但结果仍按提交顺序进入唯一的 tracker/TargetManager。
+姿态同步失效会取消或废弃在途旧检测，旧结果不能越过该感知安全栅栏。
 
 启用 `virtual_nadir.enabled` 后，检测输入改为：
 

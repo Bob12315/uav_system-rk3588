@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+from collections import deque
 
 # Some conda-packaged OpenCV builds use the Qt backend but do not bundle fonts.
 # Point Qt to a common system font directory before importing cv2 to suppress warnings.
@@ -115,37 +116,64 @@ def main() -> int:
         web_stream.start()
 
     try:
-        while True:
-            packet = video_source.read()
-            if packet is None:
-                break
+        pending_frames = deque()
+        source_finished = False
+        while pending_frames or not source_finished:
+            while not source_finished and len(pending_frames) < cfg.inference_workers:
+                packet = video_source.read()
+                if packet is None:
+                    source_finished = True
+                    break
 
-            raw_frame = packet.frame
-            frame = raw_frame
-            rectification = None
-            if rectifier is not None and attitude_history is not None:
-                attitude_cfg = cfg.virtual_nadir.attitude
-                attitude = attitude_history.lookup(
-                    packet.captured_at_monotonic_ns,
-                    max_sample_distance_ms=attitude_cfg.max_sample_distance_ms,
-                    max_bracket_span_ms=attitude_cfg.max_bracket_span_ms,
-                    future_wait_ms=attitude_cfg.future_wait_ms,
-                    min_rate_hz=attitude_cfg.min_rate_hz,
-                    rate_window_ms=attitude_cfg.rate_window_ms,
-                    min_rate_samples=attitude_cfg.min_rate_samples,
-                )
-                rectification = rectifier.rectify(raw_frame, attitude)
-                frame = rectification.frame
+                raw_frame = packet.frame
+                frame = raw_frame
+                rectification = None
+                if rectifier is not None and attitude_history is not None:
+                    attitude_cfg = cfg.virtual_nadir.attitude
+                    attitude = attitude_history.lookup(
+                        packet.captured_at_monotonic_ns,
+                        max_sample_distance_ms=attitude_cfg.max_sample_distance_ms,
+                        max_bracket_span_ms=attitude_cfg.max_bracket_span_ms,
+                        future_wait_ms=attitude_cfg.future_wait_ms,
+                        min_rate_hz=attitude_cfg.min_rate_hz,
+                        rate_window_ms=attitude_cfg.rate_window_ms,
+                        min_rate_samples=attitude_cfg.min_rate_samples,
+                    )
+                    rectification = rectifier.rectify(raw_frame, attitude)
+                    frame = rectification.frame
+
+                invalid = rectification is not None and not rectification.valid
+                if invalid:
+                    # A failed attitude match is an immediate perception fence.
+                    # Pending older detections may finish on the NPU but can no
+                    # longer reach the tracker or resurrect a target lock.
+                    for pending in pending_frames:
+                        ticket = pending[4]
+                        if ticket is not None:
+                            tracker.cancel(ticket)
+                    pending_frames.clear()
+                    tracker.reset()
+                    target_manager.invalidate()
+                    ticket = None
+                else:
+                    valid_mask = None if rectification is None else rectification.valid_mask
+                    ticket = tracker.submit(frame, valid_mask=valid_mask)
+                pending_frames.append((packet, raw_frame, frame, rectification, ticket))
+                if invalid:
+                    break
+
+            if not pending_frames:
+                continue
+            packet, raw_frame, frame, rectification, ticket = pending_frames.popleft()
             image_height, image_width = frame.shape[:2]
 
-            if rectification is not None and not rectification.valid:
+            if ticket is None:
                 tracker.reset()
                 target_manager.invalidate()
                 tracks = []
                 inference_metrics = {"preprocess": 0.0, "npu": 0.0, "postprocess": 0.0}
             else:
-                valid_mask = None if rectification is None else rectification.valid_mask
-                tracks = tracker.run(frame, valid_mask=valid_mask)
+                tracks = tracker.complete(ticket)
                 inference_metrics = tracker.last_metrics_ms
             frame_count += 1
             fps = frame_count / max(time.perf_counter() - start_time, 1e-9)

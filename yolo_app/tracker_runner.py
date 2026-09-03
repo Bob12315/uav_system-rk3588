@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from typing import Callable
 
 import cv2
 import numpy as np
@@ -15,38 +17,89 @@ except ImportError:
     from rknn_detector import Detection, RknnDetector
 
 
+@dataclass(frozen=True, slots=True)
+class InferenceTicket:
+    future: Future
+
+
 class TrackerRunner:
     """Expose RK3588 RKNN detections as project-level tracks."""
 
-    def __init__(self, cfg: AppConfig) -> None:
-        self.detector = RknnDetector(
-            model_path=cfg.model_path,
-            conf_thres=cfg.conf_thres,
-            iou_thres=cfg.iou_thres,
-            classes=cfg.classes,
-            class_names=tuple(cfg.class_names),
-        )
+    def __init__(
+        self,
+        cfg: AppConfig,
+        detector_factory: Callable[..., RknnDetector] = RknnDetector,
+    ) -> None:
+        worker_count = int(cfg.inference_workers)
+        self.detectors: list[RknnDetector] = []
+        try:
+            for worker_index in range(worker_count):
+                self.detectors.append(detector_factory(
+                    model_path=cfg.model_path,
+                    conf_thres=cfg.conf_thres,
+                    iou_thres=cfg.iou_thres,
+                    classes=cfg.classes,
+                    class_names=tuple(cfg.class_names),
+                    npu_core=worker_index if worker_count > 1 else None,
+                ))
+        except Exception:
+            for detector in self.detectors:
+                detector.release()
+            raise
+        self.executors = [
+            ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"RknnCore{index}")
+            for index in range(worker_count)
+        ]
+        self._next_worker = 0
+        self._last_metrics_ms = {"preprocess": 0.0, "npu": 0.0, "postprocess": 0.0}
         self.iou_tracker = _IoUTracker(max_lost_frames=cfg.max_lost_frames)
 
     def run(self, frame, valid_mask=None) -> list[Track]:
+        return self.complete(self.submit(frame, valid_mask=valid_mask))
+
+    def submit(self, frame, valid_mask=None) -> InferenceTicket:
+        worker_index = self._next_worker
+        self._next_worker = (self._next_worker + 1) % len(self.detectors)
+        future = self.executors[worker_index].submit(
+            self._detect,
+            self.detectors[worker_index],
+            frame,
+            valid_mask,
+        )
+        return InferenceTicket(future)
+
+    @staticmethod
+    def _detect(detector: RknnDetector, frame, valid_mask=None):
         detector_frame = frame
         if valid_mask is not None:
             _validate_mask(valid_mask, frame.shape[:2])
             detector_frame = cv2.bitwise_and(frame, frame, mask=valid_mask)
-        detections = self.detector.detect(detector_frame)
+        detections = detector.detect(detector_frame)
         if valid_mask is not None:
             detections = _filter_detections_by_valid_mask(detections, valid_mask)
+        return detections, dict(detector.last_metrics_ms)
+
+    def complete(self, ticket: InferenceTicket) -> list[Track]:
+        detections, metrics = ticket.future.result()
+        self._last_metrics_ms = metrics
         return self.iou_tracker.update(detections)
+
+    @staticmethod
+    def cancel(ticket: InferenceTicket) -> None:
+        ticket.future.cancel()
 
     def reset(self) -> None:
         self.iou_tracker.reset()
 
     @property
     def last_metrics_ms(self) -> dict[str, float]:
-        return self.detector.last_metrics_ms
+        return self._last_metrics_ms
 
     def release(self) -> None:
-        self.detector.release()
+        for executor in self.executors:
+            executor.shutdown(wait=True, cancel_futures=True)
+        for detector in self.detectors:
+            detector.release()
 
 
 @dataclass(slots=True)

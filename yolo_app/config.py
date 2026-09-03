@@ -66,6 +66,7 @@ class VirtualNadirConfig:
 @dataclass(slots=True)
 class AppConfig:
     model_path: str
+    inference_workers: int
     source: str
     conf_thres: float
     iou_thres: float
@@ -163,7 +164,7 @@ def _load_yaml_config(path: str) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("config yaml must be a mapping")
     allowed = {
-        "model_path", "source", "conf_thres", "iou_thres", "classes", "udp_ip", "udp_port",
+        "model_path", "inference_workers", "source", "conf_thres", "iou_thres", "classes", "udp_ip", "udp_port",
         "max_datagram_bytes", "max_detections",
         "selection_mode", "target_class", "max_lost_frames", "show", "save_video", "save_path",
         "line_width", "show_all_tracks", "command_enabled", "command_ip", "command_port",
@@ -340,8 +341,12 @@ def load_config() -> AppConfig:
     max_detections = int(merged.get("max_detections", 128))
     if not 512 <= max_datagram_bytes <= 65_507 or not 1 <= max_detections <= 4096:
         raise ValueError("YOLO UDP bounds are invalid")
+    inference_workers = int(merged.get("inference_workers", 1))
+    if not 1 <= inference_workers <= 3:
+        raise ValueError("inference_workers must be in 1..3 for RK3588")
     return AppConfig(
         model_path=_resolve_config_path(merged["model_path"], args.config),
+        inference_workers=inference_workers,
         source=_expand_user_path(merged["source"]),
         conf_thres=float(merged["conf_thres"]),
         iou_thres=float(merged["iou_thres"]),

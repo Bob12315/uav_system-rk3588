@@ -56,12 +56,34 @@ def test_load_config_resolves_paths_relative_to_yaml(tmp_path: Path, monkeypatch
     cfg = load_config()
 
     assert cfg.model_path == str(tmp_path / "data" / "models" / "model.rknn")
+    assert cfg.inference_workers == 1
     assert cfg.save_path == str(tmp_path / "runtime" / "videos" / "output.mp4")
     assert cfg.latest_frame is True
     assert cfg.web_stream_enabled is True
     assert cfg.web_stream_width == 0
     assert cfg.web_stream_height == 0
     assert Path(cfg.recording_dir).name == "uav_recordings"
+
+
+def test_load_config_accepts_three_rknn_inference_workers(tmp_path: Path, monkeypatch) -> None:
+    data = _config()
+    data["inference_workers"] = 3
+    path = _write_config(tmp_path, data)
+    monkeypatch.setattr("sys.argv", ["yolo", "--config", str(path)])
+
+    assert load_config().inference_workers == 3
+
+
+def test_load_config_rejects_more_than_three_inference_workers(
+    tmp_path: Path, monkeypatch
+) -> None:
+    data = _config()
+    data["inference_workers"] = 4
+    path = _write_config(tmp_path, data)
+    monkeypatch.setattr("sys.argv", ["yolo", "--config", str(path)])
+
+    with pytest.raises(ValueError, match="inference_workers must be in 1..3"):
+        load_config()
 
 
 def test_load_config_reads_web_stream_dimensions(tmp_path: Path, monkeypatch) -> None:

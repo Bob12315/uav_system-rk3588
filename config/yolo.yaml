@@ -10,6 +10,10 @@
 # 仓库内随代码管理的 RKNN FP16 部署模型。
 model_path: "../data/models/gazebo_dataset-fp16.rknn"
 
+# RK3588 三个 NPU core 各运行一个独立 RKNN context；结果按 frame_id 顺序
+# 进入 tracker。范围 1..3，设为 1 可回退到原同步推理路径。
+inference_workers: 3
+
 # 模型类别名称，顺序必须与 RKNN 模型输出一致。
 class_names: ["baozha", "shenghua", "yiran", "fangshe", "buran", "fushi", "youdu", "yushi", "ziran", "ciji", "bucket", "H"]
 

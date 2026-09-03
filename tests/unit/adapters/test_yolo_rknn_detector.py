@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import threading
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
 pytest.importorskip("cv2")
 
 from yolo_app.rknn_detector import Detection, RknnDetector, letterbox, postprocess
-from yolo_app.tracker_runner import _IoUTracker, _filter_detections_by_valid_mask
+from yolo_app.tracker_runner import TrackerRunner, _IoUTracker, _filter_detections_by_valid_mask
 
 
 def _empty_outputs():
@@ -107,3 +110,46 @@ def test_valid_mask_rejects_boxes_touching_warp_border() -> None:
 def test_detector_rejects_non_rknn_models_before_runtime_loading() -> None:
     with pytest.raises(ValueError, match=r"requires an \.rknn model"):
         RknnDetector("model.onnx", 0.25, 0.45, [])
+
+
+def test_tracker_runner_runs_three_rknn_contexts_concurrently_on_distinct_cores() -> None:
+    barrier = threading.Barrier(3)
+    created = []
+
+    class FakeDetector:
+        def __init__(self, **kwargs) -> None:
+            self.npu_core = kwargs["npu_core"]
+            self.last_metrics_ms = {"preprocess": 1.0, "npu": 2.0, "postprocess": 3.0}
+            self.released = False
+            created.append(self)
+
+        def detect(self, frame):
+            barrier.wait(timeout=1.0)
+            x = float(frame[0, 0, 0])
+            return [Detection(0, "Target", 0.9, x, 0.0, x + 10.0, 10.0)]
+
+        def release(self) -> None:
+            self.released = True
+
+    cfg = SimpleNamespace(
+        inference_workers=3,
+        model_path="model.rknn",
+        conf_thres=0.25,
+        iou_thres=0.45,
+        classes=[],
+        class_names=["Target"],
+        max_lost_frames=5,
+    )
+    runner = TrackerRunner(cfg, detector_factory=FakeDetector)
+    try:
+        tickets = [
+            runner.submit(np.full((16, 16, 3), value, dtype=np.uint8))
+            for value in (1, 2, 3)
+        ]
+        tracks = [runner.complete(ticket) for ticket in tickets]
+        assert [detector.npu_core for detector in created] == [0, 1, 2]
+        assert [frame_tracks[0].x1 for frame_tracks in tracks] == [1.0, 2.0, 3.0]
+    finally:
+        runner.release()
+
+    assert all(detector.released for detector in created)
