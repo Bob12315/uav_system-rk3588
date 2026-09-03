@@ -197,14 +197,16 @@ def main() -> int:
                         actual_path=recorder_status.path or None, frames=recorder_status.frames,
                         error=recorder_status.error or None)
                     continue
+                applied = True
                 if command.action in {"recording_start", "recording_stop"}:
                     raw_recorder.handle_command(command.action, raw_frame.shape)
                 else:
-                    target_manager.apply_command(command, tracks)
+                    applied = target_manager.apply_command(command, tracks)
                 recorder_status = raw_recorder.status()
+                applied = applied and not bool(recorder_status.error)
                 command_receiver.complete(
                     command,
-                    applied=not bool(recorder_status.error),
+                    applied=applied,
                     locked_track_id=getattr(target_manager, "locked_track_id", None),
                     recording_state=recorder_status.state,
                     recorder_boot_id=recorder_status.recorder_boot_id,

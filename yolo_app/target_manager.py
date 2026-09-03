@@ -28,20 +28,25 @@ class TargetManager:
     def locked_track_id(self) -> int | None:
         return self.state.locked_track_id
 
-    def apply_command(self, command: CommandMessage, tracks: list[Track]) -> None:
+    def apply_command(self, command: CommandMessage, tracks: list[Track]) -> bool:
         if command.action == "lock_target":
             if command.track_id is None:
-                return
+                return False
             for track in tracks:
                 if track.track_id == command.track_id:
                     self._lock_track(track.track_id)
-                    return
+                    return True
+            return False
         elif command.action == "unlock_target":
             self._unlock("searching", reset_lost_count=True)
+            return True
         elif command.action == "switch_next":
             self._switch_by_offset(tracks, offset=1)
+            return True
         elif command.action == "switch_prev":
             self._switch_by_offset(tracks, offset=-1)
+            return True
+        return False
 
     def invalidate(self) -> None:
         """Fail closed immediately; no lock or lost-frame grace survives invalid input."""
