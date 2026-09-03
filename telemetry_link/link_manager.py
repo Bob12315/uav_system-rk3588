@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from contracts.platform.vehicle_state import LinkControlSnapshot, SourceSwitchReceipt
 
 try:
+    from .attitude_udp_publisher import AttitudeUdpPublisher
     from .command_queue import CommandQueue
     from .command_sender import CommandSender
     from .config import EndpointConfig, TelemetryConfig
@@ -25,6 +26,7 @@ try:
     from contracts.platform.vehicle_commands import (BarrierDisposition, CancelRequest, CancelScope,
         CancellationReceipt, CommandSubmissionReceipt, SubmissionState, VehicleCommandEnvelope)
 except ImportError:  # pragma: no cover - supports direct script execution
+    from attitude_udp_publisher import AttitudeUdpPublisher
     from command_queue import CommandQueue
     from command_sender import CommandSender
     from config import EndpointConfig, TelemetryConfig
@@ -78,6 +80,7 @@ class SourceRuntime:
     legacy_sender_started: bool = False
     field_version_matches: object | None = None
     execution_fence_query: object | None = None
+    attitude_publisher: AttitudeUdpPublisher | None = None
 
     def __post_init__(self) -> None:
         if self.worker_lock is None:
@@ -177,7 +180,7 @@ class SourceRuntime:
                     writer.ack_router = self.ack_router
                     self.receiver = TelemetryReceiver(
                         self.client, self.state_cache, self.cfg, self.worker_stop_event,
-                        receiver_generation, self.ack_router, self.name,
+                        receiver_generation, self.ack_router, self.name, self.attitude_publisher,
                     )
                     self.receiver.start()
                     self.broker_worker = CommandBrokerWorker(
@@ -190,6 +193,10 @@ class SourceRuntime:
                     )
                     if self.cfg.request_message_intervals:
                         self._request_default_message_intervals(direct=True)
+                    elif self.cfg.attitude_udp_enabled:
+                        self._request_message_interval(
+                            "ATTITUDE", self.cfg.attitude_udp_rate_hz, direct=True
+                        )
                     self.broker_worker.start()
                 else:
                     self.sender = CommandSender(
@@ -200,10 +207,14 @@ class SourceRuntime:
                     self.legacy_sender_started = True
                     if self.cfg.request_message_intervals:
                         self._request_default_message_intervals(direct=False)
+                    elif self.cfg.attitude_udp_enabled:
+                        self._request_message_interval(
+                            "ATTITUDE", self.cfg.attitude_udp_rate_hz, direct=False
+                        )
                 if self.receiver is None:
                     self.receiver = TelemetryReceiver(
                         self.client, self.state_cache, self.cfg, self.worker_stop_event,
-                        receiver_generation, self.ack_router, self.name,
+                        receiver_generation, self.ack_router, self.name, self.attitude_publisher,
                     )
                     self.receiver.start()
                 logger.info("source=%s Reconnected successfully", self.name)
@@ -259,38 +270,51 @@ class SourceRuntime:
                 break
 
     def _request_default_message_intervals(self, *, direct: bool) -> None:
+        requested_attitude = False
         for message_name, rate_hz in self.cfg.message_interval_hz.items():
-            command = ActionCommand(
-                    action_type=ActionType.REQUEST_MESSAGE_INTERVAL,
-                    params={"message_name": message_name, "rate_hz": rate_hz},
-                    priority=20,
-                    retries_left=1,
-                    retry_interval_sec=self.cfg.action_retry_interval_sec,
-                    created_at=time.time(),
-                )
-            if direct and self.sender is not None:
-                quarantine_id = uuid.uuid4().hex
-                if self.ack_router is not None:
-                    publication = self.state_cache.atomic_publication(time.time())
-                    now_ns = time.monotonic_ns()
-                    self.ack_router.register(AckSlot(
-                        quarantine_id, str(publication["session_id"]),
-                        mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
-                        self.client.target_system, self.client.autopilot_component,
-                        discard=True, ack_deadline_monotonic_ns=now_ns + 250_000_000,
-                        total_deadline_monotonic_ns=now_ns + 250_000_000,
-                        local_system=self.client.local_system,
-                        local_component=self.client.local_component,
-                    ))
-                self.sender._send_action(command)
-                if self.ack_router is not None:
-                    self.ack_router.mark_transmitted(quarantine_id)
-                    deadline = time.monotonic_ns() + 250_000_000
-                    while self.ack_router.has_command(quarantine_id) and time.monotonic_ns() < deadline:
-                        time.sleep(0.005)
-                    self.ack_router.expire(deadline)
-            else:
-                self.command_queue.put_action(command)
+            if message_name == "ATTITUDE" and self.cfg.attitude_udp_enabled:
+                rate_hz = max(rate_hz, self.cfg.attitude_udp_rate_hz)
+                requested_attitude = True
+            self._request_message_interval(message_name, rate_hz, direct=direct)
+        if self.cfg.attitude_udp_enabled and not requested_attitude:
+            self._request_message_interval(
+                "ATTITUDE", self.cfg.attitude_udp_rate_hz, direct=direct
+            )
+
+    def _request_message_interval(
+        self, message_name: str, rate_hz: float, *, direct: bool
+    ) -> None:
+        command = ActionCommand(
+            action_type=ActionType.REQUEST_MESSAGE_INTERVAL,
+            params={"message_name": message_name, "rate_hz": rate_hz},
+            priority=20,
+            retries_left=1,
+            retry_interval_sec=self.cfg.action_retry_interval_sec,
+            created_at=time.time(),
+        )
+        if direct and self.sender is not None:
+            quarantine_id = uuid.uuid4().hex
+            if self.ack_router is not None:
+                publication = self.state_cache.atomic_publication(time.time())
+                now_ns = time.monotonic_ns()
+                self.ack_router.register(AckSlot(
+                    quarantine_id, str(publication["session_id"]),
+                    mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
+                    self.client.target_system, self.client.autopilot_component,
+                    discard=True, ack_deadline_monotonic_ns=now_ns + 250_000_000,
+                    total_deadline_monotonic_ns=now_ns + 250_000_000,
+                    local_system=self.client.local_system,
+                    local_component=self.client.local_component,
+                ))
+            self.sender._send_action(command)
+            if self.ack_router is not None:
+                self.ack_router.mark_transmitted(quarantine_id)
+                deadline = time.monotonic_ns() + 250_000_000
+                while self.ack_router.has_command(quarantine_id) and time.monotonic_ns() < deadline:
+                    time.sleep(0.005)
+                self.ack_router.expire(deadline)
+        else:
+            self.command_queue.put_action(command)
 
 
 class LinkManager:
@@ -316,6 +340,17 @@ class LinkManager:
         self._start_thread: threading.Thread | None = None
         self._field_version_port: object | None = None
         self._execution_fence_query: object | None = None
+        self._attitude_stop_event = threading.Event()
+        self.attitude_publisher = (
+            AttitudeUdpPublisher(
+                cfg.attitude_udp_ip,
+                cfg.attitude_udp_port,
+                source=cfg.active_source,
+                stop_event=self._attitude_stop_event,
+            )
+            if cfg.attitude_udp_enabled
+            else None
+        )
 
         enabled_sources = (
             ["real", "sitl"] if cfg.data_source == "dual"
@@ -334,6 +369,7 @@ class LinkManager:
                 worker_stop_event=threading.Event(),
                 field_version_matches=self._field_version_matches,
                 execution_fence_query=self._execution_fence_query,
+                attitude_publisher=self.attitude_publisher,
             )
             self._speed_overrides[source_name] = {}
             runtime = self.runtimes[source_name]
@@ -368,6 +404,8 @@ class LinkManager:
                     stream_id="navigation", reason=reason)
 
     def start(self) -> None:
+        if self.attitude_publisher is not None:
+            self.attitude_publisher.start()
         for runtime in self.runtimes.values():
             runtime.start(self.logger)
 
@@ -385,6 +423,9 @@ class LinkManager:
     def stop(self) -> None:
         for runtime in self.runtimes.values():
             runtime.stop()
+        self._attitude_stop_event.set()
+        if self.attitude_publisher is not None:
+            self.attitude_publisher.close()
         if self._start_thread is not None and self._start_thread.is_alive():
             self._start_thread.join(timeout=1.0)
 
@@ -413,6 +454,9 @@ class LinkManager:
         with self.active_lock:
             self.active_source = source_name
             self._source_revision += 1
+        attitude_publisher = getattr(self, "attitude_publisher", None)
+        if attitude_publisher is not None:
+            attitude_publisher.switch_source(source_name)
         self._clear_continuous_commands()
         self.logger.info("switched active_source=%s previous_source=%s", source_name, previous_source)
         return True

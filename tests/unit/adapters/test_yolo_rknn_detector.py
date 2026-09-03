@@ -6,7 +6,7 @@ import pytest
 pytest.importorskip("cv2")
 
 from yolo_app.rknn_detector import Detection, RknnDetector, letterbox, postprocess
-from yolo_app.tracker_runner import _IoUTracker
+from yolo_app.tracker_runner import _IoUTracker, _filter_detections_by_valid_mask
 
 
 def _empty_outputs():
@@ -79,6 +79,29 @@ def test_rknn_iou_tracker_keeps_visible_detection_id() -> None:
     second_tracks = tracker.update([shifted])
 
     assert first_tracks[0].track_id == second_tracks[0].track_id
+
+
+def test_tracker_reset_retires_all_previous_track_ids() -> None:
+    tracker = _IoUTracker(max_lost_frames=5)
+    detection = Detection(0, "Target", 0.9, 10, 10, 50, 50)
+    old_id = tracker.update([detection])[0].track_id
+
+    tracker.reset()
+    new_id = tracker.update([detection])[0].track_id
+
+    assert tracker.states
+    assert new_id != old_id
+
+
+def test_valid_mask_rejects_boxes_touching_warp_border() -> None:
+    mask = np.full((100, 100), 255, dtype=np.uint8)
+    mask[:, :20] = 0
+    invalid = Detection(0, "Target", 0.9, 10, 30, 40, 60)
+    valid = Detection(0, "Target", 0.9, 30, 30, 60, 60)
+
+    filtered = _filter_detections_by_valid_mask([invalid, valid], mask)
+
+    assert filtered == [valid]
 
 
 def test_detector_rejects_non_rknn_models_before_runtime_loading() -> None:

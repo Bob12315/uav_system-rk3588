@@ -34,6 +34,35 @@ camera/video/stream
 → optional MJPEG annotation / raw recording
 ```
 
+启用 `virtual_nadir.enabled` 后，检测输入改为：
+
+```text
+raw frame + FramePacket monotonic timestamp
+→ localhost ATTITUDE history
+→ quaternion SLERP
+→ pure-rotation Virtual Nadir homography
+→ valid-mask constrained stabilized frame
+→ RKNN detector / tracker
+```
+
+`virtual_nadir.enabled` 是图像处理路径的模式开关：关闭时保持
+`raw frame → YOLO → Web UI`，开启时使用
+`IMU stabilized frame → YOLO → Web UI`。Web UI 始终显示 YOLO 实际处理坐标域中的
+标注画面；`debug_compare` 仅改变板端本机 OpenCV 调试窗口。
+
+Virtual Nadir V1 将虚拟相机固定为 `roll=0`、`pitch=0`、`yaw=yaw_ref`；
+`yaw_ref` 在每个 telemetry/source session 首次获得有效姿态时锁定。它只补偿相机姿态，
+不补偿无人机平移，也不执行 GPS 投影、地面交点、正射图或地图拼接。
+
+姿态旁路由 `telemetry_link` 的 runtime active source 独占发布，YOLO 不连接 MAVLink。
+视频帧和姿态都使用同一主机的 monotonic 时间域。当前帧时间代表 camera read/UDP decode
+完成时间，不是真实曝光时间。
+
+该路径 fail closed：姿态缺失、过期、采样频率不足、session/source 切换或重投影失败时，
+当帧不执行推理并立即清除 tracker 历史和 target lock。重投影生成的 `valid_mask` 同时用于
+屏蔽推理输入和拒绝跨入无真实像素区域的检测框。飞控侧启用姿态 UDP 后会显式请求至少
+30 Hz 的 `ATTITUDE`；YOLO 使用配置的最低实际频率继续进行独立检查。
+
 输入与输出张量布局必须以当前 FP16 RKNN 模型的实际导出结果为准，不要因为历史
 INT8 文档假设而修改后处理。
 

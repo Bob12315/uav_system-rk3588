@@ -130,16 +130,22 @@ def main() -> int:
                     max_sample_distance_ms=attitude_cfg.max_sample_distance_ms,
                     max_bracket_span_ms=attitude_cfg.max_bracket_span_ms,
                     future_wait_ms=attitude_cfg.future_wait_ms,
+                    min_rate_hz=attitude_cfg.min_rate_hz,
+                    rate_window_ms=attitude_cfg.rate_window_ms,
+                    min_rate_samples=attitude_cfg.min_rate_samples,
                 )
                 rectification = rectifier.rectify(raw_frame, attitude)
                 frame = rectification.frame
             image_height, image_width = frame.shape[:2]
 
             if rectification is not None and not rectification.valid:
+                tracker.reset()
+                target_manager.invalidate()
                 tracks = []
                 inference_metrics = {"preprocess": 0.0, "npu": 0.0, "postprocess": 0.0}
             else:
-                tracks = tracker.run(frame)
+                valid_mask = None if rectification is None else rectification.valid_mask
+                tracks = tracker.run(frame, valid_mask=valid_mask)
                 inference_metrics = tracker.last_metrics_ms
             frame_count += 1
             fps = frame_count / max(time.perf_counter() - start_time, 1e-9)
@@ -210,18 +216,20 @@ def main() -> int:
                     source_read_ms=packet.source_read_ms,
                     npu_ms=inference_metrics["npu"],
                 )
-                debug_view = (
+                local_view = (
                     build_debug_comparison(raw_frame, rectification)
                     if rectification is not None and cfg.virtual_nadir.debug_compare
                     else annotated
                 )
                 if cfg.show:
-                    cv2.imshow(cfg.window_name, debug_view)
+                    cv2.imshow(cfg.window_name, local_view)
                     key = cv2.waitKey(1) & 0xFF
                     if key in {27, ord("q")}:
                         break
                 if web_stream is not None:
-                    web_stream.publish(debug_view)
+                    # Web UI always shows the annotated YOLO input domain:
+                    # stabilized when Virtual Nadir is enabled, raw otherwise.
+                    web_stream.publish(annotated)
                 if cfg.save_video:
                     if writer is None:
                         fps = video_source.cap.get(cv2.CAP_PROP_FPS)
@@ -234,6 +242,7 @@ def main() -> int:
                     else (
                         f" rectify_valid={rectification.valid} rectify_reason={rectification.reason} "
                         f"attitude_match_ms={rectification.attitude_match_ms} "
+                        f"attitude_rate_hz={rectification.attitude_rate_hz} "
                         f"rectify_ms={rectification.rectify_ms:.1f}"
                     )
                 )

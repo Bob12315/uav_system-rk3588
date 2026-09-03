@@ -110,7 +110,7 @@ request_message_intervals: false
 message_interval_hz:
   HEARTBEAT: 1
   EXTENDED_SYS_STATE: 2
-  ATTITUDE: 10
+  ATTITUDE: 30
   GLOBAL_POSITION_INT: 10
   LOCAL_POSITION_NED: 10
   VFR_HUD: 5
@@ -141,11 +141,14 @@ state_udp_enabled: true
 state_udp_ip: "127.0.0.1"
 state_udp_port: 5010
 
-# Virtual Nadir V1 的只读姿态旁路。仅发布当前 active source 的 MAVLink
-# ATTITUDE 到本机 YOLO 进程；不生成或发送飞行控制命令。
-attitude_udp_enabled: false
+# Virtual Nadir V1 的只读姿态基础流默认就绪。仅发布当前 active source 的
+# MAVLink ATTITUDE 到本机 YOLO；是否使用增稳画面只由 yolo.yaml 中的
+# virtual_nadir.enabled 决定，不生成或发送飞行控制命令。
+attitude_udp_enabled: true
 attitude_udp_ip: "127.0.0.1"
 attitude_udp_port: 5011
+# Virtual Nadir 启用时无论 request_message_intervals 总开关如何，都会显式请求此频率。
+attitude_udp_rate_hz: 30
 
 # true：telemetry 独立运行时默认启用 curses 终端 UI。
 # app 总控进程使用 config/app.yaml 中的 ui 配置。

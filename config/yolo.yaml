@@ -44,19 +44,28 @@ latest_frame: true
 # 默认关闭时保持 raw frame → tracker 原路径。当前参数由 Gazebo 约 2 rad
 # 宽视场近似推导，不是实机 Charuco / checkerboard 标定结果。
 virtual_nadir:
+  # 唯一的图像路径开关：
+  # false = raw frame -> YOLO -> Web UI
+  # true  = IMU stabilized frame -> YOLO -> Web UI
   enabled: false
   yaw_reference_mode: "lock_on_start"
+  # 只影响本机 OpenCV 调试窗口，不改变 Web UI 的 YOLO 标注画面。
   debug_compare: false
 
   attitude:
     ip: "127.0.0.1"
     port: 5011
-    source: "sitl"
+    # active：接受 telemetry runtime 当前 active source，并在切换时清空历史。
+    source: "active"
     history_ms: 1500
     max_samples: 128
     max_sample_distance_ms: 75
     max_bracket_span_ms: 150
     future_wait_ms: 40
+    # 飞控侧请求 30 Hz；低于 25 Hz 时感知链 fail closed，避免低频姿态硬套图像。
+    min_rate_hz: 25
+    rate_window_ms: 1000
+    min_rate_samples: 4
 
   camera:
     width: 640

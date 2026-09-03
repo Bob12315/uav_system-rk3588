@@ -39,7 +39,8 @@ except ImportError:  # pragma: no cover - supports direct script execution
 class TelemetryReceiver(threading.Thread):
     def __init__(self, client: MavlinkClient, state_cache: StateCache, cfg: TelemetryConfig,
                  stop_event: threading.Event, receiver_generation: int | None = None,
-                 ack_router: object | None = None, source_name: str | None = None) -> None:
+                 ack_router: object | None = None, source_name: str | None = None,
+                 attitude_publisher: AttitudeUdpPublisher | None = None) -> None:
         super().__init__(name="TelemetryReceiver", daemon=True)
         self.client = client
         self.state_cache = state_cache
@@ -48,7 +49,8 @@ class TelemetryReceiver(threading.Thread):
         self.receiver_generation = receiver_generation
         self.ack_router = ack_router
         self.source_name = str(source_name or cfg.active_source)
-        self.attitude_publisher = (
+        self._owns_attitude_publisher = attitude_publisher is None
+        self.attitude_publisher = attitude_publisher or (
             AttitudeUdpPublisher(
                 cfg.attitude_udp_ip,
                 cfg.attitude_udp_port,
@@ -63,7 +65,7 @@ class TelemetryReceiver(threading.Thread):
     def run(self) -> None:
         if self.receiver_generation is not None:
             self.state_cache.bind_current_thread_generation(self.receiver_generation)
-        if self.attitude_publisher is not None:
+        if self.attitude_publisher is not None and self._owns_attitude_publisher:
             self.attitude_publisher.start()
         try:
             while not self.stop_event.is_set():
@@ -87,7 +89,7 @@ class TelemetryReceiver(threading.Thread):
                 self.state_cache.update_state(last_message_type=msg_type)
                 self._handle_message(msg_type, message, now)
         finally:
-            if self.attitude_publisher is not None:
+            if self.attitude_publisher is not None and self._owns_attitude_publisher:
                 self.attitude_publisher.close()
 
     def _check_timeouts(self, now: float) -> None:

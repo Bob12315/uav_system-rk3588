@@ -88,6 +88,48 @@ def test_switch_active_source_clears_all_continuous_queues() -> None:
     assert manager.runtimes["real"].command_queue.peek_gimbal_rate() is None
 
 
+def test_switch_active_source_updates_shared_attitude_publisher_session() -> None:
+    manager = LinkManager(_config(attitude_udp_enabled=True))
+    assert manager.attitude_publisher is not None
+    old_session = manager.attitude_publisher.publisher_session_id
+
+    assert manager.switch_active_source("real") is True
+
+    assert manager.attitude_publisher.source == "real"
+    assert manager.attitude_publisher.publisher_session_id != old_session
+    assert all(
+        runtime.attitude_publisher is manager.attitude_publisher
+        for runtime in manager.runtimes.values()
+    )
+
+
+def test_virtual_nadir_attitude_interval_is_forced_to_at_least_30_hz() -> None:
+    cfg = _config(
+        data_source="sitl",
+        active_source="sitl",
+        attitude_udp_enabled=True,
+        attitude_udp_rate_hz=30.0,
+        message_interval_hz={"ATTITUDE": 10.0},
+    )
+    runtime = SourceRuntime(
+        name="sitl",
+        endpoint=_endpoint("sitl"),
+        cfg=cfg,
+        state_cache=StateCache(heartbeat_timeout_sec=0.05, rx_timeout_sec=0.05),
+        command_queue=CommandQueue(),
+        client=SimpleNamespace(),
+        stop_event=threading.Event(),
+        worker_stop_event=threading.Event(),
+    )
+
+    runtime._request_default_message_intervals(direct=False)
+    action = runtime.command_queue.get_next_action()
+
+    assert action is not None
+    assert action.action_type == ActionType.REQUEST_MESSAGE_INTERVAL
+    assert action.params == {"message_name": "ATTITUDE", "rate_hz": 30.0}
+
+
 class _FailingClient:
     connection_string = "fake"
     is_sitl = True

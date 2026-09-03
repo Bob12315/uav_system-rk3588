@@ -110,6 +110,8 @@ def test_virtual_nadir_defaults_disabled_with_approximate_calibration(
 
     assert cfg.virtual_nadir.enabled is False
     assert cfg.virtual_nadir.yaw_reference_mode == "lock_on_start"
+    assert cfg.virtual_nadir.attitude.source == "active"
+    assert cfg.virtual_nadir.attitude.min_rate_hz == 25.0
     assert cfg.virtual_nadir.camera.approximate_calibration is True
     assert cfg.virtual_nadir.camera.r_body_camera == (
         (0.0, -1.0, 0.0),
@@ -153,6 +155,7 @@ def test_virtual_nadir_reads_explicit_camera_and_output_k(tmp_path: Path, monkey
     assert cfg.virtual_nadir.enabled is True
     assert cfg.virtual_nadir.debug_compare is True
     assert cfg.virtual_nadir.attitude.source == "test"
+    assert cfg.virtual_nadir.attitude.min_rate_samples == 4
     assert cfg.virtual_nadir.camera.fx == 300.0
     assert cfg.virtual_nadir.camera.distortion[0] == pytest.approx(0.1)
     assert cfg.virtual_nadir.output.fy == 281.0

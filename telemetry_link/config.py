@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -59,6 +60,7 @@ class TelemetryConfig:
     attitude_udp_enabled: bool = False
     attitude_udp_ip: str = "127.0.0.1"
     attitude_udp_port: int = 5011
+    attitude_udp_rate_hz: float = 30.0
 
 
 def _to_bool(value: Any) -> bool:
@@ -130,6 +132,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--attitude-udp-enabled", type=_to_bool)
     parser.add_argument("--attitude-udp-ip")
     parser.add_argument("--attitude-udp-port", type=int)
+    parser.add_argument("--attitude-udp-rate-hz", type=float)
     parser.add_argument("--ui", dest="ui_enabled", action="store_true", default=None)
     parser.add_argument("--log-level")
     return parser
@@ -197,6 +200,14 @@ def _build_config(merged: dict[str, Any]) -> TelemetryConfig:
     attitude_udp_port = int(merged.get("attitude_udp_port", 5011))
     if not 1 <= attitude_udp_port <= 65535:
         raise ValueError("attitude_udp_port must be in 1..65535")
+    attitude_udp_enabled = _require_yaml_bool(
+        merged.get("attitude_udp_enabled", False), "attitude_udp_enabled"
+    )
+    attitude_udp_rate_hz = float(merged.get("attitude_udp_rate_hz", 30.0))
+    if not math.isfinite(attitude_udp_rate_hz) or attitude_udp_rate_hz <= 0.0:
+        raise ValueError("attitude_udp_rate_hz must be finite and positive")
+    if attitude_udp_enabled and attitude_udp_rate_hz < 30.0:
+        raise ValueError("attitude_udp_rate_hz must be at least 30 when attitude UDP is enabled")
     return TelemetryConfig(
         data_source=str(merged["data_source"]),
         active_source=str(merged["active_source"]),
@@ -225,11 +236,10 @@ def _build_config(merged: dict[str, Any]) -> TelemetryConfig:
         legacy_writer_enabled=legacy_writer_enabled,
         v2_writer_enabled=v2_writer_enabled,
         ack_quarantine_ms=max(0, int(merged.get("ack_quarantine_ms", 250))),
-        attitude_udp_enabled=_require_yaml_bool(
-            merged.get("attitude_udp_enabled", False), "attitude_udp_enabled"
-        ),
+        attitude_udp_enabled=attitude_udp_enabled,
         attitude_udp_ip=attitude_udp_ip,
         attitude_udp_port=attitude_udp_port,
+        attitude_udp_rate_hz=attitude_udp_rate_hz,
     )
 
 

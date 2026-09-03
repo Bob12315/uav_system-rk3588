@@ -42,6 +42,7 @@ class RectificationResult:
     pitch_rad: float | None = None
     yaw_rad: float | None = None
     yaw_ref_rad: float | None = None
+    attitude_rate_hz: float | None = None
 
 
 class VirtualNadirRectifier:
@@ -171,6 +172,7 @@ class VirtualNadirRectifier:
             attitude.pitch_rad,
             attitude.yaw_rad,
             self.yaw_ref_rad,
+            attitude.observed_rate_hz,
         )
 
     def _invalid(
@@ -195,6 +197,7 @@ class VirtualNadirRectifier:
             attitude.pitch_rad if attitude.valid else None,
             attitude.yaw_rad if attitude.valid else None,
             self.yaw_ref_rad,
+            attitude.observed_rate_hz,
         )
 
 
@@ -285,6 +288,7 @@ def build_debug_comparison(raw: np.ndarray, result: RectificationResult) -> np.n
         f"valid={result.valid} reason={result.reason} "
         f"roll={_degrees(result.roll_rad)} pitch={_degrees(result.pitch_rad)} "
         f"yaw={_degrees(result.yaw_rad)} yaw_ref={_degrees(result.yaw_ref_rad)} "
+        f"rate_hz={_number(result.attitude_rate_hz)} "
         f"match_ms={result.attitude_match_ms} rectify_ms={result.rectify_ms:.2f}"
     )
     cv2.putText(
@@ -296,3 +300,7 @@ def build_debug_comparison(raw: np.ndarray, result: RectificationResult) -> np.n
 
 def _degrees(value: float | None) -> str:
     return "n/a" if value is None else f"{math.degrees(value):.1f}"
+
+
+def _number(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.1f}"

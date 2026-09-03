@@ -49,6 +49,17 @@ def _wire(sequence: int, *, publisher: str, link: str, timestamp_ns: int) -> byt
     }).encode()
 
 
+def _reset_wire(*, publisher: str, source: str) -> bytes:
+    return json.dumps({
+        "schema_version": 1,
+        "message_type": "attitude_reset",
+        "publisher_session_id": publisher,
+        "sequence": 0,
+        "source": source,
+        "sent_at_monotonic_ns": 1,
+    }).encode()
+
+
 def test_history_slerp_crosses_yaw_wrap_on_short_path() -> None:
     history = AttitudeHistory(max_samples=8, history_ms=1000)
     history.append(_sample(1, 1_000_000_000, yaw=math.radians(179.0)))
@@ -96,6 +107,44 @@ def test_history_is_bounded_and_session_change_clears_old_samples() -> None:
     assert history.session_key == ("publisher-b", "link-b", "sitl")
 
 
+def test_history_fails_closed_when_observed_attitude_rate_is_low() -> None:
+    history = AttitudeHistory(max_samples=16, history_ms=2000)
+    for sequence in range(1, 6):
+        history.append(_sample(sequence, sequence * 100_000_000))  # 10 Hz
+
+    match = history.lookup(
+        450_000_000,
+        max_sample_distance_ms=60,
+        max_bracket_span_ms=120,
+        min_rate_hz=25.0,
+        rate_window_ms=1000,
+        min_rate_samples=4,
+    )
+
+    assert not match.valid
+    assert match.reason == "attitude_rate_insufficient"
+    assert match.observed_rate_hz == pytest.approx(10.0)
+
+
+def test_history_accepts_observed_attitude_rate_near_30_hz() -> None:
+    history = AttitudeHistory(max_samples=16, history_ms=2000)
+    step_ns = 33_000_000
+    for sequence in range(1, 7):
+        history.append(_sample(sequence, sequence * step_ns))
+
+    match = history.lookup(
+        5 * step_ns + step_ns // 2,
+        max_sample_distance_ms=20,
+        max_bracket_span_ms=40,
+        min_rate_hz=25.0,
+        rate_window_ms=1000,
+        min_rate_samples=4,
+    )
+
+    assert match.valid
+    assert match.observed_rate_hz is not None and match.observed_rate_hz > 30.0
+
+
 def test_receiver_retires_old_link_session() -> None:
     history = AttitudeHistory(max_samples=8, history_ms=1000)
     receiver = AttitudeReceiver("127.0.0.1", 0, history, expected_source="sitl")
@@ -105,6 +154,18 @@ def test_receiver_retires_old_link_session() -> None:
         assert receiver.ingest(_wire(2, publisher="a", link="link-a", timestamp_ns=30)) == "retired_session"
         assert len(history) == 1
         assert history.session_key == ("b", "link-b", "sitl")
+    finally:
+        receiver.close()
+
+
+def test_active_source_reset_clears_history_and_retires_old_source() -> None:
+    history = AttitudeHistory(max_samples=8, history_ms=1000)
+    receiver = AttitudeReceiver("127.0.0.1", 0, history, expected_source="active")
+    try:
+        assert receiver.ingest(_wire(1, publisher="a", link="link-a", timestamp_ns=10)) == "accepted"
+        assert receiver.ingest(_reset_wire(publisher="b", source="real")) == "accepted_reset"
+        assert len(history) == 0
+        assert receiver.ingest(_wire(2, publisher="a", link="link-a", timestamp_ns=30)) == "retired_session"
     finally:
         receiver.close()
 
@@ -128,6 +189,35 @@ def test_publisher_wire_is_latest_only_and_contains_link_identity() -> None:
         assert data["link_session_id"] == "link-a"
         assert data["received_at_monotonic_ns"] == 20
         assert data["roll_rad"] == pytest.approx(1.0)
+    finally:
+        stop_event.set()
+        publisher.close()
+        sink.close()
+
+
+def test_publisher_switch_source_emits_reset_and_rejects_old_source() -> None:
+    sink = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sink.bind(("127.0.0.1", 0))
+    sink.settimeout(1.0)
+    stop_event = threading.Event()
+    publisher = AttitudeUdpPublisher(
+        "127.0.0.1", sink.getsockname()[1], source="sitl", stop_event=stop_event
+    )
+    publisher.start()
+    try:
+        publisher.switch_source("real")
+        payload, _addr = sink.recvfrom(4096)
+        reset = json.loads(payload)
+        assert reset["message_type"] == "attitude_reset"
+        assert reset["source"] == "real"
+
+        publisher.offer(PublisherSample("sitl", "old", 10, 0, 0, 0, 0, 0, 0))
+        publisher.offer(PublisherSample("real", "new", 20, 0, 0, 0, 0, 0, 0))
+        payload, _addr = sink.recvfrom(4096)
+        attitude = json.loads(payload)
+        assert attitude["message_type"] == "attitude"
+        assert attitude["source"] == "real"
+        assert attitude["link_session_id"] == "new"
     finally:
         stop_event.set()
         publisher.close()

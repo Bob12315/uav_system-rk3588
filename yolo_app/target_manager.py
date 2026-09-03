@@ -43,6 +43,10 @@ class TargetManager:
         elif command.action == "switch_prev":
             self._switch_by_offset(tracks, offset=-1)
 
+    def invalidate(self) -> None:
+        """Fail closed immediately; no lock or lost-frame grace survives invalid input."""
+        self._unlock("invalid", reset_lost_count=True)
+
     def update(
         self,
         tracks: list[Track],

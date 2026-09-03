@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import cv2
+import numpy as np
+
 try:
     from .config import AppConfig
     from .models import Track
@@ -25,8 +28,18 @@ class TrackerRunner:
         )
         self.iou_tracker = _IoUTracker(max_lost_frames=cfg.max_lost_frames)
 
-    def run(self, frame) -> list[Track]:
-        return self.iou_tracker.update(self.detector.detect(frame))
+    def run(self, frame, valid_mask=None) -> list[Track]:
+        detector_frame = frame
+        if valid_mask is not None:
+            _validate_mask(valid_mask, frame.shape[:2])
+            detector_frame = cv2.bitwise_and(frame, frame, mask=valid_mask)
+        detections = self.detector.detect(detector_frame)
+        if valid_mask is not None:
+            detections = _filter_detections_by_valid_mask(detections, valid_mask)
+        return self.iou_tracker.update(detections)
+
+    def reset(self) -> None:
+        self.iou_tracker.reset()
 
     @property
     def last_metrics_ms(self) -> dict[str, float]:
@@ -50,6 +63,9 @@ class _IoUTracker:
         self.match_iou = match_iou
         self.next_id = 1
         self.states: dict[int, _TrackState] = {}
+
+    def reset(self) -> None:
+        self.states.clear()
 
     def update(self, detections: list[Detection]) -> list[Track]:
         for state in self.states.values():
@@ -97,6 +113,30 @@ class _IoUTracker:
             if state.lost_frames <= self.max_lost_frames
         }
         return visible
+
+
+def _validate_mask(valid_mask: np.ndarray, frame_shape: tuple[int, int]) -> None:
+    if valid_mask.ndim != 2 or valid_mask.shape != frame_shape:
+        raise ValueError("valid_mask must match the frame height and width")
+    if valid_mask.dtype != np.uint8:
+        raise ValueError("valid_mask must be uint8")
+
+
+def _filter_detections_by_valid_mask(
+    detections: list[Detection], valid_mask: np.ndarray
+) -> list[Detection]:
+    """Reject every box containing pixels not backed by the real camera image."""
+    height, width = valid_mask.shape
+    valid = valid_mask == 255
+    filtered: list[Detection] = []
+    for detection in detections:
+        left = max(0, min(width - 1, int(np.floor(detection.x1))))
+        top = max(0, min(height - 1, int(np.floor(detection.y1))))
+        right = max(left + 1, min(width, int(np.ceil(detection.x2)) + 1))
+        bottom = max(top + 1, min(height, int(np.ceil(detection.y2)) + 1))
+        if bool(np.all(valid[top:bottom, left:right])):
+            filtered.append(detection)
+    return filtered
 
 
 def _iou(first, second) -> float:

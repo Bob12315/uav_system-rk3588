@@ -38,6 +38,7 @@ class AttitudeMatch:
     before_sequence: int | None = None
     after_sequence: int | None = None
     attitude_match_ms: float | None = None
+    observed_rate_hz: float | None = None
 
 
 class AttitudeHistory:
@@ -105,6 +106,9 @@ class AttitudeHistory:
         max_sample_distance_ms: float,
         max_bracket_span_ms: float,
         future_wait_ms: float = 0.0,
+        min_rate_hz: float = 0.0,
+        rate_window_ms: float = 1000.0,
+        min_rate_samples: int = 2,
     ) -> AttitudeMatch:
         if frame_monotonic_ns <= 0:
             return AttitudeMatch(False, "invalid_frame_timestamp")
@@ -114,7 +118,12 @@ class AttitudeHistory:
         with self._condition:
             while True:
                 match, may_wait = self._lookup_locked(
-                    frame_monotonic_ns, max_distance_ns=max_distance_ns, max_span_ns=max_span_ns
+                    frame_monotonic_ns,
+                    max_distance_ns=max_distance_ns,
+                    max_span_ns=max_span_ns,
+                    min_rate_hz=min_rate_hz,
+                    rate_window_ns=int(rate_window_ms * 1_000_000.0),
+                    min_rate_samples=min_rate_samples,
                 )
                 if match.valid or not may_wait:
                     return match
@@ -124,7 +133,14 @@ class AttitudeHistory:
                 self._condition.wait(remaining_ns / 1_000_000_000.0)
 
     def _lookup_locked(
-        self, frame_ns: int, *, max_distance_ns: int, max_span_ns: int
+        self,
+        frame_ns: int,
+        *,
+        max_distance_ns: int,
+        max_span_ns: int,
+        min_rate_hz: float,
+        rate_window_ns: int,
+        min_rate_samples: int,
     ) -> tuple[AttitudeMatch, bool]:
         if not self._samples:
             return AttitudeMatch(False, "attitude_history_empty", self._session_key), True
@@ -150,6 +166,33 @@ class AttitudeHistory:
         if span > max_span_ns:
             return AttitudeMatch(False, "attitude_bracket_too_wide", self._session_key), False
 
+        rate_samples = [
+            sample
+            for sample in self._samples
+            if sample.received_at_monotonic_ns <= after.received_at_monotonic_ns
+            and after.received_at_monotonic_ns - sample.received_at_monotonic_ns <= rate_window_ns
+        ]
+        observed_rate_hz: float | None = None
+        if len(rate_samples) >= 2:
+            rate_samples = rate_samples[-max(2, min_rate_samples):]
+            rate_span_ns = (
+                rate_samples[-1].received_at_monotonic_ns
+                - rate_samples[0].received_at_monotonic_ns
+            )
+            if rate_span_ns > 0:
+                observed_rate_hz = (len(rate_samples) - 1) * 1_000_000_000.0 / rate_span_ns
+        if min_rate_hz > 0.0:
+            if len(rate_samples) < min_rate_samples or observed_rate_hz is None:
+                return AttitudeMatch(
+                    False, "attitude_rate_warming_up", self._session_key,
+                    observed_rate_hz=observed_rate_hz,
+                ), True
+            if observed_rate_hz < min_rate_hz:
+                return AttitudeMatch(
+                    False, "attitude_rate_insufficient", self._session_key,
+                    observed_rate_hz=observed_rate_hz,
+                ), False
+
         q0 = quaternion_from_euler_zyx(before.roll_rad, before.pitch_rad, before.yaw_rad)
         if before is after or span == 0:
             q = q0
@@ -168,6 +211,7 @@ class AttitudeHistory:
             before.sequence,
             after.sequence,
             max(before_distance, after_distance) / 1_000_000.0,
+            observed_rate_hz,
         ), False
 
 

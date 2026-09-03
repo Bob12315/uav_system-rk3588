@@ -56,7 +56,7 @@ class AttitudeReceiver(threading.Thread):
             if addr[0] not in {"127.0.0.1", "::1"}:
                 continue
             reason = self.ingest(payload)
-            if reason not in {"accepted", "out_of_order", "retired_session"}:
+            if reason not in {"accepted", "accepted_reset", "out_of_order", "retired_session"}:
                 self.logger.warning("drop attitude UDP payload reason=%s", reason)
 
     def close(self) -> None:
@@ -74,13 +74,37 @@ class AttitudeReceiver(threading.Thread):
             return "malformed"
         if not isinstance(data, dict):
             return "malformed"
-        if data.get("schema_version") != 1 or data.get("message_type") != "attitude":
+        if data.get("schema_version") != 1:
             return "unsupported_schema"
+        message_type = data.get("message_type")
+        if message_type not in {"attitude", "attitude_reset"}:
+            return "unsupported_message_type"
         try:
             publisher_session_id = str(data["publisher_session_id"])
-            link_session_id = str(data["link_session_id"])
             source = str(data["source"])
             sequence = int(data["sequence"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return "malformed"
+        if not publisher_session_id or source not in {"real", "sitl", "test"}:
+            return "invalid_fields"
+        if self.expected_source != "active" and source != self.expected_source:
+            return "invalid_fields"
+        if message_type == "attitude_reset":
+            if sequence != 0:
+                return "invalid_fields"
+            session = publisher_session_id, "source-switch", source
+            if session in self._tombstones:
+                return "retired_session"
+            if session == self._active_session:
+                return "accepted_reset"
+            if self._active_session is not None:
+                self._tombstones.append(self._active_session)
+            self._active_session = session
+            self._last_sequence = 0
+            self.history.clear()
+            return "accepted_reset"
+        try:
+            link_session_id = str(data["link_session_id"])
             received_ns = int(data["received_at_monotonic_ns"])
             values = tuple(float(data[name]) for name in (
                 "roll_rad", "pitch_rad", "yaw_rad", "roll_rate_rad_s",
@@ -91,7 +115,6 @@ class AttitudeReceiver(threading.Thread):
         if (
             not publisher_session_id
             or not link_session_id
-            or source != self.expected_source
             or sequence < 1
             or received_ns <= 0
             or not all(math.isfinite(value) for value in values)

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Local SITL must not send telemetry or video to an RK3588 by default.  A
-# different ground-station address can still be supplied explicitly.
+# The team SITL workstation forwards MAVLink telemetry and video to the RK3588
+# at this address by default. Override GCS_HOST for another ground station.
 GCS_HOST="${GCS_HOST:-10.101.31.108}"
 VIDEO_HOST="${VIDEO_HOST:-${GCS_HOST}}"
 MAVLINK_PORT="${MAVLINK_PORT:-14550}"

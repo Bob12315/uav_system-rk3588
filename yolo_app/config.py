@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ipaddress
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,9 @@ class VirtualNadirAttitudeConfig:
     max_sample_distance_ms: float
     max_bracket_span_ms: float
     future_wait_ms: float
+    min_rate_hz: float = 25.0
+    rate_window_ms: float = 1000.0
+    min_rate_samples: int = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,7 +204,8 @@ def _virtual_nadir_config(data: Any) -> VirtualNadirConfig:
     if not all(isinstance(value, dict) for value in (attitude, camera, output)):
         raise ValueError("virtual_nadir attitude/camera/output must be mappings")
     allowed_attitude = {"ip", "port", "source", "history_ms", "max_samples",
-                        "max_sample_distance_ms", "max_bracket_span_ms", "future_wait_ms"}
+                        "max_sample_distance_ms", "max_bracket_span_ms", "future_wait_ms",
+                        "min_rate_hz", "rate_window_ms", "min_rate_samples"}
     allowed_camera = {"width", "height", "fx", "fy", "cx", "cy", "fov_x_deg",
                       "fov_y_deg", "distortion", "r_body_camera", "approximate_calibration"}
     allowed_output = {"width", "height", "fx", "fy", "cx", "cy", "fov_x_deg",
@@ -216,19 +221,30 @@ def _virtual_nadir_config(data: Any) -> VirtualNadirConfig:
     ip = str(attitude.get("ip", "127.0.0.1"))
     if ip not in {"127.0.0.1", "localhost"}:
         raise ValueError("virtual_nadir.attitude.ip must be localhost-only")
-    source = str(attitude.get("source", "sitl"))
-    if source not in {"real", "sitl", "test"}:
-        raise ValueError("virtual_nadir.attitude.source must be real, sitl, or test")
+    source = str(attitude.get("source", "active"))
+    if source not in {"active", "real", "sitl", "test"}:
+        raise ValueError("virtual_nadir.attitude.source must be active, real, sitl, or test")
     port = int(attitude.get("port", 5011))
     history_ms = float(attitude.get("history_ms", 1500.0))
     max_samples = int(attitude.get("max_samples", 128))
     max_distance_ms = float(attitude.get("max_sample_distance_ms", 75.0))
     max_span_ms = float(attitude.get("max_bracket_span_ms", 150.0))
     future_wait_ms = float(attitude.get("future_wait_ms", 40.0))
+    min_rate_hz = float(attitude.get("min_rate_hz", 25.0))
+    rate_window_ms = float(attitude.get("rate_window_ms", 1000.0))
+    min_rate_samples = int(attitude.get("min_rate_samples", 4))
     if not 1 <= port <= 65535 or history_ms <= 0 or max_samples < 2:
         raise ValueError("virtual_nadir attitude bounds are invalid")
     if max_distance_ms <= 0 or max_span_ms <= 0 or future_wait_ms < 0:
         raise ValueError("virtual_nadir attitude timing bounds are invalid")
+    if (
+        not math.isfinite(min_rate_hz)
+        or not math.isfinite(rate_window_ms)
+        or min_rate_hz <= 0
+        or rate_window_ms <= 0
+        or min_rate_samples < 3
+    ):
+        raise ValueError("virtual_nadir attitude rate monitor bounds are invalid")
 
     distortion = tuple(float(value) for value in camera.get("distortion", [0, 0, 0, 0, 0]))
     raw_rotation = camera.get(
@@ -255,7 +271,8 @@ def _virtual_nadir_config(data: Any) -> VirtualNadirConfig:
         yaw_reference_mode=yaw_mode,
         debug_compare=_strict_bool(data.get("debug_compare", False), "virtual_nadir.debug_compare"),
         attitude=VirtualNadirAttitudeConfig(
-            ip, port, source, history_ms, max_samples, max_distance_ms, max_span_ms, future_wait_ms
+            ip, port, source, history_ms, max_samples, max_distance_ms, max_span_ms, future_wait_ms,
+            min_rate_hz, rate_window_ms, min_rate_samples,
         ),
         camera=CameraCalibrationConfig(
             int(camera.get("width", 640)), int(camera.get("height", 480)),
