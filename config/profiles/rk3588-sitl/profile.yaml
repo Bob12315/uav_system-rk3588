@@ -1,10 +1,19 @@
 profile: rk3588-sitl
 overrides:
   telemetry:
+    request_message_intervals: false
     data_source: sitl
     active_source: sitl
   yolo:
     model_path: "../data/models/gazebo_dataset-fp16.rknn"
-    source: "5600"
+    source: 5600
+    virtual_nadir:
+      enabled: true
+      camera:
+        fov_x_deg: 114.591559
+        fov_y_deg: 98.864783
+      output:
+        fov_x_deg: 114.591559
+        fov_y_deg: 98.864783
 executor:
   send_commands: false

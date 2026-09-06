@@ -3,7 +3,7 @@ set -euo pipefail
 
 # The team SITL workstation forwards MAVLink telemetry and video to the RK3588
 # at this address by default. Override GCS_HOST for another ground station.
-GCS_HOST="${GCS_HOST:-10.101.31.109}"
+GCS_HOST="${GCS_HOST:-10.101.31.108}"
 VIDEO_HOST="${VIDEO_HOST:-${GCS_HOST}}"
 MAVLINK_PORT="${MAVLINK_PORT:-14550}"
 MAVPROXY_STREAMRATE="${MAVPROXY_STREAMRATE:-50}"

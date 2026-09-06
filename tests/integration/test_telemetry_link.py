@@ -334,12 +334,12 @@ def test_build_arg_parser_defaults_to_root_telemetry_config(monkeypatch) -> None
     assert args.config == str(DEFAULT_CONFIG_PATH)
 
 
-def test_load_config_file_uses_tracked_sitl_root_profile() -> None:
+def test_load_config_file_uses_tracked_real_root_profile() -> None:
     cfg = load_config_file(DEFAULT_CONFIG_PATH)
 
-    assert cfg.data_source == "sitl"
-    assert cfg.active_source == "sitl"
-    assert cfg.sitl.connection_type == "udp"
+    assert cfg.data_source == "real"
+    assert cfg.active_source == "real"
+    assert cfg.real.connection_type == "eth"
 
 
 def test_load_config_file_uses_explicit_sitl_profile() -> None:

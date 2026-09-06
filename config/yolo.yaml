@@ -8,11 +8,11 @@
 # RKNN 模型
 # -----------------------------------------------------------------------------
 # 仓库内随代码管理的 RKNN FP16 部署模型。
-model_path: "../data/models/gazebo_dataset-fp16.rknn"
+model_path: "../data/models/cuadc2026-fp16.rknn"
 
 # 每个 worker 使用一个独立 RKNN context，并依次固定到 NPU core；结果按
-# frame_id 顺序进入 tracker。Gazebo 当前 10 FPS 视频源使用 2 个 worker，
-# 避免三帧预取增加无收益延迟。范围 1..3，设为 1 可回退到同步推理路径。
+# frame_id 顺序进入 tracker。暂保留 2 个 worker，USB 实测后再调优。
+# 范围 1..3，设为 1 可回退到同步推理路径。
 inference_workers: 2
 
 # 模型类别名称，顺序必须与 RKNN 模型输出一致。
@@ -32,7 +32,8 @@ classes: []
 # - 本地摄像头：/dev/videoX 或 /dev/v4l/by-id/<device>
 # - UDP H264/RTP：端口号字符串，例如 "5600"
 # - RTSP、本地视频文件或完整 GStreamer pipeline
-source: 5600
+# 已通过 uvcvideo/V4L2 确认的视频采集节点；避免 /dev/video41 编号变化。
+source: "/dev/v4l/by-id/usb-HD_720P_Webcam_HD_720P_Webcam_20130901-video-index0"
 
 # 本地摄像头采集参数。
 camera_width: 640
@@ -44,10 +45,11 @@ camera_fourcc: "MJPG"
 latest_frame: true
 
 # -----------------------------------------------------------------------------
-# Virtual Nadir Camera V1（仅离线 / SITL 验证）
+# Virtual Nadir Camera V1（实机近似参数，待标定验证）
 # -----------------------------------------------------------------------------
-# 默认关闭时保持 raw frame → tracker 原路径。当前参数由 Gazebo 约 2 rad
-# 宽视场近似推导，不是实机 Charuco / checkerboard 标定结果。
+# 用户确认：2.8 mm 镜头、85° 对角视场角、正常下视安装方向。
+# 按 640×480、方形像素和针孔模型近似换算；不等同于实机标定。
+# 假设 85° 对应当前 4:3 采集画面，若驱动裁切需重新测量。
 virtual_nadir:
   # 唯一的图像路径开关：
   # false = raw frame -> YOLO -> Web UI
@@ -69,7 +71,7 @@ virtual_nadir:
     # 30 Hz 理论周期约 33 ms；等待至 75 ms 以覆盖调度/UDP 抖动。这里只等
     # 下一条真实样本用于 SLERP，不进行姿态外推。
     future_wait_ms: 75
-    # 飞控侧请求 30 Hz；低于 25 Hz 时感知链 fail closed，避免低频姿态硬套图像。
+    # telemetry 配置请求 80 Hz；低于 25 Hz 时感知链 fail closed，避免低频姿态硬套图像。
     min_rate_hz: 25
     rate_window_ms: 1000
     min_rate_samples: 4
@@ -81,8 +83,8 @@ virtual_nadir:
     fy: null
     cx: null
     cy: null
-    fov_x_deg: 114.591559
-    fov_y_deg: 98.864783
+    fov_x_deg: 72.487673
+    fov_y_deg: 57.603876
     distortion: [0, 0, 0, 0, 0]
     # Camera → Body FRD：camera +X→body +Y，+Y→body -X，+Z→body +Z。
     r_body_camera:
@@ -98,8 +100,8 @@ virtual_nadir:
     fy: null
     cx: null
     cy: null
-    fov_x_deg: 114.591559
-    fov_y_deg: 98.864783
+    fov_x_deg: 72.487673
+    fov_y_deg: 57.603876
     border_value: [0, 0, 0]
 
 # -----------------------------------------------------------------------------

@@ -272,11 +272,13 @@ class SourceRuntime:
     def _request_default_message_intervals(self, *, direct: bool) -> None:
         requested_attitude = False
         for message_name, rate_hz in self.cfg.message_interval_hz.items():
+            if self.stop_event.is_set():
+                return
             if message_name == "ATTITUDE" and self.cfg.attitude_udp_enabled:
                 rate_hz = max(rate_hz, self.cfg.attitude_udp_rate_hz)
                 requested_attitude = True
             self._request_message_interval(message_name, rate_hz, direct=direct)
-        if self.cfg.attitude_udp_enabled and not requested_attitude:
+        if self.cfg.attitude_udp_enabled and not requested_attitude and not self.stop_event.is_set():
             self._request_message_interval(
                 "ATTITUDE", self.cfg.attitude_udp_rate_hz, direct=direct
             )
@@ -311,8 +313,14 @@ class SourceRuntime:
                 self.ack_router.mark_transmitted(quarantine_id)
                 deadline = time.monotonic_ns() + 250_000_000
                 while self.ack_router.has_command(quarantine_id) and time.monotonic_ns() < deadline:
-                    time.sleep(0.005)
-                self.ack_router.expire(deadline)
+                    if self.stop_event.wait(0.005):
+                        self.ack_router.abort(quarantine_id)
+                        return
+                self.ack_router.expire(time.monotonic_ns())
+                # Every stream request shares MAV_CMD_SET_MESSAGE_INTERVAL's
+                # ACK key. ACK/timeout closes the slot but starts quarantine;
+                # do not register the next request until that protection ends.
+                self.stop_event.wait(self.cfg.ack_quarantine_ms / 1000.0)
         else:
             self.command_queue.put_action(command)
 

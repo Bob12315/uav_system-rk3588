@@ -202,3 +202,55 @@ def test_runtime_rehearsal_has_exactly_one_backend_owner(legacy, v2) -> None:
         runtime.stop()
     assert runtime.broker_worker is None
     assert runtime.sender is None
+
+
+@pytest.mark.parametrize("acknowledge", [True, False])
+def test_bootstrap_stream_requests_wait_for_ack_quarantine(acknowledge) -> None:
+    data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+    data.update(ack_quarantine_ms=40, attitude_udp_enabled=False,
+                message_interval_hz={"HEARTBEAT": 1, "SYS_STATUS": 2})
+    cfg = _build_config(data)
+    cache = StateCache(3, 2)
+    runtime = SourceRuntime("real", cfg.real, cfg, cache, CommandQueue(),
+                            _Client(), threading.Event(), threading.Event())
+    router = AckRouter(lambda *a, **kw: None, quarantine_ns=40_000_000)
+    runtime.ack_router = router
+    sent = []
+
+    def send(command):
+        sent.append((command.params["message_name"], time.monotonic()))
+        if acknowledge:
+            assert router.observe(
+                link_session_id=str(cache.atomic_publication(time.time())["session_id"]),
+                mav_command=mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
+                source_system=1, source_component=1, result=0,
+            )
+
+    runtime.sender = SimpleNamespace(_send_action=send)
+    runtime._request_default_message_intervals(direct=True)
+    assert [name for name, _ in sent] == ["HEARTBEAT", "SYS_STATUS"]
+    assert sent[1][1] - sent[0][1] >= 0.04
+    assert not router.observe(
+        link_session_id=str(cache.atomic_publication(time.time())["session_id"]),
+        mav_command=mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
+        source_system=1, source_component=1, result=0,
+    )
+
+
+def test_stop_interrupts_bootstrap_stream_requests() -> None:
+    data = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+    data.update(attitude_udp_enabled=True,
+                message_interval_hz={"HEARTBEAT": 1, "SYS_STATUS": 2})
+    cfg = _build_config(data)
+    runtime = SourceRuntime("real", cfg.real, cfg, StateCache(3, 2), CommandQueue(),
+                            _Client(), threading.Event(), threading.Event())
+    runtime.ack_router = AckRouter(lambda *a, **kw: None)
+    sent = []
+
+    def send(command):
+        sent.append(command.params["message_name"])
+        runtime.stop_event.set()
+
+    runtime.sender = SimpleNamespace(_send_action=send)
+    runtime._request_default_message_intervals(direct=True)
+    assert sent == ["HEARTBEAT"]
